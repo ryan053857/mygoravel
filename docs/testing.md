@@ -129,7 +129,7 @@ if _, err := svc.Get(ctx, bob, item.ID); !errors.Is(err, note.ErrForbidden) {
 <a id="testing-configuration"></a>
 ## 测试配置
 
-使用 `config.Parse` 直接从字节解析配置，并通过 `config.WithLookup` 注入环境变量，测试不需要真实的文件，也不会修改进程环境：
+使用 `config.Parse` 直接从字节解析配置，并通过 `config.WithLookup` 替换默认的进程环境查找，测试不需要真实的文件，也不会读取或修改进程环境：
 
 ```go
 doc, err := config.Parse([]byte("http:\n  addr: ${HTTP_ADDR}\n"),

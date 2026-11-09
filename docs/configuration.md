@@ -7,6 +7,7 @@
     - [从字节加载](#loading-from-bytes)
 - [环境变量](#environment-variables)
     - [引用语法](#reference-syntax)
+    - [.env 文件](#env-files)
     - [在测试中提供环境变量](#environment-in-tests)
 - [默认值与覆盖规则](#defaults-and-overrides)
 - [按需加载配置段](#loading-sections)
@@ -24,9 +25,11 @@ mygoravel 的配置由两部分组成：你在 Go 代码中定义的**配置结�
 
 校验通过后，你得到的是一个类型明确、值已确认有效的普通 Go 结构体，可以直接传给业务服务使用。业务代码不需要关心配置来自文件、环境变量还是测试代码。
 
-一个典型的配置文件如下所示，每个顶层键称为一个**配置段**：
+一个典型的配置文件如下所示。除保留键 `envfile` 外，每个顶层键称为一个**配置段**：
 
 ```yaml
+envfile: .env
+
 http:
   addr: ${HTTP_ADDR:-:8080}
 
@@ -65,8 +68,6 @@ func (c HTTPConfig) Validate() error {
 package settings
 
 import (
-    "os"
-
     "github.com/cockroachdb/errors"
     "github.com/ryan053857/mygoravel/config"
 )
@@ -84,10 +85,7 @@ func (c HTTPConfig) Validate() error {
 
 func LoadHTTP(path string) (HTTPConfig, error) {
     cfg := HTTPConfig{Addr: ":8080"}
-    doc, err := config.ReadFile(path,
-        config.WithSections("http"),
-        config.WithLookup(os.LookupEnv),
-    )
+    doc, err := config.ReadFile(path, config.WithSections("http"))
     if err != nil {
         return cfg, err
     }
@@ -96,10 +94,7 @@ func LoadHTTP(path string) (HTTPConfig, error) {
 }
 ```
 
-`config.ReadFile` 负责读取并解析文件，它接受两个常用选项：
-
-- `config.WithSections` 声明文件中**允许出现**的顶层配置段，这个选项是必需的。文件中出现未声明的段时会直接报错，这样拼写错误不会被悄悄忽略；`Decode` 也只能读取已声明的段。
-- `config.WithLookup` 提供查询环境变量的函数，通常传入 `os.LookupEnv`。
+`config.ReadFile` 负责读取并解析文件。`config.WithSections` 声明文件中**允许出现**的顶层配置段，这个选项是必需的。文件中出现未声明的段时会直接报错，这样拼写错误不会被悄悄忽略；`Decode` 也只能读取已声明的段。
 
 `doc.Decode` 把指定配置段解码到结构体中。如果文件里没有这个段，结构体会保持原来的默认值。
 
@@ -127,15 +122,50 @@ doc, err := config.Parse(data, config.WithSections("http"))
 | `${NAME:-}` | 允许变量未设置，此时使用空字符串 |
 | `$${NAME}` | 转义，输出字面量 `${NAME}` |
 
+变量默认从进程环境中读取，如果配置文件声明了 `envfile`，还会从该文件中读取，见 [.env 文件](#env-files)。
+
 环境变量在 YAML 解析**之后**按标量值展开，因此变量内容不会改变文件的结构。展开只发生在 `Decode` 所选的配置段内。
 
+<a id="env-files"></a>
+### .env 文件
+
+在配置文件顶层写上 `envfile`，就可以从一个 `.env` 文件中补充环境变量：
+
+```yaml
+envfile: env/.env
+
+logs:
+  level: ${LOG_LEVEL:-info}
+```
+
+```ini
+# env/.env
+LOG_LEVEL=debug
+export DATABASE_URL="postgres://app:secret@localhost:5432/app"
+```
+
+`envfile` 遵循以下规则：
+
+- **进程环境优先。** 查找变量时先查进程环境，找不到才查 `.env` 文件。进程中设为空字符串的变量也算已设置，同样优先。因此部署时直接用环境变量覆盖 `.env` 中的值即可。
+- **不修改进程环境。** `.env` 中的变量只用于展开当前配置文件，不会写入 `os.Environ`。
+- **文件必须存在。** 声明了 `envfile` 但文件不存在、路径为空或语法错误时，`ReadFile` 和 `Parse` 都会直接报错。不需要 `.env` 的环境（例如生产容器），不要写 `envfile` 这一行。
+- **相对路径基于配置文件所在目录**，而不是当前工作目录；使用 `config.Parse` 时没有文件位置，相对路径基于当前工作目录。
+- **路径本身可以引用进程环境变量**，例如 `envfile: env/${APP_ENV}.env`。
+- `envfile` 是保留键，不能在 `WithSections` 中声明，也不能用 `Decode` 读取。
+
+`.env` 文件由 [godotenv](https://github.com/joho/godotenv) 解析，支持 `#` 注释、`export` 前缀、单引号和双引号。未加引号或双引号中的 `$NAME` / `${NAME}` 会被替换为**同一文件中前面定义的**变量，如果值中包含 `$`（例如密码），请用单引号包起来：
+
+```ini
+DB_PASSWORD='s3cr$ET'
+```
+
 > [!NOTE]
-> mygoravel 不会自动读取 `.env` 文件，也不会直接访问进程环境——环境变量只通过你传给 `WithLookup` 的函数获取。如果你需要 `.env` 文件，可以在加载配置之前用自己选择的库读取它。
+> 语法错误的报错只包含文件路径，不会回显文件内容，以免泄露其中的密钥。
 
 <a id="environment-in-tests"></a>
 ### 在测试中提供环境变量
 
-因为环境变量是通过函数注入的，测试时不必修改真实的进程环境，只需传入一个基于 map 的查询函数：
+`config.WithLookup` 可以替换默认的进程环境查找。测试时不必修改真实的进程环境，只需传入一个基于 map 的查询函数：
 
 ```go
 lookup := func(name string) (string, bool) {
@@ -149,7 +179,7 @@ doc, err := config.Parse(data,
 )
 ```
 
-每个测试持有自己的查询函数，因此可以安全地并行运行。
+每个测试持有自己的查询函数，因此可以安全地并行运行。如果配置文件声明了 `envfile`，`.env` 中的变量仍会作为查询函数未命中时的后备。
 
 <a id="defaults-and-overrides"></a>
 ## 默认值与覆盖规则
@@ -175,7 +205,6 @@ doc, err := config.Parse(data,
 ```go
 doc, err := config.ReadFile(path,
     config.WithSections("http", "database", "auth", "cache"),
-    config.WithLookup(os.LookupEnv),
 )
 if err != nil {
     return err

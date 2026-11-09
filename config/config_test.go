@@ -257,14 +257,18 @@ func TestTwoDocumentsIsolated(t *testing.T) {
 	}
 }
 
-func TestRequiresLookup(t *testing.T) {
-	doc, err := config.Parse([]byte("http:\n  port: ${PORT}\n"), config.WithSections("http"))
+func TestDefaultLookupIsProcessEnv(t *testing.T) {
+	t.Setenv("MYGORAVEL_TEST_PORT", "7777")
+	doc, err := config.Parse([]byte("http:\n  port: ${MYGORAVEL_TEST_PORT}\n"), config.WithSections("http"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := defaultHTTP()
-	if err := doc.Decode("http", &cfg); err == nil || !strings.Contains(err.Error(), "lookup") {
-		t.Fatalf("want lookup error, got %v", err)
+	if err := doc.Decode("http", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Port != 7777 {
+		t.Fatalf("port=%d", cfg.Port)
 	}
 }
 

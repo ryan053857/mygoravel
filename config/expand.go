@@ -69,9 +69,6 @@ func expand(s string, lookup LookupFunc) (string, error) {
 		if !validName(name) {
 			return "", errors.New("invalid environment variable reference")
 		}
-		if lookup == nil {
-			return "", errors.New("config: environment lookup is not configured (use config.WithLookup)")
-		}
 		val, ok := lookup(name)
 		switch {
 		case hasDef && val == "":
