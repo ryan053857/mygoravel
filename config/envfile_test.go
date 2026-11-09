@@ -22,9 +22,7 @@ db:
 func loadDir(t *testing.T, files map[string]string) (appConfig, error) {
 	t.Helper()
 	dir := writeFiles(t, files)
-	cfg := defaults()
-	err := config.Load(filepath.Join(dir, "config.yaml"), &cfg)
-	return cfg, err
+	return config.Load[appConfig](filepath.Join(dir, "config.yaml"))
 }
 
 func TestEnvFileRelativeToConfigFile(t *testing.T) {

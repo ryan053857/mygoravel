@@ -32,6 +32,9 @@ func DefaultConfig() Config {
 	}
 }
 
+// SetDefaults 实现 config.Defaulter，使 config.Load 自动填充默认值。
+func (c *Config) SetDefaults() { *c = DefaultConfig() }
+
 // Validate 检查 DSN 与连接池参数。
 func (c Config) Validate() error {
 	_, err := c.parse()

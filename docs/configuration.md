@@ -29,13 +29,12 @@ database:
 <a id="loading-configuration"></a>
 ## 加载配置
 
-为整个配置文件定义一个根结构体，用 `yaml` 标签声明字段名，在结构体中写好默认值，然后调用 `config.Load`。框架为常用组件预定义了配置类型，直接放进根结构体即可：
+为整个配置文件定义一个根结构体，用 `yaml` 标签声明字段名。框架为常用组件预定义了配置类型，直接放进根结构体即可：
 
 ```go
 package settings
 
 import (
-    "github.com/ryan053857/mygoravel/config"
     "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/logging"
@@ -46,17 +45,15 @@ type Config struct {
     Logs     logging.Config  `yaml:"logs"`
     Database database.Config `yaml:"database"`
 }
-
-func Load(path string) (Config, error) {
-    cfg := Config{
-        HTTP:     httpx.DefaultConfig(),
-        Logs:     logging.DefaultConfig(),
-        Database: database.DefaultConfig(),
-    }
-    err := config.Load(path, &cfg)
-    return cfg, err
-}
 ```
+
+然后在入口中用 `config.Load` 加载它：
+
+```go
+cfg, err := config.Load[settings.Config]("config.yaml")
+```
+
+不需要手动填写默认值：框架预定义的配置类型会在加载时自动填充自己的默认值，见[默认值](#defaults-and-validation)。
 
 | 类型 | 配置段 | 字段说明 |
 | --- | --- | --- |
@@ -86,7 +83,7 @@ storage:
   bucket: blog-images
 ```
 
-`config.Load` 会依次完成：读取 `envfile`、展开环境变量、把文件内容解码到结构体、调用 `Validate` 校验。
+`config.Load` 会依次完成：填充默认值、读取 `envfile`、展开环境变量、把文件内容解码到结构体、调用 `Validate` 校验。
 
 解码是严格的：文件中出现结构体里没有的字段（包括拼错的段名）或类型不匹配时，会直接报错并指出行号。
 
@@ -128,7 +125,23 @@ DATABASE_URL=postgres://app:secret@localhost:5432/app
 <a id="defaults-and-validation"></a>
 ## 默认值与校验
 
-调用 `Load` 前在结构体中写好的值就是默认值。文件中没有写的字段保持默认值；写了的字段覆盖默认值，包括显式写出的 `false`、`0` 和 `""`。map 按键合并，slice 整体替换。
+配置类型实现 `SetDefaults()` 方法，就可以提供默认值，`Load` 会在解码前调用它：
+
+```go
+func (c *StorageConfig) SetDefaults() {
+    c.Bucket = "blog-images"
+}
+```
+
+文件中没有写的字段保持默认值；写了的字段覆盖默认值，包括显式写出的 `false`、`0` 和 `""`。map 按键合并，slice 整体替换。
+
+`SetDefaults` 从内到外调用：先调用嵌套字段的，再调用外层结构体的。因此需要调整框架默认值时，在根结构体上实现 `SetDefaults` 即可：
+
+```go
+func (c *Config) SetDefaults() {
+    c.HTTP.Addr = ":3000"
+}
+```
 
 任何配置类型实现了 `Validate() error` 方法，`Load` 都会在解码后调用它。根结构体和所有嵌套字段都会被检查，子字段先于父结构体，所有错误一次性汇总返回：
 
@@ -147,7 +160,7 @@ func (c StorageConfig) Validate() error {
 config: config.yaml: invalid configuration: storage: endpoint is required
 ```
 
-框架预定义的配置类型都已经实现了 `Validate`，放进根结构体后会自动校验。需要跨段检查时，在根结构体上实现 `Validate` 即可。
+框架预定义的配置类型都已经实现了 `SetDefaults` 和 `Validate`，放进根结构体后会自动填充默认值并校验。需要跨段检查时，在根结构体上实现 `Validate` 即可。
 
 <a id="inspecting-configuration"></a>
 ## 检查配置

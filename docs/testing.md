@@ -207,7 +207,7 @@ func TestLoadConfig(t *testing.T) {
         t.Fatal(err)
     }
 
-    cfg, err := settings.Load(path)
+    cfg, err := config.Load[settings.Config](path)
     if err != nil {
         t.Fatal(err)
     }

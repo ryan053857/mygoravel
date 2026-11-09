@@ -10,15 +10,17 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-// Load 读取 YAML 配置文件到 dst。dst 必须是非 nil 指针，调用前填好默认值。
+// Load 读取 YAML 配置文件并返回 T，T 通常是应用的根配置结构体。
 //
-// 流程：加载 envfile → 展开 ${VAR} → 解码（未知字段报错）→
-// 对 dst 及其嵌套字段调用 Validate。文件中未写的字段保留默认值。
-func Load(path string, dst any) error {
-	if err := load(path, dst); err != nil {
-		return errors.Wrapf(err, "config: %s", path)
+// 流程：SetDefaults 填充默认值 → 加载 envfile → 展开 ${VAR} →
+// 解码（未知字段报错）→ Validate 校验。文件中未写的字段保留默认值。
+func Load[T any](path string) (T, error) {
+	var cfg T
+	if err := load(path, &cfg); err != nil {
+		var zero T
+		return zero, errors.Wrapf(err, "config: %s", path)
 	}
-	return nil
+	return cfg, nil
 }
 
 func load(path string, dst any) error {
@@ -26,6 +28,7 @@ func load(path string, dst any) error {
 	if err != nil {
 		return err
 	}
+	setDefaults(dst)
 	loader, err := yaml.NewLoader(bytes.NewReader(data))
 	if err != nil {
 		return err

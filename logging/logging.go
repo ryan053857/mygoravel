@@ -39,6 +39,9 @@ func DefaultConfig() Config {
 	return Config{Level: slog.LevelInfo, Format: FormatJSON}
 }
 
+// SetDefaults 实现 config.Defaulter，使 config.Load 自动填充默认值。
+func (c *Config) SetDefaults() { *c = DefaultConfig() }
+
 // Validate 检查输出格式。
 func (c Config) Validate() error {
 	switch c.Format {

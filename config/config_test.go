@@ -21,6 +21,10 @@ type httpConfig struct {
 	Debug   bool          `yaml:"debug"`
 }
 
+func (c *httpConfig) SetDefaults() {
+	*c = httpConfig{Addr: ":8080", Port: 8080, Timeout: 5 * time.Second}
+}
+
 type dbConfig struct {
 	DSN      string `yaml:"dsn"`
 	Password string `yaml:"password"`
@@ -51,17 +55,21 @@ func writeFiles(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// load 把 src 写入临时配置文件后加载到 dst。
-func load(t *testing.T, src string, dst any) error {
+// writeConfig 把 src 写入临时配置文件并返回路径。
+func writeConfig(t *testing.T, src string) string {
 	t.Helper()
-	dir := writeFiles(t, map[string]string{"config.yaml": src})
-	return config.Load(filepath.Join(dir, "config.yaml"), dst)
+	return filepath.Join(writeFiles(t, map[string]string{"config.yaml": src}), "config.yaml")
+}
+
+func load[T any](t *testing.T, src string) (T, error) {
+	t.Helper()
+	return config.Load[T](writeConfig(t, src))
 }
 
 func mustLoad(t *testing.T, src string) appConfig {
 	t.Helper()
-	cfg := defaults()
-	if err := load(t, src, &cfg); err != nil {
+	cfg, err := load[appConfig](t, src)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return cfg
@@ -86,23 +94,25 @@ func TestMissingFieldsKeepDefaults(t *testing.T) {
 }
 
 func TestZeroValuesOverride(t *testing.T) {
-	cfg := defaults()
-	cfg.HTTP.Debug = true
-	if err := load(t, "http:\n  port: 0\n  debug: false\n  addr: \"\"\n", &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.HTTP.Port != 0 || cfg.HTTP.Debug || cfg.HTTP.Addr != "" {
+	cfg := mustLoad(t, "http:\n  port: 0\n  timeout: 0s\n  addr: \"\"\n")
+	if cfg.HTTP.Port != 0 || cfg.HTTP.Timeout != 0 || cfg.HTTP.Addr != "" {
 		t.Fatalf("zero values not applied: %+v", cfg.HTTP)
 	}
 }
 
+type collections struct {
+	Tags   []string          `yaml:"tags"`
+	Labels map[string]string `yaml:"labels"`
+}
+
+func (c *collections) SetDefaults() {
+	c.Tags = []string{"default"}
+	c.Labels = map[string]string{"team": "core"}
+}
+
 func TestMapMergeSliceReplace(t *testing.T) {
-	type wrap struct {
-		Tags   []string          `yaml:"tags"`
-		Labels map[string]string `yaml:"labels"`
-	}
-	cfg := wrap{Tags: []string{"default"}, Labels: map[string]string{"team": "core"}}
-	if err := load(t, "tags: [a, b]\nlabels:\n  env: prod\n", &cfg); err != nil {
+	cfg, err := load[collections](t, "tags: [a, b]\nlabels:\n  env: prod\n")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(cfg.Tags, []string{"a", "b"}) ||
@@ -116,8 +126,7 @@ func TestRejectsUnknownFields(t *testing.T) {
 		"cache:\n  ttl: 1s\n":             "cache",
 		"http:\n  port: 1\n\n  prot: 2\n": "prot",
 	} {
-		cfg := defaults()
-		if err := load(t, src, &cfg); err == nil || !strings.Contains(err.Error(), field) {
+		if _, err := load[appConfig](t, src); err == nil || !strings.Contains(err.Error(), field) {
 			t.Fatalf("%q: want unknown field %s, got %v", src, field, err)
 		}
 	}
@@ -133,8 +142,7 @@ func TestRejectsInvalidYAML(t *testing.T) {
 		"http:\n  port: abc",
 	} {
 		t.Run(src, func(t *testing.T) {
-			cfg := defaults()
-			if err := load(t, src, &cfg); err == nil {
+			if _, err := load[appConfig](t, src); err == nil {
 				t.Fatal("accepted invalid YAML")
 			}
 		})
@@ -142,8 +150,7 @@ func TestRejectsInvalidYAML(t *testing.T) {
 }
 
 func TestMissingFile(t *testing.T) {
-	cfg := defaults()
-	if err := config.Load(filepath.Join(t.TempDir(), "missing.yaml"), &cfg); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := config.Load[appConfig](filepath.Join(t.TempDir(), "missing.yaml")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -166,8 +173,7 @@ db:
 }
 
 func TestMissingEnvFails(t *testing.T) {
-	cfg := defaults()
-	err := load(t, "db:\n  dsn: ${MYGORAVEL_TEST_UNSET}\n", &cfg)
+	_, err := load[appConfig](t, "db:\n  dsn: ${MYGORAVEL_TEST_UNSET}\n")
 	if err == nil || !strings.Contains(err.Error(), "MYGORAVEL_TEST_UNSET") {
 		t.Fatalf("got %v", err)
 	}
@@ -193,11 +199,11 @@ func TestAliasesExpandOnce(t *testing.T) {
 	type section struct {
 		Port int `yaml:"port"`
 	}
-	var cfg struct {
+	cfg, err := load[struct {
 		One section `yaml:"one"`
 		Two section `yaml:"two"`
-	}
-	if err := load(t, "one: &shared\n  port: ${MYGORAVEL_TEST_PORT}\ntwo: *shared\n", &cfg); err != nil {
+	}](t, "one: &shared\n  port: ${MYGORAVEL_TEST_PORT}\ntwo: *shared\n")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.One.Port != 123 || cfg.Two.Port != 123 {
@@ -221,11 +227,11 @@ type rootConfig struct {
 	Admin   *portConfig           `yaml:"admin"`
 	Workers []portConfig          `yaml:"workers"`
 	Extra   map[string]portConfig `yaml:"extra"`
-	calls   *int
+	calls   int
 }
 
 func (c *rootConfig) Validate() error {
-	*c.calls++
+	c.calls++
 	if c.API.Port == c.Admin.Port {
 		return errors.New("api and admin ports must differ")
 	}
@@ -233,14 +239,12 @@ func (c *rootConfig) Validate() error {
 }
 
 func TestValidateWalksNestedFields(t *testing.T) {
-	calls := 0
-	cfg := rootConfig{Admin: &portConfig{}, calls: &calls}
-	err := load(t, `
+	_, err := load[rootConfig](t, `
 api: {port: -1}
 admin: {port: -1}
 workers: [{port: 1}, {port: -2}]
 extra: {a: {port: -3}}
-`, &cfg)
+`)
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -249,7 +253,36 @@ extra: {a: {port: -3}}
 			t.Fatalf("missing %q in %v", want, err)
 		}
 	}
-	if calls != 1 {
-		t.Fatalf("root Validate called %d times", calls)
+}
+
+type innerDefaults struct {
+	Value string `yaml:"value"`
+	Other string `yaml:"other"`
+}
+
+func (c *innerDefaults) SetDefaults() { *c = innerDefaults{Value: "inner", Other: "inner"} }
+
+type outerDefaults struct {
+	Inner innerDefaults  `yaml:"inner"`
+	Ptr   *innerDefaults `yaml:"ptr"`
+}
+
+// 父结构体的 SetDefaults 晚于子字段调用，可以覆盖子字段的默认值。
+func (c *outerDefaults) SetDefaults() { c.Inner.Other = "outer" }
+
+func TestSetDefaultsChildrenFirst(t *testing.T) {
+	cfg, err := load[outerDefaults](t, "inner:\n  value: file\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Inner != (innerDefaults{Value: "file", Other: "outer"}) || cfg.Ptr != nil {
+		t.Fatalf("got %+v", cfg)
+	}
+}
+
+func TestLoadReturnsZeroOnError(t *testing.T) {
+	cfg, err := load[appConfig](t, "http:\n  port: abc\n")
+	if err == nil || !reflect.DeepEqual(cfg, appConfig{}) {
+		t.Fatalf("cfg=%+v err=%v", cfg, err)
 	}
 }

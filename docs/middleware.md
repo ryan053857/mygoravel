@@ -60,7 +60,7 @@ http:
 | `max_body_bytes` | 请求体的最大字节数 | 1 MiB |
 | `trusted_proxies` | 可信的反向代理网段 | 不信任任何代理 |
 
-把 `httpx.Config` 放进应用的根配置结构体，用 `httpx.DefaultConfig()` 作为默认值，再把它交给 `rest.New` 和 `httpx.ListenAndServe`：
+把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充上表中的默认值），再把它交给 `rest.New` 和 `httpx.ListenAndServe`：
 
 ```go
 api := rest.New(rest.Options{HTTP: cfg.HTTP, Logger: logger, Languages: bundle})

@@ -19,13 +19,8 @@ type frameworkConfig struct {
 	Database database.Config `yaml:"database"`
 }
 
-func frameworkDefaults() frameworkConfig {
-	return frameworkConfig{HTTP: httpx.DefaultConfig(), Logs: logging.DefaultConfig(), Database: database.DefaultConfig()}
-}
-
 func TestLoadsFrameworkConfigs(t *testing.T) {
-	cfg := frameworkDefaults()
-	err := load(t, `
+	cfg, err := load[frameworkConfig](t, `
 http:
   addr: :9000
   request_timeout: 5s
@@ -35,7 +30,7 @@ logs:
   format: text
 database:
   dsn: postgres://localhost/app
-`, &cfg)
+`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,8 +44,7 @@ database:
 }
 
 func TestFrameworkConfigsValidate(t *testing.T) {
-	cfg := frameworkDefaults()
-	err := load(t, "http:\n  max_body_bytes: 0\nlogs:\n  format: xml\n", &cfg)
+	_, err := load[frameworkConfig](t, "http:\n  max_body_bytes: 0\nlogs:\n  format: xml\n")
 	if err == nil {
 		t.Fatal("expected validation errors")
 	}

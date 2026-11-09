@@ -43,15 +43,15 @@ database:
 | `conn_max_lifetime` | 连接的最长存活时间 | `1h` |
 | `conn_max_idle_time` | 空闲连接的最长保留时间 | `30m` |
 
-这些字段对应 `database.Config` 结构体。把它放进应用的根配置结构体，并用 `database.DefaultConfig()` 作为默认值：
+这些字段对应 `database.Config` 结构体。把它放进应用的根配置结构体，`config.Load` 会自动填充上表中的默认值：
 
 ```go
 type Config struct {
     Database database.Config `yaml:"database"`
 }
 
-cfg := Config{Database: database.DefaultConfig()}
-if err := config.Load(path, &cfg); err != nil {
+cfg, err := config.Load[Config](path)
+if err != nil {
     return err
 }
 ```

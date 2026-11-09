@@ -45,6 +45,7 @@ import (
     "example.com/blog/internal/bootstrap"
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/command"
+    "github.com/ryan053857/mygoravel/config"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/logging"
 )
@@ -94,7 +95,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 
 func loadConfig(cmd *cobra.Command) (settings.Config, error) {
     path, _ := cmd.Flags().GetString("config")
-    cfg, err := settings.Load(path)
+    cfg, err := config.Load[settings.Config](path)
     if err != nil {
         return cfg, command.AsExitError(command.ExitConfig, err)
     }
@@ -102,7 +103,7 @@ func loadConfig(cmd *cobra.Command) (settings.Config, error) {
 }
 ```
 
-其中 `settings.Load` 加载配置（见[配置](configuration.md#loading-configuration)），`bootstrap.Serve` 和 `bootstrap.Routes` 组装应用并注册路由（见[依赖装配](dependencies.md#assembling-the-application)），`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)）。
+其中 `settings.Config` 是应用的配置结构（见[配置](configuration.md#loading-configuration)），`bootstrap.Serve` 和 `bootstrap.Routes` 组装应用并注册路由（见[依赖装配](dependencies.md#assembling-the-application)），`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)）。
 
 入口文件 `cmd/api/main.go` 执行根命令，并把错误转换为进程退出码：
 

@@ -33,7 +33,7 @@ logs:
 | `format` | `json` 或 `text` | `json` |
 | `add_source` | 是否记录源码位置 | `false` |
 
-把 `logging.Config` 放进应用的根配置结构体，用 `logging.DefaultConfig()` 作为默认值，然后调用 `logging.New`。输出位置和固定字段属于代码层面的决定，通过第二个参数传入：
+把 `logging.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值），然后调用 `logging.New`。输出位置和固定字段属于代码层面的决定，通过第二个参数传入：
 
 ```go
 logger := logging.New(cfg.Logs, logging.Options{

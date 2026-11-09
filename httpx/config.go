@@ -43,6 +43,9 @@ func DefaultConfig() Config {
 	}
 }
 
+// SetDefaults 实现 config.Defaulter，使 config.Load 自动填充默认值。
+func (c *Config) SetDefaults() { *c = DefaultConfig() }
+
 // Validate 检查地址非空、超时与限额为正数。
 func (c Config) Validate() error {
 	if c.Addr == "" {
