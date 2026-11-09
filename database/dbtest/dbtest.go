@@ -14,7 +14,6 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"github.com/ryan053857/mygoravel/config"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
 )
@@ -39,7 +38,7 @@ func Open(t testing.TB, migrations fs.FS) *bun.DB {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	admin, err := database.Open(ctx, database.Config{DSN: config.Secret(adminDSN)})
+	admin, err := database.Open(ctx, database.Config{DSN: adminDSN})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +51,7 @@ func Open(t testing.TB, migrations fs.FS) *bun.DB {
 	t.Cleanup(func() {
 		cleanCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		db, err := database.Open(cleanCtx, database.Config{DSN: config.Secret(adminDSN)})
+		db, err := database.Open(cleanCtx, database.Config{DSN: adminDSN})
 		if err != nil {
 			t.Errorf("dbtest: reopen admin: %v", err)
 			return

@@ -68,12 +68,10 @@ package main
 import (
     "context"
     "log/slog"
-    "net"
     "net/http"
     "os"
     "os/signal"
     "syscall"
-    "time"
 
     "github.com/danielgtaylor/huma/v2"
     "github.com/ryan053857/mygoravel/httpx"
@@ -110,26 +108,13 @@ func run() error {
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
-    logger := logging.New(logging.Options{Writer: os.Stderr})
-    api := rest.New(rest.Options{
-        Title: "Hello API", Version: "1.0.0",
-        Middleware: httpx.MiddlewareOptions{Logger: logger},
-    })
+    logger := logging.New(logging.DefaultConfig(), logging.Options{Writer: os.Stderr})
+    api := rest.New(rest.Options{Title: "Hello API", Version: "1.0.0", Logger: logger})
     registerPing(api)
 
-    listener, err := net.Listen("tcp", "127.0.0.1:8080")
-    if err != nil {
-        return err
-    }
-    server := &http.Server{
-        Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second,
-        ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second,
-        IdleTimeout: time.Minute,
-    }
-    return httpx.Serve(ctx, server, listener, httpx.ServeOptions{
-        ShutdownTimeout: 10 * time.Second,
-        Logger:          logger,
-    })
+    cfg := httpx.DefaultConfig()
+    cfg.Addr = "127.0.0.1:8080"
+    return httpx.ListenAndServe(ctx, cfg, api.Handler(), httpx.ServeOptions{Logger: logger})
 }
 
 func main() {
@@ -185,7 +170,7 @@ mygoravel 还为你生成了接口文档。在浏览器中打开 `http://localho
 
 现在你已经有了一个可以运行的 API，接下来可以根据需要逐步加入更多能力：
 
-- 用[配置](configuration.md)从 YAML 文件和环境变量中读取监听地址等参数；
+- 用[配置](configuration.md)把监听地址、日志级别等参数放进 YAML 文件；
 - 阅读[路由](routing.md)、[请求](requests.md)和[响应](responses.md)，编写真正的业务接口；
 - 用[认证](authentication.md)保护需要登录才能访问的接口；
 - 用[数据库](database.md)连接 PostgreSQL，用[迁移](migrations.md)管理表结构；

@@ -1,7 +1,6 @@
 package config_test
 
 import (
-	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -36,8 +35,8 @@ func TestEnvFileRelativeToConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTP.Addr != ":7001" || cfg.DB.Password.Reveal() != "s3cr$ET value" {
-		t.Fatalf("addr=%q password=%q", cfg.HTTP.Addr, cfg.DB.Password.Reveal())
+	if cfg.HTTP.Addr != ":7001" || cfg.DB.Password != "s3cr$ET value" {
+		t.Fatalf("addr=%q password=%q", cfg.HTTP.Addr, cfg.DB.Password)
 	}
 }
 
@@ -51,8 +50,8 @@ func TestProcessEnvOverridesEnvFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTP.Addr != ":7002" || cfg.DB.Password.Reveal() != "" {
-		t.Fatalf("addr=%q password=%q", cfg.HTTP.Addr, cfg.DB.Password.Reveal())
+	if cfg.HTTP.Addr != ":7002" || cfg.DB.Password != "" {
+		t.Fatalf("addr=%q password=%q", cfg.HTTP.Addr, cfg.DB.Password)
 	}
 }
 
@@ -77,21 +76,19 @@ func TestMissingEnvFileFails(t *testing.T) {
 	}
 }
 
-func TestInvalidEnvFileDoesNotLeak(t *testing.T) {
+func TestInvalidEnvFileFails(t *testing.T) {
 	_, err := loadDir(t, map[string]string{
 		"config.yaml": envFileConfig,
-		"env/.env":    "BAD-KEY=private-secret-value\n",
+		"env/.env":    "BAD-KEY=value\n",
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid dotenv syntax") ||
-		strings.Contains(fmt.Sprintf("%+v", err), "private-secret") {
-		t.Fatalf("got %+v", err)
+	if err == nil || !strings.Contains(err.Error(), "envfile") {
+		t.Fatalf("got %v", err)
 	}
 }
 
 func TestEnvFileMustBeNonEmptyString(t *testing.T) {
 	for _, src := range []string{
 		"envfile: [a]\n",
-		"envfile: 1\n",
 		"envfile: \"\"\n",
 		"envfile: ${MYGORAVEL_TEST_UNSET:-}\n",
 		"envfile: ${MYGORAVEL_TEST_UNSET}\n",

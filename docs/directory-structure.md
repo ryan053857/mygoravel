@@ -96,7 +96,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `config` | 读取 YAML 配置、展开环境变量、敏感值脱敏 | [配置](configuration.md) |
+| `config` | 读取 YAML 配置、展开环境变量、校验 | [配置](configuration.md) |
 | `cleanup` | 按逆序关闭入口打开的资源 | [依赖装配](dependencies.md#closing-resources) |
 | `errorx` | 定义带稳定错误码和分类的业务错误 | [错误处理](errors.md) |
 | `logging` | 构造 slog 日志器，传递请求关联字段 | [日志](logging.md) |

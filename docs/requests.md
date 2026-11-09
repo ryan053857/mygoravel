@@ -122,14 +122,11 @@ requestID := httpx.RequestID(ctx)
 <a id="body-size"></a>
 ### 请求体大小
 
-为了防止过大的请求耗尽服务器资源，默认中间件把请求体限制在 1 MiB，超出时返回 `413`。你可以在创建 API 时调整这个上限：
+为了防止过大的请求耗尽服务器资源，默认中间件把请求体限制在 1 MiB，超出时返回 `413`。你可以在配置文件中调整这个上限：
 
-```go
-api := rest.New(rest.Options{
-    Middleware: httpx.MiddlewareOptions{
-        MaxBodyBytes: 8 << 20, // 8 MiB
-    },
-})
+```yaml
+http:
+  max_body_bytes: 8388608 # 8 MiB
 ```
 
 > [!NOTE]
@@ -138,16 +135,13 @@ api := rest.New(rest.Options{
 <a id="timeouts"></a>
 ### 超时与取消
 
-默认中间件为每个请求的 context 设置 30 秒的超时，可以通过 `RequestTimeout` 选项调整：
+默认中间件为每个请求的 context 设置 30 秒的超时，可以在配置文件中调整：
 
-```go
-api := rest.New(rest.Options{
-    Middleware: httpx.MiddlewareOptions{
-        RequestTimeout: 10 * time.Second,
-    },
-})
+```yaml
+http:
+  request_timeout: 10s
 ```
 
 超时后，请求的 context 会被取消。为了让超时真正生效，请把处理器收到的 `ctx` 一路传给数据库查询和外部 HTTP 调用。
 
-除了请求 context 的超时，服务器本身还有读写超时，例如 `ReadTimeout`、`WriteTimeout` 和 `ReadHeaderTimeout`。它们由你在创建 `http.Server` 时设置，参考[安装](installation.md#entrypoint)中的示例。
+除了请求 context 的超时，服务器本身还有读写超时：`read_header_timeout`、`read_timeout`、`write_timeout` 和 `idle_timeout`。完整字段见 [HTTP 配置](middleware.md#http-configuration)。

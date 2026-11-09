@@ -23,14 +23,14 @@ func TestUnexpectedListenerExitDrainsRequests(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	draining := make(chan struct{})
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(entered)
 		<-release
 		_, _ = io.WriteString(w, "done")
-	})}
+	})
 	done := make(chan error, 1)
 	go func() {
-		done <- httpx.Serve(context.Background(), srv, ln, httpx.ServeOptions{ShutdownTimeout: time.Second, OnDraining: func() { close(draining) }})
+		done <- httpx.Serve(context.Background(), httpx.Config{ShutdownTimeout: time.Second}, ln, handler, httpx.ServeOptions{OnDraining: func() { close(draining) }})
 	}()
 	requestDone := make(chan struct{})
 	go func() {
@@ -65,7 +65,7 @@ func TestUnexpectedListenerExitDrainsRequests(t *testing.T) {
 	<-requestDone
 }
 func TestShutdownBudgetCancelsActiveRequest(t *testing.T) {
-	for _, budget := range []time.Duration{0, 20 * time.Millisecond} {
+	for _, budget := range []time.Duration{time.Nanosecond, 20 * time.Millisecond} {
 		t.Run(budget.String(), func(t *testing.T) {
 			ln, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
@@ -75,9 +75,11 @@ func TestShutdownBudgetCancelsActiveRequest(t *testing.T) {
 			defer cancel()
 			entered := make(chan struct{})
 			canceled := make(chan struct{})
-			srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done(); close(canceled) })}
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done(); close(canceled) })
 			done := make(chan error, 1)
-			go func() { done <- httpx.Serve(ctx, srv, ln, httpx.ServeOptions{ShutdownTimeout: budget}) }()
+			go func() {
+				done <- httpx.Serve(ctx, httpx.Config{ShutdownTimeout: budget}, ln, handler, httpx.ServeOptions{})
+			}()
 			go func() {
 				resp, err := http.Get("http://" + ln.Addr().String())
 				if err == nil {
@@ -108,11 +110,11 @@ func TestShutdownBudgetCancelsActiveRequest(t *testing.T) {
 }
 func TestBoundaryRecoveryLimitsAndProxyTrust(t *testing.T) {
 	for _, trusted := range []bool{false, true} {
-		opts := httpx.MiddlewareOptions{MaxBodyBytes: 3}
+		cfg := httpx.Config{MaxBodyBytes: 3}
 		if trusted {
-			opts.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+			cfg.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 		}
-		handler := httpx.Middleware(opts)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := httpx.Middleware(cfg, httpx.MiddlewareOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if trusted && r.RemoteAddr != "192.0.2.1" {
 				t.Fatal(r.RemoteAddr)
 			}
@@ -138,7 +140,7 @@ func TestBoundaryRecoveryLimitsAndProxyTrust(t *testing.T) {
 }
 
 func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
-	handler := httpx.Middleware(httpx.MiddlewareOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := httpx.Middleware(httpx.Config{}, httpx.MiddlewareOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		_, _ = io.WriteString(w, "partial")
 		panic("failure")
@@ -151,7 +153,7 @@ func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 }
 func TestRequestTimeoutReachesHandler(t *testing.T) {
-	handler := httpx.Middleware(httpx.MiddlewareOptions{RequestTimeout: 10 * time.Millisecond})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := httpx.Middleware(httpx.Config{RequestTimeout: 10 * time.Millisecond}, httpx.MiddlewareOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 		if !errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 			t.Fatal(r.Context().Err())

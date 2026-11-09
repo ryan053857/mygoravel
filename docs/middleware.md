@@ -2,7 +2,7 @@
 
 - [简介](#introduction)
 - [默认中间件](#default-middleware)
-- [配置默认中间件](#configuring-middleware)
+- [HTTP 配置](#http-configuration)
     - [可信代理](#trusted-proxies)
 - [自定义中间件](#custom-middleware)
     - [全局中间件](#chi-middleware)
@@ -14,7 +14,7 @@
 
 中间件提供了一种方便的机制，用来检查和处理进入应用的 HTTP 请求。例如，为每个请求生成请求 ID、记录访问日志、限制请求体大小等。
 
-mygoravel 已经为你准备好了一组常用的中间件。使用 `rest.New` 创建 API 时，它们会被自动安装，你只需通过选项调整它们的行为。如果需要额外的功能，也可以添加原生的 chi 或 Huma 中间件。
+mygoravel 已经为你准备好了一组常用的中间件。使用 `rest.New` 创建 API 时，它们会被自动安装，你只需通过 [HTTP 配置](#http-configuration)调整它们的行为。如果需要额外的功能，也可以添加原生的 chi 或 Huma 中间件。
 
 <a id="default-middleware"></a>
 ## 默认中间件
@@ -35,49 +35,56 @@ mygoravel 已经为你准备好了一组常用的中间件。使用 `rest.New` �
 认证不在默认中间件中，因为它是按路由启用的，见[认证](authentication.md)。健康检查也由你自己注册，见[请求生命周期](lifecycle.md#health-checks)。
 
 <a id="configuring-middleware"></a>
-## 配置默认中间件
+<a id="http-configuration"></a>
+## HTTP 配置
 
-默认中间件通过 `rest.Options` 的 `Middleware` 字段配置：
+请求超时、请求体上限、可信代理以及服务器超时都来自 `httpx.Config`，通常放在配置文件的 `http` 段：
 
-```go
-api := rest.New(rest.Options{
-    Middleware: httpx.MiddlewareOptions{
-        Logger:         logger,
-        Languages:      bundle,
-        MaxBodyBytes:   2 << 20,
-        RequestTimeout: 15 * time.Second,
-    },
-})
+```yaml
+http:
+  addr: ${HTTP_ADDR:-:8080}
+  request_timeout: 15s
+  max_body_bytes: 2097152
+  trusted_proxies: [10.20.0.0/16]
 ```
 
-| 选项 | 说明 | 默认值 |
+| 字段 | 说明 | 默认值 |
 | --- | --- | --- |
-| `Logger` | 访问日志和错误诊断使用的 `*slog.Logger` | 不记录日志 |
-| `Languages` | go-i18n 的 `*i18n.Bundle`，用于语言协商和错误消息翻译 | 不启用本地化 |
-| `MaxBodyBytes` | 请求体的最大字节数 | 1 MiB |
-| `RequestTimeout` | 请求 context 的超时时间 | 30 秒 |
-| `TrustedProxies` | 可信的反向代理网段 | 不信任任何代理 |
+| `addr` | 监听地址 | `:8080` |
+| `read_header_timeout` | 读取请求头的超时 | `5s` |
+| `read_timeout` | 读取整个请求的超时 | `30s` |
+| `write_timeout` | 写响应的超时 | `30s` |
+| `idle_timeout` | keep-alive 连接的空闲超时 | `1m` |
+| `request_timeout` | 每个请求 context 的超时 | `30s` |
+| `shutdown_timeout` | 停机时排空请求的上限 | `10s` |
+| `max_body_bytes` | 请求体的最大字节数 | 1 MiB |
+| `trusted_proxies` | 可信的反向代理网段 | 不信任任何代理 |
 
-`MaxBodyBytes` 和 `RequestTimeout` 设置为 0 或负数时会使用默认值。日志器的构造见[日志](logging.md)，语言目录的构造见[本地化](localization.md)。
+把 `httpx.Config` 放进应用的根配置结构体，用 `httpx.DefaultConfig()` 作为默认值，再把它交给 `rest.New` 和 `httpx.ListenAndServe`：
+
+```go
+api := rest.New(rest.Options{HTTP: cfg.HTTP, Logger: logger, Languages: bundle})
+// ...
+return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{Logger: logger})
+```
+
+`Logger` 用于访问日志和错误诊断，`Languages` 用于语言协商和错误消息翻译，两者都可以不传。日志器的构造见[日志](logging.md)，语言目录的构造见[本地化](localization.md)。
+
+`httpx.Config` 中没有设置（零值）的字段会使用默认值，所以测试中直接写 `rest.New(rest.Options{})` 也能正常工作。
 
 <a id="trusted-proxies"></a>
 ### 可信代理
 
 当应用部署在 Nginx、负载均衡器等反向代理之后时，请求的直接来源是代理的地址，而真实的客户端地址在 `X-Forwarded-For` 头中。但这个头可以被客户端随意伪造，所以只有来自**可信代理**的请求，才应该使用它。
 
-你可以通过 `TrustedProxies` 声明代理所在的网段：
+你可以通过 `http.trusted_proxies` 声明代理所在的网段：
 
-```go
-api := rest.New(rest.Options{
-    Middleware: httpx.MiddlewareOptions{
-        TrustedProxies: []netip.Prefix{
-            netip.MustParsePrefix("10.20.0.0/16"),
-        },
-    },
-})
+```yaml
+http:
+  trusted_proxies: [10.20.0.0/16]
 ```
 
-对于来自可信代理的请求，中间件会从右向左读取 `X-Forwarded-For`，跳过所有可信代理的地址，把遇到的第一个不可信地址作为客户端地址。没有配置 `TrustedProxies` 时，始终使用直接连接的地址。
+对于来自可信代理的请求，中间件会从右向左读取 `X-Forwarded-For`，跳过所有可信代理的地址，把遇到的第一个不可信地址作为客户端地址。没有配置 `trusted_proxies` 时，始终使用直接连接的地址。
 
 > [!WARNING]
 > 只填写你实际使用的代理网段。如果把 `0.0.0.0/0` 之类的宽泛网段设为可信，任何客户端都可以伪造自己的地址。
@@ -130,9 +137,7 @@ op.Middlewares = append(op.Middlewares, func(ctx huma.Context, next func(huma.Co
 如果你有一个不使用 `rest` 包的普通 `http.Handler`（例如标准库的 `http.ServeMux`），也可以单独为它安装默认中间件：
 
 ```go
-handler := httpx.Middleware(httpx.MiddlewareOptions{
-    Logger: logger,
-})(mux)
+handler := httpx.Middleware(cfg.HTTP, httpx.MiddlewareOptions{Logger: logger})(mux)
 ```
 
 请注意，同一条请求链上只应安装一次这组中间件。`rest.New` 已经安装过了，因此不需要对 `api.Handler()` 再次使用 `httpx.Middleware`。

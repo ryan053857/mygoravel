@@ -13,13 +13,11 @@ import (
 
 func TestNewAndContextIsolation(t *testing.T) {
 	var bufA, bufB bytes.Buffer
-	logA := logging.New(logging.Options{
-		Format: logging.FormatJSON,
+	logA := logging.New(logging.Config{Format: logging.FormatJSON}, logging.Options{
 		Writer: &bufA,
 		Attrs:  []slog.Attr{slog.String(logging.AttrService, "a")},
 	})
-	logB := logging.New(logging.Options{
-		Format: logging.FormatJSON,
+	logB := logging.New(logging.Config{Format: logging.FormatJSON}, logging.Options{
 		Writer: &bufB,
 		Attrs:  []slog.Attr{slog.String(logging.AttrService, "b")},
 	})
@@ -49,8 +47,24 @@ func TestNewAndContextIsolation(t *testing.T) {
 
 func TestDoesNotTouchDefault(t *testing.T) {
 	before := slog.Default()
-	_ = logging.New(logging.Options{Format: logging.FormatText, Writer: &bytes.Buffer{}})
+	_ = logging.New(logging.Config{Format: logging.FormatText}, logging.Options{Writer: &bytes.Buffer{}})
 	if slog.Default() != before {
 		t.Fatal("logging.New must not replace slog.Default")
+	}
+}
+
+func TestConfigControlsLevelAndFormat(t *testing.T) {
+	if err := logging.DefaultConfig().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if (logging.Config{Format: "xml"}).Validate() == nil {
+		t.Fatal("accepted unknown format")
+	}
+	var buf bytes.Buffer
+	logger := logging.New(logging.Config{Level: slog.LevelWarn, Format: logging.FormatText}, logging.Options{Writer: &buf})
+	logger.Info("hidden")
+	logger.Warn("shown")
+	if strings.Contains(buf.String(), "hidden") || !strings.Contains(buf.String(), "level=WARN msg=shown") {
+		t.Fatalf("output=%q", buf.String())
 	}
 }

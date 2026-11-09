@@ -6,53 +6,53 @@ import (
 	"net"
 	"net/http"
 	"sync/atomic"
-	"time"
 
 	"github.com/cockroachdb/errors"
 )
 
-// ServeOptions 控制 Serve 的停机行为。
+// ServeOptions 是 Serve 的运行时依赖。
 type ServeOptions struct {
-	// ShutdownTimeout 是 Shutdown 排空上限；0 表示立即 Close。
-	ShutdownTimeout time.Duration
 	// Logger 记录排空开始和服务器停止；nil 表示关闭这些日志。
 	Logger *slog.Logger
 	// OnDraining 在开始排空前调用（例如撤销 ready）；可空。
 	OnDraining func()
 }
 
-// Serve 在 ln 上运行 srv，直到 ctx 取消或 Serve 返回错误。
+// ListenAndServe 监听 cfg.Addr，并按 cfg 运行 handler，直到 ctx 取消。
+func ListenAndServe(ctx context.Context, cfg Config, handler http.Handler, opts ServeOptions) error {
+	if ctx == nil {
+		return errors.New("httpx: nil context")
+	}
+	cfg = cfg.withDefaults()
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", cfg.Addr)
+	if err != nil {
+		return errors.Wrap(err, "httpx: listen")
+	}
+	return Serve(ctx, cfg, ln, handler, opts)
+}
+
+// Serve 在 ln 上按 cfg 运行 handler（忽略 cfg.Addr），直到 ctx 取消或监听异常。
 //
-// ctx 取消或监听异常后：先调用 OnDraining，再 Shutdown；若超时则取消请求并 Close。
-// 调用方在 Serve 返回后关闭数据库等请求依赖。
-func Serve(ctx context.Context, srv *http.Server, ln net.Listener, opts ServeOptions) error {
-	if srv == nil {
-		return errors.New("httpx: nil server")
+// 停止时：先调用 OnDraining，再在 cfg.ShutdownTimeout 内排空请求；
+// 超时则取消请求 context 并强制关闭。调用方在 Serve 返回后关闭数据库等请求依赖。
+func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handler, opts ServeOptions) error {
+	if ctx == nil {
+		return errors.New("httpx: nil context")
 	}
 	if ln == nil {
 		return errors.New("httpx: nil listener")
 	}
-	if ctx == nil {
-		return errors.New("httpx: nil context")
+	if handler == nil {
+		return errors.New("httpx: nil handler")
 	}
+	cfg = cfg.withDefaults()
+	srv := cfg.server(handler)
 
-	if opts.ShutdownTimeout < 0 {
-		return errors.New("httpx: shutdown timeout must not be negative")
-	}
-	// 请求继承应用的 BaseContext，在排空结束后取消。
+	// 所有请求 context 派生自 requestRoot，排空超时或结束后统一取消。
 	requestRoot, cancelRequests := context.WithCancel(context.Background())
 	defer cancelRequests()
-	baseContext := srv.BaseContext
-	var stopCancel func() bool
-	srv.BaseContext = func(l net.Listener) context.Context {
-		base := context.Background()
-		if baseContext != nil {
-			base = baseContext(l)
-		}
-		ctx, cancel := context.WithCancel(base)
-		stopCancel = context.AfterFunc(requestRoot, cancel)
-		return ctx
-	}
+	srv.BaseContext = func(net.Listener) context.Context { return requestRoot }
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	var serveErr error
@@ -68,26 +68,17 @@ func Serve(ctx context.Context, srv *http.Server, ln net.Listener, opts ServeOpt
 	if opts.Logger != nil {
 		opts.Logger.Info("http server draining")
 	}
-	var shutdownErr error
-	if opts.ShutdownTimeout == 0 {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	shutdownErr := srv.Shutdown(shutdownCtx)
+	cancel()
+	if shutdownErr != nil {
 		cancelRequests()
-		shutdownErr = srv.Close()
-	} else {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), opts.ShutdownTimeout)
-		shutdownErr = srv.Shutdown(shutdownCtx)
-		cancel()
-		if shutdownErr != nil {
-			cancelRequests()
-			shutdownErr = errors.Join(shutdownErr, srv.Close())
-		}
+		shutdownErr = errors.Join(shutdownErr, srv.Close())
 	}
 	if !returned {
 		serveErr = <-errc
 	}
 	cancelRequests()
-	if stopCancel != nil {
-		stopCancel()
-	}
 	// 本次停机流程产生的 ErrServerClosed 表示正常退出。
 	if !returned && errors.Is(serveErr, http.ErrServerClosed) {
 		serveErr = nil

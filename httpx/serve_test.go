@@ -28,7 +28,6 @@ func TestServeDrainsBeforeCleanup(t *testing.T) {
 		<-release
 		_, _ = io.WriteString(w, "pong")
 	})
-	srv := &http.Server{Handler: mux}
 
 	var stack cleanup.Stack
 	_ = stack.Add("db", func(context.Context) error {
@@ -39,7 +38,7 @@ func TestServeDrainsBeforeCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		err := httpx.Serve(ctx, srv, ln, httpx.ServeOptions{ShutdownTimeout: time.Second})
+		err := httpx.Serve(ctx, httpx.Config{ShutdownTimeout: time.Second}, ln, mux, httpx.ServeOptions{})
 		errCh <- stack.CloseWith(context.Background(), err)
 	}()
 

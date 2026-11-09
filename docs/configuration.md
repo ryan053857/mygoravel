@@ -5,7 +5,6 @@
 - [环境变量](#environment-variables)
     - [.env 文件](#env-files)
 - [默认值与校验](#defaults-and-validation)
-- [敏感值](#secrets)
 - [检查配置](#inspecting-configuration)
 
 <a id="introduction"></a>
@@ -19,6 +18,9 @@ envfile: .env
 http:
   addr: ${HTTP_ADDR:-:8080}
 
+logs:
+  level: ${LOG_LEVEL:-info}
+
 database:
   dsn: ${DATABASE_URL}
   max_open_conns: 20
@@ -27,7 +29,7 @@ database:
 <a id="loading-configuration"></a>
 ## 加载配置
 
-为整个配置文件定义一个根结构体，用 `yaml` 标签声明字段名，在结构体中写好默认值，然后调用 `config.Load`：
+为整个配置文件定义一个根结构体，用 `yaml` 标签声明字段名，在结构体中写好默认值，然后调用 `config.Load`。框架为常用组件预定义了配置类型，直接放进根结构体即可：
 
 ```go
 package settings
@@ -35,20 +37,20 @@ package settings
 import (
     "github.com/ryan053857/mygoravel/config"
     "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/httpx"
+    "github.com/ryan053857/mygoravel/logging"
 )
 
 type Config struct {
-    HTTP     HTTPConfig      `yaml:"http"`
+    HTTP     httpx.Config    `yaml:"http"`
+    Logs     logging.Config  `yaml:"logs"`
     Database database.Config `yaml:"database"`
-}
-
-type HTTPConfig struct {
-    Addr string `yaml:"addr"`
 }
 
 func Load(path string) (Config, error) {
     cfg := Config{
-        HTTP:     HTTPConfig{Addr: ":8080"},
+        HTTP:     httpx.DefaultConfig(),
+        Logs:     logging.DefaultConfig(),
         Database: database.DefaultConfig(),
     }
     err := config.Load(path, &cfg)
@@ -56,9 +58,17 @@ func Load(path string) (Config, error) {
 }
 ```
 
+| 类型 | 配置段 | 字段说明 |
+| --- | --- | --- |
+| `httpx.Config` | `http` | [HTTP 配置](middleware.md#http-configuration) |
+| `logging.Config` | `logs` | [创建日志器](logging.md#creating-a-logger) |
+| `database.Config` | `database` | [数据库配置](database.md#configuration) |
+
+应用自己的配置（例如业务开关、第三方服务地址）同样定义成结构体，作为新字段加入 `Config`。
+
 `config.Load` 会依次完成：读取 `envfile`、展开环境变量、把文件内容解码到结构体、调用 `Validate` 校验。
 
-解码是严格的：文件中出现结构体里没有的字段（包括拼错的段名）、类型不匹配或者显式的 `null`，都会直接报错并指出字段路径和行号，错误信息不会包含配置值本身。
+解码是严格的：文件中出现结构体里没有的字段（包括拼错的段名）或类型不匹配时，会直接报错并指出行号。
 
 <a id="environment-variables"></a>
 ## 环境变量
@@ -103,40 +113,28 @@ DATABASE_URL=postgres://app:secret@localhost:5432/app
 任何配置类型实现了 `Validate() error` 方法，`Load` 都会在解码后调用它。根结构体和所有嵌套字段都会被检查，子字段先于父结构体，所有错误一次性汇总返回：
 
 ```go
-func (c HTTPConfig) Validate() error {
-    if c.Addr == "" {
-        return errors.New("addr is required")
+type PaymentConfig struct {
+    Endpoint string `yaml:"endpoint"`
+}
+
+func (c PaymentConfig) Validate() error {
+    if c.Endpoint == "" {
+        return errors.New("endpoint is required")
     }
     return nil
 }
 ```
 
 ```text
-config: config.yaml: invalid configuration: http: addr is required
+config: config.yaml: invalid configuration: payment: endpoint is required
 ```
 
-框架自带的配置类型（例如 `database.Config`）已经实现了 `Validate`，嵌入根结构体后会自动校验。需要跨段检查时，在根结构体上实现 `Validate` 即可。
-
-<a id="secrets"></a>
-## 敏感值
-
-密码、token、DSN 等字段应声明为 `config.Secret` 类型。它在 `fmt`、`slog`、JSON 和 YAML 输出中都显示为 `******`，空值显示为空。真正需要原始值时调用 `Reveal`：
-
-```go
-type Credentials struct {
-    Token config.Secret `yaml:"token"`
-}
-
-client := newClient(creds.Token.Reveal())
-```
-
-> [!WARNING]
-> `Reveal()` 返回的是普通字符串，不再受脱敏保护，不要把它写进日志或错误消息。
+框架预定义的配置类型都已经实现了 `Validate`，放进根结构体后会自动校验。需要跨段检查时，在根结构体上实现 `Validate` 即可。
 
 <a id="inspecting-configuration"></a>
 ## 检查配置
 
-由于 `config.Secret` 会自动脱敏，加载后的配置可以直接编码输出，用来在部署前检查：
+加载后的配置可以直接编码输出，用来在部署前检查：
 
 ```go
 return json.NewEncoder(cmd.OutOrStdout()).Encode(cfg)

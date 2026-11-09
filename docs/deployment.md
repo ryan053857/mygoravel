@@ -85,25 +85,25 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 
 部署平台在停止实例时通常会发送 `SIGTERM`。请确保这个信号能传递到应用进程——例如在容器中直接以应用二进制作为入口进程，而不是通过一个不转发信号的 shell 脚本启动。
 
-收到信号后，`httpx.Serve` 会开始排空请求，详见[请求生命周期](lifecycle.md#graceful-shutdown)。配置停机时间时请注意：
+收到信号后，`httpx.ListenAndServe` 会开始排空请求，详见[请求生命周期](lifecycle.md#graceful-shutdown)。配置停机时间时请注意：
 
-- `ShutdownTimeout` 决定了排空请求的最长时间；
-- 部署平台的停止宽限期（例如 Kubernetes 的 `terminationGracePeriodSeconds`）应当大于 `ShutdownTimeout` 加上关闭数据库等资源所需的时间，否则进程可能在清理完成前被强制终止。
+- `http.shutdown_timeout` 决定了排空请求的最长时间；
+- 部署平台的停止宽限期（例如 Kubernetes 的 `terminationGracePeriodSeconds`）应当大于 `shutdown_timeout` 加上关闭数据库等资源所需的时间，否则进程可能在清理完成前被强制终止。
 
 <a id="reverse-proxies"></a>
 ## 反向代理与网络
 
-如果应用部署在负载均衡器或反向代理之后，请在 `TrustedProxies` 中配置代理的实际网段，以便正确识别客户端地址，见[可信代理](middleware.md#trusted-proxies)。
+如果应用部署在负载均衡器或反向代理之后，请在 `http.trusted_proxies` 中配置代理的实际网段，以便正确识别客户端地址，见[可信代理](middleware.md#trusted-proxies)。
 
 TLS 终止、CORS、限流等功能，可以在反向代理中配置，也可以作为[自定义中间件](middleware.md#custom-middleware)加入应用。
 
 <a id="logging"></a>
 ## 日志
 
-建议把服务日志输出到标准错误，使用 JSON 格式，并通过 `Attrs` 附加服务名和版本号，便于日志平台采集和检索：
+建议把服务日志输出到标准错误，使用 JSON 格式（`logs.format` 的默认值），并通过 `Attrs` 附加服务名和版本号，便于日志平台采集和检索：
 
 ```go
-logger := logging.New(logging.Options{
+logger := logging.New(cfg.Logs, logging.Options{
     Writer: os.Stderr,
     Attrs: []slog.Attr{
         slog.String("service", "notes"),

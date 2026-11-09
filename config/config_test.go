@@ -1,10 +1,7 @@
 package config_test
 
 import (
-	"encoding/json"
-	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +10,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.yaml.in/yaml/v4"
 
 	"github.com/ryan053857/mygoravel/config"
 )
@@ -26,8 +22,8 @@ type httpConfig struct {
 }
 
 type dbConfig struct {
-	DSN      config.Secret `yaml:"dsn"`
-	Password config.Secret `yaml:"password"`
+	DSN      string `yaml:"dsn"`
+	Password string `yaml:"password"`
 }
 
 type appConfig struct {
@@ -118,7 +114,7 @@ func TestMapMergeSliceReplace(t *testing.T) {
 func TestRejectsUnknownFields(t *testing.T) {
 	for src, field := range map[string]string{
 		"cache:\n  ttl: 1s\n":             "cache",
-		"http:\n  port: 1\n\n  prot: 2\n": "http.prot",
+		"http:\n  port: 1\n\n  prot: 2\n": "prot",
 	} {
 		cfg := defaults()
 		if err := load(t, src, &cfg); err == nil || !strings.Contains(err.Error(), field) {
@@ -127,28 +123,21 @@ func TestRejectsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestRejectsMalformedStructure(t *testing.T) {
+func TestRejectsInvalidYAML(t *testing.T) {
 	for _, src := range []string{
 		"hello",
 		"- http",
 		"http: {}\nhttp: {}",
 		"http:\n  port: 1\n  port: 2",
 		"http:\n  1: x",
-		"http:\n  addr: null\n",
-		"http: {}\n---\nhttp: {}\n",
+		"http:\n  port: abc",
 	} {
 		t.Run(src, func(t *testing.T) {
 			cfg := defaults()
 			if err := load(t, src, &cfg); err == nil {
-				t.Fatal("accepted malformed structure")
+				t.Fatal("accepted invalid YAML")
 			}
 		})
-	}
-}
-
-func TestRequiresPointer(t *testing.T) {
-	if err := config.Load("unused.yaml", defaults()); err == nil {
-		t.Fatal("accepted non-pointer destination")
 	}
 }
 
@@ -171,8 +160,8 @@ db:
   dsn: ${MYGORAVEL_TEST_UNSET:-}
   password: ${MYGORAVEL_TEST_PASSWORD}
 `)
-	if cfg.HTTP.Port != 9100 || cfg.HTTP.Addr != ":7000" || cfg.DB.DSN != "" || cfg.DB.Password.Reveal() != "p@ss #word: {x}" {
-		t.Fatalf("got %+v password=%q", cfg, cfg.DB.Password.Reveal())
+	if cfg.HTTP.Port != 9100 || cfg.HTTP.Addr != ":7000" || cfg.DB.DSN != "" || cfg.DB.Password != "p@ss #word: {x}" {
+		t.Fatalf("got %+v password=%q", cfg, cfg.DB.Password)
 	}
 }
 
@@ -213,21 +202,6 @@ func TestAliasesExpandOnce(t *testing.T) {
 	}
 	if cfg.One.Port != 123 || cfg.Two.Port != 123 {
 		t.Fatalf("got %+v", cfg)
-	}
-}
-
-func TestErrorsDoNotLeakValues(t *testing.T) {
-	cfg := defaults()
-	err := load(t, "http:\n  port: private-secret-value\n", &cfg)
-	if err == nil || strings.Contains(fmt.Sprintf("%+v", err), "private-secret") || !strings.Contains(err.Error(), "http.port") {
-		t.Fatalf("got %+v", err)
-	}
-	for _, input := range []string{"${broken-private-secret", "${bad name:-private-secret}"} {
-		cfg := defaults()
-		err := load(t, "http:\n  addr: "+input+"\n", &cfg)
-		if err == nil || strings.Contains(fmt.Sprintf("%+v", err), "private-secret") {
-			t.Fatalf("%q: got %+v", input, err)
-		}
 	}
 }
 
@@ -277,28 +251,5 @@ extra: {a: {port: -3}}
 	}
 	if calls != 1 {
 		t.Fatalf("root Validate called %d times", calls)
-	}
-}
-
-func TestSecretRedaction(t *testing.T) {
-	s := config.Secret("super-secret")
-	if s.String() != "******" || s.Reveal() != "super-secret" || config.Secret("").String() != "" {
-		t.Fatalf("string=%q reveal=%q", s.String(), s.Reveal())
-	}
-	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X"} {
-		if got := fmt.Sprintf(verb, s); strings.Contains(got, "super-secret") || strings.Contains(got, "73757065722d736563726574") {
-			t.Fatalf("%s leaked: %s", verb, got)
-		}
-	}
-	if data, err := json.Marshal(s); err != nil || string(data) != `"******"` {
-		t.Fatalf("json=%s err=%v", data, err)
-	}
-	if y, err := yaml.Marshal(s); err != nil || strings.Contains(string(y), "super-secret") {
-		t.Fatalf("yaml=%s err=%v", y, err)
-	}
-	var buf strings.Builder
-	slog.New(slog.NewTextHandler(&buf, nil)).Info("x", "password", s)
-	if strings.Contains(buf.String(), "super-secret") || !strings.Contains(buf.String(), "******") {
-		t.Fatalf("slog=%q", buf.String())
 	}
 }

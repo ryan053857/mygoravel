@@ -25,7 +25,7 @@
 1. 读取并校验当前命令需要的[配置](configuration.md)；
 2. 打开数据库等资源，每成功打开一个，就登记对应的关闭操作；
 3. 构造业务服务，创建 API 并注册路由；
-4. 创建监听器，调用 `httpx.Serve` 开始处理请求。
+4. 调用 `httpx.ListenAndServe` 开始处理请求。
 
 这些步骤都是普通的 Go 代码，具体写法见[依赖装配](dependencies.md#assembling-the-application)。
 
@@ -58,23 +58,22 @@
 <a id="graceful-shutdown"></a>
 ### 平滑停止
 
-当应用收到 `SIGTERM` 或 Ctrl+C 时，我们希望它**不要粗暴地中断正在处理的请求**。`httpx.Serve` 负责完成这件事：
+当应用收到 `SIGTERM` 或 Ctrl+C 时，我们希望它**不要粗暴地中断正在处理的请求**。`httpx.ListenAndServe` 负责完成这件事：
 
 ```go
-return httpx.Serve(ctx, server, listener, httpx.ServeOptions{
-    ShutdownTimeout: 10 * time.Second,
-    Logger:          logger,
-    OnDraining:      draining.Set,
+return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{
+    Logger:     logger,
+    OnDraining: draining.Set,
 })
 ```
 
-`httpx.Serve` 接收标准库的 `*http.Server` 和一个已经创建好的 `net.Listener`。当 `ctx` 被取消（通常来自 `signal.NotifyContext`），或者监听发生异常时，它会按以下顺序停止服务：
+`httpx.ListenAndServe` 按 [`httpx.Config`](middleware.md#http-configuration) 监听地址、设置服务器超时。如果你已经有一个 `net.Listener`（例如测试中监听 `127.0.0.1:0`），可以改用 `httpx.Serve(ctx, cfg, listener, handler, opts)`。当 `ctx` 被取消（通常来自 `signal.NotifyContext`），或者监听发生异常时，它会按以下顺序停止服务：
 
 1. 调用 `OnDraining`，通知外界服务即将停止（例如让就绪检查开始返回失败）；
 2. 停止接收新连接，等待正在处理的请求完成——这个过程称为**排空**；
-3. 如果超过 `ShutdownTimeout` 仍有请求未完成，则取消这些请求的 context 并强制关闭连接。`ShutdownTimeout` 为 0 时会立即关闭。
+3. 如果超过 `shutdown_timeout`（默认 10 秒）仍有请求未完成，则取消这些请求的 context 并强制关闭连接。
 
-`httpx.Serve` 返回之后，入口才会关闭数据库等资源。这个顺序保证了正在处理的请求在结束前始终可以访问数据库。
+`httpx.ListenAndServe` 返回之后，入口才会关闭数据库等资源。这个顺序保证了正在处理的请求在结束前始终可以访问数据库。
 
 > [!WARNING]
 > 平滑停止依赖于 context 的传递。业务代码中的数据库查询和外部调用都应该使用请求的 `ctx`，这样它们才能在超时后及时停止。忽略 context 的 goroutine 会在停机后继续运行。

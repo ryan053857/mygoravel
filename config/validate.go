@@ -87,3 +87,10 @@ func fieldName(f reflect.StructField) (name string, skip bool) {
 		return strings.ToLower(f.Name), false
 	}
 }
+
+func joinPath(path, name string) string {
+	if path == "" {
+		return name
+	}
+	return path + "." + name
+}

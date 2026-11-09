@@ -63,7 +63,7 @@ func main() {
 | --- | --- | --- |
 | `command.NewServe` | `serve` | 读取配置、打开资源、启动 HTTP 服务 |
 | `command.NewOpenAPI` | `openapi` | 以文档模式注册路由，输出 OpenAPI 文档 |
-| `command.NewConfig` | `config check`、`config show` | 校验配置，输出脱敏后的配置 |
+| `command.NewConfig` | `config check`、`config show` | 校验配置，输出加载后的配置 |
 | `command.NewMigrate` | `migrate up`、`migrate status`、`migrate down` | 连接数据库，执行迁移 |
 | `command.NewDoctor` | `doctor` | 在限定时间内探测外部依赖是否可用 |
 
@@ -139,8 +139,8 @@ func New(register func(*rest.API), out, diagnostic io.Writer) *cobra.Command {
 root.AddCommand(command.NewConfig(checkConfig, showConfig))
 ```
 
-- `check` 应当读取并校验所有配置段，只做离线检查，不访问网络；
-- `show` 输出校验后的配置。它已经预定义了 `--format` 选项（默认 `yaml`），你在回调中读取这个选项并选择对应的编码器即可。由于 `config.Secret` 会自动脱敏，可以放心地输出整个配置结构体。
+- `check` 应当加载并校验配置，只做离线检查，不访问网络；
+- `show` 输出校验后的配置。它已经预定义了 `--format` 选项（默认 `yaml`），你在回调中读取这个选项并选择对应的编码器即可。
 
 配置的读取与校验见[配置](configuration.md#inspecting-configuration)。
 

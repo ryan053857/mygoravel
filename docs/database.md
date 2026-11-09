@@ -56,7 +56,7 @@ if err := config.Load(path, &cfg); err != nil {
 }
 ```
 
-`database.Config` 实现了 `Validate` 方法，`config.Load` 会自动检查 DSN 是否为空、连接池参数是否合法。`dsn` 字段的类型是 `config.Secret`，不会在日志中泄露密码。
+`database.Config` 实现了 `Validate` 方法，`config.Load` 会自动检查 DSN 是否为空、连接池参数是否合法。
 
 > [!TIP]
 > 设置 `max_open_conns` 时，请考虑应用的部署副本数：所有副本的连接数之和不应超过数据库的最大连接数。
@@ -72,11 +72,10 @@ package storage
 import (
     "context"
 
-    "github.com/ryan053857/mygoravel/config"
     "github.com/ryan053857/mygoravel/database"
 )
 
-func Check(ctx context.Context, dsn config.Secret) error {
+func Check(ctx context.Context, dsn string) error {
     cfg := database.DefaultConfig()
     cfg.DSN = dsn
     db, err := database.Open(ctx, cfg)

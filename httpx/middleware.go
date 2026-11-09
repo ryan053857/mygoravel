@@ -51,32 +51,25 @@ func AddAccessLogAttrs(ctx context.Context, attrs ...slog.Attr) {
 	}
 }
 
-// MiddlewareOptions 配置实例级 HTTP 策略，非正数限额使用默认值。
+// MiddlewareOptions 是 Middleware 的运行时依赖，均可为空。
 type MiddlewareOptions struct {
-	Logger         *slog.Logger
-	Languages      *goi18n.Bundle
-	MaxBodyBytes   int64
-	RequestTimeout time.Duration
-	TrustedProxies []netip.Prefix
+	// Logger 记录访问日志与 panic；nil 表示关闭。
+	Logger *slog.Logger
+	// Languages 用于 Accept-Language 协商；nil 表示不协商。
+	Languages *goi18n.Bundle
 }
 
 // Middleware 安装请求关联、访问日志、恢复、限额与语言协商。
-// 客户端地址沿可信代理链从右向左解析。
-func Middleware(opts MiddlewareOptions) func(http.Handler) http.Handler {
+// 超时、请求体上限与可信代理取自 cfg；客户端地址沿可信代理链从右向左解析。
+func Middleware(cfg Config, opts MiddlewareOptions) func(http.Handler) http.Handler {
 	if opts.Logger != nil {
 		opts.Logger = slog.New(logging.NewContextHandler(opts.Logger.Handler()))
 	}
-	if opts.MaxBodyBytes <= 0 {
-		opts.MaxBodyBytes = 1 << 20
-	}
-	if opts.RequestTimeout <= 0 {
-		opts.RequestTimeout = 30 * time.Second
-	}
-	opts.TrustedProxies = append([]netip.Prefix(nil), opts.TrustedProxies...)
+	cfg = cfg.withDefaults()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r = r.Clone(r.Context())
-			r.RemoteAddr = clientAddress(r, opts.TrustedProxies)
+			r.RemoteAddr = clientAddress(r, cfg.TrustedProxies)
 			id := rand.Text()
 			ctx := context.WithValue(r.Context(), requestIDKey{}, id)
 			ctx = logging.WithAttrs(ctx, slog.String(logging.AttrRequestID, id))
@@ -84,7 +77,7 @@ func Middleware(opts MiddlewareOptions) func(http.Handler) http.Handler {
 			if opts.Logger != nil {
 				ctx = context.WithValue(ctx, accessLogKey{}, access)
 			}
-			ctx, cancel := context.WithTimeout(ctx, opts.RequestTimeout)
+			ctx, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
 			defer cancel()
 
 			r = r.WithContext(ctx)
@@ -121,11 +114,11 @@ func Middleware(opts MiddlewareOptions) func(http.Handler) http.Handler {
 				}
 
 			}()
-			if r.ContentLength > opts.MaxBodyBytes {
+			if r.ContentLength > cfg.MaxBodyBytes {
 				WriteProblem(rw, http.StatusRequestEntityTooLarge, "request body too large")
 				return
 			}
-			r.Body = http.MaxBytesReader(rw, r.Body, opts.MaxBodyBytes)
+			r.Body = http.MaxBytesReader(rw, r.Body, cfg.MaxBodyBytes)
 			if opts.Languages != nil {
 				locale := i18n.MatchAcceptLanguage(opts.Languages, r.Header.Get("Accept-Language"))
 				ctx = i18n.WithLocale(ctx, locale)

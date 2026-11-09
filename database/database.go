@@ -10,13 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
-
-	"github.com/ryan053857/mygoravel/config"
 )
 
 // Config 是数据库连接配置。
 type Config struct {
-	DSN             config.Secret `yaml:"dsn"`
+	DSN             string        `yaml:"dsn"`
 	MaxOpenConns    int           `yaml:"max_open_conns"`
 	MaxIdleConns    int           `yaml:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
@@ -41,18 +39,18 @@ func (c Config) Validate() error {
 }
 
 func (c Config) parse() (*pgx.ConnConfig, error) {
-	if c.DSN.Reveal() == "" {
-		return nil, errors.New("database: dsn is required")
+	if c.DSN == "" {
+		return nil, errors.New("dsn is required")
 	}
 	if c.MaxOpenConns < 0 || c.MaxIdleConns < 0 {
-		return nil, errors.New("database: connection pool sizes must be >= 0")
+		return nil, errors.New("connection pool sizes must be >= 0")
 	}
 	if c.ConnMaxLifetime < 0 || c.ConnMaxIdleTime < 0 {
-		return nil, errors.New("database: connection lifetimes must be >= 0")
+		return nil, errors.New("connection lifetimes must be >= 0")
 	}
-	parsed, err := pgx.ParseConfig(c.DSN.Reveal())
+	parsed, err := pgx.ParseConfig(c.DSN)
 	if err != nil {
-		return nil, errors.New("database: invalid dsn")
+		return nil, errors.Wrap(err, "invalid dsn")
 	}
 	return parsed, nil
 }
@@ -61,7 +59,7 @@ func (c Config) parse() (*pgx.ConnConfig, error) {
 func Open(ctx context.Context, cfg Config) (*bun.DB, error) {
 	pgxCfg, err := cfg.parse()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "database")
 	}
 	sqldb := stdlib.OpenDB(*pgxCfg)
 	sqldb.SetMaxOpenConns(cfg.MaxOpenConns)

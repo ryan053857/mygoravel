@@ -77,24 +77,16 @@ func Serve(ctx context.Context, cfg Config, logger *slog.Logger) (err error) {
     // 3. 创建 API 并注册路由
     api := rest.New(rest.Options{
         Title: "Notes API", Version: "1.0.0",
-        Middleware: httpx.MiddlewareOptions{Logger: logger},
+        HTTP: cfg.HTTP, Logger: logger,
     })
     notehttp.Register(api, notes)
 
     // 4. 开始监听，直到 ctx 被取消
-    listener, err := net.Listen("tcp", cfg.HTTP.Addr)
-    if err != nil {
-        return err
-    }
-    server := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second}
-    return httpx.Serve(ctx, server, listener, httpx.ServeOptions{
-        ShutdownTimeout: 10 * time.Second,
-        Logger:          logger,
-    })
+    return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{Logger: logger})
 }
 ```
 
-整个过程就是普通的函数调用：先创建被依赖的对象，再创建依赖它们的对象。`httpx.Serve` 返回后，`defer` 中的 `stack.CloseWith` 才会关闭数据库连接，因此正在处理的请求不会因为数据库提前关闭而失败。请求处理与停机的完整顺序见[请求生命周期](lifecycle.md)。
+整个过程就是普通的函数调用：先创建被依赖的对象，再创建依赖它们的对象。`httpx.ListenAndServe` 返回后，`defer` 中的 `stack.CloseWith` 才会关闭数据库连接，因此正在处理的请求不会因为数据库提前关闭而失败。请求处理与停机的完整顺序见[请求生命周期](lifecycle.md)。
 
 > [!TIP]
 > 入口只打开当前命令真正需要的资源。例如 `serve` 命令需要数据库和 HTTP 监听，而 `openapi` 命令什么资源都不需要。把不同命令的组装逻辑分开，可以让每个命令都快速、独立地运行。

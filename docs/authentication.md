@@ -54,10 +54,7 @@ type TokenValidator func(ctx huma.Context, token string) (identity.Subject, erro
 package auth
 
 import (
-    "crypto/subtle"
-
     "github.com/danielgtaylor/huma/v2"
-    "github.com/ryan053857/mygoravel/config"
     "github.com/ryan053857/mygoravel/errorx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/identity"
@@ -65,11 +62,9 @@ import (
 
 var ErrUnauthenticated = errorx.Define(errorx.Unauthenticated, "auth.unauthenticated")
 
-func Validator(expected config.Secret) rest.TokenValidator {
+func Validator(expected string) rest.TokenValidator {
     return func(ctx huma.Context, token string) (identity.Subject, error) {
-        if expected.Reveal() == "" || subtle.ConstantTimeCompare(
-            []byte(token), []byte(expected.Reveal()),
-        ) != 1 {
+        if expected == "" || token != expected {
             return identity.Subject{}, ErrUnauthenticated.New()
         }
         return identity.Subject{
@@ -79,8 +74,6 @@ func Validator(expected config.Secret) rest.TokenValidator {
     }
 }
 ```
-
-这里使用 `subtle.ConstantTimeCompare` 比较 token，以防止时序攻击。
 
 在实际应用中，校验器通常会查询数据库中的 API Key，或者使用成熟的库验证 JWT 的签名和有效期。无论采用哪种方式，校验器都应当在返回主体之前完成**全部**的有效性检查：签名、过期时间、是否已吊销，以及权限范围的来源。
 
@@ -160,8 +153,8 @@ return func(ctx context.Context, in *ListNotesInput) (*ListNotesOutput, error) {
 
 ```go
 type Credential struct {
-    Token     config.Secret `yaml:"token"`
-    SubjectID string        `yaml:"subject_id"`
+    Token     string `yaml:"token"`
+    SubjectID string `yaml:"subject_id"`
 }
 
 type AuthConfig struct {
@@ -176,6 +169,6 @@ auth:
       subject_id: alice
 ```
 
-请在 `AuthConfig` 的 `Validate` 方法中检查空 token、空主体和重复的凭据，然后把校验后的配置传给校验器。token 字段使用 `config.Secret`，可以避免它出现在日志中。
+请在 `AuthConfig` 的 `Validate` 方法中检查空 token、空主体和重复的凭据，然后把校验后的配置传给校验器。
 
 用户注册、登录会话、刷新 token 等功能不在 mygoravel 的范围内。你可以选择合适的认证服务或库来实现它们，最终在校验器中把验证结果转换为 `identity.Subject` 即可。

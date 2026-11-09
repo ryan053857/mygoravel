@@ -29,7 +29,6 @@ mygoravel 的本地化基于 [go-i18n](https://github.com/nicksnyder/go-i18n)。
 package api
 
 import (
-    "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/i18n"
 )
@@ -42,9 +41,7 @@ func NewAPI() (*rest.API, error) {
     if err != nil {
         return nil, err
     }
-    return rest.New(rest.Options{
-        Middleware: httpx.MiddlewareOptions{Languages: bundle},
-    }), nil
+    return rest.New(rest.Options{Languages: bundle}), nil
 }
 ```
 

@@ -8,7 +8,6 @@
     - [添加自定义字段](#custom-context-fields)
     - [使用自己的 slog Handler](#custom-handlers)
 - [错误日志](#error-logging)
-- [敏感信息](#sensitive-data)
 
 <a id="introduction"></a>
 ## 简介
@@ -20,13 +19,25 @@ mygoravel 使用 Go 标准库的 [`log/slog`](https://pkg.go.dev/log/slog) 记�
 <a id="creating-a-logger"></a>
 ## 创建日志器
 
-使用 `logging.New` 创建日志器：
+日志级别、格式这些需要按环境调整的值来自 `logging.Config`，通常放在配置文件的 `logs` 段：
+
+```yaml
+logs:
+  level: ${LOG_LEVEL:-info}
+  format: json
+```
+
+| 字段 | 说明 | 默认值 |
+| --- | --- | --- |
+| `level` | 最低记录级别：`debug`、`info`、`warn`、`error` | `info` |
+| `format` | `json` 或 `text` | `json` |
+| `add_source` | 是否记录源码位置 | `false` |
+
+把 `logging.Config` 放进应用的根配置结构体，用 `logging.DefaultConfig()` 作为默认值，然后调用 `logging.New`。输出位置和固定字段属于代码层面的决定，通过第二个参数传入：
 
 ```go
-logger := logging.New(logging.Options{
+logger := logging.New(cfg.Logs, logging.Options{
     Writer: os.Stderr,
-    Format: logging.FormatJSON,
-    Level:  slog.LevelInfo,
     Attrs: []slog.Attr{
         slog.String("service", "notes"),
         slog.String("version", "0.1.0"),
@@ -37,12 +48,9 @@ logger := logging.New(logging.Options{
 | 选项 | 说明 | 默认值 |
 | --- | --- | --- |
 | `Writer` | 日志输出位置 | `os.Stdout` |
-| `Format` | `logging.FormatJSON` 或 `logging.FormatText` | JSON |
-| `Level` | 最低记录级别 | `slog.LevelInfo` |
-| `AddSource` | 是否记录源码位置 | `false` |
 | `Attrs` | 附加到每条日志的固定字段 | 无 |
 
-`logging.Options` 的零值即可使用。本地开发时，`FormatText` 的输出更便于阅读；生产环境中，JSON 格式更便于日志系统采集和检索。
+`logging.Config` 和 `logging.Options` 的零值都可以直接使用。本地开发时，`text` 格式的输出更便于阅读；生产环境中，JSON 格式更便于日志系统采集和检索。
 
 > [!TIP]
 > API 服务建议显式输出到 `os.Stderr`。这样，当同一个程序作为命令行工具使用时（例如 `openapi` 命令），标准输出可以完整地留给命令结果。
@@ -72,9 +80,7 @@ logger.InfoContext(ctx, "note created",
 把日志器传给 API 后，默认中间件会为每个请求记录一条访问日志：
 
 ```go
-api := rest.New(rest.Options{
-    Middleware: httpx.MiddlewareOptions{Logger: logger},
-})
+api := rest.New(rest.Options{Logger: logger})
 ```
 
 中间件还会把请求 ID 放入请求的 context。之后，只要你在业务代码中用 `logging.New` 创建的日志器配合请求的 `ctx` 记录日志，这些日志就会自动带上 `request_id` 字段：
@@ -118,15 +124,3 @@ logger := slog.New(logging.NewContextHandler(myHandler))
 | 缺失翻译 | 错误响应转换 | 找不到错误码对应翻译时的警告 |
 
 详见[错误处理](errors.md#reporting-errors)。
-
-<a id="sensitive-data"></a>
-## 敏感信息
-
-日志中不应出现密码、token 等敏感信息。如果配置中的敏感字段使用了 `config.Secret` 类型，把它直接交给 slog 会自动输出 `******`：
-
-```go
-logger.Info("config loaded", "dsn", cfg.Database.DSN) // dsn=******
-```
-
-> [!WARNING]
-> 以下情况会输出原始内容，请格外小心：调用 `Reveal()` 或把 Secret 转换为普通 `string` 之后的值；以及使用 `%+v` 格式化错误——它会展开错误链中的所有详细原因，其中可能包含敏感信息。

@@ -35,10 +35,15 @@ type API struct {
 
 // Options 创建 API。
 type Options struct {
-	Middleware httpx.MiddlewareOptions
-	Title      string
-	Version    string
-	Mode       Mode
+	Title   string
+	Version string
+	Mode    Mode
+	// HTTP 提供请求超时、请求体上限与可信代理；零值字段使用 httpx.DefaultConfig。
+	HTTP httpx.Config
+	// Logger 记录访问日志、panic 与 5xx 错误；可空。
+	Logger *slog.Logger
+	// Languages 用于语言协商与错误消息本地化；可空。
+	Languages *goi18n.Bundle
 	// Transformers 追加在 Huma 默认 Transformer 之后。
 	Transformers []huma.Transformer
 	// Router 可选；nil 时使用 chi.NewRouter()。
@@ -47,8 +52,8 @@ type Options struct {
 
 // New 创建 chi + Huma API。
 func New(opts Options) *API {
-	if opts.Middleware.Logger != nil {
-		opts.Middleware.Logger = slog.New(logging.NewContextHandler(opts.Middleware.Logger.Handler()))
+	if opts.Logger != nil {
+		opts.Logger = slog.New(logging.NewContextHandler(opts.Logger.Handler()))
 	}
 	if opts.Title == "" {
 		opts.Title = "API"
@@ -60,7 +65,7 @@ func New(opts Options) *API {
 	if r == nil {
 		r = chi.NewRouter()
 	}
-	r.Use(httpx.Middleware(opts.Middleware))
+	r.Use(httpx.Middleware(opts.HTTP, httpx.MiddlewareOptions{Logger: opts.Logger, Languages: opts.Languages}))
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteProblem(w, http.StatusNotFound, "route not found")
 	})
@@ -73,7 +78,7 @@ func New(opts Options) *API {
 	cfg.OpenAPI.Components.Schemas.RegisterTypeAlias(reflect.TypeOf(huma.ErrorModel{}), reflect.TypeOf(ErrorModel{}))
 	cfg.Transformers = append(cfg.Transformers, opts.Transformers...)
 	h := humachi.New(r, cfg)
-	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Middleware.Logger, languages: opts.Middleware.Languages}
+	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, languages: opts.Languages}
 }
 
 // Mode 返回当前模式。

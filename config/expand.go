@@ -70,7 +70,7 @@ func expand(s string, lookup lookupFunc) (string, error) {
 
 		name, def, hasDef := strings.Cut(ref, ":-")
 		if !validName(name) {
-			return "", errors.New("invalid environment variable reference")
+			return "", errors.Newf("invalid environment variable reference ${%s}", ref)
 		}
 		val, ok := lookup(name)
 		switch {

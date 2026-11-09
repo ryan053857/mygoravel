@@ -16,7 +16,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/i18n"
 	"github.com/ryan053857/mygoravel/identity"
@@ -110,7 +109,7 @@ func TestLocalizedBusinessErrorUsesPublicParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	api := rest.New(rest.Options{Middleware: httpx.MiddlewareOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Languages: bundle}})
+	api := rest.New(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Languages: bundle})
 	busy := errorx.Define(errorx.Unavailable, "demo.busy")
 	untranslated := errorx.Define(errorx.Conflict, "demo.untranslated")
 	for path, err := range map[string]error{"/busy": busy.New(errorx.Public("retry", 3)), "/untranslated": untranslated.New()} {
@@ -192,7 +191,7 @@ func TestLanguageAndLoggerAreInstanceLocal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		api := rest.New(rest.Options{Middleware: httpx.MiddlewareOptions{Logger: slog.New(slog.NewJSONHandler(tc.buf, nil)), Languages: bundle}})
+		api := rest.New(rest.Options{Logger: slog.New(slog.NewJSONHandler(tc.buf, nil)), Languages: bundle})
 		op := huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"}
 		rest.Public()(&op)
 		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
@@ -237,7 +236,7 @@ func TestLanguageAndLoggerAreInstanceLocal(t *testing.T) {
 
 func TestAccessLogCarriesBusinessCode(t *testing.T) {
 	var logs bytes.Buffer
-	api := rest.New(rest.Options{Middleware: httpx.MiddlewareOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil))}})
+	api := rest.New(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
 	op := huma.Operation{OperationID: "conflict", Method: "GET", Path: "/conflict"}
 	rest.Public()(&op)
 	rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {

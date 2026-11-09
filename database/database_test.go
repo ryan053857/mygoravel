@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/config"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
 )
@@ -74,17 +73,14 @@ func TestPublishedMigrationsIncludeNestedFiles(t *testing.T) {
 func TestOpenAndValidateShareConfigurationChecks(t *testing.T) {
 	for _, cfg := range []database.Config{
 		{},
-		{DSN: config.Secret("postgres://user:secret@host:not-a-port/db")},
-		{DSN: config.Secret("postgres://localhost/db"), MaxOpenConns: -1},
-		{DSN: config.Secret("postgres://localhost/db"), ConnMaxLifetime: -1},
+		{DSN: "postgres://user:pass@host:not-a-port/db"},
+		{DSN: "postgres://localhost/db", MaxOpenConns: -1},
+		{DSN: "postgres://localhost/db", ConnMaxLifetime: -1},
 	} {
 		validation := cfg.Validate()
 		db, err := database.Open(context.Background(), cfg)
-		if db != nil || validation == nil || err == nil || err.Error() != validation.Error() {
+		if db != nil || validation == nil || err == nil || err.Error() != "database: "+validation.Error() {
 			t.Fatalf("validation=%v open=%v db=%v", validation, err, db)
-		}
-		if strings.Contains(err.Error(), "secret") {
-			t.Fatalf("configuration error exposed credentials: %v", err)
 		}
 	}
 }
