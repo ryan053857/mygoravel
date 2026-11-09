@@ -3,7 +3,6 @@ package config_test
 import (
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,120 +12,76 @@ import (
 	"github.com/ryan053857/mygoravel/config"
 )
 
-type appConfig struct {
-	Level string        `yaml:"level"`
-	Token config.Secret `yaml:"token"`
-}
-
-// writeFiles 在临时目录中写入文件并返回目录路径。
-func writeFiles(t *testing.T, files map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	for name, content := range files {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
-func decodeApp(t *testing.T, doc *config.Document) appConfig {
-	t.Helper()
-	cfg := appConfig{Level: "default"}
-	if err := doc.Decode("app", &cfg); err != nil {
-		t.Fatal(err)
-	}
-	return cfg
-}
-
 const envFileConfig = `
 envfile: env/.env
-app:
-  level: ${LOG_LEVEL:-info}
-  token: ${TOKEN}
+http:
+  addr: ${MYGORAVEL_TEST_ADDR:-:9999}
+db:
+  password: ${MYGORAVEL_TEST_PASSWORD}
 `
 
+func loadDir(t *testing.T, files map[string]string) (appConfig, error) {
+	t.Helper()
+	dir := writeFiles(t, files)
+	cfg := defaults()
+	err := config.Load(filepath.Join(dir, "config.yaml"), &cfg)
+	return cfg, err
+}
+
 func TestEnvFileRelativeToConfigFile(t *testing.T) {
-	dir := writeFiles(t, map[string]string{
+	cfg, err := loadDir(t, map[string]string{
 		"config.yaml": envFileConfig,
-		"env/.env":    "# comment\nexport LOG_LEVEL=debug\nTOKEN='s3cr$t value'\n",
+		"env/.env":    "# comment\nexport MYGORAVEL_TEST_ADDR=:7001\nMYGORAVEL_TEST_PASSWORD='s3cr$ET value'\n",
 	})
-	doc, err := config.ReadFile(filepath.Join(dir, "config.yaml"),
-		config.WithSections("app"), config.WithLookup(lookupEnv(nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := decodeApp(t, doc)
-	if cfg.Level != "debug" || cfg.Token.Reveal() != "s3cr$t value" {
-		t.Fatalf("got level=%q token=%q", cfg.Level, cfg.Token.Reveal())
+	if cfg.HTTP.Addr != ":7001" || cfg.DB.Password.Reveal() != "s3cr$ET value" {
+		t.Fatalf("addr=%q password=%q", cfg.HTTP.Addr, cfg.DB.Password.Reveal())
 	}
 }
 
 func TestProcessEnvOverridesEnvFile(t *testing.T) {
-	dir := writeFiles(t, map[string]string{
+	t.Setenv("MYGORAVEL_TEST_ADDR", ":7002")
+	t.Setenv("MYGORAVEL_TEST_PASSWORD", "") // 空值也算已设置
+	cfg, err := loadDir(t, map[string]string{
 		"config.yaml": envFileConfig,
-		"env/.env":    "LOG_LEVEL=debug\nTOKEN=from-file\n",
+		"env/.env":    "MYGORAVEL_TEST_ADDR=:7001\nMYGORAVEL_TEST_PASSWORD=from-file\n",
 	})
-	// 进程中设为空字符串同样算已设置，优先于 envfile。
-	env := map[string]string{"LOG_LEVEL": "warn", "TOKEN": ""}
-	doc, err := config.ReadFile(filepath.Join(dir, "config.yaml"),
-		config.WithSections("app"), config.WithLookup(lookupEnv(env)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := decodeApp(t, doc)
-	if cfg.Level != "warn" || cfg.Token.Reveal() != "" {
-		t.Fatalf("got level=%q token=%q", cfg.Level, cfg.Token.Reveal())
+	if cfg.HTTP.Addr != ":7002" || cfg.DB.Password.Reveal() != "" {
+		t.Fatalf("addr=%q password=%q", cfg.HTTP.Addr, cfg.DB.Password.Reveal())
 	}
 }
 
 func TestEnvFilePathExpandsProcessEnv(t *testing.T) {
-	dir := writeFiles(t, map[string]string{
-		"config.yaml":  "envfile: env/${APP_ENV}.env\napp:\n  level: ${LOG_LEVEL}\n",
-		"env/prod.env": "LOG_LEVEL=error\n",
+	t.Setenv("MYGORAVEL_TEST_APP_ENV", "prod")
+	cfg, err := loadDir(t, map[string]string{
+		"config.yaml":  "envfile: env/${MYGORAVEL_TEST_APP_ENV}.env\nhttp:\n  addr: ${MYGORAVEL_TEST_ADDR}\n",
+		"env/prod.env": "MYGORAVEL_TEST_ADDR=:7003\n",
 	})
-	doc, err := config.ReadFile(filepath.Join(dir, "config.yaml"),
-		config.WithSections("app"), config.WithLookup(lookupEnv(map[string]string{"APP_ENV": "prod"})))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg := decodeApp(t, doc); cfg.Level != "error" {
-		t.Fatalf("level=%q", cfg.Level)
-	}
-}
-
-func TestParseWithAbsoluteEnvFile(t *testing.T) {
-	dir := writeFiles(t, map[string]string{".env": "LOG_LEVEL=trace\n"})
-	src := fmt.Sprintf("envfile: %q\napp:\n  level: ${LOG_LEVEL}\n", filepath.Join(dir, ".env"))
-	doc, err := config.Parse([]byte(src), config.WithSections("app"), config.WithLookup(lookupEnv(nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg := decodeApp(t, doc); cfg.Level != "trace" {
-		t.Fatalf("level=%q", cfg.Level)
+	if cfg.HTTP.Addr != ":7003" {
+		t.Fatalf("addr=%q", cfg.HTTP.Addr)
 	}
 }
 
 func TestMissingEnvFileFails(t *testing.T) {
-	dir := writeFiles(t, map[string]string{"config.yaml": envFileConfig})
-	_, err := config.ReadFile(filepath.Join(dir, "config.yaml"),
-		config.WithSections("app"), config.WithLookup(lookupEnv(nil)))
+	_, err := loadDir(t, map[string]string{"config.yaml": envFileConfig})
 	if !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), "envfile") {
 		t.Fatalf("want missing envfile error, got %v", err)
 	}
 }
 
 func TestInvalidEnvFileDoesNotLeak(t *testing.T) {
-	dir := writeFiles(t, map[string]string{
+	_, err := loadDir(t, map[string]string{
 		"config.yaml": envFileConfig,
 		"env/.env":    "BAD-KEY=private-secret-value\n",
 	})
-	_, err := config.ReadFile(filepath.Join(dir, "config.yaml"),
-		config.WithSections("app"), config.WithLookup(lookupEnv(nil)))
 	if err == nil || !strings.Contains(err.Error(), "invalid dotenv syntax") ||
 		strings.Contains(fmt.Sprintf("%+v", err), "private-secret") {
 		t.Fatalf("got %+v", err)
@@ -138,29 +93,14 @@ func TestEnvFileMustBeNonEmptyString(t *testing.T) {
 		"envfile: [a]\n",
 		"envfile: 1\n",
 		"envfile: \"\"\n",
-		"envfile: ${EMPTY:-}\n",
-		"envfile: ${UNSET}\n",
+		"envfile: ${MYGORAVEL_TEST_UNSET:-}\n",
+		"envfile: ${MYGORAVEL_TEST_UNSET}\n",
 	} {
 		t.Run(src, func(t *testing.T) {
-			_, err := config.Parse([]byte(src), config.WithSections("app"), config.WithLookup(lookupEnv(nil)))
+			_, err := loadDir(t, map[string]string{"config.yaml": src})
 			if err == nil || !strings.Contains(err.Error(), "envfile") {
 				t.Fatalf("want envfile error, got %v", err)
 			}
 		})
-	}
-}
-
-func TestEnvFileIsReserved(t *testing.T) {
-	if _, err := config.Parse([]byte("app: {}\n"), config.WithSections("app", "envfile")); err == nil {
-		t.Fatal("envfile accepted as a section")
-	}
-	dir := writeFiles(t, map[string]string{".env": ""})
-	doc, err := config.Parse([]byte(fmt.Sprintf("envfile: %q\n", filepath.Join(dir, ".env"))), config.WithSections("app"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var v any
-	if err := doc.Decode("envfile", &v); err == nil {
-		t.Fatal("envfile decoded as a section")
 	}
 }

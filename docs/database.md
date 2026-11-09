@@ -43,16 +43,20 @@ database:
 | `conn_max_lifetime` | 连接的最长存活时间 | `1h` |
 | `conn_max_idle_time` | 空闲连接的最长保留时间 | `30m` |
 
-这些字段对应 `database.Config` 结构体。用 `database.DefaultConfig()` 创建默认值，再从配置文件中解码覆盖：
+这些字段对应 `database.Config` 结构体。把它放进应用的根配置结构体，并用 `database.DefaultConfig()` 作为默认值：
 
 ```go
-cfg := database.DefaultConfig()
-if err := doc.Decode("database", &cfg); err != nil {
+type Config struct {
+    Database database.Config `yaml:"database"`
+}
+
+cfg := Config{Database: database.DefaultConfig()}
+if err := config.Load(path, &cfg); err != nil {
     return err
 }
 ```
 
-`database.Config` 实现了 `Validate` 方法，解码时会自动检查 DSN 是否为空、连接池参数是否合法。`dsn` 字段的类型是 `config.Secret`，不会在日志中泄露密码。
+`database.Config` 实现了 `Validate` 方法，`config.Load` 会自动检查 DSN 是否为空、连接池参数是否合法。`dsn` 字段的类型是 `config.Secret`，不会在日志中泄露密码。
 
 > [!TIP]
 > 设置 `max_open_conns` 时，请考虑应用的部署副本数：所有副本的连接数之和不应超过数据库的最大连接数。

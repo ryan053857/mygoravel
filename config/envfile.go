@@ -14,7 +14,7 @@ const envFileKey = "envfile"
 
 // loadEnvFile 读取 node 指向的 dotenv 文件。路径可引用进程环境变量，
 // 相对路径基于 dir 解析；文件不存在时返回错误。
-func loadEnvFile(node *yaml.Node, dir string, lookup LookupFunc) (map[string]string, error) {
+func loadEnvFile(node *yaml.Node, dir string, lookup lookupFunc) (map[string]string, error) {
 	if node.Kind != yaml.ScalarNode || node.ShortTag() != "!!str" {
 		return nil, errors.Newf("line %d: %s must be a string path", node.Line, envFileKey)
 	}
@@ -44,7 +44,7 @@ func loadEnvFile(node *yaml.Node, dir string, lookup LookupFunc) (map[string]str
 }
 
 // withFallback 先查 primary，未设置时再查 fallback；primary 中的空值同样优先。
-func withFallback(primary LookupFunc, fallback map[string]string) LookupFunc {
+func withFallback(primary lookupFunc, fallback map[string]string) lookupFunc {
 	return func(key string) (string, bool) {
 		if v, ok := primary(key); ok {
 			return v, true

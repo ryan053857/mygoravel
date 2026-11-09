@@ -7,7 +7,10 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-func expandNode(n *yaml.Node, lookup LookupFunc) error {
+// lookupFunc 查找环境变量；第二个返回值表示是否已设置（空字符串仍算已设置）。
+type lookupFunc func(key string) (string, bool)
+
+func expandNode(n *yaml.Node, lookup lookupFunc) error {
 	switch n.Kind {
 	case yaml.ScalarNode:
 		return expandScalar(n, lookup)
@@ -27,7 +30,7 @@ func expandNode(n *yaml.Node, lookup LookupFunc) error {
 	return nil
 }
 
-func expandScalar(n *yaml.Node, lookup LookupFunc) error {
+func expandScalar(n *yaml.Node, lookup lookupFunc) error {
 	if !strings.Contains(n.Value, "${") {
 		return nil
 	}
@@ -42,7 +45,7 @@ func expandScalar(n *yaml.Node, lookup LookupFunc) error {
 	return nil
 }
 
-func expand(s string, lookup LookupFunc) (string, error) {
+func expand(s string, lookup lookupFunc) (string, error) {
 	var b strings.Builder
 	for {
 		i := strings.Index(s, "${")

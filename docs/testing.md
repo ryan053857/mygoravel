@@ -129,16 +129,28 @@ if _, err := svc.Get(ctx, bob, item.ID); !errors.Is(err, note.ErrForbidden) {
 <a id="testing-configuration"></a>
 ## 测试配置
 
-使用 `config.Parse` 直接从字节解析配置，并通过 `config.WithLookup` 替换默认的进程环境查找，测试不需要真实的文件，也不会读取或修改进程环境：
+把配置内容写进临时文件，用 `t.Setenv` 提供环境变量，再调用 `config.Load`：
 
 ```go
-doc, err := config.Parse([]byte("http:\n  addr: ${HTTP_ADDR}\n"),
-    config.WithSections("http"),
-    config.WithLookup(func(name string) (string, bool) {
-        return map[string]string{"HTTP_ADDR": ":9000"}[name], name == "HTTP_ADDR"
-    }),
-)
+func TestLoadConfig(t *testing.T) {
+    t.Setenv("HTTP_ADDR", ":9000")
+    path := filepath.Join(t.TempDir(), "config.yaml")
+    data := "http:\n  addr: ${HTTP_ADDR}\ndatabase:\n  dsn: postgres://localhost/test\n"
+    if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+        t.Fatal(err)
+    }
+
+    cfg, err := settings.Load(path)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if cfg.HTTP.Addr != ":9000" {
+        t.Fatalf("addr = %q", cfg.HTTP.Addr)
+    }
+}
 ```
+
+`t.Setenv` 会在测试结束时恢复环境变量，但使用它的测试不能调用 `t.Parallel`。
 
 建议覆盖以下情况：默认值、显式的零值、未知字段、校验失败，以及敏感字段在输出中是否被脱敏。
 
