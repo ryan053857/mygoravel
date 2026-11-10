@@ -1,12 +1,20 @@
 # 授权
 
 - [简介](#introduction)
-- [路由级授权：权限](#scopes)
-    - [在代码中检查权限](#checking-scopes)
+- [权限](#permissions)
+    - [在路由上声明](#route-permissions)
+    - [在代码中检查](#checking-permissions)
+- [角色](#roles)
+    - [声明权限目录](#permission-catalog)
+    - [创建和分配角色](#creating-roles)
+    - [每次请求加载权限](#resolving-permissions)
+    - [超级管理员](#super-admins)
 - [资源级授权：所有权](#ownership)
     - [编写授权函数](#authorization-functions)
     - [在事务中检查](#checking-in-transactions)
     - [缓存与授权](#caching-and-authorization)
+- [列表查询中的授权](#scoping-queries)
+- [在页面中按权限显示](#authorization-in-views)
 - [授权失败的响应](#authorization-failures)
 
 <a id="introduction"></a>
@@ -14,47 +22,161 @@
 
 [认证](authentication.md)确认了调用者是谁，接下来还需要回答：这个调用者**能不能**执行当前的操作？这就是授权。
 
-在 mygoravel 中，授权分为两个层次：
+mygoravel 的授权分为三层：
 
-- **路由级授权**：调用者是否具备访问这一类接口的权限，例如“可以使用文章接口”。它通过权限声明在路由上，由框架在调用处理器之前检查；
-- **资源级授权**：调用者能否操作某一个具体的资源，例如“只能修改自己的文章”。它依赖具体的数据，由业务服务检查。
+| 层次 | 回答的问题 | 由谁检查 |
+| --- | --- | --- |
+| 路由 | 能不能使用这一类功能，例如“编辑文章” | 框架，按路由声明的权限，在调用处理器之前 |
+| 资源 | 能不能操作这一条数据，例如“只能修改自己的文章” | 业务服务，在读写数据的事务中 |
+| 数据范围 | 列表里应该出现哪些数据 | 业务服务，在构造查询时 |
 
-两个层次缺一不可：路由级授权挡住了明显不该访问的请求，资源级授权则保证每一条数据都只被正确的人访问。
+三层缺一不可：路由挡住明显不该访问的请求，资源级检查保证每一条数据只被正确的人修改，数据范围保证列表和搜索不会泄露别人的数据。
 
-<a id="scopes"></a>
-## 路由级授权：权限
+<a id="permissions"></a>
+## 权限
 
-权限是一个简单的字符串，表示一类操作。在 `rest.RequireBearer` 中列出路由需要的权限：
+权限是一个以冒号分隔的字符串，通常是“资源:操作”，例如 `articles:read`、`articles:write`、`members:manage`。主体的 `Permissions` 列出它拥有的权限，`sub.Can(perm)` 判断能否执行某项操作。授予时可以用 `*` 作为最后一段：`articles:*` 包含所有文章权限，单独的 `*` 包含全部权限。
+
+主体的权限从哪里来，取决于应用的规模：简单的应用可以在校验器或登录时直接给出；需要角色、需要随时调整权限的应用使用 `authz` 包，见[角色](#roles)。凭据还可以进一步限制权限，例如只读的个人访问令牌，`Can` 会同时检查两者，见[认证](authentication.md#key-concepts)。
+
+<a id="route-permissions"></a>
+### 在路由上声明
+
+JSON API 在 `rest.RequireBearer` 中列出路由需要的权限，页面在 `web.Require` 中列出：
 
 ```go
-requireArticles := rest.RequireBearer(api, validateToken, "articles")
-requireArticles(&op)
+requireWrite := rest.RequireBearer(api, tokens.Validate, "articles:write")
+
+pages.Routes(r, web.Require("articles:write")).Put("/admin/articles/{id}", pages.Handle(h.Update))
 ```
 
-主体的 `Can("articles")` 必须为 `true`，否则请求会以 `403` 被拒绝。传入多个权限时，调用者必须全部具备。页面用 `web.Require` 声明，规则相同。主体的权限从哪里来、个人令牌如何进一步限制，见[认证](authentication.md#key-concepts)。
+传入多个权限时，调用者必须全部具备；缺少任何一个时，API 返回 `403`，页面呈现 `403` 错误页。路由需要的权限会出现在 OpenAPI 文档的 `x-required-permissions` 字段和 [`routes` 命令](commands.md)的输出中。
 
-权限的命名由你决定。常见的做法是按资源和操作划分，例如 `articles:read`、`articles:write`：
+在路由上检查的永远是**权限**，而不是角色名：角色可以由租户自己创建和命名，代码中写死的角色名在那时就会失效。
 
-```go
-requireRead := rest.RequireBearer(api, validateToken, "articles:read")
-requireWrite := rest.RequireBearer(api, validateToken, "articles:write")
-```
+<a id="checking-permissions"></a>
+### 在代码中检查
 
-<a id="checking-scopes"></a>
-### 在代码中检查权限
-
-有时同一个接口需要根据权限返回不同的内容，这时可以在处理器或服务中使用 `Subject.Can`：
+同一个接口有时需要根据权限返回不同的内容，这时在处理器或服务中调用 `Can`：
 
 ```go
-if subject.Can("articles:admin") {
-    // 管理员可以看到所有作者的草稿
+if subject.Can("articles:read-drafts") {
+    // 编辑可以看到所有作者的草稿
 }
 ```
+
+<a id="roles"></a>
+## 角色
+
+`authz` 包提供基于角色的权限，对应 Laravel 的 spatie/laravel-permission：权限组成角色，角色分配给用户。权限变化立即生效，不需要重新登录。它把数据存在应用的数据库中，支持 PostgreSQL、SQLite 和 MySQL。
+
+使用前先发布它的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
+
+```go
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+    migrate.Source{Name: "authz", FS: authz.Migrations()},
+))
+```
+
+<a id="permission-catalog"></a>
+### 声明权限目录
+
+应用的全部权限在代码中声明一次。下面是博客的 `internal/auth/permissions.go`：
+
+```go
+package auth
+
+import "github.com/ryan053857/mygoravel/authz"
+
+const (
+    ArticlesRead       = "articles:read"
+    ArticlesReadDrafts = "articles:read-drafts"
+    ArticlesWrite      = "articles:write"
+    ArticlesEditAny    = "articles:edit-any"
+    CommentsDelete     = "comments:delete"
+    MembersManage      = "members:manage"
+)
+
+var Permissions = authz.Catalog{
+    {Name: ArticlesRead, Description: "查看文章"},
+    {Name: ArticlesReadDrafts, Description: "查看所有人的草稿"},
+    {Name: ArticlesWrite, Description: "撰写和修改自己的文章"},
+    {Name: ArticlesEditAny, Description: "修改任何人的文章"},
+    {Name: CommentsDelete, Description: "删除评论"},
+    {Name: MembersManage, Description: "管理成员"},
+}
+```
+
+```go
+roles := authz.NewStore(a.db, auth.Permissions)
+```
+
+角色只能包含目录中的权限，以及能匹配目录中权限的通配符，写错权限名会在保存角色时得到错误，而不是在运行时悄悄不生效。目录也是角色编辑界面的数据来源：`roles.Catalog()` 返回全部权限和说明。
+
+<a id="creating-roles"></a>
+### 创建和分配角色
+
+```go
+editor, err := roles.CreateRole(ctx, authz.Role{
+    Name:        "editor",
+    Description: "编辑",
+    Permissions: []string{"articles:*", auth.CommentsDelete},
+})
+
+err = roles.Assign(ctx, userID, "", editor.ID)
+```
+
+`Assign` 的第三个参数是**域**：`""` 表示应用本身，多租户应用中是租户 ID，见[多租户](tenancy.md)。一个用户可以有多个角色，权限是它们的合集。
+
+| 方法 | 用途 |
+| --- | --- |
+| `CreateRole`、`UpdateRole`、`DeleteRole` | 管理角色；修改立即影响拥有该角色的所有用户，删除角色同时撤销它的分配 |
+| `Role`、`Roles` | 读取角色，用于角色列表和编辑页 |
+| `Assign`、`Unassign` | 分配和撤销角色；重复分配什么也不做 |
+| `RolesOf`、`Members` | 某个用户的角色、拥有角色的全部用户 |
+
+初始角色通常在[填充数据](migrations.md#seeding)的命令中创建。
+
+<a id="resolving-permissions"></a>
+### 每次请求加载权限
+
+`roles.Resolve` 可以直接交给 API 和页面的 `Resolve`，它在每个请求中按用户当前的角色加载权限：
+
+```go
+api := rest.New(rest.Options{Resolve: roles.Resolve})
+pages := web.New(web.Options{Resolve: roles.Resolve /* 其余字段见视图 */})
+```
+
+加载是一次带索引的查询，不使用缓存，因此修改角色、撤销分配都在下一个请求生效。还需要检查账号是否停用时，在外面包一层：
+
+```go
+resolve := func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+    disabled, err := a.users.Disabled(ctx, sub.ID)
+    if err != nil {
+        return identity.Subject{}, err
+    }
+    if disabled {
+        return identity.Subject{}, auth.ErrUnauthenticated.New() // 401，页面登出
+    }
+    return roles.Resolve(ctx, sub)
+}
+```
+
+<a id="super-admins"></a>
+### 超级管理员
+
+给角色授予 `*`，它就拥有全部权限，不需要额外的放行逻辑：
+
+```go
+admin, err := roles.CreateRole(ctx, authz.Role{Name: "admin", Permissions: []string{"*"}})
+```
+
+`*` 只作用于权限检查。资源级的授权函数如果要让管理员也能修改别人的文章，应当检查一个具体的权限，例如下面的 `articles:edit-any`，而不是判断角色。
 
 <a id="ownership"></a>
 ## 资源级授权：所有权
 
-具备 `articles` 权限只说明调用者可以使用文章接口，并不意味着他可以读取任意一篇文章。已发布的文章所有人都能看，但草稿只有作者本人能看。业务服务需要根据当前的主体检查：
+具备 `articles:read` 只说明调用者可以使用文章接口，并不意味着他可以读取任意一篇文章。已发布的文章所有人都能看，但草稿只有作者本人能看。业务服务需要根据当前的主体检查：
 
 ```go
 var (
@@ -87,14 +209,12 @@ func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUI
 <a id="authorization-functions"></a>
 ### 编写授权函数
 
-当授权规则变得复杂时，可以把它们提取为独立的函数，集中放在业务包中，类似于其他框架中的“策略（Policy）”：
+把针对资源的规则写成业务包中**导出**的函数，相当于 Laravel 的 Policy。服务和[页面](#authorization-in-views)调用同一个函数，规则只有一份：
 
 ```go
-func canEdit(subject identity.Subject, item *Article) bool {
-    if subject.Can("articles:admin") {
-        return true
-    }
-    return item.AuthorID == subject.ID
+// CanEdit 报告 subject 能否修改 item：作者本人，或者能修改任何文章的编辑。
+func CanEdit(subject identity.Subject, item *Article) bool {
+    return subject.Can("articles:edit-any") || (subject.Can("articles:write") && item.AuthorID == subject.ID)
 }
 ```
 
@@ -118,7 +238,7 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
         if err != nil {
             return errors.Wrap(err, "load article")
         }
-        if !canEdit(subject, item) {
+        if !CanEdit(subject, item) {
             return ErrForbidden.New()
         }
         if item.Status == StatusPublished {
@@ -152,10 +272,68 @@ var ErrAlreadyPublished = errorx.Define(errorx.Conflict, "article.already_publis
 
 如果你缓存了资源，从缓存中读取到数据后同样要执行所有权检查，详见[缓存](cache.md#cache-aside)。
 
+<a id="scoping-queries"></a>
+## 列表查询中的授权
+
+列表、搜索和导出要在**查询条件**中限定范围，而不是查出来之后再过滤：后者既浪费，又容易在分页、计数时漏掉。下面的文章列表让编辑看到全部文章，其他人只看到已发布的和自己的草稿：
+
+```go
+func (s *Service) List(ctx context.Context, subject identity.Subject, limit int) ([]Article, error) {
+    var items []Article
+    q := s.db.NewSelect().Model(&items).OrderExpr("created_at DESC").Limit(limit)
+    if !subject.Can("articles:read-drafts") {
+        q = q.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+            return q.Where("status = ?", StatusPublished).WhereOr("author_id = ?", subject.ID)
+        })
+    }
+    if err := q.Scan(ctx); err != nil {
+        return nil, errors.Wrap(err, "list articles")
+    }
+    return items, nil
+}
+```
+
+多租户应用中，每个查询还必须限定在 `subject.Tenant` 中，见[租户数据隔离](tenancy.md#data-isolation)。
+
+<a id="authorization-in-views"></a>
+## 在页面中按权限显示
+
+页面上的按钮、菜单应当与服务端的规则一致：没有权限的用户不应看到“编辑”按钮。在视图包中写两个小函数，从 context 取出主体（`web.Require` 已经把它放进去了），再调用同一份规则：
+
+```go
+package views
+
+func can(ctx context.Context, perm string) bool {
+    sub, _ := identity.FromContext(ctx)
+    return sub.Can(perm)
+}
+
+func canEdit(ctx context.Context, item *article.Article) bool {
+    sub, _ := identity.FromContext(ctx)
+    return article.CanEdit(sub, item)
+}
+```
+
+templ 组件中可以直接使用 `ctx`：
+
+```templ
+templ ArticleActions(item *article.Article) {
+    if canEdit(ctx, item) {
+        <a href={ templ.SafeURL("/admin/articles/" + item.ID.String() + "/edit") }>编辑</a>
+    }
+    if can(ctx, "comments:delete") {
+        <button hx-delete={ "/admin/articles/" + item.ID.String() + "/comments" }>清空评论</button>
+    }
+}
+```
+
+隐藏按钮只是为了界面友好，不能代替服务端的检查：处理器和服务仍然要按上面的方式授权。
+
 <a id="authorization-failures"></a>
 ## 授权失败的响应
 
-- 缺少路由所需的权限时，框架返回 `403`，错误码为 `auth.forbidden`；
-- 业务服务返回 `errorx.PermissionDenied` 分类的错误时，返回 `403`，错误码为你定义的业务错误码，例如 `article.forbidden`。
+- 缺少路由所需的权限时，API 返回 `403`，错误码为 `auth.forbidden`，页面呈现 `403` 错误页；
+- 在租户中没有任何角色时，`authz` 的 `Resolve` 返回 `authz.not_member`，状态码为 `404`；
+- 业务服务返回 `errorx.PermissionDenied` 或 `errorx.NotFound` 分类的错误时，响应对应的状态码，错误码为你定义的业务错误码，例如 `article.forbidden`。
 
-两者都使用统一的[错误响应格式](errors.md#response-format)。
+它们都使用统一的[错误响应格式](errors.md#response-format)。

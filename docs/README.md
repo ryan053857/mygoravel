@@ -53,6 +53,7 @@
 - [认证](authentication.md)
 - [API 令牌](api-tokens.md)
 - [第三方登录](social-login.md)
+- [多租户](tenancy.md)
 - [授权](authorization.md)
 - [哈希](hashing.md)
 

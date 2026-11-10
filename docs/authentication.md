@@ -270,7 +270,7 @@ func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error
 
 凭据也可以绑定一个租户，例如只属于某个租户的个人访问令牌：校验器返回的主体 `Tenant` 不为空时，它与本次请求的租户不同的请求一律返回 `403`，不会调用 `Resolve`。
 
-业务服务查询租户数据时，用 `sub.Tenant` 限定范围，见[授权](authorization.md)。
+角色和成员可以交给 [`authz`](authorization.md#roles) 管理，它的 `Resolve` 就是上面这样的函数。租户的确定方式、成员管理、数据隔离和运营后台，见[多租户](tenancy.md)。
 
 <a id="retrieving-the-subject"></a>
 ## 获取已认证的主体

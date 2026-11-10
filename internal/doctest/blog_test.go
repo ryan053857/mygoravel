@@ -22,6 +22,7 @@ var blogFiles = []docFile{
 	{"internal/cli/cli.go", "commands.md"},
 	{"internal/cli/seed.go", "migrations.md"},
 	{"internal/auth/auth.go", "authentication.md"},
+	{"internal/auth/permissions.go", "authorization.md"},
 	{"internal/bootstrap/app.go", "dependencies.md"},
 	{"internal/bootstrap/http.go", "dependencies.md"},
 	{"internal/bootstrap/worker.go", "queue.md"},
