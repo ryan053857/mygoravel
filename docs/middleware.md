@@ -4,6 +4,7 @@
 - [默认中间件](#default-middleware)
 - [HTTP 配置](#http-configuration)
     - [可信代理](#trusted-proxies)
+- [限流](#rate-limiting)
 - [自行组装](#custom-stack)
 - [自定义中间件](#custom-middleware)
     - [全局中间件](#chi-middleware)
@@ -40,6 +41,7 @@ api := rest.New(rest.Options{Router: router, Logger: logger, Languages: bundle})
 | `ClientIP(proxies)` | 只信任显式配置的代理，从 `X-Forwarded-For` 解析客户端地址 |
 | `AccessLog(logger)` | 记录请求方法、状态码、耗时、客户端地址，以及业务错误的错误码 |
 | `Recover(logger)` | 处理器 panic 时，若尚未写出响应则返回通用的 500 错误；若已开始写响应则中止连接 |
+| `RateLimit(cfg, key)` | 按客户端限流，超出时返回 429；默认不启用，见[限流](#rate-limiting) |
 | `BodyLimit(n)` | 限制请求体大小，默认 1 MiB，超出时返回 413 |
 | `Timeout(d)` | 为请求 context 设置超时，默认 30 秒 |
 | `Locale(bundle)` | 根据 `Accept-Language` 选择语言 |
@@ -75,6 +77,7 @@ http:
 | `shutdown_timeout` | 停机时排空请求的上限 | `10s` |
 | `max_body_bytes` | 请求体的最大字节数（`BodyLimit`） | 1 MiB |
 | `trusted_proxies` | 可信的反向代理网段（`ClientIP`） | 不信任任何代理 |
+| `rate_limit` | 按客户端限流（`RateLimit`），见[限流](#rate-limiting) | 不限流 |
 
 把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充上表中的默认值），再把它交给 `httpx.Defaults` 和 `httpx.ListenAndServe`：
 
@@ -103,6 +106,57 @@ http:
 > [!WARNING]
 > 只填写你实际使用的代理网段。如果把 `0.0.0.0/0` 之类的宽泛网段设为可信，任何客户端都可以伪造自己的地址。
 
+<a id="rate-limiting"></a>
+## 限流
+
+`httpx.RateLimit` 为每个客户端维护一个令牌桶：桶里有令牌时请求照常处理，没有令牌时直接返回 `429 Too Many Requests`，并通过 `Retry-After` 响应头告诉客户端多少秒后重试。
+
+限流默认不启用。在配置文件中写上 `rate_limit` 段，`httpx.Defaults` 中的限流中间件就会生效；删掉这一段，限流就会关闭：
+
+```yaml
+http:
+  rate_limit:
+    rate: 10         # 每个 interval 补充 10 个令牌
+    interval: 1s
+    burst: 20        # 桶容量，允许短时间内连续发出 20 个请求
+    max_entries: 10000
+```
+
+| 字段 | 说明 | 默认值 |
+| --- | --- | --- |
+| `rate` | 每个 `interval` 补充的令牌数，为 0 时不限流 | `0` |
+| `interval` | 补充 `rate` 个令牌的周期 | `1s` |
+| `burst` | 桶容量，即允许的瞬时突发 | 等于 `rate` |
+| `max_entries` | 同时跟踪的客户端数，超出时淘汰最久没有请求的客户端 | `10000` |
+
+上面的配置表示：每个客户端平均每秒最多 10 个请求，短时间内最多连续 20 个。被拒绝的请求不消耗令牌。
+
+<a id="rate-limit-key"></a>
+### 限流的 key
+
+默认按客户端地址限流。它使用 `ClientIP` 解析后的地址，所以部署在反向代理之后时，请同时配置[可信代理](#trusted-proxies)，否则所有请求都会被算到代理头上。
+
+如果需要按别的维度限流，可以通过 `DefaultsOptions.RateLimitKey` 传入一个函数。例如，博客的开放 API 按 token 限流，没有 token 的请求仍然按地址限流：
+
+```go
+router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{
+    Logger: logger,
+    RateLimitKey: func(r *http.Request) string {
+        if token := r.Header.Get("Authorization"); token != "" {
+            return token
+        }
+        return httpx.KeyByIP(r)
+    },
+})...)
+```
+
+函数返回空字符串时，这个请求不受限流。
+
+限流中间件安装在路由匹配和认证之前，因此这里还拿不到 `rest.RequireBearer` 解析出的用户身份，只能使用请求本身携带的信息。
+
+> [!WARNING]
+> 令牌桶保存在进程内存中。部署多个实例时，每个实例分别计数，客户端实际能达到的速率是配置值乘以实例数。需要跨实例的精确限流时，请在网关中配置，或者编写基于 Redis 等共享存储的[自定义中间件](#custom-middleware)。
+
 <a id="custom-stack"></a>
 ## 自行组装
 
@@ -117,6 +171,7 @@ router.Use(
     httpx.ClientIP(cfg.HTTP.TrustedProxies),
     httpx.AccessLog(logger),
     httpx.Recover(logger),
+    httpx.RateLimit(cfg.HTTP.RateLimit, nil),
     httpx.Timeout(cfg.HTTP.RequestTimeout),
     httpx.Locale(bundle),
     func(next http.Handler) http.Handler {

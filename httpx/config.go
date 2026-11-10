@@ -26,6 +26,8 @@ type Config struct {
 	MaxBodyBytes int64 `yaml:"max_body_bytes"`
 	// TrustedProxies 是可信反向代理网段；为空时不信任 X-Forwarded-For。
 	TrustedProxies []netip.Prefix `yaml:"trusted_proxies"`
+	// RateLimit 是按客户端限流的配置；零值表示不限流。
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
 }
 
 // DefaultConfig 返回默认 HTTP 配置。

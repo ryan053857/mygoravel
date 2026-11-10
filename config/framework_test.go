@@ -25,6 +25,10 @@ http:
   addr: :9000
   request_timeout: 5s
   trusted_proxies: [10.0.0.0/8]
+  rate_limit:
+    rate: 10
+    interval: 1s
+    burst: 20
 logs:
   level: debug
   format: text
@@ -35,7 +39,8 @@ database:
 		t.Fatal(err)
 	}
 	if cfg.HTTP.Addr != ":9000" || cfg.HTTP.RequestTimeout != 5*time.Second || cfg.HTTP.ShutdownTimeout != 10*time.Second ||
-		!reflect.DeepEqual(cfg.HTTP.TrustedProxies, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) {
+		!reflect.DeepEqual(cfg.HTTP.TrustedProxies, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) ||
+		cfg.HTTP.RateLimit != (httpx.RateLimitConfig{Rate: 10, Interval: time.Second, Burst: 20}) {
 		t.Fatalf("http=%+v", cfg.HTTP)
 	}
 	if cfg.Logs.Level != slog.LevelDebug || cfg.Logs.Format != logging.FormatText {
@@ -44,11 +49,11 @@ database:
 }
 
 func TestFrameworkConfigsValidate(t *testing.T) {
-	_, err := load[frameworkConfig](t, "http:\n  max_body_bytes: 0\nlogs:\n  format: xml\n")
+	_, err := load[frameworkConfig](t, "http:\n  max_body_bytes: 0\n  rate_limit:\n    burst: -1\nlogs:\n  format: xml\n")
 	if err == nil {
 		t.Fatal("expected validation errors")
 	}
-	for _, want := range []string{"http: max_body_bytes", "logs: format", "database: dsn is required"} {
+	for _, want := range []string{"http: max_body_bytes", "http.rate_limit: burst", "logs: format", "database: dsn is required"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing %q in %v", want, err)
 		}

@@ -27,11 +27,14 @@ type DefaultsOptions struct {
 	Logger *slog.Logger
 	// Languages 用于 Accept-Language 协商；nil 表示不协商。
 	Languages *goi18n.Bundle
+	// RateLimitKey 是限流 key；nil 表示按客户端地址。仅在配置了 rate_limit 时生效。
+	RateLimitKey KeyFunc
 }
 
 // Defaults 返回推荐的中间件栈，按执行顺序排列：
-// AssignRequestID、NoSniff、ClientIP、AccessLog、Recover、BodyLimit、Timeout、Locale。
-// 超时、请求体上限与可信代理取自 cfg，零值字段使用 DefaultConfig。
+// AssignRequestID、NoSniff、ClientIP、AccessLog、Recover、RateLimit、BodyLimit、Timeout、Locale。
+// 超时、请求体上限与可信代理取自 cfg，零值字段使用 DefaultConfig；
+// cfg.RateLimit 为零值时不限流。
 //
 // 需要不同组合时（例如流式接口不设超时），直接挑选单个中间件自行组装。
 func Defaults(cfg Config, opts DefaultsOptions) []func(http.Handler) http.Handler {
@@ -42,6 +45,7 @@ func Defaults(cfg Config, opts DefaultsOptions) []func(http.Handler) http.Handle
 		ClientIP(cfg.TrustedProxies),
 		AccessLog(opts.Logger),
 		Recover(opts.Logger),
+		RateLimit(cfg.RateLimit, opts.RateLimitKey),
 		BodyLimit(cfg.MaxBodyBytes),
 		Timeout(cfg.RequestTimeout),
 		Locale(opts.Languages),
