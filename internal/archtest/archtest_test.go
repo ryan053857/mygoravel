@@ -22,10 +22,11 @@ var dependencies = map[string][]string{
 	"database":   {"config"},
 	"filesystem": {"errorx", "identity"},
 	"mail":       {"i18n"},
-	"httpx":      {"errorx", "identity", "i18n", "logging"},
+	"ratelimit":  {"errorx"},
+	"httpx":      {"errorx", "identity", "i18n", "logging", "ratelimit"},
 	"session":    {"identity", "httpx", "logging"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "session"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session"},
 }
 
 // 传输、数据库和命令组件的包前缀。

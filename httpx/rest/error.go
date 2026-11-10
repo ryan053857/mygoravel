@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -22,7 +23,12 @@ import (
 type ErrorModel struct {
 	huma.ErrorModel
 	Code string `json:"code,omitempty" doc:"Stable business error code. Present only on business errors."`
+
+	headers http.Header
 }
+
+// GetHeaders 实现 huma.HeadersError，返回随错误写出的响应头，例如 Retry-After。
+func (e *ErrorModel) GetHeaders() http.Header { return e.headers }
 
 // HTTPStatus 将 errorx.Kind 映射为 HTTP 状态。
 func HTTPStatus(err error) int {
@@ -37,6 +43,8 @@ func HTTPStatus(err error) int {
 		return http.StatusNotFound
 	case errorx.Conflict:
 		return http.StatusConflict
+	case errorx.ResourceExhausted:
+		return http.StatusTooManyRequests
 	case errorx.Unavailable:
 		return http.StatusServiceUnavailable
 	default:
@@ -45,7 +53,8 @@ func HTTPStatus(err error) int {
 }
 
 // FromError 将处理器错误转换为 HTTP 错误，nil 输入返回 nil：
-//   - 业务错误转为带 code 的 ErrorModel，detail 为 HTTP 状态描述；
+//   - 业务错误转为带 code 的 ErrorModel，detail 为 HTTP 状态描述，
+//     带 errorx.RetryAfter 时设置 Retry-After 响应头（秒，向上取整）；
 //   - 其他 huma.StatusError（例如 huma.Error404NotFound）即使被包装也原样返回；
 //   - 其余错误转为通用 500，内部错误信息不会进入响应。
 func FromError(err error) huma.StatusError {
@@ -61,10 +70,14 @@ func FromError(err error) huma.StatusError {
 		return huma.Error500InternalServerError("unexpected error occurred")
 	}
 	status := HTTPStatus(err)
-	return &ErrorModel{
+	m := &ErrorModel{
 		ErrorModel: huma.ErrorModel{Status: status, Title: http.StatusText(status), Detail: http.StatusText(status)},
 		Code:       code,
 	}
+	if d := errorx.RetryAfterOf(err); d > 0 {
+		m.headers = http.Header{"Retry-After": {strconv.Itoa(int(math.Ceil(d.Seconds())))}}
+	}
+	return m
 }
 
 // httpError 转换处理器错误。业务错误的错误码写入访问日志；context 带有 httpx.Locale
@@ -101,6 +114,13 @@ func writeError(api huma.API, ctx huma.Context, se huma.StatusError) {
 	}
 	if f, ok := se.(huma.ContentTypeFilter); ok {
 		ct = f.ContentType(ct)
+	}
+	if he, ok := se.(huma.HeadersError); ok {
+		for k, values := range he.GetHeaders() {
+			for _, v := range values {
+				ctx.AppendHeader(k, v)
+			}
+		}
 	}
 	status := se.GetStatus()
 	body, err := api.Transform(ctx, strconv.Itoa(status), se)

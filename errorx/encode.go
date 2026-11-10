@@ -3,6 +3,7 @@ package errorx
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/errors/errorspb"
@@ -10,7 +11,7 @@ import (
 )
 
 // 注册 cockroachdb/errors 编解码器，使 Error 经 errors.EncodeError/DecodeError
-// 跨进程传输后保留错误码、分类和公开参数。错误码和分类作为可报告的安全详情，
+// 跨进程传输后保留错误码、分类、公开参数和重试等待时间。错误码和分类作为可报告的安全详情，
 // 公开参数以 JSON 放入载荷，解码后数值类型变为 float64。
 func init() {
 	key := errors.GetTypeKey((*Error)(nil))
@@ -31,7 +32,11 @@ func init() {
 }
 
 func encodeDetails(e *Error) []string {
-	return []string{e.code, e.kind.String()}
+	details := []string{e.code, e.kind.String()}
+	if e.retryAfter > 0 {
+		details = append(details, e.retryAfter.String())
+	}
+	return details
 }
 
 func encodePublic(e *Error) proto.Message {
@@ -51,6 +56,9 @@ func decode(cause error, details []string, payload proto.Message) error {
 		return nil
 	}
 	e := &Error{code: details[0], kind: parseKind(details[1]), cause: cause}
+	if len(details) > 2 {
+		e.retryAfter, _ = time.ParseDuration(details[2])
+	}
 	if p, ok := payload.(*errorspb.StringPayload); ok {
 		_ = json.Unmarshal([]byte(p.Msg), &e.public)
 	}

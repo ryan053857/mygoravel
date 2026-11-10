@@ -281,10 +281,11 @@ Error types: (1) *withstack.withStack (2) *errutil.withPrefix (3) *net.OpError
 | `errorx.PermissionDenied` | 知道是谁，但无权执行 | 修改别人的文章 |
 | `errorx.NotFound` | 资源不存在 | 文章已被删除 |
 | `errorx.Conflict` | 与当前状态冲突 | slug 已被其他文章使用 |
+| `errorx.ResourceExhausted` | 配额或频率超出限制，等待后重试可能成功 | 登录尝试过于频繁，见[限流](rate-limiting.md) |
 | `errorx.Unavailable` | 依赖暂时不可用，稍后重试可能成功 | 图片存储服务超时 |
 | `errorx.Internal` | 不应该发生的内部错误 | 数据出现了不一致 |
 
-前五种是可预期的业务结果，调用方需要修正请求，原样重试没有意义。后两种属于系统故障，`New` 和 `Wrap` 会额外记录调用处的堆栈，见下一节。
+除最后两种外都是可预期的业务结果，不记录堆栈。最后两种属于系统故障，`New` 和 `Wrap` 会额外记录调用处的堆栈，见下一节。
 
 > [!TIP]
 > 能用结构体标签描述的格式要求，例如“标题不能为空”、“长度不超过 200”，请写在输入类型上，由框架自动验证。`errorx` 用于那些需要查询数据或依赖业务状态才能判断的规则。
@@ -324,6 +325,12 @@ article.slug_taken: "slug“{{.slug}}”已被使用"
 响应中的 `detail` 就会变成 `slug“hello-world”已被使用`。
 
 之所以叫“公开”参数，是因为它们会出现在给用户看的文案中，请只附加可以展示给调用者的信息。参数不会作为独立字段出现在响应中。
+
+如果失败在等待一段时间后就会消失，例如[限流](rate-limiting.md)，用 `errorx.RetryAfter` 附加建议的等待时间，HTTP 响应会带上 `Retry-After` 响应头（秒，向上取整）：
+
+```go
+return ErrTooFrequent.New(errorx.RetryAfter(30 * time.Second))
+```
 
 <a id="reference"></a>
 ## 参考
@@ -376,6 +383,7 @@ errorx.KindOf(err) // errorx.Conflict，不是业务错误时为 errorx.Internal
 | `errorx.PermissionDenied` | 403 Forbidden |
 | `errorx.NotFound` | 404 Not Found |
 | `errorx.Conflict` | 409 Conflict |
+| `errorx.ResourceExhausted` | 429 Too Many Requests |
 | `errorx.Unavailable` | 503 Service Unavailable |
 | `errorx.Internal` 及其他错误 | 500 Internal Server Error |
 

@@ -84,20 +84,18 @@ func TestServeClosesListenerOnInvalidConfig(t *testing.T) {
 }
 
 func TestMiddlewareConfigsValidate(t *testing.T) {
-	if err := httpx.DefaultRateLimitConfig().Validate(); err != nil {
+	if err := httpx.DefaultConfig().RateLimit.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	for name, tc := range map[string]struct {
 		err  error
 		want string
 	}{
-		"empty prefix":  {httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{{}}}.Validate(), "trusted_proxies[0] is not a valid network"},
-		"host bits":     {httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("10.0.0.5/8")}}.Validate(), "trusted_proxies[1]: 10.0.0.5/8 has host bits set; use 10.0.0.0/8 or 10.0.0.5/32"},
-		"ipv6 host":     {httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("fd00::1/64")}}.Validate(), "use fd00::/64 or fd00::1/128"},
-		"timeout":       {httpx.TimeoutConfig{}.Validate(), "duration must be positive"},
-		"body limit":    {httpx.BodyLimitConfig{MaxBytes: -1}.Validate(), "max_bytes must be positive"},
-		"rate":          {httpx.RateLimitConfig{Interval: time.Second, Burst: 1, MaxEntries: 1}.Validate(), "rate must be positive"},
-		"rate interval": {httpx.RateLimitConfig{Rate: 1, Burst: 1, MaxEntries: 1}.Validate(), "interval must be positive"},
+		"empty prefix": {httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{{}}}.Validate(), "trusted_proxies[0] is not a valid network"},
+		"host bits":    {httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("10.0.0.5/8")}}.Validate(), "trusted_proxies[1]: 10.0.0.5/8 has host bits set; use 10.0.0.0/8 or 10.0.0.5/32"},
+		"ipv6 host":    {httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("fd00::1/64")}}.Validate(), "use fd00::/64 or fd00::1/128"},
+		"timeout":      {httpx.TimeoutConfig{}.Validate(), "duration must be positive"},
+		"body limit":   {httpx.BodyLimitConfig{MaxBytes: -1}.Validate(), "max_bytes must be positive"},
 	} {
 		if tc.err == nil || !strings.Contains(tc.err.Error(), tc.want) {
 			t.Fatalf("%s: got %v, want %q", name, tc.err, tc.want)

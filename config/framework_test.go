@@ -11,6 +11,7 @@ import (
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/logging"
+	"github.com/ryan053857/mygoravel/ratelimit"
 )
 
 type frameworkConfig struct {
@@ -49,7 +50,7 @@ database:
 	if cfg.HTTP.Addr != ":9000" || cfg.HTTP.Timeout.Duration != 5*time.Second || cfg.HTTP.ShutdownTimeout != 10*time.Second ||
 		!reflect.DeepEqual(cfg.HTTP.ClientIP.TrustedProxies, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) ||
 		cfg.HTTP.BodyLimit != httpx.DefaultBodyLimitConfig() ||
-		cfg.HTTP.RateLimit != (httpx.RateLimitConfig{Rate: 5, Interval: time.Second, Burst: 20, MaxEntries: 10000}) {
+		cfg.HTTP.RateLimit != (ratelimit.Config{Rate: 5, Interval: time.Second, Burst: 20}) {
 		t.Fatalf("http=%+v", cfg.HTTP)
 	}
 	if cfg.HTTP.RequestID.Header != "X-Amzn-Trace-Id" || !cfg.HTTP.AccessLog.UserAgent ||

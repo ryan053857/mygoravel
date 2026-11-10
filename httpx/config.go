@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/ryan053857/mygoravel/ratelimit"
 )
 
 // Config 是 HTTP 配置，对应配置文件的 http 段：顶层是服务器参数，
@@ -29,7 +31,8 @@ type Config struct {
 	AccessLog AccessLogConfig `yaml:"access_log"`
 	Timeout   TimeoutConfig   `yaml:"timeout"`
 	BodyLimit BodyLimitConfig `yaml:"body_limit"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	// RateLimit 是全局限流的参数，通常传给 ratelimit.NewMemory 后安装 RateLimit 中间件。
+	RateLimit ratelimit.Config `yaml:"rate_limit"`
 }
 
 // DefaultConfig 返回默认 HTTP 配置。
@@ -46,7 +49,7 @@ func DefaultConfig() Config {
 		AccessLog:         DefaultAccessLogConfig(),
 		Timeout:           DefaultTimeoutConfig(),
 		BodyLimit:         DefaultBodyLimitConfig(),
-		RateLimit:         DefaultRateLimitConfig(),
+		RateLimit:         ratelimit.Config{Rate: 10, Interval: time.Second, Burst: 20},
 	}
 }
 

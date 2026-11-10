@@ -17,6 +17,7 @@ import (
 
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/ryan053857/mygoravel/ratelimit"
 )
 
 func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {
@@ -68,8 +69,8 @@ func TestInvalidParametersPanicInsteadOfDisabling(t *testing.T) {
 		"ClientIP":  func() { httpx.ClientIP(httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{{}}}) },
 		"BodyLimit": func() { httpx.BodyLimit(httpx.BodyLimitConfig{}) },
 		"Timeout":   func() { httpx.Timeout(httpx.TimeoutConfig{}) },
-		"RateLimit": func() { httpx.RateLimit(httpx.RateLimitConfig{}, httpx.KeyByIP) },
-		"RateKey":   func() { httpx.RateLimit(httpx.DefaultRateLimitConfig(), nil) },
+		"RateLimit": func() { httpx.RateLimit(nil, httpx.KeyByIP) },
+		"RateKey":   func() { httpx.RateLimit(ratelimit.NewMemory(httpx.DefaultConfig().RateLimit), nil) },
 		"Defaults":  func() { httpx.Defaults(httpx.Config{}, slog.New(slog.DiscardHandler), nil) },
 	} {
 		func() {

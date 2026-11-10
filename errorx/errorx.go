@@ -3,6 +3,7 @@ package errorx
 import (
 	"fmt"
 	"maps"
+	"time"
 
 	"github.com/cockroachdb/errors"
 )
@@ -40,12 +41,19 @@ func Public(key string, value any) Option {
 	}
 }
 
-// Error 是一次具体失败，带 cause 与公开参数。
+// RetryAfter 附加建议的重试等待时间。HTTP 边界写入 Retry-After 响应头，
+// 其他边界（例如队列）可以据此延迟重试。
+func RetryAfter(d time.Duration) Option {
+	return func(e *Error) { e.retryAfter = d }
+}
+
+// Error 是一次具体失败，带 cause、公开参数和建议的重试等待时间。
 type Error struct {
-	code   string
-	kind   Kind
-	public map[string]any
-	cause  error
+	code       string
+	kind       Kind
+	public     map[string]any
+	retryAfter time.Duration
+	cause      error
 }
 
 // New 创建失败实例。Unavailable 和 Internal 属于系统故障，在调用处附加堆栈；
@@ -103,6 +111,9 @@ func (e *Error) Kind() Kind { return e.kind }
 // Public 返回公开参数的浅拷贝。
 func (e *Error) Public() map[string]any { return maps.Clone(e.public) }
 
+// RetryAfter 返回建议的重试等待时间，未设置时为 0。
+func (e *Error) RetryAfter() time.Duration { return e.retryAfter }
+
 // Format 实现 fmt.Formatter，%+v 输出完整错误链与各层堆栈。
 func (e *Error) Format(s fmt.State, verb rune) { errors.FormatError(e, s, verb) }
 
@@ -149,4 +160,13 @@ func PublicOf(err error) map[string]any {
 		return e.Public()
 	}
 	return nil
+}
+
+// RetryAfterOf 从错误链提取建议的重试等待时间；没有则返回 0。
+func RetryAfterOf(err error) time.Duration {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.retryAfter
+	}
+	return 0
 }

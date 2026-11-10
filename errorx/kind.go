@@ -10,6 +10,7 @@ const (
 	PermissionDenied
 	NotFound
 	Conflict
+	ResourceExhausted
 	Unavailable
 	Internal
 )
@@ -27,6 +28,8 @@ func (k Kind) String() string {
 		return "not_found"
 	case Conflict:
 		return "conflict"
+	case ResourceExhausted:
+		return "resource_exhausted"
 	case Unavailable:
 		return "unavailable"
 	default:
@@ -38,7 +41,7 @@ func (k Kind) String() string {
 func (k Kind) systemic() bool { return k == Unavailable || k == Internal }
 
 // kinds 列出全部分类，新增分类时同步追加。
-var kinds = []Kind{InvalidArgument, Unauthenticated, PermissionDenied, NotFound, Conflict, Unavailable, Internal}
+var kinds = []Kind{InvalidArgument, Unauthenticated, PermissionDenied, NotFound, Conflict, ResourceExhausted, Unavailable, Internal}
 
 // parseKind 是 String 的逆运算，未知名称返回 Internal。
 func parseKind(s string) Kind {

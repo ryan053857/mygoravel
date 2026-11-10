@@ -53,7 +53,7 @@ api := rest.New(rest.Options{Router: router})
 
 | 中间件 | 行为 |
 | --- | --- |
-| `RateLimit(cfg.RateLimit, key)` | 按客户端限流，超出时返回 429，见[限流](#rate-limiting) |
+| `RateLimit(limiter, key)` | 按客户端限流，超出时返回 429，见[限流](rate-limiting.md) |
 
 框架的其他部分不依赖这些中间件是否安装。没有 `AccessLog` 时，`httpx.AddAccessLogAttrs` 什么也不做；没有 `Locale` 时，错误消息不翻译，`i18n.T` 原样返回消息 ID；没有 `AssignRequestID` 时，`httpx.RequestID` 返回空字符串。
 
@@ -101,7 +101,7 @@ http:
 | `access_log.*` | `AccessLog` | 见[访问日志](#access-log) | 只记录基本字段 |
 | `timeout.duration` | `Timeout` | 每个请求 context 的超时 | `30s` |
 | `body_limit.max_bytes` | `BodyLimit` | 请求体的最大字节数 | 1 MiB |
-| `rate_limit.*` | `RateLimit` | 见[限流](#rate-limiting) | 每秒 10 个，突发 20 个 |
+| `rate_limit.*` | `RateLimit` | 见[限流](rate-limiting.md) | 每秒 10 个，突发 20 个 |
 
 没有写出的字段使用默认值。所有超时和数值都必须为正数，写 `0` 或负数会在加载配置时报错；不需要某个中间件时，不安装它即可。
 
@@ -203,57 +203,14 @@ http:
 <a id="rate-limiting"></a>
 ## 限流
 
-`httpx.RateLimit` 为每个客户端维护一个令牌桶：桶里有令牌时请求照常处理，没有令牌时直接返回 `429 Too Many Requests`，并通过 `Retry-After` 响应头告诉客户端多少秒后重试。被拒绝的请求不消耗令牌。
-
-限流不在默认中间件中。需要时在 `httpx.Defaults` 之后安装：
+`httpx.RateLimit` 按客户端限制请求频率，超出时返回 `429`。它不在默认中间件中，需要时在 `httpx.Defaults` 之后安装：
 
 ```go
 router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
-router.Use(httpx.RateLimit(cfg.HTTP.RateLimit, httpx.KeyByIP))
+router.Use(httpx.RateLimit(ratelimit.NewMemory(cfg.HTTP.RateLimit), httpx.KeyByIP))
 ```
 
-参数来自 `http.rate_limit` 段：
-
-```yaml
-http:
-  rate_limit:
-    rate: 10         # 每个 interval 补充 10 个令牌
-    interval: 1s
-    burst: 20        # 桶容量，允许短时间内连续发出 20 个请求
-    max_entries: 10000
-```
-
-| 字段 | 说明 | 默认值 |
-| --- | --- | --- |
-| `rate` | 每个 `interval` 补充的令牌数 | `10` |
-| `interval` | 补充 `rate` 个令牌的周期 | `1s` |
-| `burst` | 桶容量，即允许的瞬时突发 | `20` |
-| `max_entries` | 同时跟踪的客户端数，超出时淘汰最久没有请求的客户端 | `10000` |
-
-上面的配置表示：每个客户端平均每秒最多 10 个请求，短时间内最多连续 20 个。
-
-<a id="rate-limit-key"></a>
-### 限流的 key
-
-`RateLimit` 的第二个参数决定按什么维度计数。`httpx.KeyByIP` 按客户端地址计数，它使用 `ClientIP` 解析后的地址，所以部署在反向代理之后时，请同时配置[可信代理](#trusted-proxies)，否则所有请求都会被算到代理头上。
-
-你也可以传入自己的函数。例如，博客的开放 API 按 token 限流，没有 token 的请求仍然按地址限流：
-
-```go
-router.Use(httpx.RateLimit(cfg.HTTP.RateLimit, func(r *http.Request) string {
-    if token := r.Header.Get("Authorization"); token != "" {
-        return token
-    }
-    return httpx.KeyByIP(r)
-}))
-```
-
-函数返回空字符串时，这个请求不受限流。
-
-限流中间件安装在路由匹配和认证之前，因此这里还拿不到 `rest.RequireBearer` 解析出的用户身份，只能使用请求本身携带的信息。
-
-> [!WARNING]
-> 令牌桶保存在进程内存中。部署多个实例时，每个实例分别计数，客户端实际能达到的速率是配置值乘以实例数。需要跨实例的精确限流时，请在网关中配置，或者编写基于 Redis 等共享存储的[自定义中间件](#custom-middleware)。
+参数来自 `http.rate_limit` 段。限流的 key、配额参数、在处理器中按用户限流以及多实例共享计数，见[限流](rate-limiting.md)。
 
 <a id="custom-stack"></a>
 ## 自行组装

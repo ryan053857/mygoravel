@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	crdb "github.com/cockroachdb/errors"
 
@@ -131,9 +132,24 @@ func TestNetworkRoundTripKeepsIdentity(t *testing.T) {
 	}
 }
 
+func TestRetryAfter(t *testing.T) {
+	ctx := context.Background()
+	limited := errorx.Define(errorx.ResourceExhausted, "demo.limited")
+	err := crdb.Wrap(limited.New(errorx.RetryAfter(1500*time.Millisecond)), "login")
+	if errorx.RetryAfterOf(err) != 1500*time.Millisecond {
+		t.Fatalf("retry after=%v", errorx.RetryAfterOf(err))
+	}
+	if got := crdb.DecodeError(ctx, crdb.EncodeError(ctx, err)); errorx.RetryAfterOf(got) != 1500*time.Millisecond {
+		t.Fatalf("decoded retry after=%v", errorx.RetryAfterOf(got))
+	}
+	if errorx.RetryAfterOf(limited.New()) != 0 || errorx.RetryAfterOf(errors.New("plain")) != 0 {
+		t.Fatal("retry after must default to 0")
+	}
+}
+
 func TestEveryKindSurvivesRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	for _, kind := range []errorx.Kind{errorx.InvalidArgument, errorx.Unauthenticated, errorx.PermissionDenied, errorx.NotFound, errorx.Conflict, errorx.Unavailable, errorx.Internal} {
+	for _, kind := range []errorx.Kind{errorx.InvalidArgument, errorx.Unauthenticated, errorx.PermissionDenied, errorx.NotFound, errorx.Conflict, errorx.ResourceExhausted, errorx.Unavailable, errorx.Internal} {
 		err := errorx.Define(kind, "demo."+kind.String()).New()
 		if got := errorx.KindOf(crdb.DecodeError(ctx, crdb.EncodeError(ctx, err))); got != kind {
 			t.Fatalf("%v decoded as %v", kind, got)

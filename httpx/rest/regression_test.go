@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
@@ -40,7 +41,7 @@ func TestWrappedErrorsAndMapping(t *testing.T) {
 	if got := rest.FromError(fmt.Errorf("outer: %w", errors.WithStack(huma.Error404NotFound("safe")))); got.GetStatus() != 404 {
 		t.Fatal(got)
 	}
-	for kind, status := range map[errorx.Kind]int{errorx.InvalidArgument: 422, errorx.Unauthenticated: 401, errorx.PermissionDenied: 403, errorx.NotFound: 404, errorx.Conflict: 409, errorx.Unavailable: 503, errorx.Internal: 500} {
+	for kind, status := range map[errorx.Kind]int{errorx.InvalidArgument: 422, errorx.Unauthenticated: 401, errorx.PermissionDenied: 403, errorx.NotFound: 404, errorx.Conflict: 409, errorx.ResourceExhausted: 429, errorx.Unavailable: 503, errorx.Internal: 500} {
 		err := fmt.Errorf("context: %w", errorx.Define(kind, "demo.code").Wrap(huma.Error400BadRequest("secret")))
 		if got := rest.FromError(err); got.GetStatus() != status {
 			t.Fatalf("kind %v: %v", kind, got)
@@ -58,6 +59,7 @@ func TestErrorResponsesMatchDocumentedSchema(t *testing.T) {
 	}
 	register("/business", errorx.Define(errorx.NotFound, "example.missing").New())
 	register("/native", errors.WithStack(huma.Error409Conflict("already exists")))
+	register("/limited", errorx.Define(errorx.ResourceExhausted, "example.limited").New(errorx.RetryAfter(1200*time.Millisecond)))
 	register("/unknown", errors.New("private-secret-diagnostics"))
 	schema := api.OpenAPI().Paths["/business"].Post.Responses["default"].Content["application/problem+json"].Schema
 
@@ -69,6 +71,7 @@ func TestErrorResponsesMatchDocumentedSchema(t *testing.T) {
 	}{
 		{"/business", `{"secret":"valid"}`, 404, "example.missing", "Not Found"},
 		{"/native", `{"secret":"valid"}`, 409, "", "already exists"},
+		{"/limited", `{"secret":"valid"}`, 429, "example.limited", "Too Many Requests"},
 		{"/unknown", `{"secret":"valid"}`, 500, "", "unexpected error occurred"},
 		{"/business", `{"secret":"x"}`, 422, "", "validation failed"},
 		{"/missing-route", `{}`, 404, "", "route not found"},
@@ -89,6 +92,9 @@ func TestErrorResponsesMatchDocumentedSchema(t *testing.T) {
 		code, _ := obj["code"].(string)
 		if rr.Code != tc.status || code != tc.code || obj["detail"] != tc.detail || rr.Header().Get("Content-Type") != "application/problem+json" {
 			t.Fatalf("%s: %d %s", tc.path, rr.Code, rr.Body.String())
+		}
+		if retry := rr.Header().Get("Retry-After"); (tc.status == 429) != (retry == "2") {
+			t.Fatalf("%s: Retry-After=%q", tc.path, retry)
 		}
 		if strings.Contains(rr.Body.String(), "private-secret-diagnostics") {
 			t.Fatal("internal error leaked")

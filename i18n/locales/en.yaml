@@ -1,3 +1,4 @@
 auth.unauthenticated: Authentication required
 auth.forbidden: Permission denied
 page.invalid_cursor: Invalid pagination cursor
+rate_limit.exceeded: Too many requests, please try again later
