@@ -4,31 +4,41 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/cockroachdb/errors"
 	"go.yaml.in/yaml/v4"
 )
 
-// Load 读取 YAML 配置文件并返回 T，T 通常是应用的根配置结构体。
+// Load 依次读取 files 中的 YAML 配置文件并返回 T，T 通常是应用的根配置结构体。
+// 后面的文件覆盖前面的文件：没写的字段保留，写了的字段覆盖，map 按键合并，slice 整体替换。
 //
-// 流程：SetDefaults 填充默认值 → 加载 envfile → 展开 ${VAR} →
-// 解码（未知字段报错）→ Validate 校验。文件中未写的字段保留默认值。
-func Load[T any](path string) (T, error) {
+// 流程：SetDefaults 填充默认值 → 逐个文件展开 ${VAR} 并解码（未知字段报错）→
+// 全部文件合并后 Validate 校验一次。
+func Load[T any](files ...string) (T, error) {
 	var cfg T
-	if err := load(path, &cfg); err != nil {
+	if len(files) == 0 {
+		return cfg, errors.New("config: no configuration file")
+	}
+	setDefaults(&cfg)
+	for _, path := range files {
+		if err := decodeFile(path, &cfg); err != nil {
+			var zero T
+			return zero, errors.Wrapf(err, "config: %s", path)
+		}
+	}
+	if err := validate(&cfg); err != nil {
 		var zero T
-		return zero, errors.Wrapf(err, "config: %s", path)
+		return zero, errors.Wrap(err, "config")
 	}
 	return cfg, nil
 }
 
-func load(path string, dst any) error {
+// decodeFile 展开 path 中的环境变量引用，并把内容解码到 dst 上。
+func decodeFile(path string, dst any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	setDefaults(dst)
 	loader, err := yaml.NewLoader(bytes.NewReader(data))
 	if err != nil {
 		return err
@@ -37,43 +47,11 @@ func load(path string, dst any) error {
 	if err := loader.Load(&doc); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	if root := mapping(&doc); root != nil {
-		lookup := lookupFunc(os.LookupEnv)
-		if node := removeKey(root, envFileKey); node != nil {
-			env, err := loadEnvFile(node.Value, filepath.Dir(path))
-			if err != nil {
-				return err
-			}
-			lookup = withFallback(lookup, env)
-		}
-		if err := expandNode(root, lookup); err != nil {
-			return err
-		}
+	if doc.Kind == 0 {
+		return nil
 	}
-	if doc.Kind != 0 {
-		if err := doc.Load(dst, yaml.WithKnownFields()); err != nil {
-			return err
-		}
+	if err := expandNode(&doc, os.LookupEnv); err != nil {
+		return err
 	}
-	return validate(dst)
-}
-
-// mapping 返回文档的根映射；根不是映射时返回 nil，交给解码报错。
-func mapping(doc *yaml.Node) *yaml.Node {
-	if doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 && doc.Content[0].Kind == yaml.MappingNode {
-		return doc.Content[0]
-	}
-	return nil
-}
-
-// removeKey 从映射中移除 key 并返回其值节点；不存在时返回 nil。
-func removeKey(m *yaml.Node, key string) *yaml.Node {
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == key {
-			v := m.Content[i+1]
-			m.Content = append(m.Content[:i], m.Content[i+2:]...)
-			return v
-		}
-	}
-	return nil
+	return doc.Load(dst, yaml.WithKnownFields())
 }

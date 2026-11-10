@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,8 +17,8 @@ import (
 const configFlag = "config"
 
 // Root 返回应用的根命令，用 AddCommand 装配需要的命令。
-// 根命令定义了所有子命令共用的 --config 选项（默认 config.yaml），
-// 并把未知命令、未知选项和多余参数标记为 ExitUsage。
+// 根命令定义了所有子命令共用的 --config 选项：可以重复传入多个配置文件，
+// 后面的覆盖前面的，默认为 config/app.yaml。未知命令、未知选项和多余参数标记为 ExitUsage。
 func Root(name, short string) *cobra.Command {
 	root := &cobra.Command{
 		Use:           name,
@@ -28,7 +29,7 @@ func Root(name, short string) *cobra.Command {
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return AsExitError(ExitUsage, err) })
-	root.PersistentFlags().String(configFlag, "config.yaml", "配置文件路径")
+	root.PersistentFlags().StringSlice(configFlag, []string{"config/app.yaml"}, "配置文件，可以传入多次，后面的覆盖前面的")
 	return root
 }
 
@@ -44,15 +45,19 @@ func Run[C any](use, short string, run func(ctx context.Context, cfg C) error) *
 	})
 }
 
-// LoadConfig 按 --config 加载并校验配置，失败时错误带 ExitConfig 退出码。
+// LoadConfig 加载并校验 --config 指定的配置文件，失败时错误带 ExitConfig 退出码。
+// 加载前先读取工作目录下的 .env（不存在时忽略），其中的变量不会覆盖进程中已经设置的变量。
 // cmd 必须挂在 Root 返回的根命令下。
 func LoadConfig[C any](cmd *cobra.Command) (C, error) {
-	path, err := cmd.Flags().GetString(configFlag)
+	var zero C
+	files, err := cmd.Flags().GetStringSlice(configFlag)
 	if err != nil {
-		var zero C
 		return zero, errors.Wrap(err, "command: --config is defined by command.Root")
 	}
-	cfg, err := config.Load[C](path)
+	if err := config.LoadEnv(".env"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return zero, AsExitError(ExitConfig, err)
+	}
+	cfg, err := config.Load[C](files...)
 	return cfg, AsExitError(ExitConfig, err)
 }
 

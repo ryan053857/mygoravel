@@ -28,12 +28,16 @@ go build -trimpath -o bin/api .
 
 如果入口位于 `cmd/api`，则把构建目标改为 `./cmd/api`。`-trimpath` 会去掉二进制中的本地路径信息。
 
-由于迁移文件和翻译文件都已通过 `embed` 嵌入，部署时只需要这一个二进制文件和配置文件。请将 `go.mod` 和 `go.sum` 提交到版本库，并记录每次构建对应的提交，以便出现问题时准确定位版本。
+由于迁移文件和翻译文件都已通过 `embed` 嵌入，部署时只需要这一个二进制文件和 `config` 目录。请将 `go.mod` 和 `go.sum` 提交到版本库，并记录每次构建对应的提交，以便出现问题时准确定位版本。
 
 <a id="release-process"></a>
 ## 发布流程
 
-一次典型的发布按以下顺序进行。下面的命令假设你已经按照[命令行](commands.md)一章声明了应用的命令行。
+一次典型的发布按以下顺序进行。下面的命令假设你已经按照[命令行](commands.md)一章装配了应用的命令行，并在部署目录（`config` 目录所在的目录）中执行。生产环境的配置由 `config/app.yaml` 和 `config/prod.yaml` 叠加而成（见[按环境覆盖配置](configuration.md#overriding-configuration)），为了简洁，先把它们记在一个变量里：
+
+```bash
+CONFIG=--config=config/app.yaml,config/prod.yaml
+```
 
 <a id="checking-configuration"></a>
 ### 检查配置
@@ -41,13 +45,13 @@ go build -trimpath -o bin/api .
 在发布前离线检查配置文件，可以尽早发现缺失的环境变量或写错的字段：
 
 ```bash
-./bin/api config check --config config.yaml
+./bin/api config check $CONFIG
 ```
 
 必要时，再用 `migrate status` 确认数据库可以连通，同时查看哪些迁移将要执行。数据库连不上时，命令以 `ExitUnavailable`（4）退出：
 
 ```bash
-./bin/api migrate status --config config.yaml
+./bin/api migrate status $CONFIG
 ```
 
 <a id="running-migrations"></a>
@@ -56,7 +60,7 @@ go build -trimpath -o bin/api .
 在启动新版本的服务**之前**执行数据库迁移：
 
 ```bash
-./bin/api migrate up --config config.yaml
+./bin/api migrate up $CONFIG
 ```
 
 迁移器使用数据库锁，即使多个部署任务同时执行迁移，也只会串行运行。迁移成功后，再启动依赖新表结构的服务。滚动发布期间，新旧版本会同时运行，请确保数据库变更对两个版本都兼容，见[零停机变更](migrations.md#zero-downtime-changes)。
@@ -65,10 +69,10 @@ go build -trimpath -o bin/api .
 ### 启动服务
 
 ```bash
-./bin/api serve --config config.yaml
+./bin/api serve $CONFIG
 ```
 
-数据库密码、token 等敏感信息建议通过部署平台的环境变量或密钥管理功能提供，在配置文件中用 `${DATABASE_URL}` 这样的方式引用，而不是直接写入文件。
+数据库密码、token 等敏感信息建议通过部署平台的环境变量或密钥管理功能提供，在配置文件中用 `${DATABASE_URL}` 这样的方式引用，而不是直接写入文件。生产环境通常不放 `.env` 文件。
 
 <a id="health-checks"></a>
 ## 健康检查

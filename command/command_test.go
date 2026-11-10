@@ -197,3 +197,88 @@ func TestExitCode(t *testing.T) {
 		t.Fatal("AsExitError(nil) must be nil")
 	}
 }
+
+// projectDir 创建一个临时项目目录并切换进去，files 的路径相对于该目录。
+func projectDir(t *testing.T, files map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+}
+
+// loadedName 用 --config 等参数加载配置，返回其中的 name。
+func loadedName(t *testing.T, args ...string) string {
+	t.Helper()
+	var name string
+	root := newRoot(command.Run("name", "print name", func(_ context.Context, cfg settings) error {
+		name = cfg.Name
+		return nil
+	}))
+	if _, _, err := execute(root, append([]string{"name"}, args...)...); err != nil {
+		t.Fatalf("%v: %v", args, err)
+	}
+	return name
+}
+
+func TestConfigFiles(t *testing.T) {
+	projectDir(t, map[string]string{
+		"config/app.yaml":   "name: app\n",
+		"config/prod.yaml":  "name: prod\n",
+		"config/local.yaml": "name: local\n",
+	})
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "app"}, // 默认 config/app.yaml
+		{[]string{"--config", "config/app.yaml", "--config", "config/prod.yaml"}, "prod"},
+		{[]string{"--config", "config/app.yaml,config/prod.yaml,config/local.yaml"}, "local"},
+		{[]string{"--config", "config/prod.yaml", "--config", "config/app.yaml"}, "app"},
+	} {
+		if got := loadedName(t, tc.args...); got != tc.want {
+			t.Errorf("args=%v name=%q want %q", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestDotEnvInWorkingDirectory(t *testing.T) {
+	t.Setenv("MYGORAVEL_TEST_NAME", "")
+	os.Unsetenv("MYGORAVEL_TEST_NAME")
+	projectDir(t, map[string]string{
+		".env":            "MYGORAVEL_TEST_NAME=from-dotenv\n",
+		"config/app.yaml": "name: ${MYGORAVEL_TEST_NAME}\n",
+	})
+	if got := loadedName(t); got != "from-dotenv" {
+		t.Fatalf("name=%q", got)
+	}
+}
+
+func TestProcessEnvOverridesDotEnv(t *testing.T) {
+	t.Setenv("MYGORAVEL_TEST_NAME", "from-process")
+	projectDir(t, map[string]string{
+		".env":            "MYGORAVEL_TEST_NAME=from-dotenv\n",
+		"config/app.yaml": "name: ${MYGORAVEL_TEST_NAME}\n",
+	})
+	if got := loadedName(t); got != "from-process" {
+		t.Fatalf("name=%q", got)
+	}
+}
+
+func TestInvalidDotEnvIsConfigError(t *testing.T) {
+	projectDir(t, map[string]string{
+		".env":            "BAD-KEY=value\n",
+		"config/app.yaml": minimalConfig,
+	})
+	root := newRoot(command.Config[settings]())
+	if _, _, err := execute(root, "config", "check"); command.ExitCode(err) != command.ExitConfig {
+		t.Fatalf("exit=%d err=%v", command.ExitCode(err), err)
+	}
+}

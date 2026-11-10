@@ -26,7 +26,10 @@ mygoravel 不要求固定的目录结构，也不会根据目录位置自动发�
 ```text
 blog/
 ├── go.mod
-├── config.yaml
+├── .env                     本地开发用的环境变量（不提交）
+├── config/
+│   ├── app.yaml             基础配置
+│   └── prod.yaml            生产环境的差异
 ├── cmd/
 │   └── api/
 │       └── main.go          进程入口：执行命令行
@@ -54,7 +57,7 @@ blog/
 | 文件 | 章节 |
 | --- | --- |
 | `cmd/api/main.go`、`internal/cli/cli.go` | [命令行](commands.md#declaring-the-cli) |
-| `internal/settings` | [配置](configuration.md#loading-configuration) |
+| `config/`、`.env`、`internal/settings` | [配置](configuration.md) |
 | `internal/bootstrap/serve.go` | [依赖装配](dependencies.md#assembling-the-application) |
 | `internal/auth/auth.go` | [认证](authentication.md#token-validators) |
 | `internal/article/article.go`、`service.go` | [数据库](database.md#defining-models)、[错误处理](errors.md#example)、[授权](authorization.md#checking-in-transactions) |
