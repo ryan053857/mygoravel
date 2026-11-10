@@ -27,6 +27,7 @@
 - [请求](requests.md)
 - [验证](validation.md)
 - [响应](responses.md)
+- [会话](session.md)
 - [错误处理](errors.md)
 - [日志](logging.md)
 
@@ -35,6 +36,7 @@
 - [命令行](commands.md)
 - [缓存](cache.md)
 - [原子锁](locks.md)
+- [限流](rate-limiting.md)
 - [文件存储与上传](filesystem.md)
 - [邮件](mail.md)
 - [本地化](localization.md)
@@ -43,8 +45,6 @@
 
 - [认证](authentication.md)
 - [授权](authorization.md)
-- [会话](session.md)
-- [限流](rate-limiting.md)
 
 ## 数据库
 

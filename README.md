@@ -24,10 +24,10 @@ go get github.com/ryan053857/mygoravel@main
 | 运行第一个应用 | [安装](docs/installation.md) |
 | 读取配置与密钥 | [配置](docs/configuration.md) |
 | 组织项目代码 | [目录结构](docs/directory-structure.md) · [依赖装配](docs/dependencies.md) |
-| 编写接口 | [路由](docs/routing.md) · [请求](docs/requests.md) · [验证](docs/validation.md) · [响应](docs/responses.md) |
+| 编写接口 | [路由](docs/routing.md) · [请求](docs/requests.md) · [验证](docs/validation.md) · [响应](docs/responses.md) · [会话](docs/session.md) |
 | 查看全部路由 | [routes 命令](docs/commands.md#routes-command) |
 | 处理错误与日志 | [错误处理](docs/errors.md) · [日志](docs/logging.md) |
-| 保护接口 | [认证](docs/authentication.md) · [授权](docs/authorization.md) · [会话](docs/session.md) |
+| 保护接口 | [认证](docs/authentication.md) · [授权](docs/authorization.md) · [限流](docs/rate-limiting.md) |
 | 使用数据库 | [数据库](docs/database.md) · [迁移](docs/migrations.md) |
 | 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |
 | 发送邮件 | [邮件](docs/mail.md) |

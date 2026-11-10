@@ -95,7 +95,7 @@ router.Use(httpx.RateLimit(ratelimit.NewMemory(cfg.HTTP.RateLimit), skipHealth))
 <a id="in-handlers"></a>
 ## 在处理器中限流
 
-博客的编辑后台使用邮箱和密码[登录](session.md#login-and-logout)。为了防止密码被暴力猜测，同一个邮箱每分钟最多尝试 5 次。只需在登录处理器开头调用限流器：
+博客的编辑后台使用邮箱和密码[登录](authentication.md#login-and-logout)。为了防止密码被暴力猜测，同一个邮箱每分钟最多尝试 5 次。只需在登录处理器开头调用限流器：
 
 ```go
 func login(users *user.Service, sessions *scs.SessionManager, attempts ratelimit.Limiter) func(context.Context, *LoginInput) (*struct{}, error) {

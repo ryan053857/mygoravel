@@ -5,13 +5,16 @@
 - [编写 Token 校验器](#token-validators)
 - [保护路由](#protecting-routes)
     - [认证失败的响应](#failed-authentication)
+- [会话认证](#session-authentication)
+    - [登录与登出](#login-and-logout)
+    - [保护会话路由](#protecting-session-routes)
 - [获取已认证的主体](#retrieving-the-subject)
 - [管理凭据](#managing-credentials)
 
 <a id="introduction"></a>
 ## 简介
 
-很多 API 都需要知道“是谁在调用”。mygoravel 内置了基于 Bearer Token 的认证：客户端在请求头中携带 `Authorization: Bearer <token>`，框架调用你提供的校验函数确认身份，然后把身份信息交给处理器。
+很多 API 都需要知道“是谁在调用”。mygoravel 内置两种认证方式：基于 Bearer Token 的认证，客户端在请求头中携带 `Authorization: Bearer <token>`，框架调用你提供的校验函数确认身份，然后把身份信息交给处理器；以及面向浏览器的[会话认证](#session-authentication)。
 
 mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API Key，也可以是由认证服务签发的 JWT——你只需要写一个函数，告诉框架这个 token 对应谁。
 
@@ -36,7 +39,7 @@ type Subject struct {
 | --- | --- |
 | `ID` | 调用者的唯一标识，是一个不透明的字符串，例如用户 ID |
 | `Type` | 调用者类别：`identity.SubjectUser`（用户）或 `identity.SubjectService`（服务） |
-| `Method` | 认证方式，例如 `bearer` |
+| `Method` | 认证方式，例如 `bearer` 或 `session` |
 | `Scopes` | 调用者被授予的访问范围，例如 `articles` |
 
 **校验器（TokenValidator）** 是你提供的函数，负责把 token 转换为主体：
@@ -163,7 +166,7 @@ rest.Register(api, op, func() func(context.Context, *actions.GetArticleInput) (*
 
 需要认证的响应还会自动加上 `Cache-Control: no-store`，防止响应被中间代理缓存。
 
-`RequireBearer` 基于更通用的 `rest.RequireAuth` 实现，[会话](session.md)的 `session.Require` 也是。需要其他认证方式（例如从自定义请求头读取 API Key）时，可以用 `RequireAuth` 声明自己的 OpenAPI 安全方案和认证函数，认证失败的响应与本章相同。
+`RequireBearer` 基于更通用的 `rest.RequireAuth` 实现，[会话认证](#protecting-session-routes)的 `session.Require` 也是。需要其他认证方式（例如从自定义请求头读取 API Key）时，可以用 `RequireAuth` 声明自己的 OpenAPI 安全方案和认证函数，认证失败的响应与本章相同。
 
 > [!TIP]
 > 不需要认证的路由也必须显式调用 `rest.Public()(&op)`。忘记声明访问策略的路由会在注册时 panic，因此你不会意外地发布一个未受保护的接口。
@@ -201,6 +204,87 @@ Www-Authenticate: Bearer
 
 认证在输入验证之前执行，所以未认证的请求不会看到验证错误。
 
+<a id="session-authentication"></a>
+## 会话认证
+
+Bearer token 适合服务端调用方和移动端。浏览器中的前端更常用[会话](session.md)：用户登录后，服务器把主体记在会话里，浏览器通过 cookie 自动携带会话 token。
+
+本节为博客应用加上编辑后台：编辑在浏览器中用邮箱和密码登录，之后访问后台的文章接口。开始之前，先按[装配会话](session.md#assembling-sessions)创建会话管理器 `sessions`，并安装它的中间件和跨站请求伪造防护。
+
+<a id="login-and-logout"></a>
+### 登录与登出
+
+登录接口校验密码，然后调用 `session.Login` 把主体记入会话。下面是 `adminhttp` 包中的登录和登出处理器，`users` 是应用自己的用户服务，`sessions` 由入口传入：
+
+```go
+type LoginInput struct {
+    Body struct {
+        Email    string `json:"email" format:"email"`
+        Password string `json:"password" minLength:"1"`
+    }
+}
+
+func login(users *user.Service, sessions *scs.SessionManager) func(context.Context, *LoginInput) (*struct{}, error) {
+    return func(ctx context.Context, in *LoginInput) (*struct{}, error) {
+        u, err := users.Authenticate(ctx, in.Body.Email, in.Body.Password)
+        if err != nil {
+            return nil, err // 例如 errorx.Unauthenticated 类错误，响应 401
+        }
+        return nil, session.Login(ctx, sessions, identity.Subject{
+            ID:     u.ID,
+            Type:   identity.SubjectUser,
+            Scopes: u.Scopes, // 例如 [articles]
+        })
+    }
+}
+
+func logout(sessions *scs.SessionManager) func(context.Context, *struct{}) (*struct{}, error) {
+    return func(ctx context.Context, _ *struct{}) (*struct{}, error) {
+        return nil, session.Logout(ctx, sessions)
+    }
+}
+```
+
+`Login` 会先更换会话 token，再保存主体，并把主体的 `Method` 设为 `session`。更换 token 可以防止登录前泄露的 token 在登录后继续有效。`Logout` 销毁会话，并让浏览器删除 cookie。
+
+登录接口本身是公开的：
+
+```go
+op := huma.Operation{OperationID: "admin-login", Method: http.MethodPost, Path: "/admin/login"}
+rest.Public()(&op)
+rest.Register(api, op, func() func(context.Context, *LoginInput) (*struct{}, error) {
+    return login(users, sessions)
+})
+```
+
+会话保存的是登录时主体的快照。用户的 scope 变化后，已登录的会话仍然使用旧的 scope，直到重新登录。需要立即生效时，用 scs 的 `Iterate` 找到该用户的会话并销毁，见[读写会话数据](session.md#session-data)。
+
+<a id="protecting-session-routes"></a>
+### 保护会话路由
+
+`session.Require` 的用法和 [`rest.RequireBearer`](#protecting-routes) 相同，只是凭据来自会话：
+
+```go
+requireEditor := session.Require(api, sessions, "articles")
+
+op := huma.Operation{OperationID: "admin-article-update", Method: http.MethodPut, Path: "/admin/articles/{id}"}
+requireEditor(&op)
+rest.Register(api, op, func() func(context.Context, *actions.UpdateArticleInput) (*actions.ArticleOutput, error) {
+    return actions.NewUpdateArticle(articles).Handle
+})
+```
+
+处理器和业务服务的写法不变，仍然用 `identity.FromContext` 读取主体，见[获取已认证的主体](#retrieving-the-subject)。同一个业务处理器因此可以同时挂在 Bearer 保护的 `/articles` 和会话保护的 `/admin/articles` 下。
+
+| 情况 | 状态码 | 错误码 |
+| --- | --- | --- |
+| 没有会话，或会话中没有登录的主体 | 401 | `auth.unauthenticated` |
+| 缺少所需的 scope | 403 | `auth.forbidden` |
+
+响应同样带有 `Cache-Control: no-store`，但不带 `WWW-Authenticate` 头。OpenAPI 文档中，这些路由使用名为 `session` 的 cookie 安全方案，`routes` 命令把它们的访问策略显示为 `session`。
+
+一条路由只能声明一种认证方式，同时调用 `RequireBearer` 和 `session.Require` 会在注册时 panic。
+
 <a id="retrieving-the-subject"></a>
 ## 获取已认证的主体
 
@@ -231,4 +315,4 @@ func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleO
 
 凭据存放在哪里、如何签发和吊销，完全由应用决定。上面把 token 写在配置文件中的做法适合内部服务或少量固定的调用方；对外开放的 API 通常会把 API Key 存在数据库中，或者使用 JWT，此时只需替换校验器的实现，路由和业务代码都不需要改变。
 
-浏览器中的前端通常使用基于 cookie 的会话登录，见[会话](session.md)。用户注册、刷新 token 等功能不在 mygoravel 的范围内。你可以选择合适的认证服务或库来实现它们，最终在校验器中把验证结果转换为 `identity.Subject` 即可。
+浏览器中的前端通常使用[会话认证](#session-authentication)。用户注册、刷新 token 等功能不在 mygoravel 的范围内。你可以选择合适的认证服务或库来实现它们，最终在校验器中把验证结果转换为 `identity.Subject` 即可。
