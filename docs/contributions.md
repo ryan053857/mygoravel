@@ -37,7 +37,7 @@ go test -race ./...
 
 单元测试不依赖任何外部服务。
 
-`files/s3` 的存储流程测试使用 [gofakes3](https://github.com/johannesboyne/gofakes3) 的内存后端，通过 `httptest` 自动启动 S3 服务，真实 AWS SDK 会向它发送请求。它覆盖对象读写、复制、分片重传、合并和取消；协议测试另外覆盖分页、错误映射及超大对象复制等边界，不需要 AWS 凭证或独立 S3 容器。
+`files/s3` 的存储流程测试使用 [gofakes3](https://github.com/johannesboyne/gofakes3) 的内存后端，通过 `httptest` 自动启动 S3 服务，真实 AWS SDK 会向它发送请求。它覆盖对象读写、服务端分片上传、预签名直传、分片合并和取消，不需要 AWS 凭证或独立 S3 容器。
 
 <a id="integration-tests"></a>
 ### 集成测试
@@ -67,7 +67,7 @@ go test -race -count=1 -tags=integration ./...
 
 集成测试中包含对迁移失败场景的演练，例如非事务迁移执行到一半失败后，检查数据库状态、人工恢复并再次执行。
 
-文件服务集成测试同时使用真实 PostgreSQL 和本地存储或 gofakes3，验证单张 `files` 表的状态变化、预签名直传、分片续传、确认和清理。只运行文件相关测试可以执行 `go test -race -tags=integration ./files/...`，仍需设置上述 `DATABASE_TEST_DSN`。
+文件服务集成测试同时使用真实 PostgreSQL 和本地存储或 gofakes3，验证单张 `files` 表的状态变化、预签名直传、分片上传、确认、删除和清理。只运行文件相关测试可以执行 `go test -race -tags=integration ./files/...`，仍需设置上述 `DATABASE_TEST_DSN`。
 
 <a id="architecture-tests"></a>
 ### 架构测试
