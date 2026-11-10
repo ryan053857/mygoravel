@@ -16,8 +16,8 @@ type Route struct {
 	// 或认证方式的名字，例如 JSON API 的 bearer、页面的 session。
 	// 没有可识别声明的路由一律为 AccessUnknown，它不表示允许匿名访问。
 	Access string
-	// Scopes 是需要认证的路由要求调用者具备的全部 scope。
-	Scopes []string
+	// Permissions 是需要认证的路由要求调用者能执行的全部权限。
+	Permissions []string
 	// OperationID、Summary 来自 JSON API 的 huma.Operation，页面路由没有。
 	OperationID string
 	Summary     string
@@ -47,7 +47,7 @@ func Routes(router chi.Routes) []Route {
 		route := Route{Access: AccessUnknown}
 		if d, ok := handler.(RouteDescriber); ok {
 			route = d.DescribeRoute()
-			route.Scopes = slices.Clone(route.Scopes)
+			route.Permissions = slices.Clone(route.Permissions)
 		}
 		route.Method, route.Path = method, path
 		routes = append(routes, route)

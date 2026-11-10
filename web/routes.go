@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/ryan053857/mygoravel/identity"
 )
 
 // AccessSession 是需要登录的页面路由在路由表中的访问策略。
@@ -14,20 +15,20 @@ const AccessSession = "session"
 
 // Access 是页面路由的访问策略，由 Public 或 Require 给出。零值不是合法的策略。
 type Access struct {
-	declared bool
-	login    bool
-	scopes   []string
+	declared    bool
+	login       bool
+	permissions []string
 }
 
 // Public 允许未登录访问，例如登录页。
 var Public = Access{declared: true}
 
-// Require 要求请求属于已登录的会话，并具备 scopes 中的全部权限：
+// Require 要求请求属于已登录的会话，并且主体能执行 permissions 中的全部权限（identity.Subject.Can）：
 // 未登录时跳转到 Options.Login，并在 next 参数中带上原地址（htmx 请求取自 HX-Current-URL）；
-// 缺少 scope 时呈现 403。设置了 Options.Resolve 时，主体和 scope 取自它的返回值。
+// 权限不足时呈现 403。设置了 Options.Resolve 时，主体和权限取自它的返回值。
 // 通过后主体写入 identity.WithSubject，处理器用 identity.FromContext 读取。
-func Require(scopes ...string) Access {
-	return Access{declared: true, login: true, scopes: slices.Clone(scopes)}
+func Require(permissions ...string) Access {
+	return Access{declared: true, login: true, permissions: slices.Clone(permissions)}
 }
 
 // Routes 在一个 chi.Router 上注册同一访问策略的页面路由。
@@ -78,7 +79,13 @@ func (p *Pages) route(access Access, h HandlerFunc) http.Handler {
 			http.Error(w, "web: page registered in ModeRoutes", http.StatusInternalServerError)
 		})
 	}
-	return p.cop.Handler(p.opts.Sessions.LoadAndSave(p.authorize(access, p.handle(h))))
+	handler := p.cop.Handler(p.opts.Sessions.LoadAndSave(p.authorize(access, p.handle(h))))
+	if tenant := p.opts.Tenant; tenant != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler.ServeHTTP(w, r.WithContext(identity.WithTenant(r.Context(), tenant(r))))
+		})
+	}
+	return handler
 }
 
 // pageRoute 是一条页面路由的处理器，向 httpx.Routes 报告访问策略。
@@ -89,10 +96,10 @@ type pageRoute struct {
 
 func (pr *pageRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) { pr.handler.ServeHTTP(w, r) }
 
-// DescribeRoute 实现 httpx.RouteDescriber：Public 为 public，Require 为 session 及其 scope。
+// DescribeRoute 实现 httpx.RouteDescriber：Public 为 public，Require 为 session 及其权限。
 func (pr *pageRoute) DescribeRoute() httpx.Route {
 	if !pr.access.login {
 		return httpx.Route{Access: httpx.AccessPublic}
 	}
-	return httpx.Route{Access: AccessSession, Scopes: slices.Clone(pr.access.scopes)}
+	return httpx.Route{Access: AccessSession, Permissions: slices.Clone(pr.access.permissions)}
 }

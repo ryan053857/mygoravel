@@ -134,7 +134,7 @@ mygoravel 要求每条路由都**显式**声明访问策略，避免因为疏忽
 rest.Public()(&op)
 ```
 
-需要认证的路由使用 `rest.RequireBearer`，并可以要求调用者具备指定的 scope：
+需要认证的路由使用 `rest.RequireBearer`，并可以要求调用者具备指定的权限：
 
 ```go
 requireArticles := rest.RequireBearer(api, validateToken, "articles")

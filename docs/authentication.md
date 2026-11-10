@@ -5,6 +5,8 @@
 - [编写 Token 校验器](#token-validators)
 - [保护路由](#protecting-routes)
     - [认证失败的响应](#failed-authentication)
+- [每次请求加载权限](#resolving-subjects)
+- [多租户](#tenants)
 - [获取已认证的主体](#retrieving-the-subject)
 - [管理凭据](#managing-credentials)
 
@@ -27,11 +29,13 @@ mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API K
 
 ```go
 type Subject struct {
-    ID         string
-    Type       SubjectType
-    Method     string
-    Scopes     []string
-    Credential string
+    ID          string
+    Type        SubjectType
+    Method      string
+    Credential  string
+    Tenant      string
+    Permissions []string
+    Scopes      []string
 }
 ```
 
@@ -40,8 +44,12 @@ type Subject struct {
 | `ID` | 调用者的唯一标识，是一个不透明的字符串，例如用户 ID |
 | `Type` | 调用者类别：`identity.SubjectUser`（用户）或 `identity.SubjectService`（服务） |
 | `Method` | 认证方式，例如 `bearer` 或 `session` |
-| `Scopes` | 调用者被授予的访问范围，例如 `articles` |
 | `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)的 ID；用于登出当前设备，可以为空 |
+| `Tenant` | 本次请求所在的租户，`""` 表示平台本身；由凭据设置时，凭据只能在这个租户中使用，见[多租户](#tenants) |
+| `Permissions` | 调用者拥有的权限，例如 `articles:write` |
+| `Scopes` | 本次请求所用凭据被限制在内的权限，例如只读令牌的 `articles:read`；`nil` 表示不限制 |
+
+`Permissions` 回答“这个人能做什么”，`Scopes` 回答“这把钥匙被允许做什么”。`sub.Can(perm)` 在两者都允许时返回 `true`，路由检查、业务服务和页面都用它判断。权限名以冒号分隔，授予时可以用 `*` 作为最后一段：`articles:*` 包含 `articles:read` 和 `articles:write`，单独的 `*` 包含全部权限。
 
 **校验器（TokenValidator）** 是你提供的函数，负责把 token 转换为主体：
 
@@ -52,7 +60,7 @@ type TokenValidator func(ctx context.Context, token string) (identity.Subject, e
 <a id="token-validators"></a>
 ## 编写 Token 校验器
 
-下面是博客应用完整的 `internal/auth/auth.go`。为了便于理解，它把可用的 token 直接写在配置文件中，每个 token 对应一个调用者和它的 scope：
+下面是博客应用完整的 `internal/auth/auth.go`。为了便于理解，它把可用的 token 直接写在配置文件中，每个 token 对应一个调用者和它的权限：
 
 ```go
 package auth
@@ -70,9 +78,9 @@ var ErrUnauthenticated = errorx.Define(errorx.Unauthenticated, "auth.unauthentic
 
 // Credential 是一个 API token 及其代表的调用者。
 type Credential struct {
-    Token     string   `yaml:"token"`
-    SubjectID string   `yaml:"subject_id"`
-    Scopes    []string `yaml:"scopes"`
+    Token       string   `yaml:"token"`
+    SubjectID   string   `yaml:"subject_id"`
+    Permissions []string `yaml:"permissions"`
 }
 
 type Config struct {
@@ -105,10 +113,10 @@ func Validator(cfg Config) rest.TokenValidator {
             return identity.Subject{}, ErrUnauthenticated.New()
         }
         return identity.Subject{
-            ID:     cred.SubjectID,
-            Type:   identity.SubjectUser,
-            Method: "bearer",
-            Scopes: cred.Scopes,
+            ID:          cred.SubjectID,
+            Type:        identity.SubjectUser,
+            Method:      "bearer",
+            Permissions: cred.Permissions,
         }, nil
     }
 }
@@ -121,7 +129,7 @@ auth:
   credentials:
     - token: ${API_TOKEN_ALICE}
       subject_id: alice
-      scopes: [articles]
+      permissions: [articles]
 ```
 
 `Validate` 会在加载配置时检查空 token 和重复的 token，配置有误时应用无法启动。
@@ -139,7 +147,7 @@ auth:
 <a id="protecting-routes"></a>
 ## 保护路由
 
-使用 `rest.RequireBearer` 为路由启用认证。它的参数是 API 实例、校验器，以及调用者必须具备的 scope。
+使用 `rest.RequireBearer` 为路由启用认证。它的参数是 API 实例、校验器，以及调用者必须能执行的权限。
 
 下面是文章模块的 `routes.go` 中注册“获取文章”接口的片段：`api` 由 `rest.New` 创建，`cfg.Auth` 来自应用配置，`db` 是入口打开的数据库。`Get` action 的定义见[路由](routing.md#http-actions)：
 
@@ -155,12 +163,12 @@ requireArticles(&op)
 rest.Register(api, op, NewGet(db).HTTP)
 ```
 
-`RequireBearer` 返回的函数可以复用于多条路由。可以传入多个 scope，调用者必须**全部**具备才能访问；不传 scope 则只要求认证通过。
+`RequireBearer` 返回的函数可以复用于多条路由。可以传入多个权限，`sub.Can` 必须对**全部**权限返回 `true` 才能访问；不传权限则只要求认证通过。
 
 `RequireBearer` 同时做了两件事：
 
 - 在运行时检查 `Authorization` 请求头并调用校验器；
-- 在 OpenAPI 文档中把这条路由标记为需要 Bearer 认证，所需的 scope 记录在 `x-required-scopes` 扩展字段中。
+- 在 OpenAPI 文档中把这条路由标记为需要 Bearer 认证，所需的权限记录在 `x-required-permissions` 扩展字段中。
 
 需要认证的响应还会自动加上 `Cache-Control: no-store`，防止响应被中间代理缓存。
 
@@ -176,7 +184,7 @@ rest.Register(api, op, NewGet(db).HTTP)
 | --- | --- | --- |
 | 没有携带 `Authorization` 头，或格式不是 `Bearer <token>` | 401 | `auth.unauthenticated` |
 | 校验器拒绝了 token | 401 | `auth.unauthenticated` |
-| 缺少所需的 scope | 403 | `auth.forbidden` |
+| 缺少所需的权限 | 403 | `auth.forbidden` |
 | 校验器返回 5xx 类错误 | 与错误分类对应，例如 503 | 无 |
 
 无论校验器返回什么错误码，客户端看到的都是统一的 `auth.unauthenticated`，不会因此得知 token 是“不存在”还是“已过期”。`401` 响应带有 `WWW-Authenticate: Bearer` 响应头。校验器返回 5xx 类错误时，响应的 `detail` 为 `authentication unavailable`，不包含校验器的错误码；框架会记录一条诊断日志。
@@ -201,6 +209,66 @@ Www-Authenticate: Bearer
 启用[本地化](localization.md)后，`detail` 会被翻译，例如中文为“请先认证”。
 
 认证在输入验证之前执行，所以未认证的请求不会看到验证错误。
+
+<a id="resolving-subjects"></a>
+## 每次请求加载权限
+
+上面的校验器直接给出了权限。更常见的情况是：凭据只说明“这是谁”，权限来自数据库中用户的角色，而且应当随时生效。这时设置 `rest.Options.Resolve`，它在认证通过后、权限检查之前运行，收到凭据给出的主体，返回本次请求的主体：
+
+```go
+api := rest.New(rest.Options{
+    Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+        u, err := users.Get(ctx, sub.ID)
+        if err != nil {
+            return identity.Subject{}, err
+        }
+        if u.Disabled {
+            return identity.Subject{}, auth.ErrUnauthenticated.New()
+        }
+        sub.Permissions = u.Permissions
+        return sub, nil
+    },
+})
+```
+
+| `Resolve` 返回 | 结果 |
+| --- | --- |
+| 主体 | 权限检查和处理器都使用它 |
+| `errorx.Unauthenticated` 类错误，或 `ID` 为空的主体 | `401`，与凭据无效相同 |
+| 其他 4xx 类错误 | 按错误分类响应，错误码就是你定义的业务错误码，例如不是租户成员时返回 `errorx.NotFound` 得到 `404` |
+| 5xx 类错误 | 与校验器的 5xx 相同 |
+
+页面使用同样签名的 [`web.Options.Resolve`](views.md#login)，所以同一个函数可以同时交给 API 和页面。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
+
+<a id="tenants"></a>
+## 多租户
+
+一个 SaaS 应用中，同一个用户可能属于多个组织，在每个组织中有不同的权限。本次请求属于哪个租户由请求本身决定，例如路径中的 `/t/{tenant}`、子域名或请求头。用 `rest.Options.Tenant` 取出它：
+
+```go
+api := rest.New(rest.Options{
+    Tenant:  func(ctx huma.Context) string { return ctx.Param("tenant") },
+    Resolve: resolve,
+})
+```
+
+`Tenant` 的结果在每个操作开始时写入 context，公开的操作也一样，用 `identity.TenantFromContext` 读取；没有设置 `Tenant` 或取到空字符串时，租户是 `""`，表示平台本身，例如个人中心和运营后台。`Resolve` 据此加载用户在这个租户中的权限，并把租户写入主体：
+
+```go
+func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+    tenant := identity.TenantFromContext(ctx)
+    perms, err := members.Permissions(ctx, tenant, sub.ID)
+    if err != nil {
+        return identity.Subject{}, err // 不是成员时返回 errorx.NotFound 类错误，得到 404
+    }
+    sub.Tenant, sub.Permissions = tenant, perms
+    return sub, nil
+}
+```
+
+凭据也可以绑定一个租户，例如只属于某个租户的个人访问令牌：校验器返回的主体 `Tenant` 不为空时，它与本次请求的租户不同的请求一律返回 `403`，不会调用 `Resolve`。
+
+业务服务查询租户数据时，用 `sub.Tenant` 限定范围，见[授权](authorization.md)。
 
 <a id="retrieving-the-subject"></a>
 ## 获取已认证的主体

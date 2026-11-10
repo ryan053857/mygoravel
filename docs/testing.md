@@ -62,7 +62,7 @@ import (
 func newTestAPI() *rest.API {
     api := rest.New(rest.Options{})
     validate := auth.Validator(auth.Config{Credentials: []auth.Credential{
-        {Token: "alice-token", SubjectID: "alice", Scopes: []string{"articles"}},
+        {Token: "alice-token", SubjectID: "alice", Permissions: []string{"articles"}},
         {Token: "guest-token", SubjectID: "guest"},
     }})
     // 这些请求在调用 Handle 之前就会被拒绝，所以不需要数据库
@@ -81,7 +81,7 @@ func TestCreateRejectsBadRequests(t *testing.T) {
         location string
     }{
         {"没有 token", "", valid, http.StatusUnauthorized, "auth.unauthenticated", ""},
-        {"缺少 scope", "guest-token", valid, http.StatusForbidden, "auth.forbidden", ""},
+        {"缺少权限", "guest-token", valid, http.StatusForbidden, "auth.forbidden", ""},
         {"slug 格式不对", "alice-token", `{"title":"Hello World","slug":"Hello World","content":""}`, http.StatusUnprocessableEntity, "", "body.slug"},
     }
     api := newTestAPI()
@@ -115,7 +115,7 @@ func TestCreateRejectsBadRequests(t *testing.T) {
 }
 ```
 
-这个测试用表格列出了三种在调用 `Handle` 之前就会被拒绝的请求：没有 token、缺少 scope、输入格式不对。它们不会触及数据库，所以 `db` 可以传 `nil`，测试运行得很快。
+这个测试用表格列出了三种在调用 `Handle` 之前就会被拒绝的请求：没有 token、缺少权限、输入格式不对。它们不会触及数据库，所以 `db` 可以传 `nil`，测试运行得很快。
 
 <a id="testing-auth-and-errors"></a>
 ### 测试认证与错误响应
@@ -123,7 +123,7 @@ func TestCreateRejectsBadRequests(t *testing.T) {
 请通过完整的 `api.Handler()` 来测试认证、验证错误和越权访问，而不是直接调用处理器函数。这样测试才能覆盖认证中间件、输入验证和错误转换的完整过程。一组典型的接口测试包括：
 
 - 不带 `Authorization` 头的请求返回 `401`；
-- 缺少 scope 的 token 返回 `403`；
+- 缺少权限的 token 返回 `403`；
 - 不合法的请求体返回 `422`，并检查 `errors[].location`；
 - 访问他人的资源返回 `403` 或 `404`；
 - 错误响应中的 `code` 与预期的错误码一致。

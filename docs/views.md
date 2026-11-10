@@ -129,7 +129,7 @@ func PageRoutes(r chi.Router, pages *web.Pages, db *bun.DB, hasher *hashing.Hash
 <a id="page-routes"></a>
 ## 注册页面路由
 
-页面路由通过 `pages.Routes` 注册，它的第二个参数是这一组路由的访问策略：`web.Public` 允许未登录访问，`web.Require(scopes...)` 要求登录，见[登录](#login)。下面是 `internal/article/articleweb/routes.go`：
+页面路由通过 `pages.Routes` 注册，它的第二个参数是这一组路由的访问策略：`web.Public` 允许未登录访问，`web.Require(permissions...)` 要求登录并具备权限，见[登录](#login)。下面是 `internal/article/articleweb/routes.go`：
 
 ```go
 package articleweb
@@ -168,12 +168,12 @@ func DocRouter() chi.Routes {
 <a id="login"></a>
 ## 登录
 
-`web.Require` 要求请求已经登录，并具备给出的全部 scope：
+`web.Require` 要求请求已经登录，并且主体能执行给出的全部权限（`sub.Can`，见[核心概念](authentication.md#key-concepts)）：
 
 | 情况 | 结果 |
 | --- | --- |
 | 未登录 | 跳转到 `Options.Login`，`next` 参数带上原地址；htmx 请求通过 `HX-Redirect` 整页跳转，原地址取自发起请求的页面 |
-| 缺少所需的 scope | 呈现 `403`，见[错误页](#error-pages) |
+| 缺少所需的权限 | 呈现 `403`，见[错误页](#error-pages) |
 | 通过 | 主体写入请求的 context，处理器用 `identity.FromContext` 读取，再传给 action |
 
 登录页由应用自己实现，注册为公开路由。下面是 `internal/auth/authweb/routes.go`，`user.Authenticate` 是用户模块校验密码的 action，见[哈希](hashing.md#hashing-passwords)：
@@ -200,7 +200,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
     if f.Valid() {
         u, err := h.authenticate.Handle(r.Context(), f.Data.Email, f.Data.Password)
         if err == nil {
-            sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser, Scopes: u.Scopes}
+            sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}
             if err := h.pages.Login(r.Context(), sub); err != nil {
                 return err
             }
@@ -226,21 +226,21 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
 
 `pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
 
-会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时设置 `Options.Resolve`，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回当前的主体：
+会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时设置 `Options.Resolve`，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回本次请求的主体。它与 API 的 [`rest.Options.Resolve`](authentication.md#resolving-subjects) 签名相同，同一个函数可以交给两者：
 
 ```go
 pages := web.New(web.Options{
     Sessions: sessions,
     Login:    "/login",
-    Resolve: func(r *http.Request, stored identity.Subject) (identity.Subject, error) {
-        u, err := user.Find(r.Context(), a.db, stored.ID)
+    Resolve: func(ctx context.Context, stored identity.Subject) (identity.Subject, error) {
+        u, err := user.Find(ctx, a.db, stored.ID)
         if err != nil {
             return identity.Subject{}, err
         }
         if u.Disabled {
             return identity.Subject{}, user.ErrDisabled.New()
         }
-        return identity.Subject{ID: u.ID, Type: identity.SubjectUser, Scopes: u.Scopes}, nil
+        return identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}, nil
     },
     // ErrorPage 等其余字段同上
 })
@@ -248,11 +248,12 @@ pages := web.New(web.Options{
 
 | `Resolve` 返回 | 结果 |
 | --- | --- |
-| 主体 | scope 检查和处理器都使用它，`Method` 为 `session` |
-| 4xx 类错误（例如账号已停用、用户不存在），或 `ID` 为空的主体 | 销毁会话，按未登录跳转到登录页 |
+| 主体 | 权限检查和处理器都使用它，`Method` 为 `session` |
+| `errorx.Unauthenticated` 类错误（例如账号已停用），或 `ID` 为空的主体 | 销毁会话，按未登录跳转到登录页 |
+| 其他 4xx 类错误（例如不是这个租户的成员） | 按分类呈现错误页，例如 `404`，不登出 |
 | 5xx 类错误（例如数据库故障） | 呈现错误页 |
 
-`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
+`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 `Resolve` 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面

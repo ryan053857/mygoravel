@@ -32,8 +32,11 @@ func (c *clock) add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unloc
 // testConfig：最长 10 小时，空闲 1 小时，“记住我”空闲 3 小时。
 var testConfig = apitoken.Config{Lifetime: 10 * time.Hour, IdleTimeout: time.Hour, RememberIdleTimeout: 3 * time.Hour}
 
+// read 是测试中个人访问令牌常用的 scope。
+var read = []string{"articles:read"}
+
 var (
-	alice = identity.Subject{ID: "alice", Type: identity.SubjectUser, Scopes: []string{"articles", "comments"}}
+	alice = identity.Subject{ID: "alice", Type: identity.SubjectUser}
 	bob   = identity.Subject{ID: "bob", Type: identity.SubjectUser}
 )
 
@@ -54,9 +57,9 @@ func login(t *testing.T, s *apitoken.Store, sub identity.Subject, d apitoken.Dev
 	return plain
 }
 
-func create(t *testing.T, s *apitoken.Store, sub identity.Subject, name string, scopes []string, expiresAt time.Time) string {
+func create(t *testing.T, s *apitoken.Store, sub identity.Subject, p apitoken.Personal) string {
 	t.Helper()
-	plain, err := s.Create(context.Background(), sub, name, scopes, expiresAt)
+	plain, err := s.Create(context.Background(), sub, p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +117,9 @@ func TestLoginAndValidate(t *testing.T) {
 		plain := login(t, s, alice, apitoken.Device{IP: "203.0.113.7", UserAgent: ua})
 
 		sub, ok := valid(t, s, plain)
+		// 登录 token 不限制权限，也不携带权限。
 		if !ok || sub.ID != "alice" || sub.Type != identity.SubjectUser || sub.Method != "bearer" ||
-			strings.Join(sub.Scopes, ",") != "articles,comments" || sub.Credential == "" {
+			sub.Scopes != nil || sub.Permissions != nil || sub.Tenant != "" || sub.Credential == "" {
 			t.Fatalf("subject=%+v ok=%v", sub, ok)
 		}
 		for _, bad := range []string{"", "bogus", plain + "x"} {
@@ -193,22 +197,38 @@ func TestCreatePersonal(t *testing.T) {
 		ctx := context.Background()
 		s, c := newStore(t, driver)
 		for name, call := range map[string]func() error{
-			"empty name":    func() error { _, err := s.Create(ctx, alice, " ", nil, time.Time{}); return err },
-			"long name":     func() error { _, err := s.Create(ctx, alice, strings.Repeat("名", 256), nil, time.Time{}); return err },
-			"past expiry":   func() error { _, err := s.Create(ctx, alice, "CI", nil, c.now()); return err },
-			"spaced scope":  func() error { _, err := s.Create(ctx, alice, "CI", []string{"a b"}, time.Time{}); return err },
-			"empty scope":   func() error { _, err := s.Create(ctx, alice, "CI", []string{""}, time.Time{}); return err },
-			"empty subject": func() error { _, err := s.Create(ctx, identity.Subject{}, "CI", nil, time.Time{}); return err },
+			"empty name": func() error { _, err := s.Create(ctx, alice, apitoken.Personal{Name: " ", Scopes: read}); return err },
+			"long name": func() error {
+				_, err := s.Create(ctx, alice, apitoken.Personal{Name: strings.Repeat("名", 256), Scopes: read})
+				return err
+			},
+			"no scopes": func() error { _, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI"}); return err },
+			"past expiry": func() error {
+				_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: read, ExpiresAt: c.now()})
+				return err
+			},
+			"spaced scope": func() error {
+				_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: []string{"a b"}})
+				return err
+			},
+			"empty scope": func() error {
+				_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: []string{""}})
+				return err
+			},
+			"empty subject": func() error {
+				_, err := s.Create(ctx, identity.Subject{}, apitoken.Personal{Name: "CI", Scopes: read})
+				return err
+			},
 		} {
 			if call() == nil {
 				t.Errorf("%s: expected error", name)
 			}
 		}
 
-		forever := create(t, s, alice, "CI 部署", []string{"articles"}, time.Time{})
-		expiring := create(t, s, alice, "报表", nil, c.now().Add(time.Hour))
+		forever := create(t, s, alice, apitoken.Personal{Name: "CI 部署", Scopes: []string{"articles:read", "comments:*"}})
+		expiring := create(t, s, alice, apitoken.Personal{Name: "报表", Scopes: read, ExpiresAt: c.now().Add(time.Hour)})
 		sub, ok := valid(t, s, forever)
-		if !ok || strings.Join(sub.Scopes, ",") != "articles" {
+		if !ok || strings.Join(sub.Scopes, ",") != "articles:read,comments:*" || sub.Permissions != nil {
 			t.Fatalf("subject=%+v ok=%v", sub, ok)
 		}
 		// 个人访问令牌不按空闲时间过期。
@@ -233,7 +253,7 @@ func TestRevoke(t *testing.T) {
 		s, _ := newStore(t, driver)
 		laptop := login(t, s, alice, apitoken.Device{})
 		phone := login(t, s, alice, apitoken.Device{})
-		ci := create(t, s, alice, "CI", nil, time.Time{})
+		ci := create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
 		bobs := login(t, s, bob, apitoken.Device{})
 		state := func(want map[string]bool) {
 			t.Helper()
@@ -276,7 +296,7 @@ func TestRevoke(t *testing.T) {
 		state(map[string]bool{"bob": true})
 
 		laptop = login(t, s, alice, apitoken.Device{})
-		ci = create(t, s, alice, "CI", nil, time.Time{})
+		ci = create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
 		if n, err := s.RevokeSubject(ctx, "alice"); n != 2 || err != nil {
 			t.Fatalf("revoke subject n=%d err=%v", n, err)
 		}
@@ -298,7 +318,7 @@ func TestCleanup(t *testing.T) {
 			login(t, s, alice, apitoken.Device{})
 		}
 		live := login(t, s, alice, apitoken.Device{Remember: true})
-		forever := create(t, s, alice, "CI", nil, time.Time{})
+		forever := create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
 		c.add(2 * time.Hour)
 
 		if _, err := s.Cleanup(ctx, 0); err == nil {
@@ -318,12 +338,37 @@ func TestCleanup(t *testing.T) {
 	})
 }
 
-// TestRequireBearer 确认 Validate 可以直接作为 rest.RequireBearer 的校验器。
+func TestTenantBinding(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		s, _ := newStore(t, driver)
+		customer := identity.Subject{ID: "carol", Type: identity.SubjectUser, Tenant: "acme"}
+		loginToken := login(t, s, customer, apitoken.Device{})
+		personal := create(t, s, alice, apitoken.Personal{Name: "acme 报表", Scopes: read, Tenant: "globex"})
+		if sub, ok := valid(t, s, loginToken); !ok || sub.Tenant != "acme" {
+			t.Fatalf("login token tenant=%q ok=%v", sub.Tenant, ok)
+		}
+		sub, ok := valid(t, s, personal)
+		if !ok || sub.Tenant != "globex" {
+			t.Fatalf("personal token tenant=%q ok=%v", sub.Tenant, ok)
+		}
+		if list, err := s.List(ctx, sub); err != nil || len(list) != 1 || list[0].Tenant != "globex" {
+			t.Fatalf("list=%+v err=%v", list, err)
+		}
+	})
+}
+
+// TestRequireBearer 确认 Validate 可以直接作为 rest.RequireBearer 的校验器：
+// 权限由 Resolve 按用户加载，个人访问令牌的 scope 再加以限制。
 func TestRequireBearer(t *testing.T) {
 	s, _ := newStore(t, sqlite.Driver)
-	api := rest.New(rest.Options{})
+	permissions := map[string][]string{"alice": {"articles:*"}}
+	api := rest.New(rest.Options{Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+		sub.Permissions = permissions[sub.ID]
+		return sub, nil
+	}})
 	op := huma.Operation{OperationID: "me", Method: http.MethodGet, Path: "/me"}
-	rest.RequireBearer(api, s.Validate, "articles")(&op)
+	rest.RequireBearer(api, s.Validate, "articles:read")(&op)
 	type meOut struct {
 		Body struct {
 			ID         string `json:"id"`
@@ -343,13 +388,19 @@ func TestRequireBearer(t *testing.T) {
 		api.Handler().ServeHTTP(rr, req)
 		return rr
 	}
-	if rr := call("bogus"); rr.Code != http.StatusUnauthorized {
-		t.Fatalf("bogus token: %d %s", rr.Code, rr.Body)
-	}
-	if rr := call(login(t, s, bob, apitoken.Device{})); rr.Code != http.StatusForbidden {
-		t.Fatalf("missing scope: %d %s", rr.Code, rr.Body)
-	}
-	if rr := call(login(t, s, alice, apitoken.Device{})); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"id":"alice"`) {
-		t.Fatalf("valid token: %d %s", rr.Code, rr.Body)
+	for name, tc := range map[string]struct {
+		token  string
+		status int
+	}{
+		"bogus token":             {"bogus", http.StatusUnauthorized},
+		"no permission":           {login(t, s, bob, apitoken.Device{}), http.StatusForbidden},
+		"login token":             {login(t, s, alice, apitoken.Device{}), http.StatusOK},
+		"personal within scope":   {create(t, s, alice, apitoken.Personal{Name: "读", Scopes: read}), http.StatusOK},
+		"personal outside scope":  {create(t, s, alice, apitoken.Personal{Name: "评论", Scopes: []string{"comments:read"}}), http.StatusForbidden},
+		"scope beyond permission": {create(t, s, bob, apitoken.Personal{Name: "越权", Scopes: []string{"*"}}), http.StatusForbidden},
+	} {
+		if rr := call(tc.token); rr.Code != tc.status {
+			t.Errorf("%s: %d %s", name, rr.Code, rr.Body)
+		}
 	}
 }

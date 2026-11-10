@@ -63,10 +63,10 @@ func docAPI(opts rest.Options, register func(api *rest.API)) *rest.API {
 }
 
 func access(route httpx.Route) string {
-	if len(route.Scopes) == 0 {
+	if len(route.Permissions) == 0 {
 		return route.Access
 	}
-	return route.Access + ": " + strings.Join(route.Scopes, ", ")
+	return route.Access + ": " + strings.Join(route.Permissions, ", ")
 }
 
 // cell 把换行、制表符等空白合并为单个空格，保持每行一条记录。

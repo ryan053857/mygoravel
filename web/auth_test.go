@@ -33,7 +33,7 @@ func authServer(t *testing.T, store scs.Store, configure ...func(*web.Options)) 
 	public.Post("/login", func(w http.ResponseWriter, r *http.Request) error {
 		sub := identity.Subject{ID: r.FormValue("user"), Type: identity.SubjectUser}
 		if sub.ID == "root" {
-			sub.Scopes = []string{"admin"}
+			sub.Permissions = []string{"admin"}
 		}
 		if err := pages.Login(r.Context(), sub); err != nil {
 			return err
@@ -109,13 +109,13 @@ func TestRequire(t *testing.T) {
 func TestRequireResolve(t *testing.T) {
 	var (
 		mu       sync.Mutex
-		scopes   []string
+		perms    []string
 		disabled bool
 		down     bool
 	)
 	set := func(f func()) { mu.Lock(); f(); mu.Unlock() }
 	// resolve 模拟每次请求查询用户的当前权限和状态，返回的主体不带 Method。
-	resolve := func(_ *http.Request, stored identity.Subject) (identity.Subject, error) {
+	resolve := func(_ context.Context, stored identity.Subject) (identity.Subject, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
@@ -124,7 +124,7 @@ func TestRequireResolve(t *testing.T) {
 		case disabled:
 			return identity.Subject{}, errorx.Define(errorx.Unauthenticated, "users.disabled").New()
 		}
-		return identity.Subject{ID: stored.ID, Type: stored.Type, Scopes: scopes}, nil
+		return identity.Subject{ID: stored.ID, Type: stored.Type, Permissions: perms}, nil
 	}
 	srv := authServer(t, memstore.New(), func(o *web.Options) { o.Resolve = resolve })
 	c := noFollow(t)
@@ -142,7 +142,7 @@ func TestRequireResolve(t *testing.T) {
 		t.Fatalf("before grant: %d", resp.StatusCode)
 	}
 	// 授权后不需要重新登录。
-	set(func() { scopes = []string{"admin"} })
+	set(func() { perms = []string{"admin"} })
 	if resp, body := get(t, c, srv.URL+"/admin"); resp.StatusCode != 200 || body != "alice via session" {
 		t.Fatalf("after grant: %d %q", resp.StatusCode, body)
 	}
@@ -219,4 +219,67 @@ func TestTrustedOrigins(t *testing.T) {
 	}()
 	o.TrustedOrigins = []string{"not a url"}
 	web.New(o)
+}
+
+func TestTenantPages(t *testing.T) {
+	members := map[string]map[string][]string{"acme": {"alice": {"articles:*"}}, "globex": {"carol": {"articles:*"}}}
+	o := options()
+	o.Tenant = func(r *http.Request) string { return chi.URLParam(r, "tenant") }
+	o.Resolve = func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+		tenant := identity.TenantFromContext(ctx)
+		perms, ok := members[tenant][sub.ID]
+		if !ok {
+			return identity.Subject{}, errorx.Define(errorx.NotFound, "tenant.not_found").New()
+		}
+		sub.Tenant, sub.Permissions = tenant, perms
+		return sub, nil
+	}
+	pages := web.New(o)
+	router := chi.NewRouter()
+	show := func(w http.ResponseWriter, r *http.Request) error {
+		sub, _ := identity.FromContext(r.Context())
+		fmt.Fprintf(w, "%s@%s in %s", sub.ID, sub.Tenant, identity.TenantFromContext(r.Context()))
+		return nil
+	}
+	public := pages.Routes(router, web.Public)
+	// 登录时可以把会话绑定到一个租户，例如只属于该租户的终端客户账号。
+	public.Post("/login", func(w http.ResponseWriter, r *http.Request) error {
+		return pages.Login(r.Context(), identity.Subject{ID: r.FormValue("user"), Tenant: r.FormValue("tenant")})
+	})
+	public.Get("/t/{tenant}/about", show)
+	pages.Routes(router, web.Require("articles:read")).Get("/t/{tenant}/dash", show)
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	login := func(form map[string][]string) *http.Client {
+		c := noFollow(t)
+		resp, err := c.PostForm(srv.URL+"/login", form)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return c
+	}
+
+	alice := login(map[string][]string{"user": {"alice"}})
+	if resp, body := get(t, alice, srv.URL+"/t/acme/dash"); resp.StatusCode != 200 || body != "alice@acme in acme" {
+		t.Fatalf("member: %d %q", resp.StatusCode, body)
+	}
+	// 不是成员时呈现 404，但不登出。
+	if resp, body := get(t, alice, srv.URL+"/t/globex/dash"); resp.StatusCode != 404 || !strings.HasPrefix(body, "page 404") {
+		t.Fatalf("not a member: %d %q", resp.StatusCode, body)
+	}
+	if resp, _ := get(t, alice, srv.URL+"/t/acme/dash"); resp.StatusCode != 200 {
+		t.Fatalf("logged out after 404: %d", resp.StatusCode)
+	}
+	if resp, body := get(t, noFollow(t), srv.URL+"/t/acme/about"); resp.StatusCode != 200 || body != "@ in acme" {
+		t.Fatalf("public: %d %q", resp.StatusCode, body)
+	}
+
+	carol := login(map[string][]string{"user": {"carol"}, "tenant": {"globex"}})
+	if resp, body := get(t, carol, srv.URL+"/t/acme/dash"); resp.StatusCode != 403 || !strings.HasPrefix(body, "page 403") {
+		t.Fatalf("session bound to globex: %d %q", resp.StatusCode, body)
+	}
+	if resp, _ := get(t, carol, srv.URL+"/t/globex/dash"); resp.StatusCode != 200 {
+		t.Fatalf("bound session in own tenant: %d", resp.StatusCode)
+	}
 }

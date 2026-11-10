@@ -50,8 +50,9 @@ type Device struct {
 type Token struct {
 	ID         string
 	Kind       Kind
-	Name       string // 个人访问令牌的名称；登录 token 为空
-	Scopes     []string
+	Name       string   // 个人访问令牌的名称；登录 token 为空
+	Scopes     []string // 个人访问令牌的权限限制；登录 token 为空
+	Tenant     string   // token 绑定的租户；"" 表示不绑定
 	IP         string
 	UserAgent  string
 	CreatedAt  time.Time
@@ -86,6 +87,7 @@ type row struct {
 	TokenHash   string    `bun:"token_hash,notnull"`
 	SubjectID   string    `bun:"subject_id,notnull"`
 	SubjectType string    `bun:"subject_type,notnull"`
+	Tenant      string    `bun:"tenant,notnull"`
 	Kind        Kind      `bun:"kind,notnull"`
 	Name        string    `bun:"name,notnull"`
 	Scopes      string    `bun:"scopes,notnull"`
@@ -108,43 +110,60 @@ func NewStore(db bun.IDB, cfg Config) *Store {
 	return &Store{db: db, cfg: cfg, now: time.Now}
 }
 
-// Login 为 sub 签发登录 token，返回 token 明文，明文只在这里返回一次。
-// token 的 scope 是 sub 的 scope，有效期按 Config 滑动。
+// Login 为 sub 签发登录 token，返回 token 明文，明文只在这里返回一次。有效期按 Config 滑动。
+//
+// 登录 token 代表用户本人，不限制权限：校验得到的主体 Scopes 为 nil，权限由 Resolve 按用户当前的角色加载。
+// sub.Tenant 不为空时，token 只能在这个租户中使用，例如只属于某个租户的终端客户账号。
 func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (string, error) {
 	now := s.now().UTC()
 	r := &row{
 		Kind:      KindLogin,
+		Tenant:    sub.Tenant,
 		Remember:  d.Remember,
 		IP:        d.IP,
 		UserAgent: truncate(d.UserAgent, maxUserAgent),
 		ExpiresAt: s.cfg.deadline(now, now, d.Remember),
 	}
-	return s.issue(ctx, sub, sub.Scopes, r, now)
+	return s.issue(ctx, sub, r, now)
+}
+
+// Personal 描述一个个人访问令牌。
+type Personal struct {
+	// Name 用于在令牌列表中辨认，长度为 1 到 255 个字符。
+	Name string
+	// Scopes 是令牌被限制在内的权限，至少一个，支持通配符（见 identity.Subject.Can）。
+	// 令牌实际能做的是用户当前权限与 Scopes 的交集，用户被收回权限后令牌随之收窄。
+	Scopes []string
+	// Tenant 不为空时，令牌只能在这个租户中使用。
+	Tenant string
+	// ExpiresAt 为零值表示不过期，否则必须晚于当前时间。
+	ExpiresAt time.Time
 }
 
 // Create 为 sub 创建个人访问令牌，返回 token 明文，明文只在这里返回一次。
-// name 用于在令牌列表中辨认，长度为 1 到 255 个字符；expiresAt 为零值表示不过期，否则必须晚于当前时间。
-// scopes 由调用方决定，通常应当是 sub 已有 scope 的子集。
-func (s *Store) Create(ctx context.Context, sub identity.Subject, name string, scopes []string, expiresAt time.Time) (string, error) {
+func (s *Store) Create(ctx context.Context, sub identity.Subject, p Personal) (string, error) {
 	now := s.now().UTC()
-	name = strings.TrimSpace(name)
+	name := strings.TrimSpace(p.Name)
 	if name == "" || len([]rune(name)) > maxName {
 		return "", errors.Newf("apitoken: name must be 1 to %d characters", maxName)
 	}
-	if !expiresAt.IsZero() && !expiresAt.After(now) {
-		return "", errors.New("apitoken: expiresAt must be in the future")
+	if len(p.Scopes) == 0 {
+		return "", errors.New("apitoken: a personal access token needs at least one scope")
 	}
-	r := &row{Kind: KindPersonal, Name: name, ExpiresAt: expiresAt.UTC()}
-	return s.issue(ctx, sub, scopes, r, now)
-}
-
-func (s *Store) issue(ctx context.Context, sub identity.Subject, scopes []string, r *row, now time.Time) (string, error) {
-	if sub.ID == "" {
-		return "", errors.New("apitoken: subject ID is required")
+	if !p.ExpiresAt.IsZero() && !p.ExpiresAt.After(now) {
+		return "", errors.New("apitoken: ExpiresAt must be in the future")
 	}
-	joined, err := joinScopes(scopes)
+	joined, err := joinScopes(p.Scopes)
 	if err != nil {
 		return "", err
+	}
+	r := &row{Kind: KindPersonal, Name: name, Scopes: joined, Tenant: p.Tenant, ExpiresAt: p.ExpiresAt.UTC()}
+	return s.issue(ctx, sub, r, now)
+}
+
+func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now time.Time) (string, error) {
+	if sub.ID == "" {
+		return "", errors.New("apitoken: subject ID is required")
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -156,7 +175,7 @@ func (s *Store) issue(ctx context.Context, sub identity.Subject, scopes []string
 	}
 	plain := base64.RawURLEncoding.EncodeToString(b)
 	r.ID, r.TokenHash = id, hash(plain)
-	r.SubjectID, r.SubjectType, r.Scopes = sub.ID, string(sub.Type), joined
+	r.SubjectID, r.SubjectType = sub.ID, string(sub.Type)
 	r.CreatedAt, r.LastUsedAt = now, now
 	if _, err := s.db.NewInsert().Model(r).Exec(ctx); err != nil {
 		return "", errors.Wrap(err, "apitoken: insert")
@@ -164,8 +183,9 @@ func (s *Store) issue(ctx context.Context, sub identity.Subject, scopes []string
 	return plain, nil
 }
 
-// Validate 实现 rest.TokenValidator：返回 token 代表的主体，Method 为 bearer，Credential 为 token 的 ID。
-// token 不存在、已撤销或已过期时返回 ErrInvalid。
+// Validate 实现 rest.TokenValidator：返回 token 代表的主体，Method 为 bearer，Credential 为 token 的 ID，
+// Tenant 为 token 绑定的租户。登录 token 的 Scopes 为 nil，个人访问令牌的 Scopes 是创建时的限制；
+// 两者的 Permissions 都为空，由 Resolve 加载。token 不存在、已撤销或已过期时返回 ErrInvalid。
 //
 // 距上次记录使用超过一分钟时，更新最近使用时间，并延长登录 token 的有效期。
 func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, error) {
@@ -186,13 +206,17 @@ func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, e
 			return identity.Subject{}, err
 		}
 	}
-	return identity.Subject{
+	sub := identity.Subject{
 		ID:         r.SubjectID,
 		Type:       identity.SubjectType(r.SubjectType),
 		Method:     "bearer",
-		Scopes:     strings.Fields(r.Scopes),
 		Credential: r.ID.String(),
-	}, nil
+		Tenant:     r.Tenant,
+	}
+	if r.Kind == KindPersonal {
+		sub.Scopes = strings.Fields(r.Scopes)
+	}
+	return sub, nil
 }
 
 // touch 记录 token 在 now 被使用。条件更新保证并发请求中只有一个真正写入。
@@ -221,6 +245,7 @@ func (s *Store) List(ctx context.Context, sub identity.Subject) ([]Token, error)
 			Kind:       r.Kind,
 			Name:       r.Name,
 			Scopes:     strings.Fields(r.Scopes),
+			Tenant:     r.Tenant,
 			IP:         r.IP,
 			UserAgent:  r.UserAgent,
 			CreatedAt:  r.CreatedAt,

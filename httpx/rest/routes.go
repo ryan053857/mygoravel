@@ -59,8 +59,8 @@ func (rt *route) DescribeRoute() httpx.Route {
 	if rt.docs && rt.op.OperationID == "" {
 		return httpx.Route{Access: httpx.AccessDocs}
 	}
-	access, scopes := routeAccess(rt.op)
-	return httpx.Route{Access: access, Scopes: scopes, OperationID: rt.op.OperationID, Summary: rt.op.Summary}
+	access, permissions := routeAccess(rt.op)
+	return httpx.Route{Access: access, Permissions: permissions, OperationID: rt.op.OperationID, Summary: rt.op.Summary}
 }
 
 func routeAccess(op *huma.Operation) (string, []string) {
@@ -71,8 +71,8 @@ func routeAccess(op *huma.Operation) (string, []string) {
 		return httpx.AccessPublic, nil
 	}
 	if name := authScheme(op); name != "" {
-		scopes, _ := op.Extensions["x-required-scopes"].([]string)
-		return name, slices.Clone(scopes)
+		permissions, _ := op.Extensions["x-required-permissions"].([]string)
+		return name, slices.Clone(permissions)
 	}
 	return httpx.AccessUnknown, nil
 }

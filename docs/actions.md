@@ -135,7 +135,7 @@ func find(ctx context.Context, db bun.IDB, id uuid.UUID) (*Article, error) {
 }
 
 func canEdit(subject identity.Subject, item *Article) bool {
-    return subject.HasScope("articles:admin") || item.AuthorID == subject.ID
+    return subject.Can("articles:admin") || item.AuthorID == subject.ID
 }
 ```
 

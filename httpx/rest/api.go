@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/logging"
 )
 
@@ -25,9 +27,10 @@ const (
 // API 包装 huma.API，携带模式与实例级策略。
 type API struct {
 	huma.API
-	mode   Mode
-	router chi.Router
-	logger *slog.Logger
+	mode    Mode
+	router  chi.Router
+	logger  *slog.Logger
+	resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
 }
 
 // Options 创建 API。
@@ -45,6 +48,14 @@ type Options struct {
 	// Router 可选；nil 时使用 chi.NewRouter()。
 	// New 不安装任何中间件：在传入前用 Router.Use 安装，例如 httpx.Defaults。
 	Router chi.Router
+	// Tenant 从请求中取出本次请求所在的租户，例如路径参数 ctx.Param("tenant")、子域名或请求头；
+	// 结果在每个操作（包括公开的操作）开始时写入 identity.WithTenant。nil 表示始终是平台本身（""）。
+	Tenant func(ctx huma.Context) string
+	// Resolve 在认证通过后把凭据给出的主体转换为本次请求的主体，例如按 identity.TenantFromContext
+	// 加载用户在租户中的权限；nil 时直接使用凭据给出的主体。
+	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体时响应 401，其他 4xx 类错误按其分类响应，
+	// 例如不是租户成员时返回 errorx.NotFound 得到 404；5xx 类错误响应对应的状态码。
+	Resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
 }
 
 // New 创建 chi + Huma API，并让未匹配的路由与方法返回 Problem Details。
@@ -77,7 +88,12 @@ func New(opts Options) *API {
 		cfg.OpenAPI.Servers = []*huma.Server{{URL: opts.BasePath}}
 	}
 	h := huma.NewAPI(cfg, newAdapter(r, docRoutes(cfg)))
-	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger}
+	if tenant := opts.Tenant; tenant != nil {
+		h.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
+			next(huma.WithContext(ctx, identity.WithTenant(ctx.Context(), tenant(ctx))))
+		})
+	}
+	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, resolve: opts.Resolve}
 }
 
 // Mode 返回当前模式。

@@ -1,8 +1,8 @@
 # 授权
 
 - [简介](#introduction)
-- [路由级授权：Scope](#scopes)
-    - [在代码中检查 Scope](#checking-scopes)
+- [路由级授权：权限](#scopes)
+    - [在代码中检查权限](#checking-scopes)
 - [资源级授权：所有权](#ownership)
     - [编写授权函数](#authorization-functions)
     - [在事务中检查](#checking-in-transactions)
@@ -16,24 +16,24 @@
 
 在 mygoravel 中，授权分为两个层次：
 
-- **路由级授权**：调用者是否具备访问这一类接口的权限，例如“可以使用文章接口”。它通过 scope 声明在路由上，由框架在调用处理器之前检查；
+- **路由级授权**：调用者是否具备访问这一类接口的权限，例如“可以使用文章接口”。它通过权限声明在路由上，由框架在调用处理器之前检查；
 - **资源级授权**：调用者能否操作某一个具体的资源，例如“只能修改自己的文章”。它依赖具体的数据，由 [action](actions.md) 的 `Handle` 检查。
 
 两个层次缺一不可：路由级授权挡住了明显不该访问的请求，资源级授权则保证每一条数据都只被正确的人访问。
 
 <a id="scopes"></a>
-## 路由级授权：Scope
+## 路由级授权：权限
 
-Scope 是一个简单的字符串，表示一类访问权限。在 `rest.RequireBearer` 中列出路由需要的 scope：
+权限是一个简单的字符串，表示一类操作。在 `rest.RequireBearer` 中列出路由需要的权限：
 
 ```go
 requireArticles := rest.RequireBearer(api, validateToken, "articles")
 requireArticles(&op)
 ```
 
-校验器返回的主体必须在 `Scopes` 中包含 `articles`，否则请求会以 `403` 被拒绝。传入多个 scope 时，调用者必须全部具备。
+主体的 `Can("articles")` 必须为 `true`，否则请求会以 `403` 被拒绝。传入多个权限时，调用者必须全部具备。页面用 `web.Require` 声明，规则相同。主体的权限从哪里来、个人令牌如何进一步限制，见[认证](authentication.md#key-concepts)。
 
-Scope 的命名由你决定。常见的做法是按资源和操作划分，例如 `articles:read`、`articles:write`：
+权限的命名由你决定。常见的做法是按资源和操作划分，例如 `articles:read`、`articles:write`：
 
 ```go
 requireRead := rest.RequireBearer(api, validateToken, "articles:read")
@@ -41,12 +41,12 @@ requireWrite := rest.RequireBearer(api, validateToken, "articles:write")
 ```
 
 <a id="checking-scopes"></a>
-### 在代码中检查 Scope
+### 在代码中检查权限
 
-有时同一个接口需要根据权限返回不同的内容，这时可以在 `Handle` 中使用 `Subject.HasScope`：
+有时同一个接口需要根据权限返回不同的内容，这时可以在 `Handle` 中使用 `Subject.Can`：
 
 ```go
-if subject.HasScope("articles:admin") {
+if subject.Can("articles:admin") {
     // 管理员可以看到所有作者的草稿
 }
 ```
@@ -54,7 +54,7 @@ if subject.HasScope("articles:admin") {
 <a id="ownership"></a>
 ## 资源级授权：所有权
 
-具备 `articles` scope 只说明调用者可以使用文章接口，并不意味着他可以读取任意一篇文章。已发布的文章所有人都能看，但草稿只有作者本人能看。“获取文章”的 `Get` action 需要根据当前的主体检查：
+具备 `articles` 权限只说明调用者可以使用文章接口，并不意味着他可以读取任意一篇文章。已发布的文章所有人都能看，但草稿只有作者本人能看。“获取文章”的 `Get` action 需要根据当前的主体检查：
 
 ```go
 var (
@@ -91,7 +91,7 @@ func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID
 
 ```go
 func canEdit(subject identity.Subject, item *Article) bool {
-    if subject.HasScope("articles:admin") {
+    if subject.Can("articles:admin") {
         return true
     }
     return item.AuthorID == subject.ID
@@ -155,7 +155,7 @@ var ErrAlreadyPublished = errorx.Define(errorx.Conflict, "article.already_publis
 <a id="authorization-failures"></a>
 ## 授权失败的响应
 
-- 缺少路由所需的 scope 时，框架返回 `403`，错误码为 `auth.forbidden`；
+- 缺少路由所需的权限时，框架返回 `403`，错误码为 `auth.forbidden`；
 - action 返回 `errorx.PermissionDenied` 分类的错误时，返回 `403`，错误码为你定义的业务错误码，例如 `article.forbidden`。
 
 两者都使用统一的[错误响应格式](errors.md#response-format)。

@@ -8,8 +8,8 @@ import (
 )
 
 type User struct {
-	ID     string
-	Scopes []string
+	ID          string
+	Permissions []string
 }
 
 // ExternalAccount 是第三方返回的账号信息。
