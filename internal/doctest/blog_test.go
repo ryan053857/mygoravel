@@ -26,6 +26,9 @@ var blogFiles = []docFile{
 	{"internal/bootstrap/http.go", "dependencies.md"},
 	{"internal/bootstrap/worker.go", "queue.md"},
 	{"internal/bootstrap/scheduler.go", "scheduling.md"},
+	{"internal/auth/social/social.go", "social-login.md"},
+	{"internal/auth/authweb/social.go", "social-login.md"},
+	{"internal/auth/authhttp/social.go", "social-login.md"},
 }
 
 // blogFragments 是文档中没有 package 和 import 的片段，补上它们后作为文件编译。

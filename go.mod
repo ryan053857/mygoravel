@@ -13,11 +13,13 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.6
 	github.com/aws/smithy-go v1.28.8
 	github.com/cockroachdb/errors v1.14.0
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/danielgtaylor/huma/v2 v2.40.0
 	github.com/eko/gocache/lib/v4 v4.2.0
 	github.com/eko/gocache/store/go_cache/v4 v4.2.2
 	github.com/eko/gocache/store/redis/v4 v4.2.2
 	github.com/go-chi/chi/v5 v5.5.0
+	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.6.0
@@ -41,6 +43,7 @@ require (
 	github.com/wneessen/go-mail v0.8.2
 	go.yaml.in/yaml/v4 v4.0.0
 	golang.org/x/crypto v0.58.0
+	golang.org/x/oauth2 v0.38.0
 	golang.org/x/term v0.48.0
 	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.62.0

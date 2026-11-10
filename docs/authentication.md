@@ -234,4 +234,4 @@ func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleO
 
 上面把 token 写在配置文件中的做法适合内部服务或少量固定的调用方。面向用户的 API 使用 [API 令牌](api-tokens.md)：单页应用和 App 登录后得到一个滑动过期的 token，用户也可以为脚本创建个人访问令牌，`Store.Validate` 直接作为校验器使用。
 
-使用外部认证服务签发的 JWT 时，在校验器中用成熟的库验证签名、签发者和有效期，再把结果转换为 `identity.Subject`。无论采用哪种凭据，路由和业务代码都不需要改变。用户注册、找回密码等功能由应用自己实现。
+使用外部认证服务签发的 JWT 时，在校验器中用成熟的库验证签名、签发者和有效期，再把结果转换为 `identity.Subject`。无论采用哪种凭据，路由和业务代码都不需要改变。用 GitHub、Google 等账号登录见[第三方登录](social-login.md)；用户注册、找回密码等功能由应用自己实现。
