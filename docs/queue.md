@@ -13,6 +13,7 @@
 - [日志](#logging)
 - [测试](#testing)
 - [使用 Redis](#redis-driver)
+- [使用 NATS](#nats-driver)
 - [使用 Watermill](#using-watermill)
 
 <a id="introduction"></a>
@@ -284,6 +285,32 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 - **持久性取决于 Redis 的配置。** 只开启 RDB 快照时，Redis 重启会丢失最近一次快照之后发布的任务；需要可靠的队列时开启 AOF（`appendonly yes`）。主从切换同样可能丢失刚写入的任务。
 
 每个 topic 在 Redis 中有四个键，键名以 `blog:queue:{mail.send}:` 开头，花括号让同一个 topic 的键落在同一个集群槽位，因此也可以使用 Redis 集群。任务完成后对应的记录都会删除，不需要清理。租约和延迟按 Redis 服务端的时钟计算，不受各实例时钟偏差影响。
+
+<a id="nats-driver"></a>
+## 使用 NATS
+
+已经在使用 [NATS](https://nats.io) 时，也可以把任务放进 JetStream。`natsqueue.New` 接收应用创建的连接和一个流名：
+
+```go
+import "github.com/ryan053857/mygoravel/queue/natsqueue"
+
+jobs := natsqueue.New(nc, "BLOG_QUEUE")
+
+err := queue.Publish(ctx, jobs, "mail.send", msg)
+
+failed := queue.NewFailedJobs(a.db, jobs)
+sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
+```
+
+服务器需要 NATS 2.12 或更高版本并开启 JetStream（`nats-server -js`），延迟任务使用服务器的定时消息；版本过低时发布和领取任务都会返回错误。驱动在第一次使用时创建名为 `BLOG_QUEUE` 的流，任务确认后即从流中删除；集群部署时用 `natsqueue.Replicas(3)` 设置副本数。每个 topic 对应一个持久消费者，没有任务时拉取请求在服务器上等待，任务到达后立即被领取，不受 `poll_interval` 影响。
+
+和 [Redis](#redis-driver) 一样，NATS 不能在数据库事务中发布，失败任务需要用 `WithFailedJobs` 写入数据库。此外还有几处不同：
+
+- **延迟的精度是秒。** 延迟任务向上取整到秒，最多晚 1 秒执行，不会提前。
+- **租约在启动时确定。** 租约就是消费者的确认等待时间，取自进程启动后第一次领取时的 `lease`，修改配置后重启生效。
+- **租约过期后不能阻止旧的确认。** 一个 worker 与 NATS 失联超过租约、任务被重新投递后，原来的 worker 仍然可以确认它。处理函数本来就需要能重复执行，这通常没有影响。
+- **停止超时释放的任务计入一次执行。** NATS 的投递次数不能回退。
+- **不检查重复的任务 ID。**
 
 <a id="using-watermill"></a>
 ## 使用 Watermill
