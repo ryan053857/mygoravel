@@ -31,7 +31,6 @@ logs:
   level: ${LOG_LEVEL:-info}
 
 database:
-  driver: postgres
   dsn: ${DATABASE_URL}
   max_open_conns: 20
 ```

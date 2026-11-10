@@ -10,6 +10,8 @@
 - [平滑停止](#graceful-shutdown)
 - [反向代理与网络](#reverse-proxies)
 - [日志](#logging)
+- [使用 SQLite 部署](#sqlite)
+    - [备份](#sqlite-backups)
 - [升级依赖](#upgrading)
 
 <a id="introduction"></a>
@@ -26,7 +28,7 @@ Go 应用会被编译成一个独立的二进制文件。对于根目录包含 `
 go build -trimpath -o bin/api .
 ```
 
-如果入口位于 `cmd/api`，则把构建目标改为 `./cmd/api`。`-trimpath` 会去掉二进制中的本地路径信息。
+如果入口位于 `cmd/api`，则把构建目标改为 `./cmd/api`。`-trimpath` 会去掉二进制中的本地路径信息。PostgreSQL 和 SQLite 的驱动都是纯 Go 实现，可以用 `CGO_ENABLED=0` 构建不依赖系统库的静态二进制。
 
 由于迁移文件和翻译文件都已通过 `embed` 嵌入，部署时只需要这一个二进制文件和 `config` 目录。请将 `go.mod` 和 `go.sum` 提交到版本库，并记录每次构建对应的提交，以便出现问题时准确定位版本。
 
@@ -63,7 +65,7 @@ CONFIG=--config=config/app.yaml,config/prod.yaml
 ./bin/api migrate up $CONFIG
 ```
 
-迁移器使用数据库锁，即使多个部署任务同时执行迁移，也只会串行运行。迁移成功后，再启动依赖新表结构的服务。滚动发布期间，新旧版本会同时运行，请确保数据库变更对两个版本都兼容，见[零停机变更](migrations.md#zero-downtime-changes)。
+在 PostgreSQL 上，迁移器使用数据库锁，即使多个部署任务同时执行迁移，也只会串行运行。迁移成功后，再启动依赖新表结构的服务。滚动发布期间，新旧版本会同时运行，请确保数据库变更对两个版本都兼容，见[零停机变更](migrations.md#zero-downtime-changes)。
 
 <a id="starting-the-server"></a>
 ### 启动服务
@@ -115,6 +117,28 @@ logs:
 ```
 
 排查问题时，可以使用响应头 `X-Request-ID` 中的请求 ID，在日志中找到同一请求的访问日志和错误诊断。详见[日志](logging.md)。
+
+<a id="sqlite"></a>
+## 使用 SQLite 部署
+
+使用 [SQLite](database.md#sqlite) 时，数据库就是服务器上的一个文件，部署方式与 PostgreSQL 有几处不同：
+
+- **只运行一个实例。** 多台机器无法共享同一个数据库文件。同一台机器上的多个进程可以同时打开它，因此滚动发布时先启动新进程、再停止旧进程是安全的；在 Kubernetes 中请使用 `replicas: 1` 和 `Recreate` 策略，避免数据卷同时挂载到两个节点。
+- **把数据库目录放在持久化存储上。** SQLite 在数据库文件旁边维护 `app.db-wal` 和 `app.db-shm` 两个文件，它们和 `app.db` 必须在同一目录，请挂载整个目录，而不是单个文件。不要使用 NFS 等网络文件系统，它们上面的文件锁不可靠。
+- **迁移不加锁。** 请在同一个部署任务中先执行 `migrate up`，再启动服务，不要让多个任务同时执行迁移。
+
+需要运行多个实例，或者写入量超过单机承受能力时，请改用 PostgreSQL。
+
+<a id="sqlite-backups"></a>
+### 备份
+
+不要直接复制正在使用的数据库文件：此时部分数据可能还在 `-wal` 文件中，复制出来的文件可能不完整。请用 `VACUUM INTO` 生成一份一致的快照，它不会阻塞读写：
+
+```bash
+sqlite3 storage/app.db "VACUUM INTO '/backups/app-$(date +%F).db'"
+```
+
+应用的二进制中已经包含 SQLite，服务器上没有 `sqlite3` 命令时，可以把同一条语句写成应用的[自定义命令](commands.md#custom-commands)，用 `db.ExecContext(ctx, "VACUUM INTO ?", path)` 执行。需要持续备份时，可以使用 [Litestream](https://litestream.io) 把数据库实时复制到对象存储。
 
 <a id="upgrading"></a>
 ## 升级依赖

@@ -28,8 +28,9 @@ var dependencies = map[string][]string{
 	"web":        {"errorx", "httpx", "i18n", "identity", "logging", "session"},
 	"lock":       {},
 	"hashing":    {},
+	"queue":      {"logging"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "web"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
@@ -44,7 +45,7 @@ var infrastructure = []string{
 
 // 后期应用形态使用的组件，当前 module 保持 HTTP API 依赖范围。
 var laterFormModules = []string{
-	"github.com/ThreeDotsLabs/watermill", "github.com/go-co-op/gocron",
+	"github.com/go-co-op/gocron",
 	"github.com/gorilla/websocket", "google.golang.org/grpc",
 	"github.com/xuri/excelize",
 }
@@ -235,6 +236,31 @@ func TestCommandCoreIsLight(t *testing.T) {
 		for _, heavy := range []string{module + "/httpx", module + "/database", "github.com/danielgtaylor/huma", "github.com/jackc/pgx", "github.com/pressly/goose"} {
 			if under(dep, heavy) {
 				t.Errorf("command depends on %s", dep)
+			}
+		}
+	}
+}
+
+// TestDatabaseCoreDoesNotLinkDrivers 确保应用只链接自己 import 的数据库驱动：
+// 核心包、迁移与迁移命令都不依赖 pgx 或 SQLite，两个驱动子包也互不依赖。
+func TestDatabaseCoreDoesNotLinkDrivers(t *testing.T) {
+	pgx, sqlite := []string{"github.com/jackc/pgx"}, []string{"modernc.org/sqlite"}
+	for pkg, forbidden := range map[string][]string{
+		module + "/database":           append(pgx, sqlite...),
+		module + "/database/migrate":   append(pgx, sqlite...),
+		module + "/command/migratecmd": append(pgx, sqlite...),
+		module + "/database/postgres":  sqlite,
+		module + "/database/sqlite":    pgx,
+	} {
+		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			for _, driver := range forbidden {
+				if under(dep, driver) {
+					t.Errorf("%s depends on %s", pkg, dep)
+				}
 			}
 		}
 	}

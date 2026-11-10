@@ -126,7 +126,7 @@ attempts := ratelimit.NewDatabase(db, "login", ratelimit.Config{Rate: 5, Interva
 使用前先发布 `rate_limits` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "ratelimit", FS: ratelimit.Migrations()},
 ))
 ```
@@ -147,7 +147,7 @@ n, err := attempts.Cleanup(ctx, 1000)
 清理作用于整张表，不限于调用者的 `name`，用任意一个数据库限流器调用即可。`Cleanup` 可以反复执行，多个实例同时执行也是安全的。
 
 > [!NOTE]
-> 异步队列功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每小时一次。
+> 定时任务功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每小时一次。
 
 <a id="redis-limiter"></a>
 ## 使用 Redis 存储

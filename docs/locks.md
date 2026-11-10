@@ -17,7 +17,7 @@
 
 `lock` 包提供带过期时间的锁：取得锁后在有效期内独占，持有者崩溃时锁到期自动失效，不会永远卡住。
 
-锁只负责「谁来执行」。并发修改同一行数据时，应优先使用带条件的更新或 `SELECT ... FOR UPDATE`，由数据库保证一致，不需要原子锁。
+锁只负责「谁来执行」。并发修改同一行数据时，应优先使用带条件的更新或 `SELECT ... FOR UPDATE`（SQLite 的写事务本身就是串行的），由数据库保证一致，不需要原子锁。
 
 本章为博客应用实现定时发布：每个实例每分钟检查一次到期的定时文章并发布，用锁保证只有一个实例真正执行。
 
@@ -119,7 +119,7 @@ locker := lock.New(lock.NewDBStore(db))
 使用前先发布 `locks` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "lock", FS: lock.Migrations()},
 ))
 ```
@@ -136,7 +136,7 @@ n, err := store.Cleanup(ctx, 1000)
 ```
 
 > [!NOTE]
-> 异步队列功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每天一次。
+> 定时任务功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每天一次。
 
 <a id="redis-store"></a>
 ## 使用 Redis 存储

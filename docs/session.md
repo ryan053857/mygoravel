@@ -5,6 +5,7 @@
 - [装配会话](#assembling-sessions)
 - [读写会话数据](#session-data)
 - [使用数据库存储](#database-store)
+    - [撤销会话](#revoking-sessions)
     - [过期清理](#cleanup)
 - [使用 Redis 存储](#redis-store)
 - [跨站请求伪造](#csrf)
@@ -79,19 +80,6 @@ lastID := sessions.GetString(ctx, "admin.last_article")
 
 `ctx` 是处理器收到的 context。`Get`、`Pop`、`Remove`、`RememberMe`、`Iterate` 等方法的说明见 [scs 文档](https://github.com/alexedwards/scs#usage)。存放自定义类型时，scs 使用 gob 编码，需要先调用 `gob.Register`。
 
-例如，管理员撤销某个用户的权限后，销毁该用户的全部会话。`session.Subject` 读取[登录](views.md#login)时保存的主体：
-
-```go
-err := sessions.Iterate(ctx, func(ctx context.Context) error {
-    if sub, ok := session.Subject(ctx, sessions); ok && sub.ID == userID {
-        return sessions.Destroy(ctx)
-    }
-    return nil
-})
-```
-
-`Iterate` 会逐个加载全部未过期的会话，适合偶尔执行的管理操作。
-
 <a id="database-store"></a>
 ## 使用数据库存储
 
@@ -105,17 +93,38 @@ sessions := session.New(cfg.Session, store)
 使用前先发布 `sessions` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "session", FS: session.Migrations()},
 ))
 ```
 
-表中每行是一个会话：`token` 是主键，`data` 是 scs 编码后的会话数据，`expiry` 是过期时间。
+表中每行是一个会话：`token` 是主键，`subject_id` 是[登录](views.md#login)的主体 ID（未登录时为空），`data` 是 scs 编码后的会话数据，`expiry` 是过期时间，`revoked_at` 是撤销时间。
+
+<a id="revoking-sessions"></a>
+### 撤销会话
+
+用户在多处登录后，可以在“账号安全”页面退出其他设备。`RevokeOthers` 撤销当前登录主体除本会话以外的全部会话，返回撤销的个数：
+
+```go
+n, err := store.RevokeOthers(ctx, sessions)
+```
+
+`ctx` 是处理器收到的 context，路由需要用 [`pages.Require`](views.md#login) 保护。修改密码后通常也调用它。
+
+管理员封禁账号或调整权限后，用 `RevokeSubject` 撤销该用户的全部会话：
+
+```go
+n, err := store.RevokeSubject(ctx, userID)
+```
+
+被撤销的设备在下一次请求时成为未登录状态，受保护的页面会跳转到登录页。两者都是一条按 `subject_id` 索引执行的 `UPDATE`，不随会话总数变慢。
+
+`Logout` 和撤销都只标记 `revoked_at`，不立即删除行：撤销时该设备可能正有请求在处理，请求结束时 scs 会再次保存会话，标记保证会话不会因此恢复。标记的行在过期后由 `Cleanup` 删除。
 
 <a id="cleanup"></a>
 ### 过期清理
 
-过期的会话不会再被读到，但行仍然留在表中。`Store` 不在后台启动清理协程，而是提供 `Cleanup`，每次最多删除 `limit` 条过期会话：
+过期和撤销的会话不会再被读到，但行仍然留在表中。`Store` 不在后台启动清理协程，而是提供 `Cleanup`，每次最多删除 `limit` 条过期会话：
 
 ```go
 n, err := store.Cleanup(ctx, 1000)
@@ -124,7 +133,7 @@ n, err := store.Cleanup(ctx, 1000)
 `Cleanup` 可以反复执行，多个实例同时执行也是安全的。
 
 > [!NOTE]
-> 异步队列功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每小时一次。
+> 定时任务功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每小时一次。
 
 <a id="redis-store"></a>
 ## 使用 Redis 存储
@@ -141,7 +150,7 @@ go get github.com/alexedwards/scs/goredisstore@latest
 sessions := session.New(cfg.Session, goredisstore.New(rdb))
 ```
 
-其他代码不变。会话借助 Redis 的键过期自动清除，不需要迁移，也不需要定期清理。
+其他代码不变。会话借助 Redis 的键过期自动清除，不需要迁移，也不需要定期清理。`RevokeOthers` 和 `RevokeSubject` 只由数据库存储提供。
 
 <a id="csrf"></a>
 ## 跨站请求伪造

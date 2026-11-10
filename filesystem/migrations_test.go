@@ -12,14 +12,16 @@ import (
 	"github.com/ryan053857/mygoravel/command/migratecmd"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/ryan053857/mygoravel/database/postgres"
+	"github.com/ryan053857/mygoravel/database/sqlite"
 	"github.com/ryan053857/mygoravel/filesystem"
 )
 
 // 此契约也由外部消费模块运行，保证下载模块携带的内嵌 SQL 能通过公开命令发布。
 func TestEmbeddedMigrationsPublishThroughPublicCommand(t *testing.T) {
-	for _, driver := range []database.Driver{database.Postgres, database.SQLite} {
-		t.Run(string(driver), func(t *testing.T) {
-			source, err := fs.Sub(filesystem.Migrations(), string(driver))
+	for _, driver := range []database.Driver{postgres.Driver, sqlite.Driver} {
+		t.Run(driver.Name(), func(t *testing.T) {
+			source, err := fs.Sub(filesystem.Migrations(), driver.Name())
 			if err != nil {
 				t.Fatal(err)
 			}

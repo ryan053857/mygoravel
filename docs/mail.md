@@ -233,7 +233,7 @@ func (s *Service) notifyEditors(ctx context.Context, item *Article) {
 - **发送失败不影响发布**。文章已经发布成功，通知没发出去只记录日志，不让接口返回错误。
 
 > [!NOTE]
-> `Send` 是同步的：接口要等邮件服务器响应才返回，发送失败也不会重试。对时效和送达要求高的邮件，以后可以交给异步队列发送，`mail.Message` 可以完整地序列化为 JSON，方便放进队列任务。
+> `Send` 是同步的：接口要等邮件服务器响应才返回，发送失败也不会重试。需要可靠送达的邮件可以交给[队列](queue.md#publishing-jobs)发送，`mail.Message` 可以完整地序列化为 JSON。
 
 <a id="messages"></a>
 ## 邮件消息

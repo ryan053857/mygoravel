@@ -176,7 +176,7 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
 
 `session.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
 
-会话保存的是登录时主体的快照。用户的 scope 变化后，已登录的会话仍然使用旧的 scope，直到重新登录。需要立即生效时，销毁该用户的会话，见[读写会话数据](session.md#session-data)。
+会话保存的是登录时主体的快照。用户的 scope 变化后，已登录的会话仍然使用旧的 scope，直到重新登录。需要立即生效时，用 `RevokeSubject` 撤销该用户的全部会话，见[撤销会话](session.md#revoking-sessions)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面

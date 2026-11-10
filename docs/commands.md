@@ -45,6 +45,7 @@ import (
     "github.com/ryan053857/mygoravel/command/migratecmd"
     "github.com/ryan053857/mygoravel/command/restcmd"
     "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/database/postgres"
 )
 
 // New 返回应用的根命令。
@@ -52,7 +53,7 @@ func New() *cobra.Command {
     root := command.Root("api", "Blog API")
     root.AddCommand(
         command.Run("serve", "启动 HTTP 服务", bootstrap.Serve),
-        migratecmd.New(migrations.FS, dbConfig),
+        migratecmd.New(migrations.FS, postgres.Driver, dbConfig),
         restcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
         restcmd.Routes(bootstrap.API, bootstrap.DocRoutes),
         command.Config[settings.Config](),
@@ -87,7 +88,7 @@ func main() {
 | --- | --- | --- |
 | `command.Run(use, short, run)` | 任意名称，例如 `serve`、`worker` | 是 |
 | `command.Config[C]()` | `config check`、`config show` | 是 |
-| `migratecmd.New(fsys, dbConfig)` | `migrate up`、`migrate status`、`migrate down` | 是 |
+| `migratecmd.New(fsys, driver, dbConfig)` | `migrate up`、`migrate status`、`migrate down`、`migrate make` | 是 |
 | `migratecmd.Publish(driver, sources...)` | 显式挂载的 `migrate publish` | 否 |
 | `restcmd.OpenAPI(opts, register)` | `openapi` | 否 |
 | `restcmd.Routes(opts, register)` | `routes` | 否 |
@@ -100,7 +101,7 @@ func main() {
 root := command.Root("worker", "订单事件消费者")
 root.AddCommand(
     command.Run("run", "消费订单事件", consumer.Run),
-    migratecmd.New(migrations.FS, dbConfig),
+    migratecmd.New(migrations.FS, postgres.Driver, dbConfig),
 )
 ```
 
@@ -160,7 +161,7 @@ Huma 自动注册的 `/docs`、`/openapi.json`、`/schemas/{schema}` 等文档�
 <a id="migrate-command"></a>
 ### migrate 命令
 
-`migratecmd.New(fsys, dbConfig)` 创建四个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`dbConfig` 从应用配置中取出数据库配置：
+`migratecmd.New(fsys, driver, dbConfig)` 创建四个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`driver` 是应用使用的数据库驱动，`dbConfig` 从应用配置中取出数据库配置：
 
 ```bash
 ./bin/api migrate up       # 执行全部未执行的迁移
@@ -177,9 +178,9 @@ VERSION         STATE    APPLIED AT           FILE
 20261112100000  pending  -                    20261112100000_create_article_tags_table.sql
 ```
 
-命令都会加载配置。`make` 只读取 `driver` 来生成对应数据库的骨架；其他命令会连接数据库，并在结束后关闭连接。数据库连不上时以 `ExitUnavailable` 退出，部署脚本可以据此重试。迁移文件的编写与嵌入见[迁移](migrations.md)。
+`make` 按 `driver` 生成对应数据库的骨架，不加载配置、不连接数据库；其他命令会加载配置、连接数据库，并在结束后关闭连接。数据库连不上时以 `ExitUnavailable` 退出，部署脚本可以据此重试。迁移文件的编写与嵌入见[迁移](migrations.md)。
 
-需要文件上传等功能自带的 SQL 时，可在 `migratecmd.New` 返回的命令上显式添加 `migratecmd.Publish(driver, sources...)`。其中 `driver` 是应用使用的数据库类型，`sources` 是应用选择的 `[]migrate.Source`，例如 `migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}`。注册后可以执行：
+需要文件上传等功能自带的 SQL 时，可在 `migratecmd.New` 返回的命令上显式添加 `migratecmd.Publish(driver, sources...)`。其中 `driver` 是应用使用的数据库驱动，`sources` 是应用选择的 `[]migrate.Source`，例如 `migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}`。注册后可以执行：
 
 ```bash
 go run ./cmd/api migrate publish --dir migrations
@@ -217,7 +218,7 @@ root.AddCommand(&cobra.Command{
         if err != nil {
             return err
         }
-        db, err := database.Open(cmd.Context(), cfg.Database)
+        db, err := database.Open(cmd.Context(), postgres.Driver, cfg.Database)
         if err != nil {
             return command.AsExitError(command.ExitUnavailable, err)
         }

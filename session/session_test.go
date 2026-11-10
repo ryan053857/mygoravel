@@ -73,7 +73,7 @@ func TestNewAppliesCookieConfig(t *testing.T) {
 }
 
 // newApp 装配一个最小应用：login 接收 {"user": ...} 登录，me 返回当前主体，
-// admin 还需要 admin scope，logout 登出。
+// admin 还需要 admin scope，logout 登出；store 为 *session.Store 时另有 logout-others 撤销其他会话。
 func newApp(t *testing.T, store scs.Store) *httptest.Server {
 	t.Helper()
 	cfg := defaults()
@@ -116,9 +116,25 @@ func newApp(t *testing.T, store scs.Store) *httptest.Server {
 	}
 	router.Get("/me", me(""))
 	router.Get("/admin", me("admin"))
+	if st, ok := store.(*session.Store); ok {
+		router.Post("/logout-others", func(w http.ResponseWriter, r *http.Request) {
+			n, err := st.RevokeOthers(r.Context(), sm)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]int{"revoked": n})
+		})
+	}
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+type revokedOut struct {
+	Body struct {
+		Revoked int `json:"revoked"`
+	}
 }
 
 func newClient(t *testing.T) *http.Client {

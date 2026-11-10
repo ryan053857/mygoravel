@@ -44,13 +44,17 @@ func (d *Database) Allow(ctx context.Context, key string) error {
 		return d.allowSQLite(ctx, key)
 	}
 	// tat 不超过 now + ahead 时放行并推后 step；否则不更新，RETURNING 不返回行。
+	//
+	// now 用 clock_timestamp() 而不是 statement_timestamp()：后者是语句开始的时间，
+	// 语句可能随后等待行锁，期间其他调用已把 tat 推后，用开始时间判断会被多算而错误拒绝。
+	// DO UPDATE 的 WHERE 和 SET 在取得行锁之后求值，clock_timestamp() 此时读取的才是执行时刻。
 	var allowed bool
 	err := d.db.NewRaw(`
 INSERT INTO rate_limits AS r (name, key, tat)
-VALUES (?, ?, statement_timestamp() + ? * interval '1 microsecond')
+VALUES (?, ?, clock_timestamp() + ? * interval '1 microsecond')
 ON CONFLICT (name, key) DO UPDATE
-   SET tat = GREATEST(r.tat, statement_timestamp()) + ? * interval '1 microsecond'
- WHERE r.tat <= statement_timestamp() + ? * interval '1 microsecond'
+   SET tat = GREATEST(r.tat, clock_timestamp()) + ? * interval '1 microsecond'
+ WHERE r.tat <= clock_timestamp() + ? * interval '1 microsecond'
 RETURNING true`,
 		d.name, key, d.step.Microseconds(), d.step.Microseconds(), d.ahead.Microseconds()).Scan(ctx, &allowed)
 	if err == nil {
@@ -61,7 +65,7 @@ RETURNING true`,
 	}
 	var wait int64 // 微秒
 	err = d.db.NewRaw(`
-SELECT (extract(epoch FROM tat - statement_timestamp()) * 1000000)::bigint - ?
+SELECT (extract(epoch FROM tat - clock_timestamp()) * 1000000)::bigint - ?
   FROM rate_limits WHERE name = ? AND key = ?`,
 		d.ahead.Microseconds(), d.name, key).Scan(ctx, &wait)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -71,26 +75,38 @@ SELECT (extract(epoch FROM tat - statement_timestamp()) * 1000000)::bigint - ?
 }
 
 // allowSQLite 与 PostgreSQL 的逻辑相同，tat 与当前时间都是应用时钟的 Unix 微秒。
+//
+// 当前时间必须在取得写锁之后读取：先读时间再排队等锁，时间较早的调用可能后执行，
+// 看到被其他调用推后的 tat，从而被多算几微秒、错误地拒绝。写事务在 BEGIN 时取得写锁
+// （database/sqlite 驱动设置了 _txlock=immediate），因此在事务内读取时间，
+// 执行顺序与时间顺序一致。
 func (d *Database) allowSQLite(ctx context.Context, key string) error {
-	now, step, ahead := time.Now().UnixMicro(), d.step.Microseconds(), d.ahead.Microseconds()
+	step, ahead := d.step.Microseconds(), d.ahead.Microseconds()
 	var allowed bool
-	err := d.db.NewRaw(`
+	var wait int64
+	err := d.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		now := time.Now().UnixMicro()
+		err := tx.NewRaw(`
 INSERT INTO rate_limits AS r (name, key, tat) VALUES (?, ?, ?)
 ON CONFLICT (name, key) DO UPDATE
    SET tat = max(r.tat, ?) + ?
  WHERE r.tat <= ?
 RETURNING true`,
-		d.name, key, now+step, now, step, now+ahead).Scan(ctx, &allowed)
-	if err == nil {
+			d.name, key, now+step, now, step, now+ahead).Scan(ctx, &allowed)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		err = tx.NewRaw(`SELECT tat - ? FROM rate_limits WHERE name = ? AND key = ?`, now+ahead, d.name, key).Scan(ctx, &wait)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	switch {
+	case err != nil:
+		return errors.Wrap(err, "ratelimit: allow")
+	case allowed:
 		return nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return errors.Wrap(err, "ratelimit: allow")
-	}
-	var wait int64
-	err = d.db.NewRaw(`SELECT tat - ? FROM rate_limits WHERE name = ? AND key = ?`, now+ahead, d.name, key).Scan(ctx, &wait)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return errors.Wrap(err, "ratelimit: allow")
 	}
 	return d.exceeded(wait)
 }

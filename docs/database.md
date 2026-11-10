@@ -19,12 +19,12 @@
 
 几乎每个 API 都需要与数据库交互。mygoravel 支持 PostgreSQL 和 SQLite，并使用以下组件：
 
-- [pgx](https://github.com/jackc/pgx)：PostgreSQL 驱动；
-- [modernc.org/sqlite](https://gitlab.com/cznic/sqlite)：纯 Go 的 SQLite 驱动，不需要 cgo；
+- [pgx](https://github.com/jackc/pgx)：PostgreSQL 驱动，由 `database/postgres` 包提供；
+- [modernc.org/sqlite](https://gitlab.com/cznic/sqlite)：纯 Go 的 SQLite 驱动，不需要 cgo，由 `database/sqlite` 包提供；
 - [Bun](https://bun.uptrace.dev)：SQL 优先的 Go ORM，负责查询构建和模型映射；
 - [goose](https://github.com/pressly/goose)：数据库迁移，见[迁移](migrations.md)。
 
-`database` 包负责打开一个配置好的连接池，返回原生的 `*bun.DB`。之后的查询、事务等操作都直接使用 Bun 的 API，你可以随时参考 [Bun 官方文档](https://bun.uptrace.dev/guide/)。
+`database` 包负责打开一个配置好的连接池，返回原生的 `*bun.DB`。应用的迁移是按某一种数据库写的，因此数据库类型在代码中通过驱动包选定，而不是在配置中；应用只会编译自己 import 的驱动。之后的查询、事务等操作都直接使用 Bun 的 API，你可以随时参考 [Bun 官方文档](https://bun.uptrace.dev/guide/)。
 
 <a id="configuration"></a>
 ## 配置
@@ -33,7 +33,6 @@
 
 ```yaml
 database:
-  driver: postgres
   dsn: ${DATABASE_URL}
   max_open_conns: 20
   max_idle_conns: 10
@@ -43,7 +42,6 @@ database:
 
 | 字段 | 说明 | `DefaultConfig` 中的默认值 |
 | --- | --- | --- |
-| `driver` | 数据库类型：`postgres` 或 `sqlite` | 无，必填 |
 | `dsn` | PostgreSQL 连接串，例如 `postgres://user:pass@localhost:5432/app?sslmode=disable`；SQLite 是数据库文件路径 | 无，必填 |
 | `max_open_conns` | 最大连接数；`0` 表示不限制 | 4 × `GOMAXPROCS` |
 | `max_idle_conns` | 最大空闲连接数；`0` 表示不保留空闲连接 | 4 × `GOMAXPROCS` |
@@ -63,7 +61,7 @@ if err != nil {
 }
 ```
 
-`database.Config` 实现了 `Validate` 方法，`config.Load` 会自动检查 driver 和 DSN 是否合法、连接池参数是否合法。
+`database.Config` 实现了 `Validate` 方法，`config.Load` 会自动检查 DSN 是否为空、连接池参数是否合法；DSN 的格式由驱动在打开连接时检查。
 
 > [!TIP]
 > 设置 `max_open_conns` 时，请考虑应用的部署副本数：所有副本的连接数之和不应超过数据库的最大连接数。
@@ -71,15 +69,18 @@ if err != nil {
 <a id="sqlite"></a>
 ### 使用 SQLite
 
-SQLite 把整个数据库存放在一个文件中，不需要单独的数据库服务，适合只部署一个实例的应用。`dsn` 是文件路径，所在目录必须已经存在：
+SQLite 把整个数据库存放在一个文件中，不需要单独的数据库服务，适合只部署一个实例的应用。使用 `database/sqlite` 包的驱动，`dsn` 是文件路径，所在目录必须已经存在：
 
 ```yaml
 database:
-  driver: sqlite
   dsn: storage/app.db
 ```
 
-`database.Open` 为每个连接设置以下参数，`dsn` 中不能再带连接参数：
+```go
+db, err := database.Open(ctx, sqlite.Driver, cfg.Database)
+```
+
+驱动为每个连接设置以下参数，`dsn` 中不能再带连接参数：
 
 - `journal_mode=WAL`：读和写互不阻塞；
 - `busy_timeout=5000`：写入冲突时最多等待 5 秒，而不是立即失败；
@@ -90,15 +91,17 @@ database:
 使用 SQLite 时需要注意：
 
 - SQLite 没有时间类型，Bun 会把时间转换为 UTC 文本写入，按文本比较即可得到正确的时间顺序。因此请让所有时间都经过 Bun 写入，不要在迁移中使用 `DEFAULT CURRENT_TIMESTAMP`，它写入的文本格式不同；
-- 写事务已经独占了数据库，不需要也不支持 `SELECT ... FOR UPDATE`，在 SQLite 上请去掉 `For("UPDATE")`；
+- 写事务已经独占了数据库，不需要也不支持 `SELECT ... FOR UPDATE`，在 SQLite 上请去掉 `For("UPDATE")`，见[在事务中检查](authorization.md#checking-in-transactions)；
+- 每个事务在 `BEGIN` 时都会取得写锁，只读的事务请传入 `&sql.TxOptions{ReadOnly: true}`，它不取写锁，也不会让写入排队；
 - `ALTER TABLE` 只支持部分操作，修改列需要重建表，见 [SQLite 文档](https://www.sqlite.org/lang_altertable.html#otheralter)。
 
-两种驱动都编译在 `database` 包中，使用它的应用二进制会增加约 6 MB。
+部署和备份见[使用 SQLite 部署](deployment.md#sqlite)。
+
 
 <a id="connecting"></a>
 ## 连接数据库
 
-使用 `database.Open` 打开连接池。它会立即 Ping 数据库确认连通，失败时自动释放已打开的资源。下面是一个完整的连接检查函数：
+使用 `database.Open` 打开连接池，第二个参数是应用使用的数据库驱动。它会立即 Ping 数据库确认连通，失败时自动释放已打开的资源。下面是一个完整的连接检查函数：
 
 ```go
 package storage
@@ -107,13 +110,13 @@ import (
     "context"
 
     "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/database/postgres"
 )
 
 func Check(ctx context.Context, dsn string) error {
     cfg := database.DefaultConfig()
-    cfg.Driver = database.Postgres
     cfg.DSN = dsn
-    db, err := database.Open(ctx, cfg)
+    db, err := database.Open(ctx, postgres.Driver, cfg)
     if err != nil {
         return err
     }
@@ -330,7 +333,7 @@ func (s *Service) Create(ctx context.Context, subject identity.Subject, c Change
         Title: c.Title, Slug: c.Slug, Content: c.Content,
     }
     _, err := s.db.NewInsert().Model(item).Exec(ctx)
-    if database.IsUniqueViolation(err, "articles_slug_key") {
+    if postgres.IsUniqueViolation(err, "articles_slug_key") {
         return nil, ErrSlugTaken.Wrap(err, errorx.Public("slug", c.Slug))
     }
     if err != nil {
@@ -340,21 +343,21 @@ func (s *Service) Create(ctx context.Context, subject identity.Subject, c Change
 }
 ```
 
-`database` 包提供了以下判断函数：
+判断函数由驱动包提供，`postgres` 和 `sqlite` 包中各有一组同名函数：
 
 | 函数 | 判断的约束 | PostgreSQL | SQLite |
 | --- | --- | --- | --- |
-| `database.IsUniqueViolation(err, names...)` | 唯一约束与主键 | 23505 | `SQLITE_CONSTRAINT_UNIQUE`、`SQLITE_CONSTRAINT_PRIMARYKEY` |
-| `database.IsForeignKeyViolation(err)` | 外键约束 | 23503 | `SQLITE_CONSTRAINT_FOREIGNKEY` |
-| `database.IsCheckViolation(err)` | 检查约束 | 23514 | `SQLITE_CONSTRAINT_CHECK` |
+| `IsUniqueViolation(err, names...)` | 唯一约束与主键 | 23505 | `SQLITE_CONSTRAINT_UNIQUE`、`SQLITE_CONSTRAINT_PRIMARYKEY` |
+| `IsForeignKeyViolation(err)` | 外键约束 | 23503 | `SQLITE_CONSTRAINT_FOREIGNKEY` |
+| `IsCheckViolation(err)` | 检查约束 | 23514 | `SQLITE_CONSTRAINT_CHECK` |
 
 `IsUniqueViolation` 可以传入约束名，只在指定的约束冲突时返回 `true`。推荐总是指定约束名，为不同的约束返回不同的业务错误，例如“slug 已被使用”和“邮箱已注册”；其他错误则保留原因继续返回。
 
 SQLite 的错误中没有约束名，只有冲突的列，因此在 SQLite 上按 `表.列` 匹配，多列之间用 `, ` 分隔；表达式索引则按索引名匹配：
 
 ```go
-database.IsUniqueViolation(err, "articles.slug")
-database.IsUniqueViolation(err, "files.disk, files.key")
+sqlite.IsUniqueViolation(err, "articles.slug")
+sqlite.IsUniqueViolation(err, "files.disk, files.key")
 ```
 
 <a id="testing"></a>

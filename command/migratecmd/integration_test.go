@@ -7,12 +7,12 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/ryan053857/mygoravel/database/postgres"
 )
 
 func TestMigrateCommandsOnPostgres(t *testing.T) {
-	db := dbtest.Open(t, database.Postgres, nil)
+	db := dbtest.Open(t, postgres.Driver, nil)
 	var name string
 	if err := db.QueryRowContext(context.Background(), "SELECT current_database()").Scan(&name); err != nil {
 		t.Fatal(err)
@@ -22,6 +22,6 @@ func TestMigrateCommandsOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	dsn.Path = "/" + name
-	path := writeConfig(t, "database:\n  driver: postgres\n  dsn: "+dsn.String()+"\n")
-	testMigrateCommands(t, path)
+	path := writeConfig(t, "database:\n  dsn: "+dsn.String()+"\n")
+	testMigrateCommands(t, postgres.Driver, path)
 }
