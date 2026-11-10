@@ -40,6 +40,7 @@
 - [原子锁](locks.md)
 - [限流](rate-limiting.md)
 - [服务端推送](sse.md)
+- [广播](broadcasting.md)
 - [文件存储与上传](filesystem.md)
 - [邮件](mail.md)
 - [队列](queue.md)

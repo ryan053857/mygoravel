@@ -30,10 +30,11 @@ var dependencies = map[string][]string{
 	"lock":       {},
 	"hashing":    {},
 	"queue":      {"logging"},
+	"broadcast":  {"logging"},
 	"schedule":   {"lock", "logging"},
 	"ai":         {"errorx", "httpx", "logging"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "broadcast"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
@@ -216,13 +217,28 @@ func TestAPIDoesNotLinkTempl(t *testing.T) {
 // TestCoreDoesNotLinkRedis 确保不用 Redis 的应用不会链接 go-redis，
 // Redis 实现分别在 lock/redislock 和 ratelimit/redislimit 中。
 func TestCoreDoesNotLinkRedis(t *testing.T) {
-	for _, pkg := range []string{module + "/lock", module + "/ratelimit", module + "/httpx"} {
+	for _, pkg := range []string{module + "/lock", module + "/ratelimit", module + "/httpx", module + "/broadcast"} {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)
 		}
 		for _, dep := range strings.Fields(string(out)) {
 			if under(dep, "github.com/redis/go-redis") {
+				t.Errorf("%s depends on %s", pkg, dep)
+			}
+		}
+	}
+}
+
+// TestBroadcastCoreDoesNotLinkNATS 确保不用 NATS 的应用不会链接 nats.go，NATS 实现在 broadcast/natsbroadcast 中。
+func TestBroadcastCoreDoesNotLinkNATS(t *testing.T) {
+	for _, pkg := range []string{module + "/broadcast", module + "/broadcast/redisbroadcast"} {
+		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			if under(dep, "github.com/nats-io") {
 				t.Errorf("%s depends on %s", pkg, dep)
 			}
 		}

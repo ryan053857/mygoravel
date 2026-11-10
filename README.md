@@ -24,7 +24,7 @@ go get github.com/ryan053857/mygoravel@main
 | 运行第一个应用 | [安装](docs/installation.md) |
 | 读取配置与密钥 | [配置](docs/configuration.md) |
 | 组织项目代码 | [目录结构](docs/directory-structure.md) · [依赖装配](docs/dependencies.md) |
-| 渲染页面 | [视图](docs/views.md) · [表单](docs/forms.md) · [服务端推送](docs/sse.md) |
+| 渲染页面 | [视图](docs/views.md) · [表单](docs/forms.md) · [服务端推送](docs/sse.md) · [广播](docs/broadcasting.md) |
 | 编写接口 | [路由](docs/routing.md) · [请求](docs/requests.md) · [验证](docs/validation.md) · [响应](docs/responses.md) · [会话](docs/session.md) |
 | 查看全部路由 | [routes 命令](docs/commands.md#routes-command) |
 | 处理错误与日志 | [错误处理](docs/errors.md) · [日志](docs/logging.md) |

@@ -167,6 +167,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
 | `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
 | `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、SSE，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[服务端推送](sse.md) |
+| `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端 | [广播](broadcasting.md) |
 | `database` | 用应用选定的驱动打开连接池 | [数据库](database.md) |
 | `database/postgres`、`database/sqlite`、`database/mysql` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
