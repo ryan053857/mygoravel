@@ -31,7 +31,7 @@
 队列使用两张表：`queue_jobs` 保存待处理和处理中的任务，处理成功后删除；`queue_failed_jobs` 保存失败的任务。使用前先[发布](migrations.md#publishing-framework-migrations)它们的迁移：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "queue", FS: queue.Migrations()},
 ))
 ```
@@ -110,6 +110,7 @@ import (
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/cleanup"
     "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/logging"
     "github.com/ryan053857/mygoravel/queue"
 )
@@ -121,7 +122,7 @@ func Work(ctx context.Context, cfg settings.Config) (err error) {
     }()
 
     slog.SetDefault(logging.New(cfg.Logs))
-    db, err := database.Open(ctx, cfg.Database)
+    db, err := database.Open(ctx, postgres.Driver, cfg.Database)
     if err != nil {
         return err
     }
@@ -248,7 +249,7 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 处理函数是普通的函数，直接调用它测试即可。发布任务的一方，用 [`dbtest.Open`](testing.md) 打开执行过 `queue.Migrations()` 的测试数据库，检查 `queue_jobs` 中的任务：
 
 ```go
-db := dbtest.Open(t, database.Postgres, migrations.FS) // 包含已发布的 queue 迁移
+db := dbtest.Open(t, postgres.Driver, migrations.FS) // 包含已发布的 queue 迁移
 svc := article.NewService(db, emails, editors)
 
 // ... 创建并发布一篇文章

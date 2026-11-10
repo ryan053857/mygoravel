@@ -18,8 +18,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/ryan053857/mygoravel/database/postgres"
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/queue"
 )
@@ -30,7 +30,7 @@ type payload struct {
 
 func openDB(t *testing.T) *bun.DB {
 	t.Helper()
-	return dbtest.Open(t, database.Postgres, postgresMigrations(t))
+	return dbtest.Open(t, postgres.Driver, postgresMigrations(t))
 }
 
 func testConfig() queue.Config {
@@ -534,7 +534,7 @@ func TestCleanupFailedJobs(t *testing.T) {
 
 func postgresMigrations(t *testing.T) fs.FS {
 	t.Helper()
-	f, err := fs.Sub(queue.Migrations(), string(database.Postgres))
+	f, err := fs.Sub(queue.Migrations(), postgres.Driver.Name())
 	if err != nil {
 		t.Fatal(err)
 	}

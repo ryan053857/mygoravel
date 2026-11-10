@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/ryan053857/mygoravel/database/postgres"
 )
 
 // 领取任务后进程崩溃：租约到期后任务被重新领取，旧的领取不能再确认或修改它。
 func TestExpiredLeaseIsReclaimedAndFenced(t *testing.T) {
-	db := dbtest.Open(t, database.Postgres, postgresMigrations(t))
+	db := dbtest.Open(t, postgres.Driver, postgresMigrations(t))
 	ctx := context.Background()
 	cfg := DefaultConfig()
 	cfg.Lease = 200 * time.Millisecond
@@ -58,7 +58,7 @@ func TestExpiredLeaseIsReclaimedAndFenced(t *testing.T) {
 
 func postgresMigrations(t *testing.T) fs.FS {
 	t.Helper()
-	f, err := fs.Sub(Migrations(), string(database.Postgres))
+	f, err := fs.Sub(Migrations(), postgres.Driver.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
