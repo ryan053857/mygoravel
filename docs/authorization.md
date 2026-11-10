@@ -138,6 +138,9 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 }
 ```
 
+> [!NOTE]
+> SQLite 不支持 `FOR UPDATE`。使用 `sqlite.Driver` 时，写事务在 `BEGIN` 时就独占了数据库，去掉 `.For("UPDATE")` 即可得到同样的保证，见[使用 SQLite](database.md#sqlite)。
+
 重复发布时返回的 `ErrAlreadyPublished` 与其他文章错误定义在一起，重复发布时客户端会收到 `409`：
 
 ```go

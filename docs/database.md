@@ -91,8 +91,11 @@ db, err := database.Open(ctx, sqlite.Driver, cfg.Database)
 使用 SQLite 时需要注意：
 
 - SQLite 没有时间类型，Bun 会把时间转换为 UTC 文本写入，按文本比较即可得到正确的时间顺序。因此请让所有时间都经过 Bun 写入，不要在迁移中使用 `DEFAULT CURRENT_TIMESTAMP`，它写入的文本格式不同；
-- 写事务已经独占了数据库，不需要也不支持 `SELECT ... FOR UPDATE`，在 SQLite 上请去掉 `For("UPDATE")`；
+- 写事务已经独占了数据库，不需要也不支持 `SELECT ... FOR UPDATE`，在 SQLite 上请去掉 `For("UPDATE")`，见[在事务中检查](authorization.md#checking-in-transactions)；
+- 每个事务在 `BEGIN` 时都会取得写锁，只读的事务请传入 `&sql.TxOptions{ReadOnly: true}`，它不取写锁，也不会让写入排队；
 - `ALTER TABLE` 只支持部分操作，修改列需要重建表，见 [SQLite 文档](https://www.sqlite.org/lang_altertable.html#otheralter)。
+
+部署和备份见[使用 SQLite 部署](deployment.md#sqlite)。
 
 
 <a id="connecting"></a>
