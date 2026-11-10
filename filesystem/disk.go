@@ -1,5 +1,5 @@
-// Package files 提供依赖 files 表的文件上传、确认、公开访问和清理服务。
-package files
+// Package filesystem 提供依赖 files 表的文件上传、确认、公开访问和清理服务。
+package filesystem
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 )
 
 var (
-	ErrNotFound    = errors.New("files: file not found")
-	ErrInvalid     = errors.New("files: invalid input")
-	ErrTooLarge    = errors.New("files: file too large")
-	ErrNotUploaded = errors.New("files: object missing or size differs")
-	ErrUnsupported = errors.New("files: disk does not support direct upload")
+	ErrNotFound    = errors.New("filesystem: file not found")
+	ErrInvalid     = errors.New("filesystem: invalid input")
+	ErrTooLarge    = errors.New("filesystem: file too large")
+	ErrNotUploaded = errors.New("filesystem: object missing or size differs")
+	ErrUnsupported = errors.New("filesystem: disk does not support direct upload")
 )
 
 // Object 是存储中实际对象的信息。

@@ -29,7 +29,7 @@ go get github.com/ryan053857/mygoravel@main
 | 处理错误与日志 | [错误处理](docs/errors.md) · [日志](docs/logging.md) |
 | 保护接口 | [认证](docs/authentication.md) · [授权](docs/authorization.md) |
 | 使用数据库 | [数据库](docs/database.md) · [迁移](docs/migrations.md) |
-| 上传和管理文件 | [文件存储与上传](docs/files.md) |
+| 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |
 | 测试与上线 | [测试](docs/testing.md) · [部署](docs/deployment.md) |
 
 ## 参与开发

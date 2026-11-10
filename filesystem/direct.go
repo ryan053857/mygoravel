@@ -1,4 +1,4 @@
-package files
+package filesystem
 
 import (
 	"context"
@@ -62,19 +62,19 @@ func (s *Service) SignPart(ctx context.Context, owner identity.Subject, id uuid.
 
 // CompleteMultipart 按编号合并全部分片。parts 必须正好覆盖 1..PartCount，ETag 取自各片上传响应。
 // 合并成功后重试也返回成功。完成后调用 Confirm。
-func (s *Service) CompleteMultipart(ctx context.Context, owner identity.Subject, id uuid.UUID, uploadID string, parts []Part) (Record, error) {
+func (s *Service) CompleteMultipart(ctx context.Context, owner identity.Subject, id uuid.UUID, uploadID string, parts []Part) (File, error) {
 	r, direct, err := s.direct(ctx, owner, id)
 	if err != nil {
-		return Record{}, err
+		return File{}, err
 	}
 	parts = slices.Clone(parts)
 	slices.SortFunc(parts, func(a, b Part) int { return int(a.Number) - int(b.Number) })
 	if uploadID == "" || len(parts) != partCount(r.Size) {
-		return Record{}, errors.Wrap(ErrInvalid, "incorrect upload ID or part count")
+		return File{}, errors.Wrap(ErrInvalid, "incorrect upload ID or part count")
 	}
 	for i, p := range parts {
 		if p.Number != int32(i+1) || p.ETag == "" {
-			return Record{}, errors.Wrap(ErrInvalid, "parts must be numbered 1..n with ETags")
+			return File{}, errors.Wrap(ErrInvalid, "parts must be numbered 1..n with ETags")
 		}
 	}
 	if err := direct.CompleteMultipart(ctx, r.Key, uploadID, parts); err != nil {
@@ -82,7 +82,7 @@ func (s *Service) CompleteMultipart(ctx context.Context, owner identity.Subject,
 		if s.checkUploaded(ctx, r) == nil {
 			return r, nil
 		}
-		return Record{}, err
+		return File{}, err
 	}
 	return r, nil
 }
@@ -112,22 +112,22 @@ func partCount(size int64) int {
 }
 
 // direct 返回 owner 尚未确认的临时文件及其磁盘的直传能力。
-func (s *Service) direct(ctx context.Context, owner identity.Subject, id uuid.UUID) (Record, DirectUploader, error) {
+func (s *Service) direct(ctx context.Context, owner identity.Subject, id uuid.UUID) (File, DirectUploader, error) {
 	r, err := s.owned(ctx, owner, id)
 	if err != nil {
-		return Record{}, nil, err
+		return File{}, nil, err
 	}
 	if r.Status != StatusTemporary {
-		return Record{}, nil, errors.Wrap(ErrInvalid, "file is already confirmed")
+		return File{}, nil, errors.Wrap(ErrInvalid, "file is already confirmed")
 	}
 	direct, ok := s.disk(r).(DirectUploader)
 	if !ok {
-		return Record{}, nil, ErrUnsupported
+		return File{}, nil, ErrUnsupported
 	}
 	return r, direct, nil
 }
 
 // ttl 是签名有效期，不超过临时文件的剩余时间。
-func ttl(r Record) time.Duration {
+func ttl(r File) time.Duration {
 	return max(time.Second, min(signTTL, time.Until(*r.ExpiresAt).Truncate(time.Second)))
 }

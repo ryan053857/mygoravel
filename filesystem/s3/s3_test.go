@@ -18,8 +18,8 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
-	"github.com/ryan053857/mygoravel/files"
-	s3disk "github.com/ryan053857/mygoravel/files/s3"
+	"github.com/ryan053857/mygoravel/filesystem"
+	s3disk "github.com/ryan053857/mygoravel/filesystem/s3"
 )
 
 // newFakeDisk 通过真实 SDK 连接内存 S3 服务。
@@ -121,7 +121,7 @@ func TestStatDeleteURL(t *testing.T) {
 func TestDirectUpload(t *testing.T) {
 	ctx := context.Background()
 	disk := newFakeDisk(t)
-	send := func(req files.SignedRequest, body []byte) string {
+	send := func(req filesystem.SignedRequest, body []byte) string {
 		t.Helper()
 		if req.Headers.Get("Host") != "" || req.Headers.Get("Content-Length") != "" {
 			t.Fatalf("restricted headers returned: %v", req.Headers)
@@ -159,13 +159,13 @@ func TestDirectUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, second := bytes.Repeat([]byte{'a'}, 5<<20), []byte("tail")
-	var parts []files.Part
+	var parts []filesystem.Part
 	for i, body := range [][]byte{first, second} {
 		req, err := disk.SignPart(ctx, "multi.bin", id, int32(i+1), int64(len(body)), 60e9)
 		if err != nil {
 			t.Fatal(err)
 		}
-		parts = append(parts, files.Part{Number: int32(i + 1), ETag: send(req, body)})
+		parts = append(parts, filesystem.Part{Number: int32(i + 1), ETag: send(req, body)})
 	}
 	if err := disk.CompleteMultipart(ctx, "multi.bin", id, parts); err != nil {
 		t.Fatal(err)

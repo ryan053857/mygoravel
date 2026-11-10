@@ -19,7 +19,7 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/files"
+	"github.com/ryan053857/mygoravel/filesystem"
 )
 
 // uploadPartSize 是服务端 Put 的分片缓冲大小，大于它的正文按分片上传，内存占用不超过一片。
@@ -54,7 +54,7 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// Disk 是 S3 磁盘，实现 files.Disk 和 files.DirectUploader。
+// Disk 是 S3 磁盘，实现 filesystem.Disk 和 filesystem.DirectUploader。
 type Disk struct {
 	client    *awss3.Client
 	presigner *awss3.PresignClient
@@ -63,8 +63,8 @@ type Disk struct {
 }
 
 var (
-	_ files.Disk           = (*Disk)(nil)
-	_ files.DirectUploader = (*Disk)(nil)
+	_ filesystem.Disk           = (*Disk)(nil)
+	_ filesystem.DirectUploader = (*Disk)(nil)
 )
 
 // Open 按配置创建客户端并检查桶可访问。桶和公开访问策略由运维预先配置。
@@ -151,7 +151,7 @@ func (d *Disk) putMultipart(ctx context.Context, key, contentType string, first 
 	// first 比一片多读了一个字节，把它接回剩余正文。
 	body := io.MultiReader(bytes.NewReader(first[uploadPartSize:]), rest)
 	part := first[:uploadPartSize]
-	var parts []files.Part
+	var parts []filesystem.Part
 	for number := int32(1); ; number++ {
 		out, err := d.client.UploadPart(ctx, &awss3.UploadPartInput{
 			Bucket: aws.String(d.bucket), Key: aws.String(key), UploadId: aws.String(uploadID),
@@ -160,7 +160,7 @@ func (d *Disk) putMultipart(ctx context.Context, key, contentType string, first 
 		if err != nil {
 			return wrap("upload part", err)
 		}
-		parts = append(parts, files.Part{Number: number, ETag: aws.ToString(out.ETag)})
+		parts = append(parts, filesystem.Part{Number: number, ETag: aws.ToString(out.ETag)})
 		next := make([]byte, uploadPartSize)
 		n, err := io.ReadFull(body, next)
 		if n == 0 && errors.Is(err, io.EOF) {
@@ -184,12 +184,12 @@ func (d *Disk) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 }
 
 // Stat 返回对象大小。
-func (d *Disk) Stat(ctx context.Context, key string) (files.Object, error) {
+func (d *Disk) Stat(ctx context.Context, key string) (filesystem.Object, error) {
 	out, err := d.client.HeadObject(ctx, &awss3.HeadObjectInput{Bucket: aws.String(d.bucket), Key: aws.String(key)})
 	if err != nil {
-		return files.Object{}, wrap("head object", err)
+		return filesystem.Object{}, wrap("head object", err)
 	}
-	return files.Object{Size: aws.ToInt64(out.ContentLength)}, nil
+	return filesystem.Object{Size: aws.ToInt64(out.ContentLength)}, nil
 }
 
 // Delete 删除对象，不存在视为成功。
@@ -202,12 +202,12 @@ func (d *Disk) Delete(ctx context.Context, key string) error {
 }
 
 // SignPut 签发单次上传地址，绑定长度和类型。
-func (d *Disk) SignPut(ctx context.Context, key, contentType string, size int64, ttl time.Duration) (files.SignedRequest, error) {
+func (d *Disk) SignPut(ctx context.Context, key, contentType string, size int64, ttl time.Duration) (filesystem.SignedRequest, error) {
 	out, err := d.presigner.PresignPutObject(ctx, &awss3.PutObjectInput{
 		Bucket: aws.String(d.bucket), Key: aws.String(key), ContentType: optional(contentType), ContentLength: aws.Int64(size),
 	}, awss3.WithPresignExpires(ttl))
 	if err != nil {
-		return files.SignedRequest{}, wrap("presign put", err)
+		return filesystem.SignedRequest{}, wrap("presign put", err)
 	}
 	return signed(out.URL, out.Method, out.SignedHeader), nil
 }
@@ -227,19 +227,19 @@ func (d *Disk) CreateMultipart(ctx context.Context, key, contentType string) (st
 }
 
 // SignPart 签发单片上传地址，绑定会话、编号和长度。
-func (d *Disk) SignPart(ctx context.Context, key, uploadID string, number int32, size int64, ttl time.Duration) (files.SignedRequest, error) {
+func (d *Disk) SignPart(ctx context.Context, key, uploadID string, number int32, size int64, ttl time.Duration) (filesystem.SignedRequest, error) {
 	out, err := d.presigner.PresignUploadPart(ctx, &awss3.UploadPartInput{
 		Bucket: aws.String(d.bucket), Key: aws.String(key), UploadId: aws.String(uploadID),
 		PartNumber: aws.Int32(number), ContentLength: aws.Int64(size),
 	}, awss3.WithPresignExpires(ttl))
 	if err != nil {
-		return files.SignedRequest{}, wrap("presign part", err)
+		return filesystem.SignedRequest{}, wrap("presign part", err)
 	}
 	return signed(out.URL, out.Method, out.SignedHeader), nil
 }
 
 // CompleteMultipart 合并分片；ETag 和分片大小由 S3 校验。
-func (d *Disk) CompleteMultipart(ctx context.Context, key, uploadID string, parts []files.Part) error {
+func (d *Disk) CompleteMultipart(ctx context.Context, key, uploadID string, parts []filesystem.Part) error {
 	completed := make([]types.CompletedPart, len(parts))
 	for i, p := range parts {
 		completed[i] = types.CompletedPart{PartNumber: aws.Int32(p.Number), ETag: aws.String(p.ETag)}
@@ -288,12 +288,12 @@ func (d *Disk) AbortAllMultipart(ctx context.Context, key string) error {
 	}
 }
 
-func signed(rawURL, method string, headers http.Header) files.SignedRequest {
+func signed(rawURL, method string, headers http.Header) filesystem.SignedRequest {
 	h := headers.Clone()
 	// Host 和 Content-Length 由 HTTP 客户端自动设置，浏览器也不允许手工设置。
 	h.Del("Host")
 	h.Del("Content-Length")
-	return files.SignedRequest{URL: rawURL, Method: method, Headers: h}
+	return filesystem.SignedRequest{URL: rawURL, Method: method, Headers: h}
 }
 
 // wrap 加上操作名，并让对象或会话不存在的错误匹配 fs.ErrNotExist。

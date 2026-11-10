@@ -14,7 +14,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 
-	"github.com/ryan053857/mygoravel/files"
+	"github.com/ryan053857/mygoravel/filesystem"
 )
 
 // Config 是本地磁盘配置。
@@ -35,16 +35,16 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// Disk 是本地磁盘，实现 files.Disk 和 http.Handler。
+// Disk 是本地磁盘，实现 filesystem.Disk 和 http.Handler。
 // 把它挂在 public_url 的路径上即可公开访问：mux.Handle("/storage/", disk)。
 type Disk struct {
 	root    *os.Root
 	baseURL string
 	prefix  string
-	files   http.Handler
+	handler http.Handler
 }
 
-var _ files.Disk = (*Disk)(nil)
+var _ filesystem.Disk = (*Disk)(nil)
 
 // Open 创建并打开存储目录。
 func Open(cfg Config) (*Disk, error) {
@@ -61,7 +61,7 @@ func Open(cfg Config) (*Disk, error) {
 	}
 	prefix := strings.TrimSuffix(u.Path, "/")
 	d := &Disk{root: root, baseURL: strings.TrimSuffix(u.String(), "/"), prefix: prefix}
-	d.files = http.StripPrefix(prefix, http.FileServerFS(publicFS{root.FS()}))
+	d.handler = http.StripPrefix(prefix, http.FileServerFS(publicFS{root.FS()}))
 	return d, nil
 }
 
@@ -72,7 +72,7 @@ func (d *Disk) Close() error { return d.root.Close() }
 func (d *Disk) URL(key string) string { return d.baseURL + "/" + escapeKey(key) }
 
 // ServeHTTP 提供文件下载，不列目录，也不暴露写入中的临时文件。
-func (d *Disk) ServeHTTP(w http.ResponseWriter, r *http.Request) { d.files.ServeHTTP(w, r) }
+func (d *Disk) ServeHTTP(w http.ResponseWriter, r *http.Request) { d.handler.ServeHTTP(w, r) }
 
 // Put 写入同目录临时文件后原子重命名，失败时不发布部分内容。
 func (d *Disk) Put(ctx context.Context, key, _ string, body io.Reader, _ int64) (err error) {
@@ -115,18 +115,18 @@ func (d *Disk) Open(_ context.Context, key string) (io.ReadCloser, error) {
 }
 
 // Stat 返回对象大小。
-func (d *Disk) Stat(_ context.Context, key string) (files.Object, error) {
+func (d *Disk) Stat(_ context.Context, key string) (filesystem.Object, error) {
 	if err := validKey(key); err != nil {
-		return files.Object{}, err
+		return filesystem.Object{}, err
 	}
 	info, err := d.root.Stat(key)
 	if err != nil {
-		return files.Object{}, err
+		return filesystem.Object{}, err
 	}
 	if !info.Mode().IsRegular() {
-		return files.Object{}, fs.ErrNotExist
+		return filesystem.Object{}, fs.ErrNotExist
 	}
-	return files.Object{Size: info.Size()}, nil
+	return filesystem.Object{Size: info.Size()}, nil
 }
 
 // Delete 删除对象，不存在视为成功。
@@ -142,7 +142,7 @@ func (d *Disk) Delete(_ context.Context, key string) error {
 
 func validKey(key string) error {
 	if !fs.ValidPath(key) || key == "." || strings.ContainsAny(key, "\\\x00") {
-		return errors.Wrapf(files.ErrInvalid, "invalid key %q", key)
+		return errors.Wrapf(filesystem.ErrInvalid, "invalid key %q", key)
 	}
 	return nil
 }

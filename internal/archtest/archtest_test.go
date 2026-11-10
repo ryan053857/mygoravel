@@ -12,18 +12,18 @@ const module = "github.com/ryan053857/mygoravel"
 
 // 每个包根可以引用的其他框架包根；同一包树中的引用直接放行。
 var dependencies = map[string][]string{
-	"cleanup":  {},
-	"config":   {},
-	"errorx":   {},
-	"logging":  {"errorx"},
-	"i18n":     {},
-	"identity": {},
-	"page":     {"errorx"},
-	"database": {"config"},
-	"files":    {"identity"},
-	"httpx":    {"errorx", "identity", "i18n", "logging"},
-	"command":  {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal": {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "files"},
+	"cleanup":    {},
+	"config":     {},
+	"errorx":     {},
+	"logging":    {"errorx"},
+	"i18n":       {},
+	"identity":   {},
+	"page":       {"errorx"},
+	"database":   {"config"},
+	"filesystem": {"identity"},
+	"httpx":      {"errorx", "identity", "i18n", "logging"},
+	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem"},
 }
 
 // 传输、数据库和命令组件的包前缀。
@@ -113,9 +113,9 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/errorx", module + "/httpx/rest", false},
 		{module + "/httpx", module + "/command", false},
 		{module + "/database", module + "/httpx", false},
-		{module + "/files", module + "/identity", true},
-		{module + "/files", module + "/httpx", false},
-		{module + "/database", module + "/files", false},
+		{module + "/filesystem", module + "/identity", true},
+		{module + "/filesystem", module + "/httpx", false},
+		{module + "/database", module + "/filesystem", false},
 		{module + "/cleanup", "github.com/jackc/pgx/v5", false},
 		{module + "/config", "net/http", false},
 		{module + "/i18n", "github.com/spf13/cobra", false},
@@ -133,13 +133,13 @@ func TestDependencyRules(t *testing.T) {
 
 // TestLocalFilesDoesNotLinkS3 确保仅使用本地文件服务不会链接 S3 SDK。
 func TestLocalFilesDoesNotLinkS3(t *testing.T) {
-	out, err := exec.Command("go", "list", "-deps", module+"/files/local").CombinedOutput()
+	out, err := exec.Command("go", "list", "-deps", module+"/filesystem/local").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list: %v\n%s", err, out)
 	}
 	for _, dep := range strings.Fields(string(out)) {
 		if under(dep, "github.com/aws/aws-sdk-go-v2") {
-			t.Errorf("local files depends on %s", dep)
+			t.Errorf("local filesystem depends on %s", dep)
 		}
 	}
 }

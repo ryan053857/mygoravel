@@ -211,6 +211,17 @@ config: invalid configuration: storage: endpoint is required
 
 框架预定义的配置类型都已经实现了 `SetDefaults` 和 `Validate`，放进根结构体后会自动填充默认值并校验。需要跨段检查时，在根结构体上实现 `Validate` 即可。
 
+想在框架配置的同一段下追加自己的字段时，用 `yaml:",inline"` 内嵌它。内嵌类型的 `SetDefaults` 和 `Validate` 仍然只调用一次；外层结构体如果自己定义了同名方法，则只调用外层的，与 Go 的方法覆盖一致。[文件存储](filesystem.md#configuration)的配置就是这样把磁盘配置放进 `filesystem` 段的：
+
+```go
+type FilesystemConfig struct {
+    filesystem.Config `yaml:",inline"`
+    Disks             struct {
+        Local local.Config `yaml:"local"`
+    } `yaml:"disks"`
+}
+```
+
 <a id="inspecting-configuration"></a>
 ## 检查配置
 

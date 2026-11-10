@@ -21,20 +21,12 @@ type Validator interface {
 }
 
 func setDefaults(dst any) {
-	walk(reflect.ValueOf(dst), "", func(v reflect.Value, _ string) {
-		if d, ok := as[Defaulter](v); ok {
-			d.SetDefaults()
-		}
-	})
+	walk(reflect.ValueOf(dst), "", func(d Defaulter, _ string) { d.SetDefaults() })
 }
 
 func validate(dst any) error {
 	var errs []error
-	walk(reflect.ValueOf(dst), "", func(v reflect.Value, path string) {
-		val, ok := as[Validator](v)
-		if !ok {
-			return
-		}
+	walk(reflect.ValueOf(dst), "", func(val Validator, path string) {
 		if err := val.Validate(); err != nil {
 			if path != "" {
 				err = errors.Wrapf(err, "%s", path)
@@ -48,16 +40,24 @@ func validate(dst any) error {
 	return errors.Wrap(errors.Join(errs...), "invalid configuration")
 }
 
-// walk 后序遍历 v：先访问所有子值（结构体字段、元素、map 值），再访问 v 本身。
+// walk 后序遍历 v：先访问所有子值（结构体字段、元素、map 值），再对实现了 I 的 v 本身调用 visit。
 // path 是 YAML 字段路径，例如 http.trusted_proxies[0]。
-func walk(v reflect.Value, path string, visit func(reflect.Value, string)) {
+//
+// 内嵌字段（例如 `yaml:",inline"`）的方法会提升到外层结构体，此时只调用外层一次，
+// 避免同一方法执行两遍；外层自己定义了该方法时也只调用外层，与 Go 的方法覆盖语义一致。
+func walk[I any](v reflect.Value, path string, visit func(I, string)) {
+	walkValue(v, path, visit, false)
+}
+
+func walkValue[I any](v reflect.Value, path string, visit func(I, string), skipSelf bool) {
 	switch v.Kind() {
 	case reflect.Pointer, reflect.Interface:
 		if !v.IsNil() {
-			walk(v.Elem(), path, visit)
+			walkValue(v.Elem(), path, visit, skipSelf)
 		}
 		return
 	case reflect.Struct:
+		_, outer := as[I](v)
 		t := v.Type()
 		for i := range t.NumField() {
 			f := t.Field(i)
@@ -65,20 +65,25 @@ func walk(v reflect.Value, path string, visit func(reflect.Value, string)) {
 				continue
 			}
 			if name, skip := fieldName(f); !skip {
-				walk(v.Field(i), joinPath(path, name), visit)
+				walkValue(v.Field(i), joinPath(path, name), visit, f.Anonymous && outer)
 			}
 		}
 	case reflect.Slice, reflect.Array:
 		for i := range v.Len() {
-			walk(v.Index(i), fmt.Sprintf("%s[%d]", path, i), visit)
+			walkValue(v.Index(i), fmt.Sprintf("%s[%d]", path, i), visit, false)
 		}
 	case reflect.Map:
 		iter := v.MapRange()
 		for iter.Next() {
-			walk(iter.Value(), joinPath(path, fmt.Sprint(iter.Key())), visit)
+			walkValue(iter.Value(), joinPath(path, fmt.Sprint(iter.Key())), visit, false)
 		}
 	}
-	visit(v, path)
+	if skipSelf {
+		return
+	}
+	if i, ok := as[I](v); ok {
+		visit(i, path)
+	}
 }
 
 // as 返回 v（或可寻址时的 &v）实现的接口 I。
@@ -113,6 +118,9 @@ func fieldName(f reflect.StructField) (name string, skip bool) {
 }
 
 func joinPath(path, name string) string {
+	if name == "" {
+		return path
+	}
 	if path == "" {
 		return name
 	}

@@ -1,4 +1,4 @@
-package files
+package filesystem
 
 import (
 	"time"
@@ -13,9 +13,9 @@ const (
 	StatusDeleted   = "deleted"   // 已删除，等待清理对象后删除记录
 )
 
-// Record 是 files 表模型。应用可以加列，框架只读写这里声明的列。
+// File 是 files 表模型。应用可以加列，框架只读写这里声明的列。
 // URL 不入库，服务返回记录时按磁盘公开基址填写。
-type Record struct {
+type File struct {
 	bun.BaseModel `bun:"table:files,alias:f"`
 	ID            uuid.UUID  `bun:"id,pk,type:uuid"      json:"id"`
 	Disk          string     `bun:"disk,notnull"         json:"disk"`

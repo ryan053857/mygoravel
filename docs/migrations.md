@@ -82,12 +82,12 @@ var FS embed.FS
 
 文件上传等可选功能自带迁移 SQL。使用这些功能时，把迁移发布到你的应用目录，审查并纳入版本控制，然后交给应用现有的 goose 迁移流程执行。
 
-发布命令需要显式注册。下面是加入已有命令装配代码的片段：`root` 是 `command.Root` 返回的根命令，`migrations.FS` 是应用嵌入的迁移，`dbConfig` 是应用命令装配中从配置取出数据库配置的函数。需要导入 `command/migratecmd`、`database/migrate` 和 `files` 包：
+发布命令需要显式注册。下面是加入已有命令装配代码的片段：`root` 是 `command.Root` 返回的根命令，`migrations.FS` 是应用嵌入的迁移，`dbConfig` 是应用命令装配中从配置取出数据库配置的函数。需要导入 `command/migratecmd`、`database/migrate` 和 `filesystem` 包：
 
 ```go
 migrationCmd := migratecmd.New(migrations.FS, dbConfig)
 migrationCmd.AddCommand(migratecmd.Publish(
-    migrate.Source{Name: "files", FS: files.Migrations()},
+    migrate.Source{Name: "filesystem", FS: filesystem.Migrations()},
 ))
 root.AddCommand(migrationCmd)
 ```
@@ -103,7 +103,7 @@ go run ./cmd/api migrate publish --dir migrations
 每个发布文件的第一行包含稳定的来源标记，例如：
 
 ```sql
--- mygoravel: files/0001_create_files
+-- mygoravel: filesystem/0001_create_files
 ```
 
 发布器通过这个标记识别已有迁移。你可以在首次执行前调整 SQL 或重命名文件，但应保留标记；再次发布不会覆盖你的修改。升级框架后，再次运行命令只会发布新增的来源迁移。
@@ -122,13 +122,13 @@ import (
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/command/migratecmd"
     "github.com/ryan053857/mygoravel/database/migrate"
-    "github.com/ryan053857/mygoravel/files"
+    "github.com/ryan053857/mygoravel/filesystem"
 )
 
 func main() {
     root := command.Root("publish-migrations", "发布应用需要的迁移")
     root.AddCommand(migratecmd.Publish(
-        migrate.Source{Name: "files", FS: files.Migrations()},
+        migrate.Source{Name: "filesystem", FS: filesystem.Migrations()},
     ))
     command.Execute(root)
 }

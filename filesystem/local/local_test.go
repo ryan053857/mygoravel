@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/files/local"
+	"github.com/ryan053857/mygoravel/filesystem/local"
 )
 
 func openDisk(t *testing.T, publicURL string) (*local.Disk, string) {
