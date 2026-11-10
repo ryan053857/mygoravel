@@ -48,7 +48,11 @@ require (
 	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.62.0
 	trpc.group/trpc-go/trpc-agent-go v1.12.0
+	trpc.group/trpc-go/trpc-agent-go/session/mysql v1.12.0
 	trpc.group/trpc-go/trpc-agent-go/session/postgres v1.12.0
+	trpc.group/trpc-go/trpc-agent-go/session/sqlite v1.12.0
+	trpc.group/trpc-go/trpc-agent-go/storage/mysql v1.12.0
+	trpc.group/trpc-go/trpc-agent-go/storage/postgres v0.8.0
 )
 
 require (
@@ -147,5 +151,4 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 	trpc.group/trpc-go/trpc-a2a-go v0.2.6-0.20260721084546-18c8244d0acb // indirect
-	trpc.group/trpc-go/trpc-agent-go/storage/postgres v0.8.0 // indirect
 )

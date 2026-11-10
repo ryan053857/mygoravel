@@ -425,7 +425,13 @@ trpc.group/trpc-go/trpc-a2a-go v0.2.6-0.20260721084546-18c8244d0acb h1:hW6SMv4qf
 trpc.group/trpc-go/trpc-a2a-go v0.2.6-0.20260721084546-18c8244d0acb/go.mod h1:7nbGA66/9AZ2j8+juvl7IsH0FC9jEdrxgsmBLrdKnLw=
 trpc.group/trpc-go/trpc-agent-go v1.12.0 h1:zQ80GIwrJuugnXDyXVJ3iBKryCmnL3po1wRUpxHBQ8U=
 trpc.group/trpc-go/trpc-agent-go v1.12.0/go.mod h1:EjRAYkzjeQfW/Xhhwd/k96dRNZ//EPOsIMtMWSuQ39A=
+trpc.group/trpc-go/trpc-agent-go/session/mysql v1.12.0 h1:3gKqM7AnUm2Rv34spf2+zOo5Y2TlQfn1vJskLVl86T4=
+trpc.group/trpc-go/trpc-agent-go/session/mysql v1.12.0/go.mod h1:ADTQaDSks5usBH/iRvdGz0O52q1eWXEy6tsc636FIyc=
 trpc.group/trpc-go/trpc-agent-go/session/postgres v1.12.0 h1:1cA+JhTcuK+o/Lqy8Ph1wPfh/tIIMcZ1QLohBYTw2W4=
 trpc.group/trpc-go/trpc-agent-go/session/postgres v1.12.0/go.mod h1:620LDvdt1xp7Jxa7r+zpYGdEhpOFGw79u0Ml0BxnHO0=
+trpc.group/trpc-go/trpc-agent-go/session/sqlite v1.12.0 h1:DcJxqmksPDfKZ/9RrTMCkd4mFKKMmKJd9e5J0nNP2AQ=
+trpc.group/trpc-go/trpc-agent-go/session/sqlite v1.12.0/go.mod h1:oq+fVu68Zt0YoyvVHeLKNR0WRIi2C1jVvfdLF2KkJ10=
+trpc.group/trpc-go/trpc-agent-go/storage/mysql v1.12.0 h1:xhJHNdYE7Anf0TfgzzOb2bsd7v2vMinanjR+Pr1qKPY=
+trpc.group/trpc-go/trpc-agent-go/storage/mysql v1.12.0/go.mod h1:sH6nwsTT+yLAMlramY08hHeeAHuGwpKaybax2yvyq2c=
 trpc.group/trpc-go/trpc-agent-go/storage/postgres v0.8.0 h1:8phxJucSgwhdhS0UP6uyaVtWyNL3z1RW7OfLHYUtzco=
 trpc.group/trpc-go/trpc-agent-go/storage/postgres v0.8.0/go.mod h1:q1/qPdLQ8hgyGhvq2t0lmfhRcekm0chBc5+ZI32pBv0=

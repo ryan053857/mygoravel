@@ -37,7 +37,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-这些表的名称都以 `agent_` 开头，结构由 trpc-agent-go 的 PostgreSQL 会话存储决定。目前只支持 PostgreSQL。
+这些表的名称都以 `agent_` 开头，PostgreSQL、MySQL 和 SQLite 都支持，`migratecmd.Publish` 按传入的驱动选择对应的迁移。表结构与 trpc-agent-go 各数据库的会话存储完全一致，框架的测试会在每次升级 trpc-agent-go 时检查这一点。
 
 <a id="assembling"></a>
 ## 装配
@@ -47,7 +47,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ```go
 ai.SetLogger(slog.Default())
 
-sessions, err := aipg.NewSessions(cfg.Database.DSN) // aipg 是 github.com/ryan053857/mygoravel/ai/postgres
+sessions, err := aipg.NewSessions(db) // aipg 是 github.com/ryan053857/mygoravel/ai/postgres
 if err != nil {
     return nil, err
 }
@@ -66,7 +66,7 @@ stack.MustAdd("ai", func(context.Context) error {
 ```
 
 - `ai.SetLogger` 让 trpc-agent-go 的日志写进应用的日志，带 `component=ai` 字段，可以[单独设置级别](logging.md#component-levels)。
-- `aipg.NewSessions` 打开自己的连接池，不和 `*bun.DB` 共用。
+- 对话存储按数据库选择包：`ai/postgres`、`ai/mysql` 或 `ai/sqlite`，用法相同，参数都是应用的 `*bun.DB`，和数据库驱动 `database/postgres` 等一一对应，应用只链接自己用的那个。PostgreSQL 和 MySQL 直接使用应用的连接池；SQLite 对同一个数据库文件另开一组连接（trpc-agent-go 关闭存储时会关闭它的连接），不支持内存数据库。`sessions.Close` 不会关闭应用的数据库。
 - `ai.RequireApproval` 列出需要审批的工具，见[审批](#approval)。
 - `runs.Close` 取消还在进行的运行。它登记在数据库之后，所以会先于数据库关闭。
 
