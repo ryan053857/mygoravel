@@ -23,8 +23,9 @@ var dependencies = map[string][]string{
 	"filesystem": {"errorx", "identity"},
 	"mail":       {"i18n"},
 	"httpx":      {"errorx", "identity", "i18n", "logging"},
+	"session":    {"identity", "httpx", "logging"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "session"},
 }
 
 // 传输、数据库和命令组件的包前缀。
@@ -36,7 +37,7 @@ var infrastructure = []string{
 
 // 后期应用形态使用的组件，当前 module 保持 HTTP API 依赖范围。
 var laterFormModules = []string{
-	"github.com/a-h/templ", "github.com/alexedwards/scs",
+	"github.com/a-h/templ",
 	"github.com/ThreeDotsLabs/watermill", "github.com/go-co-op/gocron",
 	"github.com/gorilla/websocket", "google.golang.org/grpc",
 	"github.com/xuri/excelize",
@@ -119,6 +120,9 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/mail", module + "/i18n", true},
 		{module + "/mail", module + "/database", false},
 		{module + "/httpx", module + "/mail", false},
+		{module + "/session", module + "/httpx/rest", true},
+		{module + "/httpx", module + "/session", false},
+		{module + "/session", module + "/database", false},
 		{module + "/cleanup", "github.com/jackc/pgx/v5", false},
 		{module + "/config", "net/http", false},
 		{module + "/i18n", "github.com/spf13/cobra", false},

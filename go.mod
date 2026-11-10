@@ -3,6 +3,7 @@ module github.com/ryan053857/mygoravel
 go 1.27.3
 
 require (
+	github.com/alexedwards/scs/v2 v2.9.0
 	github.com/aws/aws-sdk-go-v2 v1.47.8
 	github.com/aws/aws-sdk-go-v2/config v1.32.40
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.16

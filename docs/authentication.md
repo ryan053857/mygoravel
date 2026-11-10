@@ -163,6 +163,8 @@ rest.Register(api, op, func() func(context.Context, *actions.GetArticleInput) (*
 
 需要认证的响应还会自动加上 `Cache-Control: no-store`，防止响应被中间代理缓存。
 
+`RequireBearer` 基于更通用的 `rest.RequireAuth` 实现，[会话](session.md)的 `session.Require` 也是。需要其他认证方式（例如从自定义请求头读取 API Key）时，可以用 `RequireAuth` 声明自己的 OpenAPI 安全方案和认证函数，认证失败的响应与本章相同。
+
 > [!TIP]
 > 不需要认证的路由也必须显式调用 `rest.Public()(&op)`。忘记声明访问策略的路由会在注册时 panic，因此你不会意外地发布一个未受保护的接口。
 
@@ -229,4 +231,4 @@ func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleO
 
 凭据存放在哪里、如何签发和吊销，完全由应用决定。上面把 token 写在配置文件中的做法适合内部服务或少量固定的调用方；对外开放的 API 通常会把 API Key 存在数据库中，或者使用 JWT，此时只需替换校验器的实现，路由和业务代码都不需要改变。
 
-用户注册、登录会话、刷新 token 等功能不在 mygoravel 的范围内。你可以选择合适的认证服务或库来实现它们，最终在校验器中把验证结果转换为 `identity.Subject` 即可。
+浏览器中的前端通常使用基于 cookie 的会话登录，见[会话](session.md)。用户注册、刷新 token 等功能不在 mygoravel 的范围内。你可以选择合适的认证服务或库来实现它们，最终在校验器中把验证结果转换为 `identity.Subject` 即可。

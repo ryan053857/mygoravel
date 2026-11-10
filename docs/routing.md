@@ -73,7 +73,7 @@ api := rest.New(rest.Options{
 | `Summary` | 路由的简短描述，显示在接口文档中 |
 | 输入类型 | 路径参数、查询参数、请求头和请求体的来源、类型及验证规则 |
 | 输出类型 | 响应体、状态码和响应头 |
-| 访问策略 | `rest.Public()` 或 `rest.RequireBearer(...)`，必须二选一 |
+| 访问策略 | `rest.Public()`、`rest.RequireBearer(...)` 或 `session.Require(...)`，必须选择一个 |
 | 处理器工厂 | 返回真正处理请求的函数 |
 
 由于请求和响应的结构都写在 Go 类型中，Huma 可以据此自动完成参数解析、输入验证，并生成准确的 OpenAPI 文档。输入和输出类型的写法分别见[请求](requests.md)和[响应](responses.md)。
@@ -99,7 +99,7 @@ func(ctx context.Context, in *Input) (*Output, error)
 
 `rest.Register` 会在注册时检查以下问题，一旦发现就直接 panic，让错误在应用启动时立刻暴露：
 
-- 路由没有声明访问策略（既没有调用 `Public` 也没有调用 `RequireBearer`）；
+- 路由没有声明访问策略（没有调用 `Public`、`RequireBearer` 或 `session.Require`）；
 - `OperationID` 与已注册的路由重复；
 - 与已注册的路由方法相同且路径形状冲突，例如 `/articles/{id}` 与 `/articles/{articleID}`。
 
