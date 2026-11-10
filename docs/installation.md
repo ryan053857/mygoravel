@@ -96,12 +96,10 @@ func registerPing(api *rest.API) {
         Summary:     "检查 API 是否可响应",
     }
     rest.Public()(&op)
-    rest.Register(api, op, func() func(context.Context, *PingInput) (*PingOutput, error) {
-        return func(ctx context.Context, in *PingInput) (*PingOutput, error) {
-            out := &PingOutput{}
-            out.Body.Message = "pong"
-            return out, nil
-        }
+    rest.Register(api, op, func(ctx context.Context, in *PingInput) (*PingOutput, error) {
+        out := &PingOutput{}
+        out.Body.Message = "pong"
+        return out, nil
     })
 }
 

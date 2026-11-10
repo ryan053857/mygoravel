@@ -16,12 +16,12 @@
 
 在 mygoravel 中，你不需要手动读取 `http.Request`。每条路由都有一个**输入类型**——一个普通的 Go 结构体，字段上的标签说明这个值从哪里来。Huma 会在调用处理器之前读取请求、转换类型并完成[验证](validation.md)，你的处理器拿到的就是一个已经填好的结构体。
 
-例如，在[获取文章](routing.md#http-actions)的 `GetArticle.Handle` 方法中，输入已经完成类型转换。它和 `GetArticleInput` 一起定义在 `internal/article/articlehttp/actions/get_article.go` 中，属于 `actions` 包；共享的 `ArticleOutput` 定义在同包的 `dto.go` 中。下面只展示方法签名和读取输入的位置：
+例如，在[获取文章](routing.md#http-actions)的 `Get.HTTP` 方法中，输入已经完成类型转换。它和 `GetInput` 一起定义在 `internal/article/get.go` 中；共享的 `ArticleOutput` 定义在同包的 `dto.go` 中。下面只展示方法签名和读取输入的位置：
 
 ```go
-func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleOutput, error) {
+func (a *Get) HTTP(ctx context.Context, in *GetInput) (*ArticleOutput, error) {
     // in.ID 已经是解析好的 uuid.UUID
-    // ……调用业务服务并返回输出
+    // ……调用 a.Handle 并返回输出
 }
 ```
 
@@ -34,7 +34,7 @@ func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleO
 使用 `path` 标签读取路由路径中的参数。下面的输入类型对应 `/articles/{id}`，`uuid.UUID` 来自 `github.com/google/uuid`：
 
 ```go
-type GetArticleInput struct {
+type GetInput struct {
     ID uuid.UUID `path:"id"`
 }
 ```
@@ -56,7 +56,7 @@ type SearchArticlesInput struct {
 客户端请求 `/articles?limit=50` 时，`in.Limit` 为 50；省略 `limit` 时为默认值 20；传入 500 时，请求会被拒绝。查询参数默认是可选的。
 
 > [!NOTE]
-> 上面的写法会把超出范围的 `limit` 当作错误拒绝。如果你希望把它悄悄截断为 100，就不要声明 `maximum`，而是在业务服务中处理，并在接口描述中说明这一行为。
+> 上面的写法会把超出范围的 `limit` 当作错误拒绝。如果你希望把它悄悄截断为 100，就不要声明 `maximum`，而是在 action 中处理，并在接口描述中说明这一行为。
 
 > [!TIP]
 > 列表接口的分页参数不需要自己声明，嵌入 `page.OffsetParams` 或 `page.CursorParams` 即可，见[分页](responses.md#pagination)。
@@ -78,15 +78,17 @@ type RequestInput struct {
 <a id="json-body"></a>
 ### JSON 请求体
 
-输入结构体中名为 `Body` 的字段表示请求体：
+输入结构体中名为 `Body` 的字段表示请求体。创建文章的请求体是文章模块的 `Changes`，验证规则写在它的字段上，见[数据对象](actions.md#data-objects)：
 
 ```go
-type CreateArticleInput struct {
-    Body struct {
-        Title   string `json:"title" minLength:"1" maxLength:"200"`
-        Slug    string `json:"slug" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" maxLength:"100"`
-        Content string `json:"content"`
-    }
+type Changes struct {
+    Title   string `json:"title" minLength:"1" maxLength:"200"`
+    Slug    string `json:"slug" maxLength:"100" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" patternDescription:"小写字母、数字和连字符"`
+    Content string `json:"content"`
+}
+
+type CreateInput struct {
+    Body Changes
 }
 ```
 
@@ -100,18 +102,14 @@ Authorization: Bearer <token>
 {"title":"Hello World","slug":"hello-world","content":"这是我的第一篇文章。"}
 ```
 
-处理器中通过 `in.Body.Title`、`in.Body.Slug` 等读取字段。请求体中的字段默认是**必填**的，验证规则的写法见[验证](validation.md)。
+处理器中通过 `in.Body.Title`、`in.Body.Slug` 等读取字段，或者把 `in.Body` 整个交给 `Handle`。请求体中的字段默认是**必填**的，验证规则的写法见[验证](validation.md)。
 
 一个输入类型可以同时包含路径参数、查询参数、请求头和请求体：
 
 ```go
-type UpdateArticleInput struct {
+type UpdateInput struct {
     ID   uuid.UUID `path:"id"`
-    Body struct {
-        Title   string `json:"title" minLength:"1" maxLength:"200"`
-        Slug    string `json:"slug" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" maxLength:"100"`
-        Content string `json:"content"`
-    }
+    Body Changes
 }
 ```
 

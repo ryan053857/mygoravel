@@ -29,6 +29,10 @@ var blogFiles = []docFile{
 	{"internal/auth/social/social.go", "social-login.md"},
 	{"internal/auth/authweb/social.go", "social-login.md"},
 	{"internal/auth/authhttp/social.go", "social-login.md"},
+	{"internal/article/publish.go", "actions.md"},
+	{"internal/article/get.go", "routing.md"},
+	{"internal/article/routes.go", "routing.md"},
+	{"internal/article/dto.go", "routing.md"},
 }
 
 // blogFragments 是文档中没有 package 和 import 的片段，补上它们后作为文件编译。

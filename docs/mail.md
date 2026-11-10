@@ -70,7 +70,7 @@ mail:
 
 `mail.Address` 在配置中写成一个字符串，`"名字 <邮箱>"` 或只写邮箱都可以。
 
-然后在[入口](dependencies.md#assembling-the-application)中创建发送器，传给文章服务：
+然后在[入口](dependencies.md#assembling-the-application)中创建发送器，传给发布文章的 action：
 
 ```go
 func newMailer(cfg settings.MailConfig) (mail.Mailer, error) {
@@ -90,8 +90,10 @@ mailer, err := newMailer(cfg.Mail)
 if err != nil {
     return err
 }
-articles := article.NewService(db, mailer, emails, cfg.Mail.Editors)
+publish := article.NewPublish(db, mailer, emails, cfg.Mail.Editors)
 ```
+
+[发布文章](actions.md#writing-actions)的 `Publish` 多了三个依赖，`article.Register` 构造它的地方也要把它们传进去。
 
 `emails` 是下一节加载的邮件模板。`logmail.New(nil)` 使用 `slog.Default()`，每封邮件记录为一条 `mail sent` 日志，包含收件人、主题和正文，开发时可以直接从日志里复制邮件中的链接。
 
@@ -193,33 +195,33 @@ mail.article_published.subject: "新文章：{{.Title}}"
 `Render` 渲染一封邮件，返回已经填好 `Subject`、`HTML` 和 `Text` 的 `mail.Message`，再补上收件人交给发送器：
 
 ```go
-type Service struct {
+type Publish struct {
     db      *bun.DB
     mailer  mail.Mailer
     emails  *mail.Templates
     editors mail.Address
 }
 
-func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         // ...
     })
     if err != nil {
         return nil, err
     }
-    s.notifyEditors(ctx, item)
+    a.notifyEditors(ctx, item)
     return item, nil
 }
 
-func (s *Service) notifyEditors(ctx context.Context, item *Article) {
-    msg, err := s.emails.Render(ctx, "article_published", map[string]any{
+func (a *Publish) notifyEditors(ctx context.Context, item *Article) {
+    msg, err := a.emails.Render(ctx, "article_published", map[string]any{
         "Title": item.Title,
         "URL":   "https://blog.example.com/" + item.Slug,
     })
     if err == nil {
-        msg.To = []mail.Address{s.editors}
-        err = s.mailer.Send(ctx, msg)
+        msg.To = []mail.Address{a.editors}
+        err = a.mailer.Send(ctx, msg)
     }
     if err != nil {
         slog.ErrorContext(ctx, "notify editors failed", "article_id", item.ID, "error", err)
@@ -268,7 +270,7 @@ func TestPublishNotifiesEditors(t *testing.T) {
         t.Fatal(err)
     }
     editors := mail.Address{Email: "editors@example.com"}
-    svc := article.NewService(db, mailer, emails, editors)
+    publish := article.NewPublish(db, mailer, emails, editors)
 
     // ... 创建并发布一篇文章
 

@@ -37,22 +37,12 @@ type echoOut struct {
 }
 
 func TestOpenAPIDoesNotCallNewHandler(t *testing.T) {
-	called := false
 	api := rest.New(rest.Options{Title: "doc", Mode: rest.ModeOpenAPI})
-	rest.Register(api, huma.Operation{Security: []map[string][]string{},
+	rest.Register[pingIn, pingOut](api, huma.Operation{Security: []map[string][]string{},
 		OperationID: "ping",
 		Method:      http.MethodGet,
 		Path:        "/ping",
-	}, func() func(context.Context, *pingIn) (*pingOut, error) {
-		called = true
-		return func(context.Context, *pingIn) (*pingOut, error) {
-			t.Fatal("handler body should not run in openapi mode")
-			return nil, nil
-		}
-	})
-	if called {
-		t.Fatal("newHandler must not be called in ModeOpenAPI")
-	}
+	}, nil)
 	doc, err := api.OpenAPIJSON()
 	if err != nil {
 		t.Fatal(err)
@@ -74,19 +64,15 @@ func TestInstanceTransformersIsolated(t *testing.T) {
 	}
 	a := rest.New(rest.Options{Title: "a", Transformers: []huma.Transformer{markA}})
 	b := rest.New(rest.Options{Title: "b", Transformers: []huma.Transformer{markB}})
-	rest.Register(a, huma.Operation{Security: []map[string][]string{}, OperationID: "a-ping", Method: http.MethodGet, Path: "/ping"}, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(context.Context, *pingIn) (*pingOut, error) {
-			out := &pingOut{}
-			out.Body.Message = "a"
-			return out, nil
-		}
+	rest.Register(a, huma.Operation{Security: []map[string][]string{}, OperationID: "a-ping", Method: http.MethodGet, Path: "/ping"}, func(context.Context, *pingIn) (*pingOut, error) {
+		out := &pingOut{}
+		out.Body.Message = "a"
+		return out, nil
 	})
-	rest.Register(b, huma.Operation{Security: []map[string][]string{}, OperationID: "b-ping", Method: http.MethodGet, Path: "/ping"}, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(context.Context, *pingIn) (*pingOut, error) {
-			out := &pingOut{}
-			out.Body.Message = "b"
-			return out, nil
-		}
+	rest.Register(b, huma.Operation{Security: []map[string][]string{}, OperationID: "b-ping", Method: http.MethodGet, Path: "/ping"}, func(context.Context, *pingIn) (*pingOut, error) {
+		out := &pingOut{}
+		out.Body.Message = "b"
+		return out, nil
 	})
 
 	ra := httptest.NewRecorder()
@@ -108,32 +94,26 @@ func TestPingServeAndErrorMapping(t *testing.T) {
 		OperationID: "ping",
 		Method:      http.MethodGet,
 		Path:        "/ping",
-	}, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(ctx context.Context, _ *pingIn) (*pingOut, error) {
-			out := &pingOut{}
-			out.Body.Message = "pong"
-			return out, nil
-		}
+	}, func(ctx context.Context, _ *pingIn) (*pingOut, error) {
+		out := &pingOut{}
+		out.Body.Message = "pong"
+		return out, nil
 	})
 	rest.Register(api, huma.Operation{Security: []map[string][]string{},
 		OperationID: "deny",
 		Method:      http.MethodGet,
 		Path:        "/deny",
-	}, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(context.Context, *pingIn) (*pingOut, error) {
-			return nil, errDenied.New()
-		}
+	}, func(context.Context, *pingIn) (*pingOut, error) {
+		return nil, errDenied.New()
 	})
 	rest.Register(api, huma.Operation{Security: []map[string][]string{},
 		OperationID: "echo",
 		Method:      http.MethodPost,
 		Path:        "/echo",
-	}, func() func(context.Context, *echoIn) (*echoOut, error) {
-		return func(context.Context, *echoIn) (*echoOut, error) {
-			out := &echoOut{}
-			out.Body.OK = true
-			return out, nil
-		}
+	}, func(context.Context, *echoIn) (*echoOut, error) {
+		out := &echoOut{}
+		out.Body.OK = true
+		return out, nil
 	})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -201,13 +181,9 @@ func TestPingServeAndErrorMapping(t *testing.T) {
 
 func TestResponsesHaveNoSchemaLink(t *testing.T) {
 	api := rest.New(rest.Options{})
-	rest.Register(api, huma.Operation{Security: []map[string][]string{}, OperationID: "ping", Method: http.MethodGet, Path: "/ping"}, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(context.Context, *pingIn) (*pingOut, error) { return &pingOut{}, nil }
-	})
-	rest.Register(api, huma.Operation{Security: []map[string][]string{}, OperationID: "deny", Method: http.MethodGet, Path: "/deny"}, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(context.Context, *pingIn) (*pingOut, error) {
-			return nil, errorx.Define(errorx.NotFound, "demo.missing").New()
-		}
+	rest.Register(api, huma.Operation{Security: []map[string][]string{}, OperationID: "ping", Method: http.MethodGet, Path: "/ping"}, func(context.Context, *pingIn) (*pingOut, error) { return &pingOut{}, nil })
+	rest.Register(api, huma.Operation{Security: []map[string][]string{}, OperationID: "deny", Method: http.MethodGet, Path: "/deny"}, func(context.Context, *pingIn) (*pingOut, error) {
+		return nil, errorx.Define(errorx.NotFound, "demo.missing").New()
 	})
 	for _, path := range []string{"/ping", "/deny"} {
 		rr := httptest.NewRecorder()

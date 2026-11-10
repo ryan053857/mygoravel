@@ -175,7 +175,7 @@ if err != nil {
 }
 ```
 
-只使用一种磁盘时，只打开并传入那一个。把 `fileService` 传给需要文件的业务服务和处理器。文件服务不注册路由，也不启动后台任务：上传接口和权限检查由应用决定，清理由[清理任务](#cleanup)执行。
+只使用一种磁盘时，只打开并传入那一个。把 `fileService` 传给需要文件的 [action](actions.md)。文件服务不注册路由，也不启动后台任务：上传接口和权限检查由应用决定，清理由[清理任务](#cleanup)执行。
 
 <a id="server-upload"></a>
 ## 通过应用服务器上传
@@ -457,16 +457,17 @@ https://img.example.com/<签名>/rs:fill:300:200/plain/https://cdn.example.com/2
 <a id="rest"></a>
 ## 在 REST 接口中使用
 
-文件服务不注册路由，上传接口由你在 [REST](routing.md) 模块中按需声明。本节给出博客应用中 `filehttp` 模块的完整写法，目录组织与[组织路由](routing.md#organizing-routes)一致：
+文件服务不注册路由，上传接口由你在 [REST](routing.md) 模块中按需声明。本节给出博客应用中 `file` 模块的完整写法，目录组织与[组织路由](routing.md#organizing-routes)一致：
 
 ```text
-internal/file/filehttp/
+internal/file/
 ├── routes.go              注册文件模块的路由
-└── actions/
-    ├── upload_file.go     服务端上传
-    ├── direct_upload.go   S3 直传：登记、签名、分片
-    └── dto.go             共享的输入输出类型
+├── upload.go              服务端上传
+├── direct_upload.go       S3 直传：登记、签名、分片
+└── dto.go                 共享的输入输出类型
 ```
+
+这些 action 的业务都由框架的文件服务完成，它们只有 HTTP 入口，不需要单独的 `Handle`。
 
 <a id="rest-routes"></a>
 ### 路由
@@ -486,15 +487,13 @@ internal/file/filehttp/
 `routes.go` 声明这些路由。所有接口都需要登录，`requireUser` 由入口传入，例如 `rest.RequireBearer(api, validateToken)`：
 
 ```go
-package filehttp
+package file
 
 import (
-    "context"
     "net/http"
 
     "github.com/danielgtaylor/huma/v2"
 
-    "example.com/blog/internal/file/filehttp/actions"
     "github.com/ryan053857/mygoravel/filesystem"
     "github.com/ryan053857/mygoravel/httpx/rest"
 )
@@ -509,9 +508,7 @@ func Register(api *rest.API, requireUser func(*huma.Operation), files *filesyste
         DefaultStatus: http.StatusCreated,
     }
     requireUser(&upload)
-    rest.Register(api, upload, func() func(context.Context, *actions.UploadFileInput) (*actions.FileOutput, error) {
-        return actions.NewUploadFile(files).Handle
-    })
+    rest.Register(api, upload, NewUpload(files).HTTP)
 
     prepare := huma.Operation{
         OperationID:   "file-prepare",
@@ -521,9 +518,7 @@ func Register(api *rest.API, requireUser func(*huma.Operation), files *filesyste
         DefaultStatus: http.StatusCreated,
     }
     requireUser(&prepare)
-    rest.Register(api, prepare, func() func(context.Context, *actions.PrepareFileInput) (*actions.FileOutput, error) {
-        return actions.NewDirectUpload(files).Prepare
-    })
+    rest.Register(api, prepare, NewDirectUpload(files).Prepare)
 
     signPut := huma.Operation{
         OperationID: "file-sign-put",
@@ -532,9 +527,7 @@ func Register(api *rest.API, requireUser func(*huma.Operation), files *filesyste
         Summary:     "单次直传签名",
     }
     requireUser(&signPut)
-    rest.Register(api, signPut, func() func(context.Context, *actions.FileIDInput) (*actions.SignedOutput, error) {
-        return actions.NewDirectUpload(files).SignPut
-    })
+    rest.Register(api, signPut, NewDirectUpload(files).SignPut)
 
     createMultipart := huma.Operation{
         OperationID:   "file-multipart-create",
@@ -544,9 +537,7 @@ func Register(api *rest.API, requireUser func(*huma.Operation), files *filesyste
         DefaultStatus: http.StatusCreated,
     }
     requireUser(&createMultipart)
-    rest.Register(api, createMultipart, func() func(context.Context, *actions.FileIDInput) (*actions.MultipartOutput, error) {
-        return actions.NewDirectUpload(files).CreateMultipart
-    })
+    rest.Register(api, createMultipart, NewDirectUpload(files).CreateMultipart)
 
     signPart := huma.Operation{
         OperationID: "file-multipart-sign-part",
@@ -555,9 +546,7 @@ func Register(api *rest.API, requireUser func(*huma.Operation), files *filesyste
         Summary:     "分片签名",
     }
     requireUser(&signPart)
-    rest.Register(api, signPart, func() func(context.Context, *actions.SignPartInput) (*actions.SignedOutput, error) {
-        return actions.NewDirectUpload(files).SignPart
-    })
+    rest.Register(api, signPart, NewDirectUpload(files).SignPart)
 
     complete := huma.Operation{
         OperationID: "file-multipart-complete",
@@ -566,9 +555,7 @@ func Register(api *rest.API, requireUser func(*huma.Operation), files *filesyste
         Summary:     "合并分片",
     }
     requireUser(&complete)
-    rest.Register(api, complete, func() func(context.Context, *actions.CompleteMultipartInput) (*actions.FileOutput, error) {
-        return actions.NewDirectUpload(files).CompleteMultipart
-    })
+    rest.Register(api, complete, NewDirectUpload(files).CompleteMultipart)
 
     abort := huma.Operation{
         OperationID:   "file-multipart-abort",
@@ -578,22 +565,20 @@ func Register(api *rest.API, requireUser func(*huma.Operation), files *filesyste
         DefaultStatus: http.StatusNoContent,
     }
     requireUser(&abort)
-    rest.Register(api, abort, func() func(context.Context, *actions.UploadIDInput) (*actions.NoContentOutput, error) {
-        return actions.NewDirectUpload(files).AbortMultipart
-    })
+    rest.Register(api, abort, NewDirectUpload(files).AbortMultipart)
 }
 ```
 
 入口在组装应用时调用它：
 
 ```go
-filehttp.Register(api, rest.RequireBearer(api, validateToken), fileService)
+file.Register(api, rest.RequireBearer(api, validateToken), fileService)
 ```
 
-`actions/dto.go` 定义共享的输入和输出。响应体直接使用 `filesystem.File` 等类型，它们自带 JSON 标签，`File` 的 JSON 中包含公开地址 `url`，但不包含上传者信息：
+`dto.go` 定义共享的输入和输出。响应体直接使用 `filesystem.File` 等类型，它们自带 JSON 标签，`File` 的 JSON 中包含公开地址 `url`，但不包含上传者信息：
 
 ```go
-package actions
+package file
 
 import (
     "github.com/google/uuid"
@@ -627,10 +612,10 @@ type NoContentOutput struct{}
 <a id="rest-upload"></a>
 ### 服务端上传接口
 
-`actions/upload_file.go` 用 Huma 的 `MultipartFormFiles` 接收 `multipart/form-data` 中名为 `file` 的字段，再交给 `Upload`：
+`upload.go` 用 Huma 的 `MultipartFormFiles` 接收 `multipart/form-data` 中名为 `file` 的字段，再交给 `Upload`：
 
 ```go
-package actions
+package file
 
 import (
     "context"
@@ -640,21 +625,21 @@ import (
     "github.com/ryan053857/mygoravel/identity"
 )
 
-type UploadFileInput struct {
+type UploadInput struct {
     RawBody huma.MultipartFormFiles[struct {
         File huma.FormFile `form:"file" required:"true"`
     }]
 }
 
-type UploadFile struct {
+type Upload struct {
     files *filesystem.Service
 }
 
-func NewUploadFile(files *filesystem.Service) *UploadFile {
-    return &UploadFile{files: files}
+func NewUpload(files *filesystem.Service) *Upload {
+    return &Upload{files: files}
 }
 
-func (a *UploadFile) Handle(ctx context.Context, in *UploadFileInput) (*FileOutput, error) {
+func (a *Upload) HTTP(ctx context.Context, in *UploadInput) (*FileOutput, error) {
     owner, _ := identity.FromContext(ctx)
     f := in.RawBody.Data().File
     file, err := a.files.Upload(ctx, owner, filesystem.FileInput{
@@ -696,10 +681,10 @@ curl -X POST https://blog.example.com/files \
 <a id="rest-direct-upload"></a>
 ### 直传接口
 
-`actions/direct_upload.go` 把直传相关的几个动作放在一起，它们都只是把路径参数转交给文件服务：
+`direct_upload.go` 把直传相关的几个接口放在一个 action 中，每个方法对应一个接口，都只是把参数转交给文件服务：
 
 ```go
-package actions
+package file
 
 import (
     "context"
@@ -822,35 +807,35 @@ await api('POST', `/files/${record.id}/multipart/${upload.upload_id}/complete`, 
 <a id="rest-confirm"></a>
 ### 在业务接口中确认
 
-客户端上传完成后，把文件 ID 提交给使用它的业务接口，由业务接口确认。例如创建文章时设置封面：
+客户端上传完成后，把文件 ID 提交给使用它的业务接口，由业务接口确认。例如创建文章时设置封面，`Create` 通过构造函数接收文件服务，在插入文章的同一个事务中确认文件：
 
 ```go
-type CreateArticleInput struct {
+type CreateInput struct {
     Body struct {
-        Title   string    `json:"title" minLength:"1" maxLength:"200"`
+        Changes
         CoverID uuid.UUID `json:"cover_id"`
     }
 }
 
-func (a *CreateArticle) Handle(ctx context.Context, in *CreateArticleInput) (*ArticleOutput, error) {
-    owner, _ := identity.FromContext(ctx)
-    cover, err := a.files.Confirm(ctx, owner, in.Body.CoverID, coverImage)
-    if err != nil {
-        return nil, err
-    }
-    created, err := a.articles.Create(ctx, owner, article.CreateInput{
-        Title:    in.Body.Title,
-        CoverID:  cover.ID,
-        CoverURL: cover.URL,
+func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes, coverID uuid.UUID) (*Article, error) {
+    item := &Article{ /* 与原来相同…… */ }
+    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        cover, err := a.files.WithDB(tx).Confirm(ctx, subject, coverID, coverImage)
+        if err != nil {
+            return err
+        }
+        item.CoverID = cover.ID
+        _, err = tx.NewInsert().Model(item).Exec(ctx)
+        return err // 处理唯一约束冲突，与原来相同……
     })
     if err != nil {
         return nil, err
     }
-    return newArticleOutput(created), nil
+    return item, nil
 }
 ```
 
-用户提交了别人的文件 ID、已过期的 ID，文件还没上传完，或者不是允许的图片时，`Confirm` 会返回错误，接口直接返回它即可。需要确认与业务写入在同一事务中时，在业务服务内部使用 `WithDB(tx)`，见[确认文件](#confirming-files)。
+`HTTP` 把 `in.Body.Changes` 和 `in.Body.CoverID` 交给 `Handle`。用户提交了别人的文件 ID、已过期的 ID，文件还没上传完，或者不是允许的图片时，`Confirm` 会返回错误，接口直接返回它即可。事务回滚时文件保持 `temporary`，见[确认文件](#confirming-files)。
 
 <a id="rest-limits"></a>
 ### 请求体大小与超时

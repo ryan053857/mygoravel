@@ -19,9 +19,9 @@ import (
 
 func TestRoutesIncludesTypedNativeAndHiddenRoutesWithoutRuntime(t *testing.T) {
 	api := rest.New(rest.Options{Mode: rest.ModeOpenAPI})
-	factory := func() func(context.Context, *pingIn) (*pingOut, error) {
-		t.Fatal("route inspection constructed a handler")
-		return nil
+	handler := func(context.Context, *pingIn) (*pingOut, error) {
+		t.Fatal("route inspection invoked a handler")
+		return nil, nil
 	}
 	validator := func(context.Context, string) (identity.Subject, error) {
 		t.Fatal("route inspection validated a token")
@@ -30,16 +30,16 @@ func TestRoutesIncludesTypedNativeAndHiddenRoutesWithoutRuntime(t *testing.T) {
 	// Register out of display order, including two methods on one path.
 	create := huma.Operation{OperationID: "item-create", Method: http.MethodPost, Path: "/inventory/items", Summary: "创建条目"}
 	rest.RequireBearer(api, validator, "items:write", "items:read")(&create)
-	rest.Register(api, create, factory)
+	rest.Register(api, create, handler)
 	get := huma.Operation{OperationID: "item-list", Method: http.MethodGet, Path: "/inventory/items", Summary: "查看条目列表\n支持分页"}
 	rest.Public()(&get)
-	rest.Register(api, get, factory)
+	rest.Register(api, get, handler)
 	private := huma.Operation{OperationID: "item-private", Method: http.MethodGet, Path: "/inventory/private"}
 	rest.RequireBearer(api, validator)(&private)
-	rest.Register(api, private, factory)
+	rest.Register(api, private, handler)
 	hidden := huma.Operation{OperationID: "item-hidden", Method: http.MethodGet, Path: "/inventory/hidden", Summary: "隐藏条目详情", Hidden: true}
 	rest.Public()(&hidden)
-	rest.Register(api, hidden, factory)
+	rest.Register(api, hidden, handler)
 
 	native := func(http.ResponseWriter, *http.Request) {
 		t.Fatal("route inspection invoked a native handler")
@@ -165,7 +165,7 @@ func TestRoutesUnderMountedAPI(t *testing.T) {
 		api = rest.New(rest.Options{Mode: rest.ModeOpenAPI, Router: r, BasePath: "/api/v1"})
 		op := huma.Operation{OperationID: "ping", Method: http.MethodGet, Path: "/ping"}
 		rest.Public()(&op)
-		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) { return nil })
+		rest.Register[pingIn, pingOut](api, op, nil)
 	})
 	router.Get("/health", func(http.ResponseWriter, *http.Request) {})
 	routes := httpx.Routes(router)

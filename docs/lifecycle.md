@@ -24,7 +24,7 @@
 
 1. 读取并校验当前命令需要的[配置](configuration.md)；
 2. 打开数据库等资源，每成功打开一个，就登记对应的关闭操作；
-3. 构造业务服务，创建 API 并注册路由；
+3. 创建 API，构造 action 并注册路由；
 4. 调用 `httpx.ListenAndServe` 开始处理请求。
 
 这些步骤都是普通的 Go 代码，具体写法见[依赖装配](dependencies.md#assembling-the-application)。
@@ -48,7 +48,7 @@
   → 路由匹配
   → Bearer 认证（仅限需要认证的路由）
   → Huma 解析并验证输入
-  → 你的处理器调用业务服务
+  → action 的 HTTP 方法调用 Handle
   → 错误转换为统一的错误响应
 ```
 
@@ -56,7 +56,7 @@
 
 - 没有携带有效 token 的请求，在 Bearer 认证这一步就返回 `401`；
 - 标题为空或 slug 格式不对的请求，在 Huma 验证输入这一步返回 `422`，你的处理器不会被调用；
-- 通过了前面所有步骤，处理器才会调用 `articles.Update`。它返回的业务错误（例如 slug 已被使用）在最后一步被转换为 `409` 等响应。
+- 通过了前面所有步骤，`Update.HTTP` 才会调用 `Handle`。它返回的业务错误（例如 slug 已被使用）在最后一步被转换为 `409` 等响应。
 
 前半部分由安装在 Router 上的中间件完成，作用于所有请求，详见[中间件](middleware.md)；认证由路由上声明的策略决定，详见[认证](authentication.md)；输入解析与验证见[请求](requests.md)和[验证](validation.md)；处理器返回的错误如何转换为 HTTP 响应，见[错误处理](errors.md)。
 

@@ -2,13 +2,13 @@
 
 - [基本路由](#basic-routing)
     - [路由声明](#operations)
-    - [处理器工厂](#handler-factories)
+    - [处理器](#handlers)
     - [注册时的检查](#registration-checks)
 - [路由参数](#route-parameters)
 - [访问策略](#access-policies)
 - [组织路由](#organizing-routes)
     - [模块内注册](#module-registration)
-    - [按业务动作组织处理器](#http-actions)
+    - [action 的 HTTP 入口](#http-actions)
     - [共享响应结构](#shared-responses)
     - [查看全部路由](#listing-routes)
 - [API 版本](#api-versioning)
@@ -41,12 +41,10 @@ func registerPing(api *rest.API) {
         Summary:     "检查 API 是否可响应",
     }
     rest.Public()(&op)
-    rest.Register(api, op, func() func(context.Context, *PingInput) (*PingOutput, error) {
-        return func(ctx context.Context, in *PingInput) (*PingOutput, error) {
-            out := &PingOutput{}
-            out.Body.Message = "pong"
-            return out, nil
-        }
+    rest.Register(api, op, func(ctx context.Context, in *PingInput) (*PingOutput, error) {
+        out := &PingOutput{}
+        out.Body.Message = "pong"
+        return out, nil
     })
 }
 ```
@@ -75,25 +73,27 @@ api := rest.New(rest.Options{
 | 输入类型 | 路径参数、查询参数、请求头和请求体的来源、类型及验证规则 |
 | 输出类型 | 响应体、状态码和响应头 |
 | 访问策略 | `rest.Public()` 或 `rest.RequireBearer(...)`，必须选择一个 |
-| 处理器工厂 | 返回真正处理请求的函数 |
+| 处理器 | 处理请求的函数，通常是 [action](actions.md) 的 `HTTP` 方法 |
 
 由于请求和响应的结构都写在 Go 类型中，Huma 可以据此自动完成参数解析、输入验证，并生成准确的 OpenAPI 文档。输入和输出类型的写法分别见[请求](requests.md)和[响应](responses.md)。
 
-<a id="handler-factories"></a>
-### 处理器工厂
+<a id="handlers"></a>
+### 处理器
 
-你可能已经注意到，`rest.Register` 的最后一个参数不是处理器本身，而是一个**返回处理器的函数**。处理器的签名始终是：
+处理器的签名始终是：
 
 ```go
 func(ctx context.Context, in *Input) (*Output, error)
 ```
 
-之所以多包一层，是因为 API 有两种运行模式：
+业务接口的处理器通常是 [action](actions.md) 的方法值，例如 `article.NewPublish(db).HTTP`。
 
-- **运行模式**（`rest.ModeServe`，默认）：`rest.Register` 调用工厂，得到处理器并挂载到路由上；
-- **文档模式**（`rest.ModeOpenAPI`）：只生成接口文档，**不会调用工厂**。
+API 有两种运行模式：
 
-这意味着在文档模式下，处理器依赖的数据库、缓存等资源都不需要存在。你可以在没有任何外部依赖的环境中（例如 CI）导出接口文档，详见[离线导出](#exporting-openapi)。
+- **运行模式**（`rest.ModeServe`，默认）：处理器挂载到路由上；
+- **文档模式**（`rest.ModeOpenAPI`）：只生成接口文档，**不会调用处理器**，也可以传 `nil`。
+
+文档模式下路由照常注册，action 也会被构造，只是传入的数据库等依赖都是 `nil`。只要构造函数只保存依赖、不使用它们，就可以在没有任何外部依赖的环境中（例如 CI）导出接口文档，详见[离线导出](#exporting-openapi)。
 
 <a id="registration-checks"></a>
 ### 注册时的检查
@@ -146,44 +146,37 @@ requireArticles(&op)
 <a id="organizing-routes"></a>
 ## 组织路由
 
-推荐在每个业务模块的 HTTP 子包中保留 `routes.go`，集中声明该模块的路由；在它旁边创建 `actions` 子目录，存放请求处理动作。目录名表达代码的职责，每个文件用“动作 + 业务对象”表达具体用途。这样你可以在 `routes.go` 中查看路径、方法和访问策略，再跳转到 `actions` 中的实现：
+业务代码按 [action](actions.md) 组织，每个业务动作一个文件，HTTP 入口是 action 的 `HTTP` 方法。每个业务模块再用一个 `routes.go` 集中声明自己的路由，你可以在这里查看路径、方法和访问策略，再跳转到对应的 action：
 
 ```text
-internal/article/articlehttp/
-├── routes.go                 注册文章模块的路由
-└── actions/                  HTTP 请求处理动作
-    ├── create_article.go     创建文章
-    ├── get_article.go        获取文章
-    ├── publish_article.go    发布文章
-    └── dto.go                动作共享的响应结构与转换
+internal/article/
+├── article.go      模型、业务错误与共享的规则
+├── create.go       Create：创建文章
+├── get.go          Get：获取文章
+├── publish.go      Publish：发布文章
+├── dto.go          共享的响应结构与转换
+└── routes.go       注册文章模块的路由
 ```
-
-下面给出这五个文件的完整代码。`article` 是同一应用中的业务包，业务服务的实现见[错误处理](errors.md#returning-errors)和[授权](authorization.md#ownership)。
-
-> [!NOTE]
-> 单文件 action 是文档推荐的代码组织方式。框架不检查文件名、目录或 action 类型，也不要求实现某个 `Action` 接口；普通函数同样可以作为处理器。小型示例可以保持在一个文件中。
 
 <a id="module-registration"></a>
 ### 模块内注册
 
-`routes.go` 属于 `articlehttp` 包，提供模块的统一 `Register` 入口。它导入 `actions` 子包，只声明路由并绑定对应的 action：
+`internal/article/routes.go` 与 action 同属 `article` 包，提供模块的统一 `Register` 入口。它只声明路由，并把 action 的 `HTTP` 方法注册为处理器：
 
 ```go
-package articlehttp
+package article
 
 import (
-    "context"
     "net/http"
 
     "github.com/danielgtaylor/huma/v2"
+    "github.com/uptrace/bun"
 
-    "example.com/blog/internal/article"
-    "example.com/blog/internal/article/articlehttp/actions"
     "github.com/ryan053857/mygoravel/httpx/rest"
 )
 
 // Register 注册文章模块的全部路由。
-func Register(api *rest.API, requireArticles func(*huma.Operation), articles *article.Service) {
+func Register(api *rest.API, requireArticles func(*huma.Operation), db *bun.DB) {
     create := huma.Operation{
         OperationID:   "article-create",
         Method:        http.MethodPost,
@@ -192,9 +185,7 @@ func Register(api *rest.API, requireArticles func(*huma.Operation), articles *ar
         DefaultStatus: http.StatusCreated,
     }
     requireArticles(&create)
-    rest.Register(api, create, func() func(context.Context, *actions.CreateArticleInput) (*actions.ArticleOutput, error) {
-        return actions.NewCreateArticle(articles).Handle
-    })
+    rest.Register(api, create, NewCreate(db).HTTP)
 
     get := huma.Operation{
         OperationID: "article-get",
@@ -203,9 +194,7 @@ func Register(api *rest.API, requireArticles func(*huma.Operation), articles *ar
         Summary:     "获取文章",
     }
     requireArticles(&get)
-    rest.Register(api, get, func() func(context.Context, *actions.GetArticleInput) (*actions.ArticleOutput, error) {
-        return actions.NewGetArticle(articles).Handle
-    })
+    rest.Register(api, get, NewGet(db).HTTP)
 
     publish := huma.Operation{
         OperationID: "article-publish",
@@ -214,94 +203,67 @@ func Register(api *rest.API, requireArticles func(*huma.Operation), articles *ar
         Summary:     "发布文章",
     }
     requireArticles(&publish)
-    rest.Register(api, publish, func() func(context.Context, *actions.PublishArticleInput) (*actions.ArticleOutput, error) {
-        return actions.NewPublishArticle(articles).Handle
-    })
+    rest.Register(api, publish, NewPublish(db).HTTP)
 }
 ```
 
-action 的构造函数在处理器工厂内部调用。文档模式不会执行这些工厂，因此生成 OpenAPI 或查看路由时不需要创建业务服务、打开数据库。
+`Register` 接收模块的 action 需要的依赖，在注册时构造它们。生成 OpenAPI 或查看路由时，`db` 为 `nil`，处理器不会被调用。
 
-入口在组装应用时调用模块的注册函数，并决定这些路由的访问策略。这里的 `articles` 是入口构造的 `*article.Service`，`validateToken` 是 token 校验器，完整的组装代码见[依赖装配](dependencies.md#assembling-the-application)：
+入口在组装应用时调用模块的注册函数，并决定这些路由的访问策略。这里的 `db` 是入口打开的数据库，`validateToken` 是 token 校验器，完整的组装代码见[依赖装配](dependencies.md#assembling-the-application)：
 
 ```go
-articlehttp.Register(api, rest.RequireBearer(api, validateToken, "articles"), articles)
+article.Register(api, rest.RequireBearer(api, validateToken, "articles"), db)
 ```
 
 <a id="http-actions"></a>
-### 按业务动作组织处理器
+### action 的 HTTP 入口
 
-`actions` 目录中的文件都属于 `actions` 包，每个动作单独放在一个文件中，包含输入类型、依赖、构造函数和 `Handle` 方法。目录已经标明 action 的职责，文件名和类型名只需表达业务意图，例如 `create_article.go` 和 `CreateArticle`，不必重复添加 `action_` 前缀或 `Action` 后缀。
-
-`actions/create_article.go` 定义创建文章的动作：
+`publish.go` 的完整代码见[编写 action](actions.md#writing-actions)。`create.go` 和 `get.go` 的写法相同，下面是 `internal/article/get.go`：
 
 ```go
-package actions
-
-import (
-    "context"
-
-    "example.com/blog/internal/article"
-    "github.com/ryan053857/mygoravel/identity"
-)
-
-type CreateArticleInput struct {
-    Body struct {
-        Title   string `json:"title" minLength:"1" maxLength:"200"`
-        Slug    string `json:"slug" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" maxLength:"100"`
-        Content string `json:"content"`
-    }
-}
-
-type CreateArticle struct {
-    articles *article.Service
-}
-
-func NewCreateArticle(articles *article.Service) *CreateArticle {
-    return &CreateArticle{articles: articles}
-}
-
-func (a *CreateArticle) Handle(ctx context.Context, in *CreateArticleInput) (*ArticleOutput, error) {
-    subject, _ := identity.FromContext(ctx)
-    item, err := a.articles.Create(ctx, subject, article.Changes{
-        Title: in.Body.Title, Slug: in.Body.Slug, Content: in.Body.Content,
-    })
-    if err != nil {
-        return nil, err
-    }
-    return &ArticleOutput{Body: toDTO(item)}, nil
-}
-```
-
-`actions/get_article.go` 定义获取文章的动作：
-
-```go
-package actions
+package article
 
 import (
     "context"
 
     "github.com/google/uuid"
+    "github.com/uptrace/bun"
 
-    "example.com/blog/internal/article"
     "github.com/ryan053857/mygoravel/identity"
 )
 
-type GetArticleInput struct {
+// Get 获取文章。
+type Get struct {
+    db *bun.DB
+}
+
+func NewGet(db *bun.DB) *Get {
+    return &Get{db: db}
+}
+
+// Handle 返回一篇文章。草稿只有作者本人能看到。
+func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+    if subject.ID == "" {
+        return nil, ErrForbidden.New()
+    }
+    item, err := find(ctx, a.db, id)
+    if err != nil {
+        return nil, err
+    }
+    if item.Status == StatusDraft && item.AuthorID != subject.ID {
+        return nil, ErrNotFound.New() // 别人的草稿，当作不存在
+    }
+    return item, nil
+}
+
+type GetInput struct {
     ID uuid.UUID `path:"id"`
 }
 
-type GetArticle struct {
-    articles *article.Service
-}
-
-func NewGetArticle(articles *article.Service) *GetArticle {
-    return &GetArticle{articles: articles}
-}
-
-func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleOutput, error) {
+// HTTP 处理 GET /articles/{id}。
+func (a *Get) HTTP(ctx context.Context, in *GetInput) (*ArticleOutput, error) {
     subject, _ := identity.FromContext(ctx)
-    item, err := a.articles.Get(ctx, subject, in.ID)
+    item, err := a.Handle(ctx, subject, in.ID)
     if err != nil {
         return nil, err
     }
@@ -309,59 +271,25 @@ func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleO
 }
 ```
 
-`actions/publish_article.go` 定义发布文章的动作：
+`create.go` 的输入类型直接使用模块的 `Changes` 作为请求体，验证规则写在 `Changes` 上，见[数据对象](actions.md#data-objects)：
 
 ```go
-package actions
-
-import (
-    "context"
-
-    "github.com/google/uuid"
-
-    "example.com/blog/internal/article"
-    "github.com/ryan053857/mygoravel/identity"
-)
-
-type PublishArticleInput struct {
-    ID uuid.UUID `path:"id"`
-}
-
-type PublishArticle struct {
-    articles *article.Service
-}
-
-func NewPublishArticle(articles *article.Service) *PublishArticle {
-    return &PublishArticle{articles: articles}
-}
-
-func (a *PublishArticle) Handle(ctx context.Context, in *PublishArticleInput) (*ArticleOutput, error) {
-    subject, _ := identity.FromContext(ctx)
-    item, err := a.articles.Publish(ctx, subject, in.ID)
-    if err != nil {
-        return nil, err
-    }
-    return &ArticleOutput{Body: toDTO(item)}, nil
+type CreateInput struct {
+    Body Changes
 }
 ```
 
-每个 `Handle` 只做三件事：把输入转换为业务参数、调用业务服务、把结果转换为输出。业务规则，包括“只有作者能发布”、“不能重复发布”，都留在服务中。不同 action 使用各自的输入类型，后续可以独立增加字段或验证规则。
-
-action 在注册路由时构造，其 `Handle` 会被多个请求并发调用。只在字段中保存可安全共享的依赖；请求数据保存在方法参数和局部变量中。
+每个 `HTTP` 方法只做三件事：从输入和 context 中取出参数、调用 `Handle`、把结果转换为输出。业务规则，包括“只有作者能发布”、“不能重复发布”，都在 `Handle` 中。不同 action 使用各自的输入类型，后续可以独立增加字段或验证规则。
 
 <a id="shared-responses"></a>
 ### 共享响应结构
 
-这三个动作返回同一种文章表示，因此将 `ArticleDTO`、`ArticleOutput` 和转换函数放在 `actions/dto.go` 中共享。它们和处理器属于同一个 `actions` 包，转换函数 `toDTO` 可以保持不导出。某个动作独有的输出类型可以直接放在该 action 文件中：
+这几个 action 返回同一种文章表示，因此把 `ArticleDTO`、`ArticleOutput` 和转换函数放在 `internal/article/dto.go` 中共享。某个 action 独有的输出类型直接放在它自己的文件中：
 
 ```go
-package actions
+package article
 
-import (
-    "time"
-
-    "example.com/blog/internal/article"
-)
+import "time"
 
 type ArticleDTO struct {
     ID          string     `json:"id"`
@@ -376,7 +304,7 @@ type ArticleOutput struct {
     Body ArticleDTO
 }
 
-func toDTO(a *article.Article) ArticleDTO {
+func toDTO(a *Article) ArticleDTO {
     return ArticleDTO{
         ID: a.ID.String(), Title: a.Title, Slug: a.Slug,
         AuthorID: a.AuthorID, Status: a.Status, PublishedAt: a.PublishedAt,
@@ -384,7 +312,7 @@ func toDTO(a *article.Article) ArticleDTO {
 }
 ```
 
-依赖方向是 `articlehttp → actions → article`：路由入口绑定动作，动作调用业务服务。共享响应放在 `actions` 包内，避免动作为了使用 DTO 而反过来导入 `articlehttp`，造成循环依赖。无需为每个动作再创建一个子包；这仍然是推荐的组织约定，框架不要求这种目录结构。请求和响应类型的详细写法分别见[请求](requests.md)和[响应](responses.md)。
+`ArticleDTO` 决定了 API 返回哪些字段。不要把模型 `Article` 直接作为响应体：给模型加一个内部字段，就会意外地把它暴露给客户端。请求和响应类型的详细写法分别见[请求](requests.md)和[响应](responses.md)。
 
 <a id="listing-routes"></a>
 ### 查看全部路由
@@ -413,7 +341,7 @@ router.Route("/api/v1", func(r chi.Router) {
 
 路由按子路由注册，接口地址是 `/api/v1/articles`。`BasePath` 写入 OpenAPI 文档的 `servers`，文档页 `/api/v1/docs` 和生成的客户端据此拼出完整地址；`routes` 命令显示的也是完整路径。
 
-需要不兼容的修改时，新版本挂在另一个子路由下，用自己的 `rest.API`。两个版本各有一份 OpenAPI 文档，共用同一套业务服务：
+需要不兼容的修改时，新版本挂在另一个子路由下，用自己的 `rest.API`。两个版本各有一份 OpenAPI 文档，共用同一套 action：
 
 ```go
 router.Route("/api/v2", func(r chi.Router) {

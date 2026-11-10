@@ -12,7 +12,7 @@
 
 哈希使用 PHC 字符串格式，例如 `$argon2id$v=19$m=19456,t=2,p=1$<盐>$<哈希>`。算法、参数和随机盐都编码在字符串中，保存在一个文本列里即可。这个格式与 PHP 的 `password_hash` 互通，从 Laravel 等应用迁移过来的密码哈希可以直接校验。
 
-本章为博客应用的用户服务实现密码校验，也就是[页面登录](views.md#login)中登录处理器调用的 `users.Authenticate`。
+本章为博客应用的用户模块实现密码校验，也就是[页面登录](views.md#login)中登录处理器调用的 `user.Authenticate` action。
 
 <a id="configuration"></a>
 ## 配置
@@ -44,11 +44,11 @@ argon2id 的默认值是 OWASP 推荐的最低配置。参数越大越难暴力�
 <a id="hashing-passwords"></a>
 ## 哈希与校验密码
 
-在[入口](dependencies.md#assembling-the-application)创建 `Hasher`，传给用户服务：
+在[入口](dependencies.md#assembling-the-application)的 `open` 中创建 `Hasher`，保存在 `App` 中，传给需要它的 action：
 
 ```go
 hasher := hashing.New(cfg.Hashing)
-users := user.NewService(db, hasher)
+authenticate := user.NewAuthenticate(db, hasher)
 ```
 
 `Hasher` 可以并发使用，整个应用共用一个即可。
@@ -56,28 +56,37 @@ users := user.NewService(db, hasher)
 保存密码时用 `Make` 生成哈希。每次调用都使用新的随机盐，同一个密码两次的结果不同：
 
 ```go
-hash, err := s.hasher.Make(password)
+hash, err := a.hasher.Make(password)
 if err != nil {
     return err
 }
 u := &User{Email: email, PasswordHash: hash}
 ```
 
-登录时用 `Check` 校验密码。下面是用户服务的 `Authenticate`，`ErrInvalidCredentials` 是应用定义的 `errorx.Unauthenticated` 类错误：
+登录时用 `Check` 校验密码。下面是用户模块的 `Authenticate` action，`ErrInvalidCredentials` 是应用定义的 `errorx.Unauthenticated` 类错误：
 
 ```go
 var ErrInvalidCredentials = errorx.Define(errorx.Unauthenticated, "auth.invalid_credentials")
 
-func (s *Service) Authenticate(ctx context.Context, email, password string) (*User, error) {
+type Authenticate struct {
+    db     *bun.DB
+    hasher *hashing.Hasher
+}
+
+func NewAuthenticate(db *bun.DB, hasher *hashing.Hasher) *Authenticate {
+    return &Authenticate{db: db, hasher: hasher}
+}
+
+func (a *Authenticate) Handle(ctx context.Context, email, password string) (*User, error) {
     var u User
-    err := s.db.NewSelect().Model(&u).Where("email = ?", email).Scan(ctx)
+    err := a.db.NewSelect().Model(&u).Where("email = ?", email).Scan(ctx)
     if errors.Is(err, sql.ErrNoRows) {
         return nil, ErrInvalidCredentials.New()
     }
     if err != nil {
         return nil, errors.Wrap(err, "find user")
     }
-    if !s.hasher.Check(password, u.PasswordHash) {
+    if !a.hasher.Check(password, u.PasswordHash) {
         return nil, ErrInvalidCredentials.New()
     }
     return &u, nil
@@ -96,16 +105,16 @@ bcrypt 只处理密码的前 72 字节。driver 为 bcrypt 时，`Make` 对更�
 `NeedsRehash` 判断一个哈希是否用当前的算法和参数生成。登录时手上有明文密码，是更新哈希的唯一时机：
 
 ```go
-if !s.hasher.Check(password, u.PasswordHash) {
+if !a.hasher.Check(password, u.PasswordHash) {
     return nil, ErrInvalidCredentials.New()
 }
-if s.hasher.NeedsRehash(u.PasswordHash) {
-    hash, err := s.hasher.Make(password)
+if a.hasher.NeedsRehash(u.PasswordHash) {
+    hash, err := a.hasher.Make(password)
     if err != nil {
         return nil, err
     }
     u.PasswordHash = hash
-    if _, err := s.db.NewUpdate().Model(&u).Column("password_hash").WherePK().Exec(ctx); err != nil {
+    if _, err := a.db.NewUpdate().Model(&u).Column("password_hash").WherePK().Exec(ctx); err != nil {
         return nil, errors.Wrap(err, "rehash password")
     }
 }

@@ -4,8 +4,8 @@
 - [一个完整的例子](#example)
     - [声明输入格式](#declaring-input)
     - [定义业务错误](#defining-errors)
-    - [在服务中返回错误](#returning-errors)
-    - [在处理器中调用服务](#calling-from-handlers)
+    - [在 action 中返回错误](#returning-errors)
+    - [HTTP 入口](#calling-from-handlers)
     - [客户端看到的响应](#what-clients-see)
     - [服务端日志](#what-operators-see)
 - [选择错误分类](#error-kinds)
@@ -27,7 +27,7 @@
 | 失败类型 | 例子 | 由谁处理 |
 | --- | --- | --- |
 | **输入格式错误** | 标题为空、slug 含有空格 | 在输入类型上声明规则，框架自动验证，处理器根本不会被调用 |
-| **可预期的业务结果** | 文章不存在、slug 已被使用 | 用 `errorx` 定义带错误码的业务错误，在服务中返回 |
+| **可预期的业务结果** | 文章不存在、slug 已被使用 | 用 `errorx` 定义带错误码的业务错误，在 action 中返回 |
 | **意料之外的故障** | 数据库连不上、代码有 bug | 用 `errors.Wrap` 补充上下文后返回，客户端只会收到通用的 `500` |
 
 无论哪一类，业务代码都只需要**返回错误**。选择 HTTP 状态码、生成错误响应、记录日志，都由框架在边界处完成。下面通过一个完整的例子，看看这三类失败分别是怎样被处理的。
@@ -49,16 +49,12 @@
 <a id="declaring-input"></a>
 ### 声明输入格式
 
-格式上的要求直接写在输入类型的结构体标签上。不符合要求的请求会被框架拦截，并返回 `422`。按照[按业务动作组织处理器](routing.md#http-actions)的约定，把下面的输入类型放在 `internal/article/articlehttp/actions/update_article.go` 中，与修改文章的处理器放在一起，包名为 `actions`：
+格式上的要求直接写在输入类型的结构体标签上。不符合要求的请求会被框架拦截，并返回 `422`。“修改文章”的 [action](actions.md) 放在 `internal/article/update.go` 中，它的输入类型由路径参数和请求体组成，请求体是文章模块提交的数据 `Changes`，验证规则写在 `Changes` 上，见[模块内共享的代码](actions.md#shared-code)：
 
 ```go
-type UpdateArticleInput struct {
+type UpdateInput struct {
     ID   uuid.UUID `path:"id"`
-    Body struct {
-        Title   string `json:"title" minLength:"1" maxLength:"200"`
-        Slug    string `json:"slug" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" maxLength:"100"`
-        Content string `json:"content"`
-    }
+    Body Changes
 }
 ```
 
@@ -85,9 +81,9 @@ var (
 错误码推荐使用 `资源.原因` 的形式，全部小写，单词之间用下划线连接。错误码在整个应用中必须唯一。
 
 <a id="returning-errors"></a>
-### 在服务中返回错误
+### 在 action 中返回错误
 
-下面是 `article` 包中的 `Update` 方法。读取、检查和更新在同一个事务中完成，原因见[授权](authorization.md#checking-in-transactions)：
+下面是 `update.go` 中的 `Update` action 和它的 `Handle` 方法。读取、检查和更新在同一个事务中完成，原因见[授权](authorization.md#checking-in-transactions)：
 
 ```go
 import (
@@ -103,13 +99,17 @@ import (
     "github.com/ryan053857/mygoravel/identity"
 )
 
-type Changes struct {
-    Title, Slug, Content string
+type Update struct {
+    db *bun.DB
 }
 
-func (s *Service) Update(ctx context.Context, subject identity.Subject, id uuid.UUID, c Changes) (*Article, error) {
+func NewUpdate(db *bun.DB) *Update {
+    return &Update{db: db}
+}
+
+func (a *Update) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID, c Changes) (*Article, error) {
     item := new(Article)
-    err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         err := tx.NewSelect().Model(item).Where("id = ?", id).For("UPDATE").Scan(ctx)
         if errors.Is(err, sql.ErrNoRows) {
             return ErrNotFound.New() // ① 可预期：文章不存在
@@ -148,26 +148,14 @@ func (s *Service) Update(ctx context.Context, subject identity.Subject, id uuid.
 3. **意料之外的故障**：用 `errors.Wrap` 说明“在做什么时失败了”，然后原样返回。
 
 <a id="calling-from-handlers"></a>
-### 在处理器中调用服务
+### HTTP 入口
 
-处理器不需要做任何错误转换，直接返回服务的错误即可。在同一个 `update_article.go` 中，为“修改文章”定义 `UpdateArticle`，通过构造函数接收上面的业务服务。下面是处理器部分的代码；`context`、`article` 和 `identity` 分别来自标准库、应用的业务包和框架的身份包：
+HTTP 入口不需要做任何错误转换，直接返回 `Handle` 的错误即可。在同一个 `update.go` 中加入 `HTTP` 方法：
 
 ```go
-type UpdateArticle struct {
-    articles *article.Service
-}
-
-func NewUpdateArticle(articles *article.Service) *UpdateArticle {
-    return &UpdateArticle{articles: articles}
-}
-
-func (a *UpdateArticle) Handle(ctx context.Context, in *UpdateArticleInput) (*ArticleOutput, error) {
-    subject, _ := identity.FromContext(ctx) // 未认证时主体为空，服务会以 article.forbidden 拒绝
-    item, err := a.articles.Update(ctx, subject, in.ID, article.Changes{
-        Title:   in.Body.Title,
-        Slug:    in.Body.Slug,
-        Content: in.Body.Content,
-    })
+func (a *Update) HTTP(ctx context.Context, in *UpdateInput) (*ArticleOutput, error) {
+    subject, _ := identity.FromContext(ctx) // 未认证时主体为空，Handle 会以 article.forbidden 拒绝
+    item, err := a.Handle(ctx, subject, in.ID, in.Body)
     if err != nil {
         return nil, err
     }
@@ -175,7 +163,7 @@ func (a *UpdateArticle) Handle(ctx context.Context, in *UpdateArticleInput) (*Ar
 }
 ```
 
-共享的 `ArticleOutput` 和 `toDTO` 定义在 `actions/dto.go` 中，完整代码见[共享响应结构](routing.md#shared-responses)。接着在父包 `articlehttp` 的 `routes.go` 的 `Register` 函数中加入下面的路由声明。`api`、`requireArticles` 和 `articles` 都由 `Register` 的参数传入，`actions` 的导入路径是 `example.com/blog/internal/article/articlehttp/actions`：
+共享的 `ArticleOutput` 和 `toDTO` 定义在 `dto.go` 中，完整代码见[共享响应结构](routing.md#shared-responses)。接着在 `routes.go` 的 `Register` 函数中加入下面的路由声明，`api`、`requireArticles` 和 `db` 都由 `Register` 的参数传入：
 
 ```go
 op := huma.Operation{
@@ -185,12 +173,10 @@ op := huma.Operation{
     Summary:     "修改文章",
 }
 requireArticles(&op)
-rest.Register(api, op, func() func(context.Context, *actions.UpdateArticleInput) (*actions.ArticleOutput, error) {
-    return actions.NewUpdateArticle(articles).Handle
-})
+rest.Register(api, op, NewUpdate(db).HTTP)
 ```
 
-`requireArticles` 要求请求携带有效的 token，见[认证](authentication.md)。处理器在工厂内部构造，因此离线查看路由或导出 OpenAPI 时不会创建它，也不会访问业务服务。
+`requireArticles` 要求请求携带有效的 token，见[认证](authentication.md)。
 
 <a id="what-clients-see"></a>
 ### 客户端看到的响应
@@ -259,8 +245,8 @@ Content-Type: application/problem+json
 load article: dial tcp 10.0.0.5:5432: connect: connection refused
 (1) attached stack trace
   -- stack trace:
-  | example.com/blog/article.(*Service).Update.func1
-  |     /app/article/service.go:42
+  | example.com/blog/internal/article.(*Update).Handle.func1
+  |     /app/internal/article/update.go:42
   | ...
 Wraps: (2) load article
 Wraps: (3) dial tcp 10.0.0.5:5432: connect: connection refused
@@ -299,7 +285,7 @@ Error types: (1) *withstack.withStack (2) *errutil.withPrefix (3) *net.OpError
 - 如果**无法归类**，在它刚进入你的代码时用 `errors.Wrap` 包装，堆栈就记录在这里。之后每经过一层，都可以再用 `errors.Wrap` 补充上下文：
 
 ```go
-if _, err := s.articles.Update(ctx, subject, id, changes); err != nil {
+if _, err := a.update.Handle(ctx, subject, id, changes); err != nil {
     return errors.Wrap(err, "import article")
 }
 ```

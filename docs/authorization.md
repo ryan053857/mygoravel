@@ -17,7 +17,7 @@
 在 mygoravel 中，授权分为两个层次：
 
 - **路由级授权**：调用者是否具备访问这一类接口的权限，例如“可以使用文章接口”。它通过 scope 声明在路由上，由框架在调用处理器之前检查；
-- **资源级授权**：调用者能否操作某一个具体的资源，例如“只能修改自己的文章”。它依赖具体的数据，由业务服务检查。
+- **资源级授权**：调用者能否操作某一个具体的资源，例如“只能修改自己的文章”。它依赖具体的数据，由 [action](actions.md) 的 `Handle` 检查。
 
 两个层次缺一不可：路由级授权挡住了明显不该访问的请求，资源级授权则保证每一条数据都只被正确的人访问。
 
@@ -43,7 +43,7 @@ requireWrite := rest.RequireBearer(api, validateToken, "articles:write")
 <a id="checking-scopes"></a>
 ### 在代码中检查 Scope
 
-有时同一个接口需要根据权限返回不同的内容，这时可以在处理器或服务中使用 `Subject.HasScope`：
+有时同一个接口需要根据权限返回不同的内容，这时可以在 `Handle` 中使用 `Subject.HasScope`：
 
 ```go
 if subject.HasScope("articles:admin") {
@@ -54,7 +54,7 @@ if subject.HasScope("articles:admin") {
 <a id="ownership"></a>
 ## 资源级授权：所有权
 
-具备 `articles` scope 只说明调用者可以使用文章接口，并不意味着他可以读取任意一篇文章。已发布的文章所有人都能看，但草稿只有作者本人能看。业务服务需要根据当前的主体检查：
+具备 `articles` scope 只说明调用者可以使用文章接口，并不意味着他可以读取任意一篇文章。已发布的文章所有人都能看，但草稿只有作者本人能看。“获取文章”的 `Get` action 需要根据当前的主体检查：
 
 ```go
 var (
@@ -62,11 +62,11 @@ var (
     ErrForbidden = errorx.Define(errorx.PermissionDenied, "article.forbidden")
 )
 
-func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     if subject.ID == "" {
         return nil, ErrForbidden.New()
     }
-    item, err := s.find(ctx, id)
+    item, err := find(ctx, a.db, id)
     if err != nil {
         return nil, err
     }
@@ -77,9 +77,9 @@ func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUI
 }
 ```
 
-请注意，主体是作为参数**显式传入**业务服务的，而不是在服务内部从 context 中读取。这样，服务的权限要求一目了然，在测试中也很容易构造不同身份的调用者。
+请注意，主体是作为参数**显式传入** `Handle` 的，而不是在内部从 context 中读取。这样，action 的权限要求一目了然，在测试中也很容易构造不同身份的调用者。`find` 是文章模块中按 ID 查询的函数，见[模块内共享的代码](actions.md#shared-code)。
 
-服务在入口处拒绝空的主体 ID。这保证了即使服务被命令行或其他代码直接调用，也不会跳过身份检查。
+`Handle` 一开始就拒绝空的主体 ID。这保证了即使 action 被命令行或其他代码直接调用，也不会跳过身份检查。
 
 > [!TIP]
 > 上面对别人的草稿返回 `404` 而不是 `403`，这样不会泄露“这篇草稿存在”的信息。而修改别人已发布的文章时，文章本身是公开的，返回 `403` 更准确。你可以根据业务需要选择 `errorx.NotFound` 或 `errorx.PermissionDenied`。
@@ -87,7 +87,7 @@ func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUI
 <a id="authorization-functions"></a>
 ### 编写授权函数
 
-当授权规则变得复杂时，可以把它们提取为独立的函数，集中放在业务包中，类似于其他框架中的“策略（Policy）”：
+当授权规则变得复杂时，可以把它们提取为独立的函数，集中放在业务包的 `article.go` 中，供各个 action 使用，类似于其他框架中的“策略（Policy）”：
 
 ```go
 func canEdit(subject identity.Subject, item *Article) bool {
@@ -105,12 +105,12 @@ func canEdit(subject identity.Subject, item *Article) bool {
 
 对于写操作，请在实际读写数据的**同一个事务**中完成所有权检查。如果先在事务外检查、再在事务内修改，两步之间资源可能已经被其他请求改变。
 
-下面是发布文章的完整实现。它用 `FOR UPDATE` 锁住这篇文章，在同一个事务中检查权限和状态，然后更新：
+下面是“发布文章”的 `Publish` action 的 `Handle`，完整的 `publish.go` 见[编写 action](actions.md#writing-actions)。它用 `FOR UPDATE` 锁住这篇文章，在同一个事务中检查权限和状态，然后更新：
 
 ```go
-func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         err := tx.NewSelect().Model(item).Where("id = ?", id).For("UPDATE").Scan(ctx)
         if errors.Is(err, sql.ErrNoRows) {
             return ErrNotFound.New()
@@ -156,6 +156,6 @@ var ErrAlreadyPublished = errorx.Define(errorx.Conflict, "article.already_publis
 ## 授权失败的响应
 
 - 缺少路由所需的 scope 时，框架返回 `403`，错误码为 `auth.forbidden`；
-- 业务服务返回 `errorx.PermissionDenied` 分类的错误时，返回 `403`，错误码为你定义的业务错误码，例如 `article.forbidden`。
+- action 返回 `errorx.PermissionDenied` 分类的错误时，返回 `403`，错误码为你定义的业务错误码，例如 `article.forbidden`。
 
 两者都使用统一的[错误响应格式](errors.md#response-format)。

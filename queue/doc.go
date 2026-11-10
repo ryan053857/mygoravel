@@ -5,7 +5,7 @@
 // Subscriber 从驱动领取到期的任务交给 Watermill 的 Router 处理，多个实例竞争领取；
 // 处理失败的任务按退避时间重试，次数用完后转入 queue_failed_jobs。重试、失败任务、并发和平滑停止与驱动无关。
 //
-//	// 发布
+//	// 发布（也可以用 Topic 把 topic 名称和 payload 类型声明在一起）
 //	err := queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
 //
 //	// 处理

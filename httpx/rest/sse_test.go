@@ -27,20 +27,18 @@ func TestRegisterSSE(t *testing.T) {
 	api := rest.New(rest.Options{})
 	op := huma.Operation{OperationID: "count", Method: http.MethodGet, Path: "/count"}
 	rest.Public()(&op)
-	rest.RegisterSSE(api, op, map[string]any{"tick": tick{}}, func() func(context.Context, *countIn) (*huma.StreamResponse, error) {
-		return func(_ context.Context, in *countIn) (*huma.StreamResponse, error) {
-			if in.N <= 0 {
-				return nil, errorx.Define(errorx.NotFound, "count.empty").New()
-			}
-			return rest.SSE(func(s *httpx.Stream) error {
-				for i := range in.N {
-					if err := s.SendJSON(httpx.Event{Name: "tick"}, tick{i}); err != nil {
-						return err
-					}
-				}
-				return nil
-			}), nil
+	rest.RegisterSSE(api, op, map[string]any{"tick": tick{}}, func(_ context.Context, in *countIn) (*huma.StreamResponse, error) {
+		if in.N <= 0 {
+			return nil, errorx.Define(errorx.NotFound, "count.empty").New()
 		}
+		return rest.SSE(func(s *httpx.Stream) error {
+			for i := range in.N {
+				if err := s.SendJSON(httpx.Event{Name: "tick"}, tick{i}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}), nil
 	})
 	srv := httptest.NewServer(api.Handler())
 	defer srv.Close()

@@ -19,9 +19,9 @@ import (
 //
 // 处理器先完成检查和准备，出错时照常返回错误，客户端收到 Problem Details；
 // 准备好后返回 SSE(fn)，fn 在连接上写出事件，不受 httpx.Timeout 的超时限制。
-func RegisterSSE[I any](api *API, op huma.Operation, events map[string]any, newHandler func() func(context.Context, *I) (*huma.StreamResponse, error)) {
+func RegisterSSE[I any](api *API, op huma.Operation, events map[string]any, handler func(context.Context, *I) (*huma.StreamResponse, error)) {
 	addEventStream(api, &op, events)
-	Register(api, op, newHandler)
+	Register(api, op, handler)
 }
 
 // SSE 返回一个 SSE 响应，fn 用 Stream.SendJSON 写出事件，连接管理见 httpx.SSE。

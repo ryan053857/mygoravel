@@ -44,19 +44,19 @@ func registerRoutes(t *testing.T) func(*rest.API) {
 		if api.Mode() != rest.ModeOpenAPI {
 			t.Fatal("routes must be registered in OpenAPI mode")
 		}
-		factory := func() func(context.Context, *input) (*output, error) {
-			t.Fatal("handler factory must not run")
-			return nil
+		handler := func(context.Context, *input) (*output, error) {
+			t.Fatal("handler must not run")
+			return nil, nil
 		}
 		create := huma.Operation{OperationID: "article-create", Method: http.MethodPost, Path: "/articles", Summary: "创建文章"}
 		rest.RequireBearer(api, func(context.Context, string) (identity.Subject, error) {
 			t.Fatal("token validator must not run")
 			return identity.Subject{}, nil
 		}, "articles")(&create)
-		rest.Register(api, create, factory)
+		rest.Register(api, create, handler)
 		list := huma.Operation{OperationID: "article-list", Method: http.MethodGet, Path: "/articles", Summary: "获取文章\t\n列表"}
 		rest.Public()(&list)
-		rest.Register(api, list, factory)
+		rest.Register(api, list, handler)
 		api.Router().Get("/livez", func(http.ResponseWriter, *http.Request) {
 			t.Fatal("native handler must not run")
 		})

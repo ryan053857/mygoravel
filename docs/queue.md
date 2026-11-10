@@ -4,6 +4,7 @@
 - [准备数据表](#preparing-tables)
 - [发布任务](#publishing-jobs)
     - [延迟执行](#delayed-jobs)
+    - [带类型的 topic](#typed-topics)
 - [处理任务](#processing-jobs)
     - [启动 worker](#running-workers)
     - [配置](#configuration)
@@ -49,22 +50,22 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 
 `queue.Publish` 把任意可以编码为 JSON 的值发布到一个 topic。第二个参数是队列驱动，`queue.Database` 把任务保存在数据库中，它接收 `*bun.DB` 或 `bun.Tx`：传入事务时，任务和业务数据一起提交，事务回滚时任务也不会执行。
 
-下面是改写后的 `Publish`：通知邮件在发布文章的同一个事务中渲染并入队，文章服务不再需要发送器：
+下面是改写后的 `Publish` action：通知邮件在发布文章的同一个事务中渲染并入队，它不再需要发送器：
 
 ```go
-func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         // ... 检查权限并更新文章状态
 
-        msg, err := s.emails.Render(ctx, "article_published", map[string]any{
+        msg, err := a.emails.Render(ctx, "article_published", map[string]any{
             "Title": item.Title,
             "URL":   "https://blog.example.com/" + item.Slug,
         })
         if err != nil {
             return err
         }
-        msg.To = []mail.Address{s.editors}
+        msg.To = []mail.Address{a.editors}
         return queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
     })
     if err != nil {
@@ -89,6 +90,19 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 ```go
 err := queue.Publish(ctx, queue.Database(tx), "articles.publish", item.ID, queue.At(item.PublishAt))
 ```
+
+<a id="typed-topics"></a>
+### 带类型的 topic
+
+同一个 topic 的发布和处理通常不在一处：上面发布 `articles.publish`，worker 中处理它。用 `queue.Topic` 把 topic 名称和 payload 类型声明在一起，两边共用这个声明，名称写错或类型不一致时无法通过编译：
+
+```go
+var PublishAt = queue.Topic[uuid.UUID]("articles.publish")
+
+err := PublishAt.Publish(ctx, queue.Database(tx), item.ID, queue.At(item.PublishAt))
+```
+
+`Topic` 的 `Publish` 和 `Handle` 方法与 `queue.Publish`、`queue.Handle` 相同，只是不再需要 topic 参数。把它和处理任务的 action 声明在同一个文件中，见[队列任务](actions.md#as-jobs)。
 
 <a id="processing-jobs"></a>
 ## 处理任务
@@ -136,7 +150,7 @@ func Work(ctx context.Context, cfg settings.Config) error {
 }
 ```
 
-`newMailer` 见[装配发送器](mail.md#assembling-mailer)。在根命令中注册它：
+`newMailer` 见[装配发送器](mail.md#assembling-mailer)。action 的任务入口也注册在这里，例如定时发布文章，见[队列任务](actions.md#as-jobs)。在根命令中注册它：
 
 ```go
 root.AddCommand(command.Run("work", "处理队列任务", bootstrap.Work))
@@ -248,7 +262,7 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 
 ```go
 db := dbtest.Open(t, postgres.Driver, migrations.FS) // 包含已发布的 queue 迁移
-svc := article.NewService(db, emails, editors)
+publish := article.NewPublish(db, emails, editors)
 
 // ... 创建并发布一篇文章
 
