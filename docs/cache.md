@@ -282,20 +282,22 @@ svc := article.NewService(db, newTestCache())
 <a id="redis"></a>
 ## 使用 Redis
 
-应用有多个副本、需要共享缓存时，改用 Redis。安装 Redis store 和客户端：
+应用有多个副本、需要共享缓存时，改用 Redis。安装 Redis store：
 
 ```bash
 go get github.com/eko/gocache/store/redis/v4@v4.2.2
-go get github.com/redis/go-redis/v9@v9.23.0
 ```
 
-在入口中替换前两层，并把客户端登记到 [`cleanup.Stack`](dependencies.md#closing-resources)：
+这个 store 的包名也是 `redis`，与 go-redis 冲突，导入时起个别名：
 
 ```go
-client := redis.NewClient(&redis.Options{Addr: cfg.Cache.Addr, ContextTimeoutEnabled: true})
-stack.MustAdd("redis", func(context.Context) error { return client.Close() })
+redisstore "github.com/eko/gocache/store/redis/v4"
+```
 
-articleCache := cache.New[string](redisstore.NewRedis(client, store.WithExpiration(cfg.Cache.DefaultTTL)))
+在入口中把前两层换成 Redis store，传入[创建好的 Redis 客户端](redis.md#connecting) `rdb`：
+
+```go
+articleCache := cache.New[string](redisstore.NewRedis(rdb, store.WithExpiration(cfg.Cache.DefaultTTL)))
 ```
 
 文章服务和其余代码无需修改。与内存缓存的区别：

@@ -270,7 +270,7 @@ export DATABASE_TEST_DSN='postgres://postgres:postgres@127.0.0.1:55432/postgres?
 go test -race -count=1 -tags=integration ./...
 ```
 
-测试完成后，执行 `docker stop app-test-postgres` 即可清理。如果你的应用还用到了 Redis 等其他外部服务，请为它们编写各自的集成测试。
+测试完成后，执行 `docker stop app-test-postgres` 即可清理。Redis 的集成测试见 [Redis](redis.md#testing)。
 
 <a id="command-tests"></a>
 ## 命令测试

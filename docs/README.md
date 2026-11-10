@@ -51,6 +51,7 @@
 
 - [快速入门](database.md)
 - [迁移](migrations.md)
+- [Redis](redis.md)
 
 ## 测试
 

@@ -6,6 +6,7 @@
 - [读写会话数据](#session-data)
 - [使用数据库存储](#database-store)
     - [过期清理](#cleanup)
+- [使用 Redis 存储](#redis-store)
 - [跨站请求伪造](#csrf)
 
 <a id="introduction"></a>
@@ -117,8 +118,6 @@ migrationCmd.AddCommand(migratecmd.Publish(
 
 表中每行是一个会话：`token` 是主键，`data` 是 scs 编码后的会话数据，`expiry` 是过期时间。
 
-使用 Redis 时，换成 scs 的 [redisstore](https://github.com/alexedwards/scs/tree/master/redisstore) 即可，其他代码不变。
-
 <a id="cleanup"></a>
 ### 过期清理
 
@@ -132,6 +131,23 @@ n, err := store.Cleanup(ctx, 1000)
 
 > [!NOTE]
 > 异步队列功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每小时一次。
+
+<a id="redis-store"></a>
+## 使用 Redis 存储
+
+应用已经使用 [Redis](redis.md) 时，也可以把会话放进 Redis。安装 scs 的 [goredisstore](https://github.com/alexedwards/scs/tree/master/goredisstore)：
+
+```bash
+go get github.com/alexedwards/scs/goredisstore@latest
+```
+
+然后传入[入口中创建的客户端](redis.md#connecting) `rdb`：
+
+```go
+sessions := session.New(cfg.Session, goredisstore.New(rdb), nil)
+```
+
+其他代码不变。会话借助 Redis 的键过期自动清除，不需要迁移，也不需要定期清理。
 
 <a id="csrf"></a>
 ## 跨站请求伪造
