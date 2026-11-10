@@ -50,6 +50,7 @@
 ## 安全
 
 - [认证](authentication.md)
+- [API 令牌](api-tokens.md)
 - [授权](authorization.md)
 - [哈希](hashing.md)
 

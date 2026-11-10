@@ -119,6 +119,8 @@ n, err := store.RevokeSubject(ctx, userID)
 
 被撤销的设备在下一次请求时成为未登录状态，受保护的页面会跳转到登录页。两者都是一条按 `subject_id` 索引执行的 `UPDATE`，不随会话总数变慢。
 
+应用同时为单页应用或 App 签发了 [API 令牌](api-tokens.md)时，要让用户在所有地方下线，还需要撤销他的令牌，见[撤销令牌](api-tokens.md#revoking-tokens)。
+
 `Logout` 和撤销都只标记 `revoked_at`，不立即删除行：撤销时该设备可能正有请求在处理，请求结束时 scs 会再次保存会话，标记保证会话不会因此恢复。标记的行在过期后由 `Cleanup` 删除。
 
 <a id="cleanup"></a>

@@ -204,7 +204,7 @@ func TestRESTUploadAndConfirm(t *testing.T) {
 		e := newEnv(t, driver)
 		api := rest.New(rest.Options{Title: "test"})
 		users := map[string]identity.Subject{"alice": alice, "bob": bob}
-		auth := rest.RequireBearer(api, func(_ huma.Context, token string) (identity.Subject, error) {
+		auth := rest.RequireBearer(api, func(_ context.Context, token string) (identity.Subject, error) {
 			return users[token], nil
 		})
 		registerFileRoutes(api, auth, e.svc)

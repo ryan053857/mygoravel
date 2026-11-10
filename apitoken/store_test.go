@@ -1,0 +1,354 @@
+package apitoken_test
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/ryan053857/mygoravel/apitoken"
+	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/httpx/rest"
+	"github.com/ryan053857/mygoravel/identity"
+)
+
+// clock 是可以拨动的测试时钟。
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *clock) now() time.Time      { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *clock) add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unlock() }
+
+// testConfig：最长 10 小时，空闲 1 小时，“记住我”空闲 3 小时。
+var testConfig = apitoken.Config{Lifetime: 10 * time.Hour, IdleTimeout: time.Hour, RememberIdleTimeout: 3 * time.Hour}
+
+var (
+	alice = identity.Subject{ID: "alice", Type: identity.SubjectUser, Scopes: []string{"articles", "comments"}}
+	bob   = identity.Subject{ID: "bob", Type: identity.SubjectUser}
+)
+
+func newStore(t *testing.T, driver database.Driver) (*apitoken.Store, *clock) {
+	t.Helper()
+	s := apitoken.NewStore(openDB(t, driver), testConfig)
+	c := &clock{t: time.Now().UTC().Truncate(time.Second)}
+	apitoken.SetClock(s, c.now)
+	return s, c
+}
+
+func login(t *testing.T, s *apitoken.Store, sub identity.Subject, d apitoken.Device) string {
+	t.Helper()
+	plain, err := s.Login(context.Background(), sub, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plain
+}
+
+func create(t *testing.T, s *apitoken.Store, sub identity.Subject, name string, scopes []string, expiresAt time.Time) string {
+	t.Helper()
+	plain, err := s.Create(context.Background(), sub, name, scopes, expiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plain
+}
+
+// valid 校验 token，返回主体；无效时返回 ok 为 false。
+func valid(t *testing.T, s *apitoken.Store, token string) (identity.Subject, bool) {
+	t.Helper()
+	sub, err := s.Validate(context.Background(), token)
+	if errors.Is(err, apitoken.ErrInvalid) {
+		return sub, false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sub, true
+}
+
+func TestConfig(t *testing.T) {
+	var cfg apitoken.Config
+	cfg.SetDefaults()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("defaults invalid: %v", err)
+	}
+	for name, c := range map[string]apitoken.Config{
+		"zero lifetime":          {IdleTimeout: time.Hour},
+		"negative idle":          {Lifetime: time.Hour, IdleTimeout: -time.Second},
+		"negative remember idle": {Lifetime: time.Hour, RememberIdleTimeout: -time.Second},
+	} {
+		if c.Validate() == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+	for name, build := range map[string]func(){
+		"nil db":         func() { apitoken.NewStore(nil, testConfig) },
+		"invalid config": func() { apitoken.NewStore(openDB(t, testDrivers[0]), apitoken.Config{}) },
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s: expected panic", name)
+				}
+			}()
+			build()
+		}()
+	}
+}
+
+func TestLoginAndValidate(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		s, c := newStore(t, driver)
+		ua := strings.Repeat("浏", 300)
+		plain := login(t, s, alice, apitoken.Device{IP: "203.0.113.7", UserAgent: ua})
+
+		sub, ok := valid(t, s, plain)
+		if !ok || sub.ID != "alice" || sub.Type != identity.SubjectUser || sub.Method != "bearer" ||
+			strings.Join(sub.Scopes, ",") != "articles,comments" || sub.Credential == "" {
+			t.Fatalf("subject=%+v ok=%v", sub, ok)
+		}
+		for _, bad := range []string{"", "bogus", plain + "x"} {
+			if _, ok := valid(t, s, bad); ok {
+				t.Fatalf("token %q accepted", bad)
+			}
+		}
+
+		list, err := s.List(ctx, sub)
+		if err != nil || len(list) != 1 {
+			t.Fatalf("list=%+v err=%v", list, err)
+		}
+		tok := list[0]
+		if tok.ID != sub.Credential || !tok.Current || tok.Kind != apitoken.KindLogin || tok.IP != "203.0.113.7" ||
+			len([]rune(tok.UserAgent)) != 255 || !tok.ExpiresAt.Equal(c.now().Add(time.Hour)) {
+			t.Fatalf("token=%+v", tok)
+		}
+		if others, _ := s.List(ctx, bob); len(others) != 0 {
+			t.Fatalf("bob sees %d tokens", len(others))
+		}
+		if _, err := s.Login(ctx, identity.Subject{}, apitoken.Device{}); err == nil {
+			t.Fatal("expected error for empty subject")
+		}
+	})
+}
+
+func TestLoginSlidingExpiry(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		s, c := newStore(t, driver)
+
+		// 一直在用：每次使用都延长一小时，越过最初的截止时间仍然有效。
+		plain := login(t, s, alice, apitoken.Device{})
+		start := c.now()
+		for c.now().Sub(start) < 10*time.Hour-50*time.Minute {
+			c.add(50 * time.Minute)
+			if _, ok := valid(t, s, plain); !ok {
+				t.Fatalf("active token expired after %v", c.now().Sub(start))
+			}
+		}
+		// 但不超过 Lifetime。
+		c.add(50 * time.Minute)
+		if _, ok := valid(t, s, plain); ok {
+			t.Fatalf("token valid after lifetime: %v", c.now().Sub(start))
+		}
+
+		// 空闲超过一小时失效。
+		idle := login(t, s, alice, apitoken.Device{})
+		c.add(time.Hour)
+		if _, ok := valid(t, s, idle); ok {
+			t.Fatal("idle token still valid")
+		}
+
+		// “记住我”空闲三小时内有效。
+		remembered := login(t, s, alice, apitoken.Device{Remember: true})
+		c.add(2 * time.Hour)
+		if _, ok := valid(t, s, remembered); !ok {
+			t.Fatal("remembered token expired within remember idle timeout")
+		}
+
+		// 一分钟内的使用不写库，因此不延长有效期。
+		quick := login(t, s, alice, apitoken.Device{})
+		c.add(30 * time.Second)
+		if _, ok := valid(t, s, quick); !ok {
+			t.Fatal("quick token invalid")
+		}
+		c.add(time.Hour - 30*time.Second)
+		if _, ok := valid(t, s, quick); ok {
+			t.Fatal("use within a minute extended the token")
+		}
+	})
+}
+
+func TestCreatePersonal(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		s, c := newStore(t, driver)
+		for name, call := range map[string]func() error{
+			"empty name":    func() error { _, err := s.Create(ctx, alice, " ", nil, time.Time{}); return err },
+			"past expiry":   func() error { _, err := s.Create(ctx, alice, "CI", nil, c.now()); return err },
+			"spaced scope":  func() error { _, err := s.Create(ctx, alice, "CI", []string{"a b"}, time.Time{}); return err },
+			"empty scope":   func() error { _, err := s.Create(ctx, alice, "CI", []string{""}, time.Time{}); return err },
+			"empty subject": func() error { _, err := s.Create(ctx, identity.Subject{}, "CI", nil, time.Time{}); return err },
+		} {
+			if call() == nil {
+				t.Errorf("%s: expected error", name)
+			}
+		}
+
+		forever := create(t, s, alice, "CI 部署", []string{"articles"}, time.Time{})
+		expiring := create(t, s, alice, "报表", nil, c.now().Add(time.Hour))
+		sub, ok := valid(t, s, forever)
+		if !ok || strings.Join(sub.Scopes, ",") != "articles" {
+			t.Fatalf("subject=%+v ok=%v", sub, ok)
+		}
+		// 个人访问令牌不按空闲时间过期。
+		c.add(1000 * time.Hour)
+		if _, ok := valid(t, s, forever); !ok {
+			t.Fatal("non-expiring token expired")
+		}
+		if _, ok := valid(t, s, expiring); ok {
+			t.Fatal("token valid after expiresAt")
+		}
+		list, err := s.List(ctx, alice)
+		if err != nil || len(list) != 1 || list[0].Name != "CI 部署" || list[0].Kind != apitoken.KindPersonal ||
+			!list[0].ExpiresAt.IsZero() || list[0].Current {
+			t.Fatalf("list=%+v err=%v", list, err)
+		}
+	})
+}
+
+func TestRevoke(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		s, _ := newStore(t, driver)
+		laptop := login(t, s, alice, apitoken.Device{})
+		phone := login(t, s, alice, apitoken.Device{})
+		ci := create(t, s, alice, "CI", nil, time.Time{})
+		bobs := login(t, s, bob, apitoken.Device{})
+		state := func(want map[string]bool) {
+			t.Helper()
+			for name, token := range map[string]string{"laptop": laptop, "phone": phone, "ci": ci, "bob": bobs} {
+				if _, ok := valid(t, s, token); ok != want[name] {
+					t.Fatalf("%s valid=%v, want %v", name, ok, want[name])
+				}
+			}
+		}
+
+		// 在笔记本上退出其他设备：只撤销其他登录 token，保留个人访问令牌。
+		onLaptop, _ := valid(t, s, laptop)
+		if n, err := s.RevokeOthers(ctx, onLaptop); n != 1 || err != nil {
+			t.Fatalf("revoke others n=%d err=%v", n, err)
+		}
+		state(map[string]bool{"laptop": true, "ci": true, "bob": true})
+
+		// 从页面（会话，没有 token 凭据）发起时撤销全部登录 token。
+		if n, err := s.RevokeOthers(ctx, alice); n != 1 || err != nil {
+			t.Fatalf("revoke others from session n=%d err=%v", n, err)
+		}
+		state(map[string]bool{"ci": true, "bob": true})
+
+		ciSub, _ := valid(t, s, ci)
+		for name, call := range map[string]func() error{
+			"other subject": func() error { return s.Revoke(ctx, bob, ciSub.Credential) },
+			"malformed id":  func() error { return s.Revoke(ctx, alice, "not-a-uuid") },
+		} {
+			if err := call(); !errors.Is(err, apitoken.ErrNotFound) {
+				t.Fatalf("%s: err=%v", name, err)
+			}
+		}
+		// 传入当前凭据即登出当前设备。
+		if err := s.Revoke(ctx, ciSub, ciSub.Credential); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Revoke(ctx, ciSub, ciSub.Credential); !errors.Is(err, apitoken.ErrNotFound) {
+			t.Fatalf("revoke twice: %v", err)
+		}
+		state(map[string]bool{"bob": true})
+
+		laptop = login(t, s, alice, apitoken.Device{})
+		ci = create(t, s, alice, "CI", nil, time.Time{})
+		if n, err := s.RevokeSubject(ctx, "alice"); n != 2 || err != nil {
+			t.Fatalf("revoke subject n=%d err=%v", n, err)
+		}
+		state(map[string]bool{"bob": true})
+		if _, err := s.RevokeSubject(ctx, ""); err == nil {
+			t.Fatal("expected error for empty subject")
+		}
+		if _, err := s.RevokeOthers(ctx, identity.Subject{}); err == nil {
+			t.Fatal("expected error for empty subject")
+		}
+	})
+}
+
+func TestCleanup(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		s, c := newStore(t, driver)
+		for range 3 {
+			login(t, s, alice, apitoken.Device{})
+		}
+		live := login(t, s, alice, apitoken.Device{Remember: true})
+		forever := create(t, s, alice, "CI", nil, time.Time{})
+		c.add(2 * time.Hour)
+
+		if _, err := s.Cleanup(ctx, 0); err == nil {
+			t.Fatal("expected error for non-positive limit")
+		}
+		if n, err := s.Cleanup(ctx, 2); n != 2 || err != nil {
+			t.Fatalf("first cleanup n=%d err=%v", n, err)
+		}
+		if n, err := s.Cleanup(ctx, 10); n != 1 || err != nil {
+			t.Fatalf("second cleanup n=%d err=%v", n, err)
+		}
+		for _, token := range []string{live, forever} {
+			if _, ok := valid(t, s, token); !ok {
+				t.Fatal("live token removed")
+			}
+		}
+	})
+}
+
+// TestRequireBearer 确认 Validate 可以直接作为 rest.RequireBearer 的校验器。
+func TestRequireBearer(t *testing.T) {
+	s, _ := newStore(t, testDrivers[0])
+	api := rest.New(rest.Options{})
+	op := huma.Operation{OperationID: "me", Method: http.MethodGet, Path: "/me"}
+	rest.RequireBearer(api, s.Validate, "articles")(&op)
+	type meOut struct {
+		Body struct {
+			ID         string `json:"id"`
+			Credential string `json:"credential"`
+		}
+	}
+	rest.Register(api, op, func() func(context.Context, *struct{}) (*meOut, error) {
+		return func(ctx context.Context, _ *struct{}) (*meOut, error) {
+			sub, _ := identity.FromContext(ctx)
+			out := &meOut{}
+			out.Body.ID, out.Body.Credential = sub.ID, sub.Credential
+			return out, nil
+		}
+	})
+	call := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/me", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rr := httptest.NewRecorder()
+		api.Handler().ServeHTTP(rr, req)
+		return rr
+	}
+	if rr := call("bogus"); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("bogus token: %d %s", rr.Code, rr.Body)
+	}
+	if rr := call(login(t, s, bob, apitoken.Device{})); rr.Code != http.StatusForbidden {
+		t.Fatalf("missing scope: %d %s", rr.Code, rr.Body)
+	}
+	if rr := call(login(t, s, alice, apitoken.Device{})); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"id":"alice"`) {
+		t.Fatalf("valid token: %d %s", rr.Code, rr.Body)
+	}
+}

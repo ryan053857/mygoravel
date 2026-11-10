@@ -12,10 +12,11 @@ const (
 
 // Subject 是已认证主体；ID 为不透明标识。
 type Subject struct {
-	ID     string
-	Type   SubjectType
-	Method string   // 认证方式，如 bearer
-	Scopes []string // 已验证 scope
+	ID         string
+	Type       SubjectType
+	Method     string   // 认证方式，如 bearer
+	Scopes     []string // 已验证 scope
+	Credential string   // 本次请求所用凭据的 ID，如 API token 的 ID；用于登出当前设备、在设备列表中标出当前设备，可为空
 }
 
 type ctxKey struct{}

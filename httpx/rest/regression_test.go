@@ -156,7 +156,7 @@ func TestLocalizedBusinessErrorUsesPublicParams(t *testing.T) {
 func TestBearerRejectsEmptySubjectAndDocumentsNoOAuthScopes(t *testing.T) {
 	api := rest.New(rest.Options{})
 	op := huma.Operation{OperationID: "auth", Method: http.MethodGet, Path: "/auth"}
-	rest.RequireBearer(api, func(huma.Context, string) (identity.Subject, error) { return identity.Subject{}, nil }, "orders")(&op)
+	rest.RequireBearer(api, func(context.Context, string) (identity.Subject, error) { return identity.Subject{}, nil }, "orders")(&op)
 	if len(op.Security[0]["bearer"]) != 0 {
 		t.Fatal("HTTP bearer cannot carry OAuth scopes")
 	}
@@ -263,7 +263,7 @@ func TestAccessLogCarriesBusinessCode(t *testing.T) {
 		}
 	})
 	secured := huma.Operation{OperationID: "secured", Method: "GET", Path: "/secured"}
-	rest.RequireBearer(api, func(huma.Context, string) (identity.Subject, error) { return identity.Subject{ID: "u"}, nil })(&secured)
+	rest.RequireBearer(api, func(context.Context, string) (identity.Subject, error) { return identity.Subject{ID: "u"}, nil })(&secured)
 	rest.Register(api, secured, func() func(context.Context, *pingIn) (*pingOut, error) {
 		return func(context.Context, *pingIn) (*pingOut, error) { return &pingOut{}, nil }
 	})

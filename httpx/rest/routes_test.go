@@ -23,7 +23,7 @@ func TestRoutesIncludesTypedNativeAndHiddenRoutesWithoutRuntime(t *testing.T) {
 		t.Fatal("route inspection constructed a handler")
 		return nil
 	}
-	validator := func(huma.Context, string) (identity.Subject, error) {
+	validator := func(context.Context, string) (identity.Subject, error) {
 		t.Fatal("route inspection validated a token")
 		return identity.Subject{}, nil
 	}
