@@ -82,7 +82,7 @@ go test -race -count=1 -tags=integration ./...
 <a id="doc-tests"></a>
 ### 文档用法测试
 
-有些功能框架不做封装，由文档直接教用户使用社区组件，例如用 gocache 做缓存。`internal/doctest` 在真实环境中验证文档描述的这些行为，例如缓存未命中时返回 `store.NotFound`、Redis store 的 TTL 选项是否生效。依赖升级改变了这些行为时测试会失败，提醒同步修改文档。
+有些功能框架不做封装，由文档直接教用户使用社区组件，例如用 gocache 做缓存。`internal/doctest` 在真实环境中验证文档描述的这些行为，例如缓存未命中时返回 `store.NotFound`、Redis store 的 TTL 选项是否生效。依赖升级改变了这些行为时测试会失败，提醒同步修改文档。它还会把文档中博客示例的完整文件（正文写明「完整的 `internal/...`」的代码块）提取出来，和 `internal/doctest/testdata/blog` 中的占位包一起编译；修改这些文件或框架 API 时，测试会指出文档中不再能编译的代码。新增一个完整文件时，把它加入 `blog_test.go` 的 `blogFiles`。
 
 <a id="continuous-integration"></a>
 ## 持续集成

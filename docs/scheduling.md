@@ -21,7 +21,7 @@
 <a id="defining-tasks"></a>
 ## 定义任务
 
-`schedule.New` 创建调度器，`Add` 注册任务，名称在调度器中唯一：
+`schedule.New` 创建调度器，`Add` 注册任务。名称在调度器中唯一，也是锁名的一部分，最长 `schedule.MaxNameLength`（225）字节：
 
 ```go
 sched := schedule.New(locker, nil)
@@ -44,7 +44,7 @@ sched.Add("articles:publish-scheduled", "* * * * *", articles.PublishScheduled)
 
 cron 表达式的完整语法（包括 `L`、`W`、`#` 等）见 [gronx](https://github.com/adhocore/gronx#cron-expression)。`@every` 按 Unix 时间对齐，例如 `@every 15s` 总是在第 0、15、30、45 秒触发，与进程何时启动无关，因此所有实例算出的触发时刻都一样。
 
-表达式不合法、名称重复时，`Add` 直接 panic，应用在启动时就会发现。
+表达式不合法、名称重复或过长时，`Add` 直接 panic，应用在启动时就会发现。
 
 <a id="timezones"></a>
 ### 时区
@@ -60,7 +60,7 @@ sched.Add("reports:daily", "0 3 * * *", reports.Generate, schedule.In(shanghai))
 <a id="running-the-scheduler"></a>
 ## 运行调度器
 
-调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是在 `open` 中[创建的锁](locks.md#database-store)：
+调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[数据库锁](locks.md#database-store)：
 
 ```go
 package bootstrap
@@ -97,14 +97,10 @@ func Schedule(ctx context.Context, cfg settings.Config) error {
 
 `Run` 每秒检查一次到期的任务，每个任务在自己的 goroutine 中执行，一个任务执行很久不会耽误其他任务按时触发。
 
-在根命令中注册 `schedule` 命令，并把调度器加入一体运行的 `start`（见[在一个进程中运行多个部分](commands.md#running-together)）：
+在根命令中注册 `schedule` 命令；`app.go` 中的 `Start` 已经包含调度器，见[在一个进程中运行多个部分](commands.md#running-together)：
 
 ```go
 root.AddCommand(command.Run("schedule", "执行定时任务", bootstrap.Schedule))
-
-func Start(ctx context.Context, cfg settings.Config) error {
-    return run(ctx, cfg, (*App).HTTP, (*App).Worker, (*App).Scheduler)
-}
 ```
 
 <a id="multiple-instances"></a>

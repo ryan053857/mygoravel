@@ -27,6 +27,10 @@ const (
 	shutdownTimeout = 30 * time.Second
 )
 
+// MaxNameLength 是任务名的最大字节数。调度器的锁名是 "schedule:<任务名>:<触发时刻的 Unix 秒>"，
+// 不能超过 lock.MaxNameLength；Unix 秒按 int64 最长的 20 个字符预留。
+const MaxNameLength = lock.MaxNameLength - len("schedule:") - len(":") - 20
+
 // Scheduler 按表达式定时执行任务。用 Add 注册任务，再调用 Run。
 type Scheduler struct {
 	locker          *lock.Locker
@@ -75,13 +79,16 @@ func New(locker *lock.Locker, logger *slog.Logger) *Scheduler {
 	}
 }
 
-// Add 注册任务。name 在调度器中唯一，也用作锁名的一部分；expr 支持
+// Add 注册任务。name 在调度器中唯一，也用作锁名的一部分，最长 MaxNameLength 字节；expr 支持
 // 5 段 cron 表达式（分钟精度，在第 0 秒触发）、6 段（第一段是秒）、@hourly、@daily 这类预定义写法，
 // 以及按 Unix 时间对齐的 "@every 15s"（至少 1 秒，必须是整秒）。
-// 名称重复、表达式非法，或者在 Run 之后调用时 panic。
+// 名称为空、过长或重复，表达式非法，或者在 Run 之后调用时 panic。
 func (s *Scheduler) Add(name, expr string, run func(ctx context.Context) error, opts ...Option) {
 	if name == "" || run == nil {
 		panic("schedule: task name and function are required")
+	}
+	if len(name) > MaxNameLength {
+		panic(errors.Newf("schedule: task name %.20q… is longer than %d bytes", name, MaxNameLength))
 	}
 	w, err := parse(expr)
 	if err != nil {

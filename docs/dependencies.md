@@ -68,6 +68,7 @@ import (
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/database/postgres"
+    "github.com/ryan053857/mygoravel/lock"
     "github.com/ryan053857/mygoravel/logging"
     "github.com/uptrace/bun"
 )
@@ -76,6 +77,7 @@ import (
 type App struct {
     cfg      settings.Config
     db       *bun.DB
+    locker   *lock.Locker
     articles *article.Service
 }
 
@@ -91,7 +93,12 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
         return db.Close()
     })
 
-    return &App{cfg: cfg, db: db, articles: article.NewService(db)}, nil
+    return &App{
+        cfg:      cfg,
+        db:       db,
+        locker:   lock.New(lock.NewDBStore(db)),
+        articles: article.NewService(db),
+    }, nil
 }
 
 // run 装配 App，然后在同一个进程中运行 parts，直到收到停止信号。
@@ -116,7 +123,14 @@ func run(ctx context.Context, cfg settings.Config, parts ...func(*App, context.C
 func Serve(ctx context.Context, cfg settings.Config) error {
     return run(ctx, cfg, (*App).HTTP)
 }
+
+// Start 在一个进程中运行 HTTP 服务、队列 worker 和定时任务调度器，start 命令调用它。
+func Start(ctx context.Context, cfg settings.Config) error {
+    return run(ctx, cfg, (*App).HTTP, (*App).Worker, (*App).Scheduler)
+}
 ```
+
+`locker` 是[原子锁](locks.md)，[调度器](scheduling.md#multiple-instances)用它在多个实例之间去重。`Worker` 和 `Scheduler` 两个运行部分分别在[队列](queue.md#running-workers)和[定时任务](scheduling.md#running-the-scheduler)两章中介绍。
 
 HTTP 服务在 `internal/bootstrap/http.go` 中：
 

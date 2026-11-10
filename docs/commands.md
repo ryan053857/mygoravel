@@ -129,7 +129,7 @@ root.AddCommand(
 博客应用有三个常驻部分：HTTP 服务、[队列 worker](queue.md#running-workers) 和[定时任务调度器](scheduling.md#running-the-scheduler)，分别是 `App` 的 `HTTP`、`Worker` 和 `Scheduler` 方法（见[依赖装配](dependencies.md#assembling-the-application)）。每个命令只是选择运行哪些部分：
 
 ```go
-// internal/bootstrap/app.go
+// Serve 和 Start 在 app.go 中，Work 在 worker.go 中，Schedule 在 scheduler.go 中
 func Serve(ctx context.Context, cfg settings.Config) error {
     return run(ctx, cfg, (*App).HTTP)
 }
