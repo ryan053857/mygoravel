@@ -2,6 +2,9 @@ auth.unauthenticated: Authentication required
 auth.forbidden: Permission denied
 page.invalid_cursor: Invalid pagination cursor
 rate_limit.exceeded: Too many requests, please try again later
+ai.busy: The conversation is in progress, please try again later
+ai.awaiting_approval: The conversation is waiting for approval
+ai.not_pending: No such pending action
 web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
 web.cross_origin: Cross-origin request rejected

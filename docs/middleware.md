@@ -67,19 +67,9 @@ api := rest.New(rest.Options{Router: router})
 
 `httpx.Timeout` 为请求的 context 设置超时，默认 30 秒，参数来自 `http.timeout` 段。超时后 context 被取消，传入了 `ctx` 的数据库查询和外部调用随之停止。
 
-它不在 `httpx.Defaults` 中，因为不是每条路由都应该有超时：SSE 这类流式响应会一直保持连接，到期就会被切断。只有 JSON API 时，像上面那样把它装在 Router 上即可。同一个 Router 上还有流式路由时，用 chi 的 `Route` 或 `Group` 只为需要的路由安装，例如：
+它不在 `httpx.Defaults` 中，需要单独安装：有些应用只想给部分路由设置超时，例如只给 `/api` 下的路由。
 
-```go
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
-
-router.Route("/api", func(r chi.Router) {
-    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
-    api := rest.New(rest.Options{Router: r})
-    // 注册 API 路由
-})
-
-router.Get("/events", streamEvents) // 不设超时
-```
+[服务端推送](sse.md)不受它影响：SSE 开始推送后摆脱这个超时，连接一直保持到客户端断开，所以流式路由可以和普通路由装在同一组中间件下。
 
 <a id="http-configuration"></a>
 ## HTTP 配置

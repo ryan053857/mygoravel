@@ -151,9 +151,8 @@ func BodyLimit(cfg BodyLimitConfig) func(http.Handler) http.Handler {
 	}
 }
 
-// Timeout 为请求 context 设置 cfg.Duration 的超时。它不在 Defaults 中，
-// 安装在需要超时的路由组上，例如 JSON API 和普通页面；流式路由不安装。
-// 它只取消 context，由处理器决定如何响应。cfg 不合法时 panic。
+// Timeout 为请求 context 设置 cfg.Duration 的超时。它只取消 context，由处理器决定如何响应。
+// SSE 开始推送后不受它限制，见 SSE。cfg 不合法时 panic。
 func Timeout(cfg TimeoutConfig) func(http.Handler) http.Handler {
 	mustValid("Timeout", cfg.Validate())
 	d := cfg.Duration
@@ -161,8 +160,34 @@ func Timeout(cfg TimeoutConfig) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), d)
 			defer cancel()
+			ctx = context.WithValue(ctx, untimedKey{}, r.Context())
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
+	}
+}
+
+// untimedKey 保存 Timeout 设置超时之前的 context，供 SSE 摆脱超时。
+type untimedKey struct{}
+
+// withoutTimeout 返回一个保留 ctx 中所有值、但不受 Timeout 超时影响的 context：
+// 它仍在客户端断开或服务器关闭时取消。stop 释放相关资源。
+func withoutTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	untimed, ok := ctx.Value(untimedKey{}).(context.Context)
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	for {
+		outer, ok := untimed.Value(untimedKey{}).(context.Context)
+		if !ok {
+			break
+		}
+		untimed = outer
+	}
+	out, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(untimed, cancel)
+	return out, func() {
+		stop()
+		cancel()
 	}
 }
 

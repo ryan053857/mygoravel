@@ -2,6 +2,9 @@ auth.unauthenticated: 请先认证
 auth.forbidden: 没有访问权限
 page.invalid_cursor: 分页游标无效
 rate_limit.exceeded: 请求过于频繁，请稍后再试
+ai.busy: 对话正在进行，请稍后再试
+ai.awaiting_approval: 对话正在等待审批，请先处理待审批的操作
+ai.not_pending: 没有这个待审批的操作
 web.not_found: 页面不存在
 web.bad_form: 无法解析提交的表单
 web.cross_origin: 跨站请求被拒绝

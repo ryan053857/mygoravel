@@ -4,6 +4,7 @@
 - [流式响应](#streaming-responses)
 - [长连接](#long-lived-connections)
     - [断线重连](#reconnecting)
+- [JSON API](#json-api)
 - [路由与超时](#routes-and-timeouts)
 - [部署](#deployment)
 
@@ -14,7 +15,9 @@
 
 SSE 只负责服务端到浏览器。浏览器发给服务端的仍然是普通请求，所以认证、跨站请求伪造防护、验证和限流都和其他页面一样。
 
-`web.SSE` 写出事件流，它有两种用法：
+页面使用 `web.SSE` 写出事件流，事件内容是 HTML 片段；JSON API 使用 `rest.RegisterSSE`，事件内容是 JSON，见 [JSON API](#json-api)。两者共用 `httpx.SSE` 管理连接：心跳、超时、停机和断线重连的行为都相同。
+
+`web.SSE` 有两种用法：
 
 | 用法 | 浏览器端 | 适合 |
 | --- | --- | --- |
@@ -136,28 +139,61 @@ for _, n := range h.notifier.Since(s.LastEventID()) {
 
 `Event` 还可以设置 `Name`。有名字的事件不替换内容，htmx 会在页面上派发同名的 DOM 事件，可以用 `hx-trigger` 或 Alpine 的 `x-on` 监听。
 
+<a id="json-api"></a>
+## JSON API
+
+App 或第三方调用者需要同样的进度时，用 `rest.RegisterSSE` 注册一个 JSON 事件流接口。它的参数和 `rest.Register` 相同，多一个事件表：键是事件名，值是事件数据的类型，用于生成 OpenAPI 文档：
+
+```go
+type PublishRequest struct {
+    Body PublishInput
+}
+
+type PublishProgress struct {
+    ID     string `json:"id"`
+    Result string `json:"result"`
+}
+
+rest.RegisterSSE(api, op, map[string]any{"progress": PublishProgress{}},
+    func() func(context.Context, *PublishRequest) (*huma.StreamResponse, error) {
+        return func(ctx context.Context, in *PublishRequest) (*huma.StreamResponse, error) {
+            ids := make([]uuid.UUID, len(in.Body.IDs))
+            for i, raw := range in.Body.IDs {
+                id, err := uuid.Parse(raw)
+                if err != nil {
+                    // 还没有开始推送，客户端照常收到 Problem Details
+                    return nil, huma.Error422UnprocessableEntity("invalid article id " + raw)
+                }
+                ids[i] = id
+            }
+            sub, _ := identity.FromContext(ctx)
+            return rest.SSE(func(s *httpx.Stream) error {
+                for _, id := range ids {
+                    p := PublishProgress{ID: id.String(), Result: "已发布"}
+                    if _, err := articles.Publish(s.Context(), sub, id); err != nil {
+                        p.Result = httpx.ErrorDetail(s.Context(), err)
+                    }
+                    if err := s.SendJSON(httpx.Event{Name: "progress"}, p); err != nil {
+                        return nil // 客户端已经离开
+                    }
+                }
+                return nil
+            }), nil
+        }
+    })
+```
+
+处理器先完成检查，出错时照常返回错误；返回 `rest.SSE` 之后才开始推送。`httpx.Stream` 和 `web.Stream` 一样提供 `Context`、`Done` 和 `LastEventID`，`SendJSON` 把值编码为一行 JSON，`Send` 发送原样的文本。
+
+浏览器的 `EventSource` 只能发 GET 请求。需要 POST 时，前端用 `fetch` 读取响应流，或者使用 [@microsoft/fetch-event-source](https://github.com/Azure/fetch-event-source) 这类库。
+
 <a id="routes-and-timeouts"></a>
 ## 路由与超时
 
-长连接会一直保持，所以 SSE 路由不能安装 [`httpx.Timeout`](middleware.md#request-timeout)，否则到期就会被切断。把[装配页面](views.md#assembling-pages)中的页面路由组拆成两组，只给普通页面安装 Timeout：
+SSE 路由和普通路由装在同一组中间件下即可。开始推送之后，连接不再受请求时限的约束：
 
-```go
-router.Group(func(r chi.Router) {
-    r.Use(pages.Middleware)
-    r.Group(func(r chi.Router) {
-        r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
-        authweb.Register(r, pages, sessions, a.users)
-        articleweb.Register(r, pages, a.articles)
-    })
-    r.Group(func(r chi.Router) {
-        r.Use(pages.Require("articles"))
-        r.Get("/admin/events", pages.Handle(h.Events))
-        r.Post("/admin/articles/publish", pages.Handle(h.Publish))
-    })
-})
-```
-
-服务器配置中的 `http.write_timeout` 同样会切断长连接，`web.SSE` 会为当前请求取消它，不需要修改配置。
+- [`httpx.Timeout`](middleware.md#request-timeout) 的超时不再取消 `s.Context()`，它只在客户端断开或服务器停机时取消。
+- 服务器配置中的 `http.write_timeout` 同样会切断长连接，SSE 会为当前请求取消它，不需要修改配置。
 
 停机时，`httpx.ListenAndServe` 一开始排空，`s.Done()` 就会关闭，处理器返回，连接结束，浏览器随后重连到其他实例。所以打开着的长连接不会让停机等满 `shutdown_timeout`，见[平滑停止](lifecycle.md#graceful-shutdown)。
 

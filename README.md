@@ -33,6 +33,7 @@ go get github.com/ryan053857/mygoravel@main
 | 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |
 | 发送邮件 | [邮件](docs/mail.md) |
 | 在后台执行任务 | [队列](docs/queue.md) · [定时任务](docs/scheduling.md) |
+| 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |
 | 防止任务重复执行 | [原子锁](docs/locks.md) |
 | 测试与上线 | [测试](docs/testing.md) · [部署](docs/deployment.md) |
 

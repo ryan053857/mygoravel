@@ -1,0 +1,556 @@
+package ai
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
+	"trpc.group/trpc-go/trpc-agent-go/agent"
+	"trpc.group/trpc-go/trpc-agent-go/event"
+	"trpc.group/trpc-go/trpc-agent-go/model"
+	"trpc.group/trpc-go/trpc-agent-go/runner"
+	"trpc.group/trpc-go/trpc-agent-go/session"
+	"trpc.group/trpc-go/trpc-agent-go/tool"
+
+	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/ryan053857/mygoravel/logging"
+)
+
+var (
+	// ErrBusy 表示对话正在运行，新消息应当用 Run.Steer 插入。
+	ErrBusy = errorx.Define(errorx.Conflict, "ai.busy")
+	// ErrAwaitingApproval 表示对话中有等待审批的工具调用，处理它们之前不能发送新消息。
+	ErrAwaitingApproval = errorx.Define(errorx.Conflict, "ai.awaiting_approval")
+	// ErrNotPending 表示要审批的工具调用不存在或已经处理过。
+	ErrNotPending = errorx.Define(errorx.NotFound, "ai.not_pending")
+	// ErrFinished 表示运行已经结束，不能再插入消息，应当开始新的运行。
+	ErrFinished = errors.New("ai: run finished")
+)
+
+// steerExtension 是 trpc-agent-go 为已消费的插话消息事件附加的扩展字段。
+const steerExtension = "trpc_agent.steer.queued_user_message"
+
+// Runs 在后台运行一个 agent，并记录每个对话当前的运行。
+//
+// 同一个对话同时只有一个运行；运行结束后保留一段时间（默认 1 分钟），让断线的客户端接上剩余的事件。
+type Runs struct {
+	app      string
+	runner   runner.Runner
+	sessions session.Service
+	approval map[string]tool.CallableTool
+	keep     time.Duration
+	logger   *slog.Logger
+
+	runnerOpts []runner.Option
+
+	mu     sync.Mutex
+	runs   map[session.Key]*Run
+	wg     sync.WaitGroup
+	closed bool
+}
+
+// Option 配置 Runs。
+type Option func(*Runs)
+
+// RequireApproval 让模型调用这些工具时不执行，运行停下等待 Runs.Approve 或 Runs.Reject。
+// 工具同样要加入 agent 的工具列表，模型才能调用它们。
+func RequireApproval(tools ...tool.CallableTool) Option {
+	return func(rs *Runs) {
+		for _, t := range tools {
+			rs.approval[t.Declaration().Name] = t
+		}
+	}
+}
+
+// KeepFinished 设置运行结束后保留的时间，期间重连的客户端仍能取得剩余的事件。
+func KeepFinished(d time.Duration) Option { return func(rs *Runs) { rs.keep = d } }
+
+// WithLogger 设置记录运行错误的日志，默认使用 slog.Default()。
+func WithLogger(l *slog.Logger) Option { return func(rs *Runs) { rs.logger = l } }
+
+// RunnerOptions 把选项传给 runner.NewRunner，例如 runner.WithMemoryService。
+func RunnerOptions(opts ...runner.Option) Option {
+	return func(rs *Runs) { rs.runnerOpts = append(rs.runnerOpts, opts...) }
+}
+
+// NewRuns 为 agent 创建 Runs，对话保存在 sessions 中。app 是应用名，用于区分同一个存储中不同应用的对话。
+func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Option) *Runs {
+	rs := &Runs{
+		app:      app,
+		sessions: sessions,
+		approval: map[string]tool.CallableTool{},
+		keep:     time.Minute,
+		runs:     map[session.Key]*Run{},
+	}
+	for _, opt := range opts {
+		opt(rs)
+	}
+	rs.logger = logging.Or(rs.logger).With(logging.AttrComponent, "ai")
+	rs.runner = runner.NewRunner(app, ag, append([]runner.Option{runner.WithSessionService(sessions)}, rs.runnerOpts...)...)
+	return rs
+}
+
+// Close 取消所有运行并等待它们结束，然后关闭 runner。会话存储由调用方关闭。
+func (rs *Runs) Close() error {
+	rs.mu.Lock()
+	rs.closed = true
+	for _, r := range rs.runs {
+		r.cancel()
+	}
+	rs.mu.Unlock()
+	rs.wg.Wait()
+	return rs.runner.Close()
+}
+
+func (rs *Runs) key(userID, sessionID string) session.Key {
+	return session.Key{AppName: rs.app, UserID: userID, SessionID: sessionID}
+}
+
+// Send 把一条用户消息交给对话：对话没有在运行时开始一次运行，正在运行时插入这次运行（见 Run.Steer）。
+// 返回处理这条消息的运行。对话在等待审批时返回 ErrAwaitingApproval。
+func (rs *Runs) Send(ctx context.Context, userID, sessionID string, msg model.Message, opts ...agent.RunOption) (*Run, error) {
+	for {
+		r, err := rs.Start(ctx, userID, sessionID, msg, opts...)
+		if !errors.Is(err, ErrBusy) {
+			return r, err
+		}
+		if r, ok := rs.Get(userID, sessionID); ok {
+			err := r.Steer(msg)
+			if err == nil {
+				return r, nil
+			}
+			if !errors.Is(err, ErrFinished) {
+				return nil, err
+			}
+		}
+		// 运行恰好结束：重新开始。
+	}
+}
+
+// Start 在后台开始一次运行，把 msg 发给 agent。对话不存在时自动创建。
+//
+// 运行不受 ctx 取消的影响，但保留其中的值（例如日志字段）。对话正在运行时返回 ErrBusy，
+// 等待审批时返回 ErrAwaitingApproval。
+func (rs *Runs) Start(ctx context.Context, userID, sessionID string, msg model.Message, opts ...agent.RunOption) (*Run, error) {
+	key := rs.key(userID, sessionID)
+	if r, ok := rs.Get(userID, sessionID); ok && !r.isFinished() {
+		return nil, ErrBusy.New()
+	}
+	if len(rs.approval) > 0 {
+		_, pending, err := rs.pending(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if len(pending) > 0 {
+			return nil, ErrAwaitingApproval.New()
+		}
+	}
+	return rs.start(ctx, key, msg, opts, false)
+}
+
+// start 开始运行。resumed 为 true 表示审批之后继续：上一次运行停下时还没送达的插话消息随之送达。
+func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, opts []agent.RunOption, resumed bool) (*Run, error) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.closed {
+		return nil, errors.New("ai: runs closed")
+	}
+	prev, ok := rs.runs[key]
+	if ok && !prev.isFinished() {
+		return nil, ErrBusy.New()
+	}
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	r := &Run{
+		ID:      uuid.NewString(),
+		key:     key,
+		rs:      rs,
+		cancel:  cancel,
+		changed: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	if resumed && prev != nil {
+		prev.mu.Lock()
+		r.steered, prev.steered = prev.steered, nil
+		prev.mu.Unlock()
+	}
+	if len(rs.approval) > 0 {
+		names := make([]string, 0, len(rs.approval))
+		for name := range rs.approval {
+			names = append(names, name)
+		}
+		opts = append(opts, agent.WithToolExecutionFilter(tool.NewExcludeToolNamesFilter(names...)))
+	}
+	rs.runs[key] = r
+	rs.wg.Add(1)
+	go func() {
+		defer rs.wg.Done()
+		r.loop(runCtx, msg, opts)
+		cancel()
+		time.AfterFunc(rs.keep, func() {
+			rs.mu.Lock()
+			// 停下等待审批时还没送达的插话消息保存在运行中，审批之后送达，所以这样的运行不删除。
+			if rs.runs[key] == r && !r.hasSteered() {
+				delete(rs.runs, key)
+			}
+			rs.mu.Unlock()
+		})
+	}()
+	return r, nil
+}
+
+// Get 返回对话当前的运行，或者刚结束、仍在保留期内的运行。
+func (rs *Runs) Get(userID, sessionID string) (*Run, bool) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	r, ok := rs.runs[rs.key(userID, sessionID)]
+	return r, ok
+}
+
+// Pending 从会话存储读出对话中等待审批的工具调用，不依赖运行所在的进程。
+func (rs *Runs) Pending(ctx context.Context, userID, sessionID string) ([]ToolCall, error) {
+	_, pending, err := rs.pending(ctx, rs.key(userID, sessionID))
+	if err != nil {
+		return nil, err
+	}
+	calls := make([]ToolCall, len(pending))
+	for i, p := range pending {
+		calls[i] = p.call
+	}
+	return calls, nil
+}
+
+// Approve 执行一个等待审批的工具调用，把结果写回对话。
+// 这是最后一个等待审批的调用时，对话在后台继续运行并返回该运行；否则返回 nil，等待其余调用的决定。
+func (rs *Runs) Approve(ctx context.Context, userID, sessionID, callID string, opts ...agent.RunOption) (*Run, error) {
+	return rs.resolve(ctx, rs.key(userID, sessionID), callID, opts, func(call ToolCall) string {
+		out, err := rs.approval[call.Name].Call(ctx, []byte(call.Arguments))
+		if err != nil {
+			return "Error: " + err.Error()
+		}
+		if s, ok := out.(string); ok {
+			return s
+		}
+		b, err := json.Marshal(out)
+		if err != nil {
+			return "Error: " + err.Error()
+		}
+		return string(b)
+	})
+}
+
+// Reject 拒绝一个等待审批的工具调用，把 reason 作为调用结果告诉模型，其余同 Approve。
+func (rs *Runs) Reject(ctx context.Context, userID, sessionID, callID, reason string, opts ...agent.RunOption) (*Run, error) {
+	return rs.resolve(ctx, rs.key(userID, sessionID), callID, opts, func(ToolCall) string {
+		b, _ := json.Marshal(map[string]string{"error": "rejected", "reason": reason})
+		return string(b)
+	})
+}
+
+func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opts []agent.RunOption, result func(ToolCall) string) (*Run, error) {
+	if r, ok := rs.Get(key.UserID, key.SessionID); ok && !r.isFinished() {
+		return nil, ErrBusy.New()
+	}
+	sess, pending, err := rs.pending(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	idx := -1
+	for i, p := range pending {
+		if p.call.ID == callID {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return nil, ErrNotPending.New(errorx.Public("call_id", callID))
+	}
+	p := pending[idx]
+	msg := model.NewToolMessage(p.call.ID, p.call.Name, result(p.call))
+	if len(pending) > 1 {
+		// 还有其他调用等待决定：结果先写进对话，最后一个决定到来时再继续运行。
+		evt := event.NewResponseEvent(p.source.InvocationID, p.source.Author, &model.Response{
+			Object:  model.ObjectTypeToolResponse,
+			Done:    true,
+			Choices: []model.Choice{{Message: msg}},
+		})
+		evt.Branch, evt.FilterKey = p.source.Branch, p.source.FilterKey
+		return nil, rs.sessions.AppendEvent(ctx, sess, evt)
+	}
+	return rs.start(ctx, key, msg, opts, true)
+}
+
+type pendingCall struct {
+	call   ToolCall
+	source *event.Event
+}
+
+// pending 找出对话中最后一次调用里需要审批、还没有结果的工具调用。
+func (rs *Runs) pending(ctx context.Context, key session.Key) (*session.Session, []pendingCall, error) {
+	sess, err := rs.sessions.GetSession(ctx, key)
+	if err != nil {
+		return nil, nil, err
+	}
+	if sess == nil {
+		return nil, nil, nil
+	}
+	var calls []pendingCall
+	answered := map[string]bool{}
+	for i := range sess.Events {
+		ev := &sess.Events[i]
+		if ev.Response == nil {
+			continue
+		}
+		for _, c := range ev.Choices {
+			if c.Message.Role == model.RoleTool {
+				answered[c.Message.ToolID] = true
+			}
+			if len(c.Message.ToolCalls) > 0 {
+				calls = calls[:0]
+				for _, tc := range c.Message.ToolCalls {
+					if _, ok := rs.approval[tc.Function.Name]; ok {
+						calls = append(calls, pendingCall{toolCall(tc), ev})
+					}
+				}
+			}
+		}
+	}
+	out := calls[:0]
+	for _, c := range calls {
+		if !answered[c.call.ID] {
+			out = append(out, c)
+		}
+	}
+	return sess, out, nil
+}
+
+func toolCall(tc model.ToolCall) ToolCall {
+	return ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: string(tc.Function.Arguments)}
+}
+
+// Run 是对话的一次后台运行。它的方法可以并发调用。
+type Run struct {
+	// ID 唯一标识这次运行。
+	ID string
+
+	key    session.Key
+	rs     *Runs
+	cancel context.CancelFunc
+
+	mu       sync.Mutex
+	events   []Event
+	changed  chan struct{} // 追加事件时关闭并替换，唤醒等待的读者
+	done     chan struct{}
+	finished bool
+	reqID    string          // 当前 trpc-agent-go 请求的 ID
+	steered  []model.Message // 已插入、还没有被 agent 消费的消息
+}
+
+// Steer 在运行中途插入一条用户消息。它在当前这批工具调用结束后、下一次请求模型之前进入对话；
+// 如果模型已经在给出最终回答，回答结束后运行会带着这条消息继续。运行已经结束时返回 ErrFinished。
+func (r *Run) Steer(msg model.Message) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.finished {
+		return ErrFinished
+	}
+	r.steered = append(r.steered, msg)
+	if r.reqID != "" {
+		// 失败（例如请求恰好结束）时消息留在 steered 中，由 loop 在下一轮发出。
+		_ = runner.EnqueueUserMessage(r.rs.runner, r.reqID, msg)
+	}
+	return nil
+}
+
+// Cancel 取消运行。已经生成的消息保留在对话中。
+func (r *Run) Cancel() { r.cancel() }
+
+// Done 在运行结束、最后一个事件（done）产生后关闭。
+func (r *Run) Done() <-chan struct{} { return r.done }
+
+func (r *Run) hasSteered() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.steered) > 0
+}
+
+func (r *Run) isFinished() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.finished
+}
+
+// Events 依次返回 lastEventID 之后的事件，然后等待新的事件，直到运行结束或 ctx 取消。
+// lastEventID 为空或者属于其他运行时，从第一个事件开始。
+func (r *Run) Events(ctx context.Context, lastEventID string) func(yield func(Event) bool) {
+	next := 0
+	if run, seq, ok := strings.Cut(lastEventID, "."); ok && run == r.ID {
+		if n, err := strconv.Atoi(seq); err == nil {
+			next = n + 1
+		}
+	}
+	return func(yield func(Event) bool) {
+		for {
+			r.mu.Lock()
+			if next < len(r.events) {
+				ev := r.events[next]
+				r.mu.Unlock()
+				next++
+				if !yield(ev) {
+					return
+				}
+				continue
+			}
+			finished, changed := r.finished, r.changed
+			r.mu.Unlock()
+			if finished {
+				return
+			}
+			select {
+			case <-changed:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+func (r *Run) emit(name string, data any, raw *event.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, Event{ID: fmt.Sprintf("%s.%d", r.ID, len(r.events)), Name: name, Data: data, Raw: raw})
+	close(r.changed)
+	r.changed = make(chan struct{})
+}
+
+// loop 运行 agent，直到没有剩余的插话消息。
+func (r *Run) loop(ctx context.Context, msg model.Message, opts []agent.RunOption) {
+	defer close(r.done)
+	var failed bool
+	calls := map[string]ToolCall{}
+	answered := map[string]bool{}
+	for first := true; ; first = false {
+		reqID := uuid.NewString()
+		r.mu.Lock()
+		r.reqID = reqID
+		queued := append([]model.Message(nil), r.steered...)
+		r.mu.Unlock()
+		if !first {
+			r.emit(EventUser, Text{msg.Content}, nil)
+		}
+		ch, err := r.rs.runner.Run(ctx, r.key.UserID, r.key.SessionID, msg, append(opts, agent.WithRequestID(reqID))...)
+		if err != nil {
+			r.fail(ctx, err)
+			failed = true
+		} else {
+			for _, m := range queued {
+				_ = runner.EnqueueUserMessage(r.rs.runner, reqID, m)
+			}
+			failed = r.consume(ctx, ch, calls, answered)
+		}
+
+		r.mu.Lock()
+		r.reqID = ""
+		if !failed && ctx.Err() == nil && len(r.steered) > 0 && len(r.pendingCalls(calls, answered)) == 0 {
+			msg = r.steered[0]
+			r.steered = r.steered[1:]
+			r.mu.Unlock()
+			continue
+		}
+		done := Done{Pending: r.pendingCalls(calls, answered), Canceled: ctx.Err() != nil}
+		if done.Pending == nil {
+			done.Pending = []ToolCall{}
+		}
+		r.events = append(r.events, Event{ID: fmt.Sprintf("%s.%d", r.ID, len(r.events)), Name: EventDone, Data: done})
+		r.finished = true
+		close(r.changed)
+		r.changed = make(chan struct{})
+		r.mu.Unlock()
+		return
+	}
+}
+
+// pendingCalls 返回需要审批、还没有结果的调用。调用方持有 r.mu。
+func (r *Run) pendingCalls(calls map[string]ToolCall, answered map[string]bool) []ToolCall {
+	var out []ToolCall
+	for id, c := range calls {
+		if _, ok := r.rs.approval[c.Name]; ok && !answered[id] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (r *Run) fail(ctx context.Context, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	r.rs.logger.ErrorContext(ctx, "agent run failed", "session_id", r.key.SessionID, "error", err)
+	r.emit(EventError, Error{err.Error()}, nil)
+}
+
+// consume 把 trpc-agent-go 的事件转换为 Event，返回运行是否出错。
+func (r *Run) consume(ctx context.Context, ch <-chan *event.Event, calls map[string]ToolCall, answered map[string]bool) (failed bool) {
+	// 当前这条回答的思考过程和正文是否已经以增量发出；已发出的部分不再从完整消息中重复发送。
+	var streamedReasoning, streamedText bool
+	for ev := range ch {
+		if ev == nil || ev.Response == nil {
+			continue
+		}
+		if ev.Error != nil {
+			if ctx.Err() == nil {
+				failed = true
+				r.rs.logger.ErrorContext(ctx, "agent run failed", "session_id", r.key.SessionID, "error", ev.Error.Message)
+				r.emit(EventError, Error{ev.Error.Message}, ev)
+			}
+			continue
+		}
+		for _, c := range ev.Choices {
+			if ev.IsPartial {
+				if c.Delta.ReasoningContent != "" {
+					streamedReasoning = true
+					r.emit(EventReasoning, Text{c.Delta.ReasoningContent}, ev)
+				}
+				if c.Delta.Content != "" {
+					streamedText = true
+					r.emit(EventText, Text{c.Delta.Content}, ev)
+				}
+				continue
+			}
+			m := c.Message
+			switch m.Role {
+			case model.RoleUser:
+				if _, ok := ev.Extensions[steerExtension]; ok {
+					r.mu.Lock()
+					if len(r.steered) > 0 {
+						r.steered = r.steered[1:]
+					}
+					r.mu.Unlock()
+					r.emit(EventUser, Text{m.Content}, ev)
+				}
+			case model.RoleTool:
+				answered[m.ToolID] = true
+				r.emit(EventToolResult, ToolResult{ID: m.ToolID, Name: m.ToolName, Content: m.Content}, ev)
+			case model.RoleAssistant:
+				if !streamedReasoning && m.ReasoningContent != "" {
+					r.emit(EventReasoning, Text{m.ReasoningContent}, ev)
+				}
+				if !streamedText && m.Content != "" {
+					r.emit(EventText, Text{m.Content}, ev)
+				}
+				streamedReasoning, streamedText = false, false
+				for _, tc := range m.ToolCalls {
+					call := toolCall(tc)
+					calls[call.ID] = call
+					r.emit(EventToolCall, call, ev)
+				}
+			}
+		}
+	}
+	return failed
+}

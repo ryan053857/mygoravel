@@ -30,8 +30,9 @@ var dependencies = map[string][]string{
 	"hashing":    {},
 	"queue":      {"logging"},
 	"schedule":   {"lock", "logging"},
+	"ai":         {"errorx", "httpx", "logging"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
