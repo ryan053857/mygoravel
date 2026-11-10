@@ -78,10 +78,10 @@ var FS embed.FS
 <a id="migration-commands"></a>
 ### 迁移命令
 
-在[装配命令行](commands.md#declaring-the-cli)时加入 `command.Migrate`，应用就有了 `migrate up`、`migrate status` 和 `migrate down` 三个命令：
+在[装配命令行](commands.md#declaring-the-cli)时加入 `command/migratecmd` 包的 `migratecmd.New`，应用就有了 `migrate up`、`migrate status` 和 `migrate down` 三个命令：
 
 ```go
-root.AddCommand(command.Migrate(migrations.FS, func(cfg settings.Config) database.Config {
+root.AddCommand(migratecmd.New(migrations.FS, func(cfg settings.Config) database.Config {
     return cfg.Database
 }))
 ```

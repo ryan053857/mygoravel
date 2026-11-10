@@ -1,6 +1,6 @@
 //go:build integration
 
-package command_test
+package migratecmd_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ryan053857/mygoravel/command"
+	"github.com/ryan053857/mygoravel/command/migratecmd"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 )
 
@@ -24,7 +24,7 @@ func TestMigrateCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	dsn.Path = "/" + name
-	path := writeConfig(t, "name: blog\ndatabase:\n  dsn: "+dsn.String()+"\n")
+	path := writeConfig(t, "database:\n  dsn: "+dsn.String()+"\n")
 
 	migrations := fstest.MapFS{
 		"00001_create_notes.sql": {Data: []byte("-- +goose Up\nCREATE TABLE notes (id int);\n-- +goose Down\nDROP TABLE notes;\n")},
@@ -32,7 +32,7 @@ func TestMigrateCommands(t *testing.T) {
 	}
 	run := func(args ...string) string {
 		t.Helper()
-		root := newRoot(command.Migrate(migrations, dbConfig))
+		root := newRoot(migratecmd.New(migrations, dbConfig))
 		out, _, err := execute(root, append(args, "--config", path)...)
 		if err != nil {
 			t.Fatalf("%v: %v", args, err)

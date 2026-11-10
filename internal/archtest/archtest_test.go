@@ -141,3 +141,19 @@ func TestDependencyScope(t *testing.T) {
 		}
 	}
 }
+
+// TestCommandCoreIsLight 确保只用 command 核心包的应用（例如常驻 worker）
+// 不会链接 HTTP API 和数据库组件；它们分别在 command/restcmd 和 command/migratecmd 中。
+func TestCommandCoreIsLight(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", module+"/command").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list: %v\n%s", err, out)
+	}
+	for _, dep := range strings.Fields(string(out)) {
+		for _, heavy := range []string{module + "/httpx", module + "/database", "github.com/danielgtaylor/huma", "github.com/jackc/pgx", "github.com/pressly/goose"} {
+			if under(dep, heavy) {
+				t.Errorf("command depends on %s", dep)
+			}
+		}
+	}
+}

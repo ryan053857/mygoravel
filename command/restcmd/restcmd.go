@@ -1,4 +1,6 @@
-package command
+// Package restcmd 提供查看 HTTP API 的命令：openapi 输出 OpenAPI 文档，routes 输出路由表。
+// 两个命令都以文档模式注册路由，不读取配置，不调用处理器工厂。
+package restcmd
 
 import (
 	"fmt"
@@ -7,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 )
 
@@ -71,4 +74,14 @@ func orDash(value string) string {
 		return "-"
 	}
 	return value
+}
+
+// leaf 构造不接受位置参数的命令。
+func leaf(use, short string, run func(cmd *cobra.Command) error) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Args:  command.NoArgs,
+		RunE:  func(cmd *cobra.Command, _ []string) error { return run(cmd) },
+	}
 }

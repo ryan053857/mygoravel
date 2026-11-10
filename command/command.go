@@ -24,7 +24,7 @@ func Root(name, short string) *cobra.Command {
 		Short:         short,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          noArgs,
+		Args:          NoArgs,
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return AsExitError(ExitUsage, err) })
@@ -73,7 +73,7 @@ func leaf(use, short string, run func(cmd *cobra.Command) error) *cobra.Command 
 	return &cobra.Command{
 		Use:   use,
 		Short: short,
-		Args:  noArgs,
+		Args:  NoArgs,
 		RunE:  func(cmd *cobra.Command, _ []string) error { return run(cmd) },
 	}
 }
@@ -85,6 +85,8 @@ func group(use, short string, children ...*cobra.Command) *cobra.Command {
 	return cmd
 }
 
-func noArgs(cmd *cobra.Command, args []string) error {
+// NoArgs 是拒绝位置参数的 cobra.PositionalArgs，出错时带 ExitUsage 退出码。
+// 自定义命令用它代替 cobra.NoArgs，多余参数就会以退出码 2 失败。
+func NoArgs(cmd *cobra.Command, args []string) error {
 	return AsExitError(ExitUsage, cobra.NoArgs(cmd, args))
 }

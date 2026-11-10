@@ -155,6 +155,8 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `database` | 打开 PostgreSQL 连接，识别约束错误 | [数据库](database.md) |
 | `database/migrate` | 构造 goose 迁移器，检查已发布迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
-| `command` | 构造常用的 Cobra 子命令 | [命令行](commands.md) |
+| `command` | 根命令、`Run`、`config` 命令、退出码 | [命令行](commands.md) |
+| `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
+| `command/restcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
 
 缓存不在框架包中，你可以直接使用 [eko/gocache](https://github.com/eko/gocache)，详见[缓存](cache.md)；数据库查询和事务也直接使用 Bun 的原生 API。

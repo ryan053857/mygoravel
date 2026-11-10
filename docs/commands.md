@@ -42,6 +42,8 @@ import (
     "example.com/blog/internal/settings"
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/command"
+    "github.com/ryan053857/mygoravel/command/migratecmd"
+    "github.com/ryan053857/mygoravel/command/restcmd"
     "github.com/ryan053857/mygoravel/database"
 )
 
@@ -50,9 +52,9 @@ func New() *cobra.Command {
     root := command.Root("api", "Blog API")
     root.AddCommand(
         command.Run("serve", "启动 HTTP 服务", bootstrap.Serve),
-        command.Migrate(migrations.FS, dbConfig),
-        command.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
-        command.Routes(bootstrap.API, bootstrap.DocRoutes),
+        migratecmd.New(migrations.FS, dbConfig),
+        restcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
+        restcmd.Routes(bootstrap.API, bootstrap.DocRoutes),
         command.Config[settings.Config](),
     )
     return root
@@ -83,10 +85,12 @@ func main() {
 | 构造函数 | 创建的命令 | 需要配置 |
 | --- | --- | --- |
 | `command.Run(use, short, run)` | 任意名称，例如 `serve`、`worker` | 是 |
-| `command.Migrate(fsys, dbConfig)` | `migrate up`、`migrate status`、`migrate down` | 是 |
 | `command.Config[C]()` | `config check`、`config show` | 是 |
-| `command.OpenAPI(opts, register)` | `openapi` | 否 |
-| `command.Routes(opts, register)` | `routes` | 否 |
+| `migratecmd.New(fsys, dbConfig)` | `migrate up`、`migrate status`、`migrate down` | 是 |
+| `restcmd.OpenAPI(opts, register)` | `openapi` | 否 |
+| `restcmd.Routes(opts, register)` | `routes` | 否 |
+
+迁移命令和 HTTP API 命令分别放在 `command/migratecmd` 和 `command/restcmd` 两个子包中。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
 
 不提供 HTTP API 的应用，例如一个只消费消息队列的常驻进程，只装配它需要的命令即可：
 
@@ -94,7 +98,7 @@ func main() {
 root := command.Root("worker", "订单事件消费者")
 root.AddCommand(
     command.Run("run", "消费订单事件", consumer.Run),
-    command.Migrate(migrations.FS, dbConfig),
+    migratecmd.New(migrations.FS, dbConfig),
 )
 ```
 
@@ -115,7 +119,7 @@ root.AddCommand(
 <a id="openapi-command"></a>
 ### openapi 命令
 
-`command.OpenAPI(opts, register)` 以[文档模式](routing.md#exporting-openapi)和 `opts` 创建 API，调用 `register` 注册路由，然后把 OpenAPI 文档输出到标准输出：
+`restcmd.OpenAPI(opts, register)` 以[文档模式](routing.md#exporting-openapi)和 `opts` 创建 API，调用 `register` 注册路由，然后把 OpenAPI 文档输出到标准输出：
 
 ```bash
 ./bin/api openapi > openapi.json
@@ -126,7 +130,7 @@ root.AddCommand(
 <a id="routes-command"></a>
 ### routes 命令
 
-当业务模块变多时，你可以用 `routes` 查看整个应用的路由，不必逐个打开模块中的 `routes.go`。`command.Routes` 的参数与 `command.OpenAPI` 相同，同样在文档模式下注册路由，不需要配置文件：
+当业务模块变多时，你可以用 `routes` 查看整个应用的路由，不必逐个打开模块中的 `routes.go`。`restcmd.Routes` 的参数与 `restcmd.OpenAPI` 相同，同样在文档模式下注册路由，不需要配置文件：
 
 ```bash
 ./bin/api routes
@@ -153,7 +157,7 @@ Huma 自动注册的 `/docs`、`/openapi.json`、`/schemas/{schema}` 等文档�
 <a id="migrate-command"></a>
 ### migrate 命令
 
-`command.Migrate(fsys, dbConfig)` 创建三个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`dbConfig` 从应用配置中取出数据库配置：
+`migratecmd.New(fsys, dbConfig)` 创建三个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`dbConfig` 从应用配置中取出数据库配置：
 
 ```bash
 ./bin/api migrate up       # 执行全部未执行的迁移
@@ -189,13 +193,13 @@ VERSION         STATE    APPLIED AT           FILE
 <a id="custom-commands"></a>
 ## 自定义命令
 
-根命令和内置命令都是原生的 `*cobra.Command`，任意 Cobra 命令都可以一起装配。需要读取配置时，调用 `command.LoadConfig`，它使用同一个 `--config` 选项，失败时同样带 `ExitConfig` 退出码：
+根命令和内置命令都是原生的 `*cobra.Command`，任意 Cobra 命令都可以一起装配。需要读取配置时，调用 `command.LoadConfig`，它使用同一个 `--config` 选项，失败时同样带 `ExitConfig` 退出码。不接受位置参数的命令，用 `command.NoArgs` 代替 `cobra.NoArgs`，多余参数就会以 `ExitUsage` 失败：
 
 ```go
 root.AddCommand(&cobra.Command{
     Use:   "ping-db",
     Short: "检查数据库能否连通",
-    Args:  cobra.NoArgs,
+    Args:  command.NoArgs,
     RunE: func(cmd *cobra.Command, _ []string) error {
         cfg, err := command.LoadConfig[settings.Config](cmd)
         if err != nil {

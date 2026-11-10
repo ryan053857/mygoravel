@@ -1,4 +1,5 @@
-package command
+// Package migratecmd 提供 migrate up/status/down 命令。
+package migratecmd
 
 import (
 	"context"
@@ -13,23 +14,24 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/spf13/cobra"
 
+	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
 )
 
-// Migrate 构造 migrate up/status/down 命令。fsys 的根目录直接包含 SQL 迁移文件，
+// New 构造 migrate 命令及其 up、status、down 子命令。fsys 的根目录直接包含 SQL 迁移文件，
 // dbConfig 从应用配置中取出数据库配置。数据库连不上时以 ExitUnavailable 退出。
-func Migrate[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command {
+func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command {
 	// withProvider 连接数据库并创建迁移器，run 结束后关闭连接。
 	withProvider := func(run func(context.Context, io.Writer, *goose.Provider) error) func(*cobra.Command) error {
 		return func(cmd *cobra.Command) error {
-			cfg, err := LoadConfig[C](cmd)
+			cfg, err := command.LoadConfig[C](cmd)
 			if err != nil {
 				return err
 			}
 			db, err := database.Open(cmd.Context(), dbConfig(cfg))
 			if err != nil {
-				return AsExitError(ExitUnavailable, err)
+				return command.AsExitError(command.ExitUnavailable, err)
 			}
 			defer db.Close()
 			provider, err := migrate.NewProvider(db.DB, fsys)
@@ -39,7 +41,8 @@ func Migrate[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Com
 			return run(cmd.Context(), cmd.OutOrStdout(), provider)
 		}
 	}
-	return group("migrate", "数据库迁移",
+	root := leaf("migrate", "数据库迁移", func(cmd *cobra.Command) error { return cmd.Help() })
+	root.AddCommand(
 		leaf("up", "执行全部未执行的迁移", withProvider(func(ctx context.Context, out io.Writer, p *goose.Provider) error {
 			results, err := p.Up(ctx)
 			printResults(out, results)
@@ -69,6 +72,7 @@ func Migrate[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Com
 			return errors.Wrap(err, "migrate: down")
 		})),
 	)
+	return root
 }
 
 // printResults 每行输出一个已完成的迁移，例如 "up    20261111090000_create_articles.sql  12ms"。
@@ -80,4 +84,14 @@ func printResults(out io.Writer, results []*goose.MigrationResult) {
 		}
 	}
 	tw.Flush()
+}
+
+// leaf 构造不接受位置参数的命令。
+func leaf(use, short string, run func(cmd *cobra.Command) error) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Args:  command.NoArgs,
+		RunE:  func(cmd *cobra.Command, _ []string) error { return run(cmd) },
+	}
 }
