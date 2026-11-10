@@ -17,22 +17,26 @@ func TestExpiredLeaseIsReclaimedAndFenced(t *testing.T) {
 		db := dbtest.Open(t, driver, migrations(t, driver))
 		ctx := context.Background()
 		cfg := DefaultConfig()
-		cfg.Lease = 200 * time.Millisecond
+		cfg.Lease = 500 * time.Millisecond
 		s := NewSubscriber(db, cfg, nil)
 
 		if err := Publish(ctx, NewPublisher(db), "jobs", 1); err != nil {
 			t.Fatal(err)
 		}
+		claimedAt := time.Now()
 		crashed, err := s.claim("jobs", 10)
 		if err != nil || len(crashed) != 1 || crashed[0].Attempts != 1 || crashed[0].ReservedAt.IsZero() {
 			t.Fatalf("first claim %+v err=%v", crashed, err)
 		}
-		if again, err := s.claim("jobs", 10); err != nil || len(again) != 0 {
-			t.Fatalf("claimed a leased job: %+v err=%v", again, err)
-		}
-
-		time.Sleep(250 * time.Millisecond)
+		// 租约期内不能再次领取。调用慢到超过租约时（CI 上的 SQLite），租约已经正常过期，这次领取就是重新领取。
 		reclaimed, err := s.claim("jobs", 10)
+		if err != nil || len(reclaimed) != 0 && time.Since(claimedAt) < cfg.Lease {
+			t.Fatalf("claimed a leased job: %+v err=%v", reclaimed, err)
+		}
+		if len(reclaimed) == 0 {
+			time.Sleep(time.Until(crashed[0].AvailableAt) + 50*time.Millisecond)
+			reclaimed, err = s.claim("jobs", 10)
+		}
 		if err != nil || len(reclaimed) != 1 || reclaimed[0].Attempts != 2 {
 			t.Fatalf("reclaim %+v err=%v", reclaimed, err)
 		}

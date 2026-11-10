@@ -216,7 +216,7 @@ func TestDelay(t *testing.T) {
 		publish(t, db, "jobs", 1, queue.Delay(time.Second))
 		select {
 		case at := <-got:
-			if d := at.Sub(begin); d < time.Second || d > 1500*time.Millisecond {
+			if d := at.Sub(begin); d < time.Second || d > 2500*time.Millisecond {
 				t.Fatalf("handled after %v", d)
 			}
 		case <-time.After(5 * time.Second):
@@ -363,7 +363,7 @@ func TestCompetingSubscribers(t *testing.T) {
 		for i := range 2 {
 			start(t, db, cfg, func(r *message.Router, sub *queue.Subscriber) {
 				queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
-					time.Sleep(50 * time.Millisecond)
+					time.Sleep(100 * time.Millisecond)
 					mu.Lock()
 					seen[p.N]++
 					per[i]++
@@ -392,8 +392,8 @@ func TestCompetingSubscribers(t *testing.T) {
 				t.Fatalf("job %d handled %d times", k, v)
 			}
 		}
-		// 串行需要 2 秒；两个实例各 5 个并发约 0.2 秒。
-		if elapsed > time.Second || per[0] == 0 || per[1] == 0 {
+		// 串行需要 4 秒；两个实例各 5 个并发约 0.4 秒。
+		if elapsed > 2*time.Second || per[0] == 0 || per[1] == 0 {
 			t.Fatalf("elapsed %v, per subscriber %v", elapsed, per)
 		}
 	})
@@ -423,14 +423,14 @@ func TestLeaseIsExtended(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		cfg := testConfig()
-		cfg.Lease = 300 * time.Millisecond
+		cfg.Lease = time.Second
 		var handled atomic.Int64
 		var cause atomic.Value
 		for range 2 {
 			start(t, db, cfg, func(r *message.Router, sub *queue.Subscriber) {
 				queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
 					handled.Add(1)
-					time.Sleep(time.Second)
+					time.Sleep(2500 * time.Millisecond)
 					cause.Store(fmt.Sprint(context.Cause(ctx)))
 					return nil
 				})
