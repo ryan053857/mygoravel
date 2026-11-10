@@ -135,7 +135,7 @@ sched.Add("tmp:cleanup", "@hourly", cleanTmpDir, schedule.EveryInstance())
 
 ```go
 sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
-    return queue.Publish(ctx, queue.NewPublisher(a.db), "reports.generate", time.Now().AddDate(0, 0, -1))
+    return queue.Publish(ctx, queue.Database(a.db), "reports.generate", time.Now().AddDate(0, 0, -1))
 })
 ```
 

@@ -11,10 +11,7 @@ import (
 	"github.com/uptrace/bun/dialect"
 )
 
-// driverDatabase 是 queue_failed_jobs.driver 中数据库驱动的名称。
-const driverDatabase = "database"
-
-// metadataAvailableAt 是 Publish 传递可执行时间的内部元数据，写入时转为 available_at 列。
+// metadataAvailableAt 是通过 Publisher 发布 Watermill 消息时指定可执行时间的元数据，入队时转为 Job.AvailableAt。
 const metadataAvailableAt = "_queue_available_at"
 
 type job struct {

@@ -47,7 +47,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 <a id="publishing-jobs"></a>
 ## 发布任务
 
-`queue.Publish` 把任意可以编码为 JSON 的值发布到一个 topic。`queue.NewPublisher` 接收 `*bun.DB` 或 `bun.Tx`，传入事务时，任务和业务数据一起提交，事务回滚时任务也不会执行。
+`queue.Publish` 把任意可以编码为 JSON 的值发布到一个 topic。第二个参数是队列驱动，`queue.Database` 把任务保存在数据库中，它接收 `*bun.DB` 或 `bun.Tx`：传入事务时，任务和业务数据一起提交，事务回滚时任务也不会执行。
 
 下面是改写后的 `Publish`：通知邮件在发布文章的同一个事务中渲染并入队，文章服务不再需要发送器：
 
@@ -65,7 +65,7 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
             return err
         }
         msg.To = []mail.Address{s.editors}
-        return queue.Publish(ctx, queue.NewPublisher(tx), "mail.send", msg)
+        return queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
     })
     if err != nil {
         return nil, err
@@ -87,7 +87,7 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 `queue.Delay` 让任务在一段时间之后才执行，`queue.At` 指定执行时间：
 
 ```go
-err := queue.Publish(ctx, queue.NewPublisher(tx), "articles.publish", item.ID, queue.At(item.PublishAt))
+err := queue.Publish(ctx, queue.Database(tx), "articles.publish", item.ID, queue.At(item.PublishAt))
 ```
 
 <a id="processing-jobs"></a>
@@ -123,7 +123,7 @@ func (a *App) Worker(ctx context.Context) error {
         return err
     }
 
-    sub := queue.NewSubscriber(a.db, a.cfg.Queue, nil)
+    sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil)
     defer sub.Close()
     router := queue.NewRouter(nil)
     queue.Handle(router, sub, "mail.send", mailer.Send)
@@ -265,4 +265,4 @@ if err != nil || n != 1 {
 
 `queue.NewRouter` 已经安装了 `Recoverer`，把处理函数的 panic 转为普通的失败。不要再安装 Watermill 的 `Retry` 和 `PoisonQueue`：它们在进程内重试、把失败消息发到另一个 topic，而队列的重试和失败任务是持久化的，两者叠加会让一次失败被重试很多次。
 
-`queue.Publisher` 和 `queue.Subscriber` 实现了 Watermill 的 `message.Publisher` 和 `message.Subscriber`，也可以用 `router.AddConsumerHandler` 直接注册处理 `*message.Message` 的函数。
+`queue.Subscriber` 实现了 Watermill 的 `message.Subscriber`，也可以用 `router.AddConsumerHandler` 直接注册处理 `*message.Message` 的函数。`queue.NewPublisher(driver)` 返回实现 `message.Publisher` 的发布者，用来发布 Watermill 消息，例如交给 Watermill 中间件使用。
