@@ -2,18 +2,15 @@ package rest
 
 import (
 	"context"
-	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
-	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/i18n"
 )
 
 // ErrorModel 在 Huma 原生 Problem Details 上增加业务错误码。
@@ -58,28 +55,12 @@ func FromError(err error) huma.StatusError {
 	return m
 }
 
-// httpError 转换处理器错误。业务错误的错误码写入访问日志；context 带有 httpx.Locale
-// 协商的语言时，以错误码为消息 ID 翻译 detail，errorx.Public 参数作为模板数据。
-// 当前语言缺少翻译时使用默认语言的译文，都没有时保留 HTTP 状态描述；
-// 两种情况都在访问日志中标记 untranslated。
+// httpError 转换处理器错误：业务错误的 detail 换成 httpx.ErrorDetail 的译文，
+// 错误码写入访问日志，缺少译文时标记 untranslated。
 func (a *API) httpError(ctx context.Context, err error) huma.StatusError {
 	se := FromError(err)
-	code := errorx.CodeOf(err)
-	if code == "" {
-		return se
-	}
-	httpx.AddAccessLogAttrs(ctx, slog.String("code", code))
-	l := i18n.Localizer(ctx)
-	if l == nil {
-		return se
-	}
-	m := se.(*ErrorModel)
-	msg, lerr := l.Localize(&goi18n.LocalizeConfig{MessageID: code, TemplateData: errorx.PublicOf(err)})
-	if lerr != nil {
-		httpx.AddAccessLogAttrs(ctx, slog.Bool("untranslated", true))
-	}
-	if msg != "" {
-		m.Detail = msg
+	if m, ok := se.(*ErrorModel); ok && m.Code != "" {
+		m.Detail = httpx.ErrorDetail(ctx, err)
 	}
 	return se
 }

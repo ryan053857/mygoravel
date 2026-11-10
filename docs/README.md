@@ -1,6 +1,6 @@
 # mygoravel 文档
 
-欢迎使用 mygoravel！mygoravel 是一个用于构建 HTTP API 的 Go 应用框架。它为配置、路由、验证、错误处理、日志、认证、数据库和迁移提供一套统一的约定，同时让你直接使用 chi、Huma、slog、Bun、goose、Cobra 等社区组件的原生能力。
+欢迎使用 mygoravel！mygoravel 是一个用于构建 HTTP API 和服务端渲染页面的 Go 应用框架。它为配置、路由、验证、错误处理、日志、认证、数据库和迁移提供一套统一的约定，同时让你直接使用 chi、Huma、slog、Bun、goose、Cobra 等社区组件的原生能力。
 
 如果你是第一次接触 mygoravel，建议从[安装](installation.md)开始，用几分钟跑通第一个接口，然后按照下面的目录顺序阅读。每篇文档都可以独立查阅，遇到需要其他章节知识的地方，正文会给出链接。
 
@@ -27,6 +27,8 @@
 - [请求](requests.md)
 - [验证](validation.md)
 - [响应](responses.md)
+- [视图](views.md)
+- [表单](forms.md)
 - [会话](session.md)
 - [错误处理](errors.md)
 - [日志](logging.md)
@@ -37,6 +39,7 @@
 - [缓存](cache.md)
 - [原子锁](locks.md)
 - [限流](rate-limiting.md)
+- [服务端推送](sse.md)
 - [文件存储与上传](filesystem.md)
 - [邮件](mail.md)
 - [本地化](localization.md)

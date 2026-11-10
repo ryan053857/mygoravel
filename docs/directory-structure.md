@@ -38,16 +38,21 @@ blog/
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务、注册路由
 │   ├── auth/                token 校验器
+│   ├── web/                 页面布局与错误页组件（templ）
 │   └── article/             文章业务模块
 │       ├── article.go       模型与业务错误
 │       ├── service.go       业务规则与数据库操作
-│       └── articlehttp/     HTTP 输入输出与路由注册
-│           ├── routes.go                本模块的路由声明与 action 绑定
-│           └── actions/                 HTTP 请求处理动作
-│               ├── create_article.go    创建文章
-│               ├── get_article.go       获取文章
-│               ├── publish_article.go   发布文章
-│               └── dto.go               动作共享的响应结构与转换
+│       ├── articlehttp/     HTTP 输入输出与路由注册
+│       │   ├── routes.go                本模块的路由声明与 action 绑定
+│       │   └── actions/                 HTTP 请求处理动作
+│       │       ├── create_article.go    创建文章
+│       │       ├── get_article.go       获取文章
+│       │       ├── publish_article.go   发布文章
+│       │       └── dto.go               动作共享的响应结构与转换
+│       └── articleweb/      编辑后台页面
+│           ├── routes.go    页面路由
+│           ├── handlers.go  页面处理器
+│           └── views/       templ 组件及生成的 _templ.go
 ├── migrations/              SQL 迁移文件和 embed.go
 └── locales/                 应用自己的翻译文件
 ```
@@ -65,6 +70,7 @@ blog/
 | `internal/article/articlehttp/routes.go` | [模块内注册](routing.md#module-registration) |
 | `internal/article/articlehttp/actions/` 下的 `create_article.go`、`get_article.go`、`publish_article.go` | [按业务动作组织处理器](routing.md#http-actions) |
 | `internal/article/articlehttp/actions/dto.go` | [共享响应结构](routing.md#shared-responses) |
+| `internal/web/`、`internal/article/articleweb/` | [视图](views.md)、[表单](forms.md) |
 | `migrations/` | [迁移](migrations.md#embedding-migrations) |
 
 目录不必一次建齐，等真正有代码要放时再创建即可。
@@ -156,6 +162,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `page` | 固定分页与游标分页的参数和响应结构 | [分页](responses.md#pagination) |
 | `httpx` | HTTP 中间件、平滑停机 | [中间件](middleware.md)、[请求生命周期](lifecycle.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
+| `httpx/web` | 服务端渲染页面：渲染组件、错误页、表单、SSE，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[服务端推送](sse.md) |
 | `database` | 打开 PostgreSQL 或 SQLite 连接，识别约束错误 | [数据库](database.md) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |

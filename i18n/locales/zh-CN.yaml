@@ -2,3 +2,28 @@ auth.unauthenticated: 请先认证
 auth.forbidden: 没有访问权限
 page.invalid_cursor: 分页游标无效
 rate_limit.exceeded: 请求过于频繁，请稍后再试
+web.not_found: 页面不存在
+web.bad_form: 无法解析提交的表单
+validation.required: 必填
+validation.filled: 不能为空
+validation.min_length: 至少 {{.Min}} 个字符
+validation.max_length: 最多 {{.Max}} 个字符
+validation.minimum: 不能小于 {{.Min}}
+validation.exclusive_minimum: 必须大于 {{.Min}}
+validation.maximum: 不能大于 {{.Max}}
+validation.exclusive_maximum: 必须小于 {{.Max}}
+validation.multiple_of: 必须是 {{.Value}} 的倍数
+validation.min_items: 至少选择 {{.Min}} 项
+validation.max_items: 最多选择 {{.Max}} 项
+validation.unique: 不能有重复项
+validation.integer: 必须是整数
+validation.number: 必须是数字
+validation.one_of: 不是可选的值
+validation.email: 邮箱格式不正确
+validation.url: 网址格式不正确
+validation.date_time: 日期时间格式不正确
+validation.date: 日期格式不正确
+validation.time: 时间格式不正确
+validation.format: 格式不正确
+validation.pattern: 格式不正确
+validation.pattern_description: 必须是{{.Description}}

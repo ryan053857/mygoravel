@@ -2,3 +2,28 @@ auth.unauthenticated: Authentication required
 auth.forbidden: Permission denied
 page.invalid_cursor: Invalid pagination cursor
 rate_limit.exceeded: Too many requests, please try again later
+web.not_found: Page not found
+web.bad_form: The submitted form could not be parsed
+validation.required: This field is required
+validation.filled: This field must not be empty
+validation.min_length: Must be at least {{.Min}} characters
+validation.max_length: Must be at most {{.Max}} characters
+validation.minimum: Must be at least {{.Min}}
+validation.exclusive_minimum: Must be greater than {{.Min}}
+validation.maximum: Must be at most {{.Max}}
+validation.exclusive_maximum: Must be less than {{.Max}}
+validation.multiple_of: Must be a multiple of {{.Value}}
+validation.min_items: Select at least {{.Min}} items
+validation.max_items: Select at most {{.Max}} items
+validation.unique: Items must be unique
+validation.integer: Must be an integer
+validation.number: Must be a number
+validation.one_of: Not an allowed value
+validation.email: Must be a valid email address
+validation.url: Must be a valid URL
+validation.date_time: Must be a valid date and time
+validation.date: Must be a valid date
+validation.time: Must be a valid time
+validation.format: Invalid format
+validation.pattern: Invalid format
+validation.pattern_description: Must be {{.Description}}

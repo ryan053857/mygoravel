@@ -38,7 +38,7 @@ func ListenAndServe(ctx context.Context, cfg Config, handler http.Handler, opts 
 //
 // Serve 返回时 ln 已关闭，包括因参数错误提前返回的情况。
 //
-// 停止时：先调用 OnDraining，再在 cfg.ShutdownTimeout 内排空请求；
+// 停止时：先调用 OnDraining，再关闭 DrainStarted 返回的通道，然后在 cfg.ShutdownTimeout 内排空请求；
 // 超时则取消请求 context 并强制关闭。调用方在 Serve 返回后关闭数据库等请求依赖。
 func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handler, opts ServeOptions) error {
 	if ln == nil {
@@ -59,8 +59,10 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 	logger := componentLogger(opts.Logger)
 	srv := cfg.server(handler)
 
-	// 所有请求 context 派生自 requestRoot，排空超时或结束后统一取消。
-	requestRoot, cancelRequests := context.WithCancel(context.Background())
+	// 所有请求 context 派生自 requestRoot，排空超时或结束后统一取消；
+	// draining 在排空开始时关闭，供 SSE 等长连接主动结束，见 DrainStarted。
+	draining := make(chan struct{})
+	requestRoot, cancelRequests := context.WithCancel(context.WithValue(context.Background(), drainKey{}, draining))
 	defer cancelRequests()
 	srv.BaseContext = func(net.Listener) context.Context { return requestRoot }
 	errc := make(chan error, 1)
@@ -75,6 +77,7 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 	if opts.OnDraining != nil {
 		opts.OnDraining()
 	}
+	close(draining)
 	logger.Info("http server draining")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	shutdownErr := srv.Shutdown(shutdownCtx)
@@ -93,6 +96,16 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 	}
 	logger.Info("http server stopped")
 	return errors.Join(errors.Wrap(serveErr, "httpx: serve"), errors.Wrap(shutdownErr, "httpx: shutdown"))
+}
+
+type drainKey struct{}
+
+// DrainStarted 返回一个在服务器开始排空时关闭的通道。
+// 长连接（例如 SSE）应当监听它并主动结束，否则 Serve 要等满 ShutdownTimeout 才能退出；
+// 浏览器会自动重连到其他实例。请求不是由 Serve 处理时返回 nil，从它接收会一直阻塞。
+func DrainStarted(ctx context.Context) <-chan struct{} {
+	ch, _ := ctx.Value(drainKey{}).(chan struct{})
+	return ch
 }
 
 // Draining 是可在就绪检查中观察的排空标志。

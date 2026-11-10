@@ -81,3 +81,39 @@ func TestServeDrainsBeforeCleanup(t *testing.T) {
 		t.Fatal("db should close after serve returns")
 	}
 }
+
+// 长连接监听 DrainStarted 主动结束后，Serve 不必等满 ShutdownTimeout。
+func TestDrainStartedEndsLongRequests(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		select {
+		case <-httpx.DrainStarted(r.Context()):
+		case <-time.After(10 * time.Second):
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- httpx.Serve(ctx, shutdownIn(5*time.Second), ln, handler, httpx.ServeOptions{}) }()
+	go func() {
+		if resp, err := http.Get("http://" + ln.Addr().String()); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-entered
+	began := time.Now()
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(began); took > time.Second {
+		t.Fatalf("Serve took %v to stop", took)
+	}
+	if httpx.DrainStarted(context.Background()) != nil {
+		t.Fatal("DrainStarted outside Serve should be nil")
+	}
+}

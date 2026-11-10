@@ -99,6 +99,8 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 
 如果应用部署在负载均衡器或反向代理之后，请在 `http.client_ip.trusted_proxies` 中配置代理的实际网段，以便正确识别客户端地址，见[可信代理](middleware.md#trusted-proxies)。
 
+反向代理转发请求时请保留原始的 `Host` 请求头（包括端口），例如 nginx 使用 `proxy_set_header Host $http_host;`。`$host` 会丢掉端口，[跨站请求伪造](session.md#csrf)防护会因为 `Origin` 与 `Host` 不一致而拒绝所有 `POST` 等请求。使用[服务端推送](sse.md#deployment)时，还要在反向代理上启用 HTTP/2。
+
 TLS 终止、CORS 等功能，可以在反向代理中配置，也可以作为[自定义中间件](middleware.md#custom-middleware)加入应用。限流既可以在网关中配置，也可以使用内置的[限流](rate-limiting.md)；内存限流器按实例分别计数，多实例部署时请把这一点计入配置值，需要共享计数时使用数据库限流器。
 
 <a id="logging"></a>

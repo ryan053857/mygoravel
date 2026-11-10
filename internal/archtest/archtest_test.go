@@ -24,7 +24,7 @@ var dependencies = map[string][]string{
 	"mail":       {"i18n"},
 	"ratelimit":  {"errorx"},
 	"httpx":      {"errorx", "identity", "i18n", "logging", "ratelimit"},
-	"session":    {"identity", "httpx", "logging"},
+	"session":    {"errorx", "identity", "httpx", "logging"},
 	"lock":       {},
 	"hashing":    {},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
@@ -43,7 +43,6 @@ var infrastructure = []string{
 
 // 后期应用形态使用的组件，当前 module 保持 HTTP API 依赖范围。
 var laterFormModules = []string{
-	"github.com/a-h/templ",
 	"github.com/ThreeDotsLabs/watermill", "github.com/go-co-op/gocron",
 	"github.com/gorilla/websocket", "google.golang.org/grpc",
 	"github.com/xuri/excelize",

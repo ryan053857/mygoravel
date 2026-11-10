@@ -8,6 +8,7 @@
 - [会话认证](#session-authentication)
     - [登录与登出](#login-and-logout)
     - [保护会话路由](#protecting-session-routes)
+    - [保护页面](#protecting-pages)
 - [获取已认证的主体](#retrieving-the-subject)
 - [管理凭据](#managing-credentials)
 
@@ -284,6 +285,35 @@ rest.Register(api, op, func() func(context.Context, *actions.UpdateArticleInput)
 响应同样带有 `Cache-Control: no-store`，但不带 `WWW-Authenticate` 头。OpenAPI 文档中，这些路由使用名为 `session` 的 cookie 安全方案，`routes` 命令把它们的访问策略显示为 `session`。
 
 一条路由只能声明一种认证方式，同时调用 `RequireBearer` 和 `session.Require` 会在注册时 panic。
+
+<a id="protecting-pages"></a>
+### 保护页面
+
+服务端渲染的[页面](views.md)用 `session.RequirePage` 保护。它是普通的 chi 中间件，第一个参数是用来呈现错误的 `web.Pages`：
+
+```go
+r.Group(func(r chi.Router) {
+    r.Use(session.RequirePage(pages, sessions, "/login", "articles"))
+    r.Get("/admin/articles/{id}/edit", pages.Handle(h.Edit))
+})
+```
+
+与 `session.Require` 不同，未登录的浏览器会被带到登录页，而不是收到 `401`：
+
+| 情况 | 结果 |
+| --- | --- |
+| 未登录 | 跳转到 `/login?next=原地址`；htmx 请求通过 `HX-Redirect` 整页跳转，原地址取自发起请求的页面 |
+| 缺少所需的 scope | 由 `pages` 呈现 `403`，见[错误页](views.md#error-pages) |
+
+登录页的处理器校验密码后调用 `session.Login`，再回到 `next`。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径：
+
+```go
+if err := session.Login(r.Context(), sessions, sub); err != nil {
+    return err
+}
+web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
+return nil
+```
 
 <a id="retrieving-the-subject"></a>
 ## 获取已认证的主体
