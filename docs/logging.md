@@ -112,6 +112,7 @@ logs:
 | component | 日志 |
 | --- | --- |
 | `http` | 访问日志、panic 堆栈、`5xx` 诊断、认证后端故障、平滑停止 |
+| `queue` | 任务失败与重试、转入失败任务表、领取和写回任务的数据库错误 |
 
 你自己的模块通过 `With` 或 context 设置 `component`：
 

@@ -27,8 +27,9 @@ var dependencies = map[string][]string{
 	"session":    {"identity", "httpx", "logging"},
 	"lock":       {},
 	"hashing":    {},
+	"queue":      {"logging"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
@@ -43,8 +44,7 @@ var infrastructure = []string{
 
 // 后期应用形态使用的组件，当前 module 保持 HTTP API 依赖范围。
 var laterFormModules = []string{
-	"github.com/a-h/templ",
-	"github.com/ThreeDotsLabs/watermill", "github.com/go-co-op/gocron",
+	"github.com/a-h/templ", "github.com/go-co-op/gocron",
 	"github.com/gorilla/websocket", "google.golang.org/grpc",
 	"github.com/xuri/excelize",
 }

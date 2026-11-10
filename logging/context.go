@@ -17,6 +17,12 @@ func WithAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
 	return context.WithValue(ctx, ctxKey{}, slices.Concat(prev, attrs))
 }
 
+// ContextAttrs 返回 ctx 中由 WithAttrs 累加的字段，没有时返回 nil。
+func ContextAttrs(ctx context.Context) []slog.Attr {
+	attrs, _ := ctx.Value(ctxKey{}).([]slog.Attr)
+	return slices.Clone(attrs)
+}
+
 // NewContextHandler 包装 h，在处理记录时追加 context 中的字段。
 func NewContextHandler(h slog.Handler) slog.Handler {
 	if _, ok := h.(contextHandler); ok {
