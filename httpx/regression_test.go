@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/ryan053857/mygoravel/httpx"
 )
 
@@ -114,7 +116,7 @@ func TestBoundaryRecoveryLimitsAndProxyTrust(t *testing.T) {
 		if trusted {
 			cfg.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 		}
-		handler := httpx.Middleware(cfg, httpx.MiddlewareOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := defaults(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if trusted && r.RemoteAddr != "192.0.2.1" {
 				t.Fatal(r.RemoteAddr)
 			}
@@ -140,7 +142,7 @@ func TestBoundaryRecoveryLimitsAndProxyTrust(t *testing.T) {
 }
 
 func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
-	handler := httpx.Middleware(httpx.Config{}, httpx.MiddlewareOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := defaults(httpx.Config{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		_, _ = io.WriteString(w, "partial")
 		panic("failure")
@@ -153,7 +155,7 @@ func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 }
 func TestRequestTimeoutReachesHandler(t *testing.T) {
-	handler := httpx.Middleware(httpx.Config{RequestTimeout: 10 * time.Millisecond}, httpx.MiddlewareOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := defaults(httpx.Config{RequestTimeout: 10 * time.Millisecond})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 		if !errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 			t.Fatal(r.Context().Err())
@@ -165,4 +167,8 @@ func TestRequestTimeoutReachesHandler(t *testing.T) {
 	if rr.Code != 408 {
 		t.Fatal(rr.Code)
 	}
+}
+
+func defaults(cfg httpx.Config) func(http.Handler) http.Handler {
+	return chi.Chain(httpx.Defaults(cfg, httpx.DefaultsOptions{})...).Handler
 }

@@ -66,6 +66,7 @@ import (
     "example.com/blog/internal/article/articlehttp"
     "example.com/blog/internal/auth"
     "example.com/blog/internal/settings"
+    "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/cleanup"
     "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/httpx"
@@ -95,10 +96,12 @@ func Serve(ctx context.Context, cfg settings.Config, logger *slog.Logger) (err e
     // 2. 构造业务服务
     articles := article.NewService(db)
 
-    // 3. 创建 API 并注册路由
+    // 3. 安装中间件，创建 API 并注册路由
+    router := chi.NewRouter()
+    router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...)
     api := rest.New(rest.Options{
         Title: "Blog API", Version: "1.0.0",
-        HTTP: cfg.HTTP, Logger: logger,
+        Router: router, Logger: logger,
     })
     Routes(api, auth.Validator(cfg.Auth), articles)
 

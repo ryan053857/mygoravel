@@ -38,19 +38,18 @@ type Options struct {
 	Title   string
 	Version string
 	Mode    Mode
-	// HTTP 提供请求超时、请求体上限与可信代理；零值字段使用 httpx.DefaultConfig。
-	HTTP httpx.Config
-	// Logger 记录访问日志、panic 与 5xx 错误；可空。
+	// Logger 记录 5xx 错误与缺失的错误翻译；可空。
 	Logger *slog.Logger
-	// Languages 用于语言协商与错误消息本地化；可空。
+	// Languages 用于错误消息本地化，语言取自 httpx.Locale 写入的 context；可空。
 	Languages *goi18n.Bundle
 	// Transformers 追加在 Huma 默认 Transformer 之后。
 	Transformers []huma.Transformer
 	// Router 可选；nil 时使用 chi.NewRouter()。
+	// New 不安装任何中间件：在传入前用 Router.Use 安装，例如 httpx.Defaults。
 	Router chi.Router
 }
 
-// New 创建 chi + Huma API。
+// New 创建 chi + Huma API，并让未匹配的路由与方法返回 Problem Details。
 func New(opts Options) *API {
 	if opts.Logger != nil {
 		opts.Logger = slog.New(logging.NewContextHandler(opts.Logger.Handler()))
@@ -65,7 +64,6 @@ func New(opts Options) *API {
 	if r == nil {
 		r = chi.NewRouter()
 	}
-	r.Use(httpx.Middleware(opts.HTTP, httpx.MiddlewareOptions{Logger: opts.Logger, Languages: opts.Languages}))
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteProblem(w, http.StatusNotFound, "route not found")
 	})

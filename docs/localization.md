@@ -29,11 +29,13 @@ mygoravel 的本地化基于 [go-i18n](https://github.com/nicksnyder/go-i18n)。
 package api
 
 import (
+    "github.com/go-chi/chi/v5"
+    "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/i18n"
 )
 
-func NewAPI() (*rest.API, error) {
+func NewAPI(cfg httpx.Config) (*rest.API, error) {
     bundle, err := i18n.New(i18n.Options{
         Default: "zh-CN",
         Layers:  []i18n.Layer{i18n.FrameworkLayer()},
@@ -41,9 +43,13 @@ func NewAPI() (*rest.API, error) {
     if err != nil {
         return nil, err
     }
-    return rest.New(rest.Options{Languages: bundle}), nil
+    router := chi.NewRouter()
+    router.Use(httpx.Defaults(cfg, httpx.DefaultsOptions{Languages: bundle})...)
+    return rest.New(rest.Options{Router: router, Languages: bundle}), nil
 }
 ```
+
+语言目录要同时交给两处：`httpx.Defaults` 用它协商请求语言，`rest.New` 用它翻译错误消息。
 
 `Default` 是默认语言，当请求的语言不受支持时使用它。省略时默认为 `zh-CN`，你也可以设置为 `en`。
 
@@ -60,7 +66,7 @@ func NewAPI() (*rest.API, error) {
 <a id="determining-the-locale"></a>
 ## 确定请求语言
 
-启用本地化后，默认中间件会根据请求的 `Accept-Language` 头，从已加载的语言中选择最匹配的一种，并通过 `Content-Language` 响应头告知客户端。不支持或无法解析的语言会回退到默认语言。
+启用本地化后，`httpx.Locale` 中间件会根据请求的 `Accept-Language` 头，从已加载的语言中选择最匹配的一种，并通过 `Content-Language` 响应头告知客户端。不支持或无法解析的语言会回退到默认语言。
 
 ```bash
 curl -i http://localhost:8080/articles -H 'Accept-Language: en'

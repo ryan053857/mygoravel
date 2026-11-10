@@ -81,13 +81,14 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 <a id="request-correlation"></a>
 ### 请求关联
 
-把日志器传给 API 后，默认中间件会为每个请求记录一条访问日志：
+把日志器传给[默认中间件](middleware.md#default-middleware)后，`httpx.AccessLog` 会为每个请求记录一条访问日志：
 
 ```go
-api := rest.New(rest.Options{Logger: logger})
+router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...)
+api := rest.New(rest.Options{Router: router, Logger: logger})
 ```
 
-中间件还会把请求 ID 放入请求的 context。之后，只要你在业务代码中用 `logging.New` 创建的日志器配合请求的 `ctx` 记录日志，这些日志就会自动带上 `request_id` 字段：
+`rest.New` 的 `Logger` 用于记录 5xx 错误的诊断信息。`httpx.AssignRequestID` 还会把请求 ID 放入请求的 context。之后，只要你在业务代码中用 `logging.New` 创建的日志器配合请求的 `ctx` 记录日志，这些日志就会自动带上 `request_id` 字段：
 
 ```json
 {"level":"INFO","msg":"article published","service":"blog","request_id":"9F2K…","article_id":"0f8c…","author_id":"alice"}
@@ -122,7 +123,7 @@ logger := slog.New(logging.NewContextHandler(myHandler))
 
 | 日志 | 记录者 | 内容 |
 | --- | --- | --- |
-| 访问日志 | 默认中间件 | 每个请求的方法、状态码、耗时、客户端地址，以及业务错误的错误码 |
+| 访问日志 | `httpx.AccessLog` | 每个请求的方法、状态码、耗时、客户端地址，以及业务错误的错误码 |
 | 错误诊断 | `rest.Register` | `5xx` 错误的错误码和完整错误链 |
 | 认证后端故障 | `rest.RequireBearer` | 校验器返回 `5xx` 类错误时的错误码和完整错误链 |
 | 缺失翻译 | 错误响应转换 | 找不到错误码对应翻译时的警告 |

@@ -14,8 +14,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/i18n"
 	"github.com/ryan053857/mygoravel/identity"
@@ -109,7 +111,7 @@ func TestLocalizedBusinessErrorUsesPublicParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	api := rest.New(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Languages: bundle})
+	api := withDefaults(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Languages: bundle})
 	busy := errorx.Define(errorx.Unavailable, "demo.busy")
 	untranslated := errorx.Define(errorx.Conflict, "demo.untranslated")
 	for path, err := range map[string]error{"/busy": busy.New(errorx.Public("retry", 3)), "/untranslated": untranslated.New()} {
@@ -191,7 +193,7 @@ func TestLanguageAndLoggerAreInstanceLocal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		api := rest.New(rest.Options{Logger: slog.New(slog.NewJSONHandler(tc.buf, nil)), Languages: bundle})
+		api := withDefaults(rest.Options{Logger: slog.New(slog.NewJSONHandler(tc.buf, nil)), Languages: bundle})
 		op := huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"}
 		rest.Public()(&op)
 		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
@@ -236,7 +238,7 @@ func TestLanguageAndLoggerAreInstanceLocal(t *testing.T) {
 
 func TestAccessLogCarriesBusinessCode(t *testing.T) {
 	var logs bytes.Buffer
-	api := rest.New(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+	api := withDefaults(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
 	op := huma.Operation{OperationID: "conflict", Method: "GET", Path: "/conflict"}
 	rest.Public()(&op)
 	rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
@@ -260,5 +262,32 @@ func TestAccessLogCarriesBusinessCode(t *testing.T) {
 		if entry["msg"] != "http request" || entry["code"] != code {
 			t.Fatalf("%s: %v", path, entry)
 		}
+	}
+}
+
+// withDefaults 按应用的常规写法安装 httpx.Defaults 后创建 API。
+func withDefaults(opts rest.Options) *rest.API {
+	router := chi.NewRouter()
+	router.Use(httpx.Defaults(httpx.Config{}, httpx.DefaultsOptions{Logger: opts.Logger, Languages: opts.Languages})...)
+	opts.Router = router
+	return rest.New(opts)
+}
+
+func TestNewInstallsNoMiddleware(t *testing.T) {
+	api := rest.New(rest.Options{})
+	op := huma.Operation{OperationID: "ping", Method: "GET", Path: "/ping"}
+	rest.Public()(&op)
+	rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
+		return func(ctx context.Context, _ *pingIn) (*pingOut, error) {
+			if _, deadline := ctx.Deadline(); deadline || httpx.RequestID(ctx) != "" {
+				t.Fatal("rest.New installed middleware")
+			}
+			return &pingOut{}, nil
+		}
+	})
+	rr := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/ping", nil))
+	if rr.Code != 200 || rr.Header().Get("X-Request-ID") != "" {
+		t.Fatal(rr.Code, rr.Header())
 	}
 }

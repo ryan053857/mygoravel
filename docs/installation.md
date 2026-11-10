@@ -74,6 +74,7 @@ import (
     "syscall"
 
     "github.com/danielgtaylor/huma/v2"
+    "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/logging"
@@ -109,11 +110,14 @@ func run() error {
     defer stop()
 
     logger := logging.New(logging.DefaultConfig(), logging.Options{Writer: os.Stderr})
-    api := rest.New(rest.Options{Title: "Hello API", Version: "1.0.0", Logger: logger})
-    registerPing(api)
-
     cfg := httpx.DefaultConfig()
     cfg.Addr = "127.0.0.1:8080"
+
+    router := chi.NewRouter()
+    router.Use(httpx.Defaults(cfg, httpx.DefaultsOptions{Logger: logger})...)
+    api := rest.New(rest.Options{Title: "Hello API", Version: "1.0.0", Router: router, Logger: logger})
+    registerPing(api)
+
     return httpx.ListenAndServe(ctx, cfg, api.Handler(), httpx.ServeOptions{Logger: logger})
 }
 
@@ -127,7 +131,7 @@ func main() {
 
 这个程序只做了四件事：
 
-1. 创建日志器和 API 实例；
+1. 创建日志器，安装[默认中间件](middleware.md#default-middleware)，再创建 API 实例；
 2. 通过 `registerPing` 注册一条 `GET /ping` 路由；
 3. 在 `127.0.0.1:8080` 上监听；
 4. 收到 Ctrl+C 或 `SIGTERM` 时，等待正在处理的请求完成后退出。

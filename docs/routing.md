@@ -441,11 +441,11 @@ api.Router().Get("/livez", func(w http.ResponseWriter, r *http.Request) {
 })
 ```
 
-这类路由同样会经过默认中间件（请求 ID、访问日志、panic 恢复等），但不会出现在 OpenAPI 文档中，也没有类型化的输入验证。对于业务接口，请使用 `rest.Register`。
+这类路由同样会经过 Router 上安装的中间件（例如请求 ID、访问日志、panic 恢复），但不会出现在 OpenAPI 文档中，也没有类型化的输入验证。对于业务接口，请使用 `rest.Register`。
 
 <a id="native-huma-register"></a>
 ### 使用原生 huma.Register
 
 `rest.API` 内嵌了 `huma.API`，因此你也可以调用 Huma 原生的 `huma.Register`。不过这样做会绕过 mygoravel 的访问策略检查、业务错误转换和文档模式支持，这些都需要你自己处理。除非有特殊需求，否则推荐使用 `rest.Register`。
 
-如果你需要传入自定义的 chi Router，请参阅[中间件](middleware.md#chi-middleware)。
+`rest.New` 不安装任何中间件，中间件的安装方式请参阅[中间件](middleware.md)。

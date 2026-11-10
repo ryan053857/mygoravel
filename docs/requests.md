@@ -115,7 +115,7 @@ type UpdateArticleInput struct {
 <a id="request-id"></a>
 ## 请求 ID
 
-默认中间件会为每个请求生成一个唯一的 ID。在处理器或业务代码中，可以通过请求的 context 读取它：
+`httpx.AssignRequestID` 中间件会为每个请求确定一个 ID：如果请求头 `X-Request-ID` 已经携带合法的值（1–128 个字母、数字或 `-_.:`，通常由网关生成），就沿用它，否则生成新的 ID。在处理器或业务代码中，可以通过请求的 context 读取它：
 
 ```go
 requestID := httpx.RequestID(ctx)
@@ -129,7 +129,7 @@ requestID := httpx.RequestID(ctx)
 <a id="body-size"></a>
 ### 请求体大小
 
-为了防止过大的请求耗尽服务器资源，默认中间件把请求体限制在 1 MiB，超出时返回 `413`。你可以在配置文件中调整这个上限：
+为了防止过大的请求耗尽服务器资源，[默认中间件](middleware.md#default-middleware)中的 `httpx.BodyLimit` 把请求体限制在 1 MiB，超出时返回 `413`。你可以在配置文件中调整这个上限：
 
 ```yaml
 http:
@@ -137,12 +137,12 @@ http:
 ```
 
 > [!NOTE]
-> Huma 的 `Operation` 也有自己的 `MaxBodyBytes` 设置。如果某个接口需要接收更大的请求体，请同时检查该路由和全局中间件的上限，两者都需要足够大。
+> Huma 的 `Operation` 也有自己的 `MaxBodyBytes` 设置。如果某个接口需要接收更大的请求体，请同时检查该路由和全局中间件的上限，两者都需要足够大。只有少数接口需要更大上限时，可以[自行组装中间件](middleware.md#custom-stack)，只为这些接口放宽 `BodyLimit`。
 
 <a id="timeouts"></a>
 ### 超时与取消
 
-默认中间件为每个请求的 context 设置 30 秒的超时，可以在配置文件中调整：
+`httpx.Timeout` 中间件为每个请求的 context 设置超时，默认 30 秒，可以在配置文件中调整：
 
 ```yaml
 http:

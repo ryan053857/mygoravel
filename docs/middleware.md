@@ -4,6 +4,7 @@
 - [默认中间件](#default-middleware)
 - [HTTP 配置](#http-configuration)
     - [可信代理](#trusted-proxies)
+- [自行组装](#custom-stack)
 - [自定义中间件](#custom-middleware)
     - [全局中间件](#chi-middleware)
     - [路由中间件](#route-middleware)
@@ -14,23 +15,38 @@
 
 中间件提供了一种方便的机制，用来检查和处理进入应用的 HTTP 请求。例如，为每个请求生成请求 ID、记录访问日志、限制请求体大小等。
 
-mygoravel 已经为你准备好了一组常用的中间件。使用 `rest.New` 创建 API 时，它们会被自动安装，你只需通过 [HTTP 配置](#http-configuration)调整它们的行为。如果需要额外的功能，也可以添加原生的 chi 或 Huma 中间件。
+mygoravel 的中间件都是标准的 `func(http.Handler) http.Handler`，安装在 chi Router 上。`rest.New` 不会替你安装任何中间件：安装哪些、按什么顺序执行，都写在你的入口代码里。对大多数应用，一行 `httpx.Defaults` 就够了。
 
 <a id="default-middleware"></a>
 ## 默认中间件
 
-`rest.New` 创建的每个 API 都会自动获得以下能力：
+`httpx.Defaults` 返回一组推荐的中间件。先把它们安装到 Router 上，再把 Router 交给 `rest.New`：
 
-| 能力 | 行为 |
+```go
+router := chi.NewRouter()
+router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger, Languages: bundle})...)
+
+api := rest.New(rest.Options{Router: router, Logger: logger, Languages: bundle})
+```
+
+这里使用了 `github.com/go-chi/chi/v5`。`Logger` 和 `Languages` 都可以不传，不传时相应的中间件不会生效。
+
+`httpx.Defaults` 按以下顺序包含这些中间件，每一个都可以单独使用：
+
+| 中间件 | 行为 |
 | --- | --- |
-| 请求 ID | 为每个请求生成唯一 ID，写入 context 和 `X-Request-ID` 响应头 |
-| 访问日志 | 提供日志器时，记录请求方法、状态码、耗时、客户端地址，以及业务错误的错误码 |
-| panic 恢复 | 处理器 panic 时，若尚未写出响应则返回通用的 500 错误；若已开始写响应则中止连接 |
-| 安全响应头 | 设置 `X-Content-Type-Options: nosniff` |
-| 请求体大小限制 | 默认 1 MiB，超出时返回 413 |
-| 请求超时 | 请求 context 默认 30 秒后超时 |
-| 客户端地址 | 只信任显式配置的代理转发的地址 |
-| 语言协商 | 提供语言目录时，根据 `Accept-Language` 选择语言 |
+| `AssignRequestID()` | 确定请求 ID，写入 context、日志字段和 `X-Request-ID` 响应头；入站的 `X-Request-ID` 合法时沿用 |
+| `NoSniff()` | 设置 `X-Content-Type-Options: nosniff` |
+| `ClientIP(proxies)` | 只信任显式配置的代理，从 `X-Forwarded-For` 解析客户端地址 |
+| `AccessLog(logger)` | 记录请求方法、状态码、耗时、客户端地址，以及业务错误的错误码 |
+| `Recover(logger)` | 处理器 panic 时，若尚未写出响应则返回通用的 500 错误；若已开始写响应则中止连接 |
+| `BodyLimit(n)` | 限制请求体大小，默认 1 MiB，超出时返回 413 |
+| `Timeout(d)` | 为请求 context 设置超时，默认 30 秒 |
+| `Locale(bundle)` | 根据 `Accept-Language` 选择语言 |
+
+参数为零值或 `nil` 的中间件会直接放行请求，不做任何处理。例如 `httpx.Timeout(0)` 不设置超时，`httpx.AccessLog(nil)` 不记录日志。
+
+框架的其他部分不依赖这些中间件是否安装。没有 `AccessLog` 时，`httpx.AddAccessLogAttrs` 什么也不做；没有 `Locale` 时，错误消息使用默认语言；没有 `AssignRequestID` 时，`httpx.RequestID` 返回空字符串。
 
 认证不在默认中间件中，因为它是按路由启用的，见[认证](authentication.md)。健康检查也由你自己注册，见[请求生命周期](lifecycle.md#health-checks)。
 
@@ -55,22 +71,20 @@ http:
 | `read_timeout` | 读取整个请求的超时 | `30s` |
 | `write_timeout` | 写响应的超时 | `30s` |
 | `idle_timeout` | keep-alive 连接的空闲超时 | `1m` |
-| `request_timeout` | 每个请求 context 的超时 | `30s` |
+| `request_timeout` | 每个请求 context 的超时（`Timeout`） | `30s` |
 | `shutdown_timeout` | 停机时排空请求的上限 | `10s` |
-| `max_body_bytes` | 请求体的最大字节数 | 1 MiB |
-| `trusted_proxies` | 可信的反向代理网段 | 不信任任何代理 |
+| `max_body_bytes` | 请求体的最大字节数（`BodyLimit`） | 1 MiB |
+| `trusted_proxies` | 可信的反向代理网段（`ClientIP`） | 不信任任何代理 |
 
-把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充上表中的默认值），再把它交给 `rest.New` 和 `httpx.ListenAndServe`：
+把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充上表中的默认值），再把它交给 `httpx.Defaults` 和 `httpx.ListenAndServe`：
 
 ```go
-api := rest.New(rest.Options{HTTP: cfg.HTTP, Logger: logger, Languages: bundle})
+router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...)
 // ...
 return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{Logger: logger})
 ```
 
-`Logger` 用于访问日志和错误诊断，`Languages` 用于语言协商和错误消息翻译，两者都可以不传。日志器的构造见[日志](logging.md)，语言目录的构造见[本地化](localization.md)。
-
-`httpx.Config` 中没有设置（零值）的字段会使用默认值，所以测试中直接写 `rest.New(rest.Options{})` 也能正常工作。
+`httpx.Defaults` 会把 `httpx.Config` 中没有设置（零值）的字段替换为默认值。日志器的构造见[日志](logging.md)，语言目录的构造见[本地化](localization.md)。
 
 <a id="trusted-proxies"></a>
 ### 可信代理
@@ -84,10 +98,44 @@ http:
   trusted_proxies: [10.20.0.0/16]
 ```
 
-对于来自可信代理的请求，中间件会从右向左读取 `X-Forwarded-For`，跳过所有可信代理的地址，把遇到的第一个不可信地址作为客户端地址。没有配置 `trusted_proxies` 时，始终使用直接连接的地址。
+对于来自可信代理的请求，`ClientIP` 会从右向左读取 `X-Forwarded-For`，跳过所有可信代理的地址，把遇到的第一个不可信地址作为客户端地址。没有配置 `trusted_proxies` 时，始终使用直接连接的地址。
 
 > [!WARNING]
 > 只填写你实际使用的代理网段。如果把 `0.0.0.0/0` 之类的宽泛网段设为可信，任何客户端都可以伪造自己的地址。
+
+<a id="custom-stack"></a>
+## 自行组装
+
+`httpx.Defaults` 只是一个返回切片的普通函数。当默认组合不合适时，可以直接挑选需要的中间件，自己决定顺序和参数。
+
+例如，博客允许作者在 `/uploads/` 下上传最大 20 MiB 的图片，其他接口仍然限制在 1 MiB。`BodyLimit` 一旦安装就无法在内层放宽，所以要在安装时按路径选择上限：
+
+```go
+router.Use(
+    httpx.AssignRequestID(),
+    httpx.NoSniff(),
+    httpx.ClientIP(cfg.HTTP.TrustedProxies),
+    httpx.AccessLog(logger),
+    httpx.Recover(logger),
+    httpx.Timeout(cfg.HTTP.RequestTimeout),
+    httpx.Locale(bundle),
+    func(next http.Handler) http.Handler {
+        small := httpx.BodyLimit(cfg.HTTP.MaxBodyBytes)(next)
+        large := httpx.BodyLimit(20 << 20)(next)
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            if strings.HasPrefix(r.URL.Path, "/uploads/") {
+                large.ServeHTTP(w, r)
+                return
+            }
+            small.ServeHTTP(w, r)
+        })
+    },
+)
+```
+
+上传路由本身还要把 Huma 的 `Operation.MaxBodyBytes` 设为相同的上限，见[请求体大小](requests.md#body-size)。用同样的方式，也可以为流式接口去掉 `Timeout`。
+
+自行组装时请保持 `AccessLog` 在 `Recover` 之外，这样 panic 产生的 500 才会出现在访问日志中。
 
 <a id="custom-middleware"></a>
 ## 自定义中间件
@@ -95,7 +143,7 @@ http:
 <a id="chi-middleware"></a>
 ### 全局中间件
 
-如果需要为所有请求添加自定义行为，可以先创建一个 chi Router 并安装中间件，再通过 `Options.Router` 传给 `rest.New`。
+自己编写的中间件和默认中间件安装方式完全相同，`router.Use` 的先后顺序就是执行顺序。
 
 例如，博客在数据库维护期间需要进入只读模式：读请求照常处理，修改文章等写请求统一返回 `503`：
 
@@ -103,6 +151,7 @@ http:
 var readOnly atomic.Bool // 由运维开关控制，例如收到某个信号时切换
 
 router := chi.NewRouter()
+router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...)
 router.Use(func(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if readOnly.Load() && r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -113,13 +162,12 @@ router.Use(func(next http.Handler) http.Handler {
     })
 })
 
-api := rest.New(rest.Options{Router: router, HTTP: cfg.HTTP, Logger: logger})
+api := rest.New(rest.Options{Router: router, Logger: logger})
 ```
 
-这里使用了 `github.com/go-chi/chi/v5`。chi 要求所有中间件在注册路由之前安装，而 `rest.New` 会在构造时安装默认中间件，所以请先安装自己的中间件，再调用 `rest.New`，最后注册路由。
+安装在默认中间件之后，被拒绝的写请求同样带有请求 ID、出现在访问日志中，panic 也会被恢复。
 
-> [!NOTE]
-> 以这种方式添加的中间件会在默认中间件**之前**执行。此时请求还没有请求 ID，panic 也不会被恢复，所以请让这类中间件保持简单，并自行处理可能出现的错误。
+chi 要求所有中间件在注册路由之前安装，所以请先安装中间件，再调用 `rest.New` 并注册路由。
 
 <a id="route-middleware"></a>
 ### 路由中间件
@@ -146,7 +194,7 @@ requireArticles(&legacy)
 
 之后像注册 `article-get` 一样注册它即可。`Deprecated: true` 还会在 OpenAPI 文档中把这条路由标记为已废弃。
 
-路由中间件在默认中间件之后、处理器之前执行。
+路由中间件在 Router 上的全局中间件之后、处理器之前执行。
 
 > [!TIP]
 > 认证请不要自己写路由中间件，而是使用 [`rest.RequireBearer`](authentication.md#protecting-routes)。它在检查凭据的同时，还会在 OpenAPI 文档中标记该路由需要认证，确保运行行为和文档一致。
@@ -154,10 +202,8 @@ requireArticles(&legacy)
 <a id="plain-handlers"></a>
 ## 用于普通 HTTP 处理器
 
-如果你有一个不使用 `rest` 包的普通 `http.Handler`（例如标准库的 `http.ServeMux`），也可以单独为它安装默认中间件：
+这些中间件不依赖 `rest` 包。如果你有一个普通的 `http.Handler`（例如标准库的 `http.ServeMux`），可以用 `chi.Chain` 为它安装：
 
 ```go
-handler := httpx.Middleware(cfg.HTTP, httpx.MiddlewareOptions{Logger: logger})(mux)
+handler := chi.Chain(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...).Handler(mux)
 ```
-
-请注意，同一条请求链上只应安装一次这组中间件。`rest.New` 已经安装过了，因此不需要对 `api.Handler()` 再次使用 `httpx.Middleware`。
