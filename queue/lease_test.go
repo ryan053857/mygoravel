@@ -2,19 +2,17 @@ package queue
 
 import (
 	"context"
-	"io/fs"
 	"testing"
 	"time"
 
 	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
 // 领取任务后进程崩溃：租约到期后任务被重新领取，旧的领取不能再确认或修改它。
 func TestExpiredLeaseIsReclaimedAndFenced(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, driver database.Driver) {
-		db := dbtest.Open(t, driver, migrations(t, driver))
+		db := dbtesting.Open(t, driver, Migrations())
 		ctx := context.Background()
 		cfg := DefaultConfig()
 		cfg.Lease = 500 * time.Millisecond
@@ -61,21 +59,13 @@ func TestExpiredLeaseIsReclaimedAndFenced(t *testing.T) {
 	})
 }
 
-// testDrivers 是租约测试运行的数据库，integration 标签追加 PostgreSQL。
-var testDrivers = []database.Driver{sqlite.Driver}
-
+// forEachDriver 在每种数据库上运行 test，跳过队列尚不支持的 MySQL。
 func forEachDriver(t *testing.T, test func(t *testing.T, driver database.Driver)) {
 	t.Helper()
-	for _, driver := range testDrivers {
-		t.Run(driver.Name(), func(t *testing.T) { test(t, driver) })
-	}
-}
-
-func migrations(t *testing.T, driver database.Driver) fs.FS {
-	t.Helper()
-	f, err := fs.Sub(Migrations(), driver.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		if driver.Name() == "mysql" {
+			t.Skip("队列暂不支持 MySQL")
+		}
+		test(t, driver)
+	})
 }
