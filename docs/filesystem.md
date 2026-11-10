@@ -13,6 +13,13 @@
 - [确认文件](#confirming-files)
 - [访问文件](#accessing-files)
 - [删除文件](#deleting-files)
+- [在 REST 接口中使用](#rest)
+    - [路由](#rest-routes)
+    - [服务端上传接口](#rest-upload)
+    - [直传接口](#rest-direct-upload)
+    - [在业务接口中确认](#rest-confirm)
+    - [请求体大小与超时](#rest-limits)
+    - [错误响应](#rest-errors)
 - [过期清理](#cleanup)
 - [表结构](#schema)
 
@@ -25,7 +32,7 @@
 
 1. **上传**：通过应用服务器上传（`Upload`），或由客户端直传到 S3（`Prepare` 后签名上传）。此时文件是 `temporary` 状态。
 2. **确认**：业务真正使用这个文件时（例如保存文章、更新头像）调用 `Confirm`，文件变为 `ready`。
-3. **回收**：超过 `temp_ttl` 仍未确认的文件，以及已删除文件的对象，由 `Cleanup` 定期清理。
+3. **回收**：超过 `temp_ttl` 仍未确认的文件，以及已删除的文件，由清理任务 `Cleanup` 从存储中删除。
 
 先上传、后确认，用户上传后放弃表单时，临时文件会自动回收，不会在存储中留下垃圾。
 
@@ -169,7 +176,7 @@ if err != nil {
 }
 ```
 
-把 `fileService` 传给需要文件的业务服务和处理器。文件服务不注册路由，也不启动后台任务：上传接口、权限检查和清理调度都由应用决定。
+把 `fileService` 传给需要文件的业务服务和处理器。文件服务不注册路由，也不启动后台任务：上传接口和权限检查由应用决定，清理由[清理任务](#cleanup)执行。
 
 <a id="server-upload"></a>
 ## 通过应用服务器上传
@@ -339,25 +346,466 @@ defer body.Close()
 err := fileService.Delete(ctx, id)
 ```
 
-`Delete` 先把记录标为 `deleted`，再删除磁盘上的对象和记录。文件不存在时也返回成功，可以放心重复调用。删除对象失败时返回错误，记录保持 `deleted`，由 `Cleanup` 稍后重试。
+`Delete` 把记录标为 `deleted`，此后 `Get`、`Open` 和 `Confirm` 都把它视为不存在。文件不存在时也返回成功，可以放心重复调用。
 
-在事务中删除时（`WithDB(tx).Delete`），只标记删除，事务提交后由 `Cleanup` 删除对象；事务回滚则文件原样保留，不会出现记录还在、对象已经被删的情况。
+磁盘上的对象和记录由[清理任务](#cleanup)删除，`Delete` 本身只是一条 `UPDATE`，不访问存储。因此它可以放进业务事务中，与业务数据一起提交：
+
+```go
+err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    if _, err := tx.NewDelete().Model(&article).WherePK().Exec(ctx); err != nil {
+        return err
+    }
+    return fileService.WithDB(tx).Delete(ctx, article.CoverID)
+})
+```
+
+事务回滚时文件原样保留。注意在清理任务执行之前，对象仍然可以通过公开地址访问。
+
+<a id="rest"></a>
+## 在 REST 接口中使用
+
+文件服务不注册路由，上传接口由你在 [REST](routing.md) 模块中按需声明。本节给出博客应用中 `filehttp` 模块的完整写法，目录组织与[组织路由](routing.md#organizing-routes)一致：
+
+```text
+internal/file/filehttp/
+├── routes.go              注册文件模块的路由
+└── actions/
+    ├── upload_file.go     服务端上传
+    ├── direct_upload.go   S3 直传：登记、签名、分片
+    └── dto.go             共享的输入输出类型
+```
+
+<a id="rest-routes"></a>
+### 路由
+
+| 方法和路径 | 服务方法 | 用途 |
+| --- | --- | --- |
+| `POST /files` | `Upload` | 通过应用服务器上传（`multipart/form-data`） |
+| `POST /files/prepare` | `Prepare` | 登记直传文件 |
+| `POST /files/{id}/sign` | `SignPut` | 单次直传签名 |
+| `POST /files/{id}/multipart` | `CreateMultipart` | 创建分片会话 |
+| `POST /files/{id}/multipart/{uploadID}/parts/{number}/sign` | `SignPart` | 为一片签名 |
+| `POST /files/{id}/multipart/{uploadID}/complete` | `CompleteMultipart` | 合并分片 |
+| `DELETE /files/{id}/multipart/{uploadID}` | `AbortMultipart` | 放弃分片上传 |
+
+只使用本地磁盘时，保留第一个路由即可。`Confirm` 不需要单独的接口，它在使用文件的业务接口中调用，见[在业务接口中确认](#rest-confirm)。
+
+`routes.go` 声明这些路由。所有接口都需要登录，`requireUser` 由入口传入，例如 `rest.RequireBearer(api, validateToken)`：
+
+```go
+package filehttp
+
+import (
+    "context"
+    "net/http"
+
+    "github.com/danielgtaylor/huma/v2"
+
+    "example.com/blog/internal/file/filehttp/actions"
+    "github.com/ryan053857/mygoravel/filesystem"
+    "github.com/ryan053857/mygoravel/httpx/rest"
+)
+
+// Register 注册文件模块的全部路由。
+func Register(api *rest.API, requireUser func(*huma.Operation), files *filesystem.Service) {
+    upload := huma.Operation{
+        OperationID:     "file-upload",
+        Method:          http.MethodPost,
+        Path:            "/files",
+        Summary:         "上传文件",
+        DefaultStatus: http.StatusCreated,
+    }
+    requireUser(&upload)
+    rest.Register(api, upload, func() func(context.Context, *actions.UploadFileInput) (*actions.FileOutput, error) {
+        return actions.NewUploadFile(files).Handle
+    })
+
+    prepare := huma.Operation{
+        OperationID:   "file-prepare",
+        Method:        http.MethodPost,
+        Path:          "/files/prepare",
+        Summary:       "登记直传文件",
+        DefaultStatus: http.StatusCreated,
+    }
+    requireUser(&prepare)
+    rest.Register(api, prepare, func() func(context.Context, *actions.PrepareFileInput) (*actions.FileOutput, error) {
+        return actions.NewDirectUpload(files).Prepare
+    })
+
+    signPut := huma.Operation{
+        OperationID: "file-sign-put",
+        Method:      http.MethodPost,
+        Path:        "/files/{id}/sign",
+        Summary:     "单次直传签名",
+    }
+    requireUser(&signPut)
+    rest.Register(api, signPut, func() func(context.Context, *actions.FileIDInput) (*actions.SignedOutput, error) {
+        return actions.NewDirectUpload(files).SignPut
+    })
+
+    createMultipart := huma.Operation{
+        OperationID:   "file-multipart-create",
+        Method:        http.MethodPost,
+        Path:          "/files/{id}/multipart",
+        Summary:       "创建分片会话",
+        DefaultStatus: http.StatusCreated,
+    }
+    requireUser(&createMultipart)
+    rest.Register(api, createMultipart, func() func(context.Context, *actions.FileIDInput) (*actions.MultipartOutput, error) {
+        return actions.NewDirectUpload(files).CreateMultipart
+    })
+
+    signPart := huma.Operation{
+        OperationID: "file-multipart-sign-part",
+        Method:      http.MethodPost,
+        Path:        "/files/{id}/multipart/{uploadID}/parts/{number}/sign",
+        Summary:     "分片签名",
+    }
+    requireUser(&signPart)
+    rest.Register(api, signPart, func() func(context.Context, *actions.SignPartInput) (*actions.SignedOutput, error) {
+        return actions.NewDirectUpload(files).SignPart
+    })
+
+    complete := huma.Operation{
+        OperationID: "file-multipart-complete",
+        Method:      http.MethodPost,
+        Path:        "/files/{id}/multipart/{uploadID}/complete",
+        Summary:     "合并分片",
+    }
+    requireUser(&complete)
+    rest.Register(api, complete, func() func(context.Context, *actions.CompleteMultipartInput) (*actions.FileOutput, error) {
+        return actions.NewDirectUpload(files).CompleteMultipart
+    })
+
+    abort := huma.Operation{
+        OperationID:   "file-multipart-abort",
+        Method:        http.MethodDelete,
+        Path:          "/files/{id}/multipart/{uploadID}",
+        Summary:       "放弃分片上传",
+        DefaultStatus: http.StatusNoContent,
+    }
+    requireUser(&abort)
+    rest.Register(api, abort, func() func(context.Context, *actions.UploadIDInput) (*actions.NoContentOutput, error) {
+        return actions.NewDirectUpload(files).AbortMultipart
+    })
+}
+```
+
+入口在组装应用时调用它：
+
+```go
+filehttp.Register(api, rest.RequireBearer(api, validateToken), fileService)
+```
+
+`actions/dto.go` 定义共享的输入和输出。响应体直接使用 `filesystem.File` 等类型，它们自带 JSON 标签，`File` 的 JSON 中包含公开地址 `url`，但不包含上传者信息：
+
+```go
+package actions
+
+import (
+    "github.com/google/uuid"
+    "github.com/ryan053857/mygoravel/filesystem"
+)
+
+type FileIDInput struct {
+    ID uuid.UUID `path:"id"`
+}
+
+type UploadIDInput struct {
+    ID       uuid.UUID `path:"id"`
+    UploadID string    `path:"uploadID"`
+}
+
+type FileOutput struct {
+    Body filesystem.File
+}
+
+type SignedOutput struct {
+    Body filesystem.SignedRequest
+}
+
+type MultipartOutput struct {
+    Body filesystem.Multipart
+}
+
+type NoContentOutput struct{}
+```
+
+<a id="rest-upload"></a>
+### 服务端上传接口
+
+`actions/upload_file.go` 用 Huma 的 `MultipartFormFiles` 接收 `multipart/form-data` 中名为 `file` 的字段，再交给 `Upload`：
+
+```go
+package actions
+
+import (
+    "context"
+
+    "github.com/danielgtaylor/huma/v2"
+    "github.com/ryan053857/mygoravel/filesystem"
+    "github.com/ryan053857/mygoravel/identity"
+)
+
+type UploadFileInput struct {
+    RawBody huma.MultipartFormFiles[struct {
+        File huma.FormFile `form:"file" required:"true"`
+    }]
+}
+
+type UploadFile struct {
+    files *filesystem.Service
+}
+
+func NewUploadFile(files *filesystem.Service) *UploadFile {
+    return &UploadFile{files: files}
+}
+
+func (a *UploadFile) Handle(ctx context.Context, in *UploadFileInput) (*FileOutput, error) {
+    owner, _ := identity.FromContext(ctx)
+    f := in.RawBody.Data().File
+    file, err := a.files.Upload(ctx, owner, filesystem.FileInput{
+        Filename:    f.Filename,
+        ContentType: f.ContentType,
+        Size:        f.Size,
+    }, f.File)
+    if err != nil {
+        return nil, err
+    }
+    return &FileOutput{Body: file}, nil
+}
+```
+
+Huma 解析表单时，较小的文件留在内存中，较大的文件写入临时文件，`Upload` 再把它流式写入磁盘。错误直接返回即可，`filesystem` 的错误会转换为对应的 HTTP 响应，见[错误响应](#rest-errors)。
+
+客户端上传：
+
+```bash
+curl -X POST https://blog.example.com/files \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@cover.png"
+```
+
+```json
+{
+  "id": "0193a3c2-...",
+  "disk": "local",
+  "key": "2026/11/10/0193a3c2-....png",
+  "filename": "cover.png",
+  "content_type": "image/png",
+  "size": 102400,
+  "status": "temporary",
+  "expires_at": "2026-11-11T08:00:00Z",
+  "url": "https://blog.example.com/storage/2026/11/10/0193a3c2-....png"
+}
+```
+
+<a id="rest-direct-upload"></a>
+### 直传接口
+
+`actions/direct_upload.go` 把直传相关的几个动作放在一起，它们都只是把路径参数转交给文件服务：
+
+```go
+package actions
+
+import (
+    "context"
+
+    "github.com/google/uuid"
+    "github.com/ryan053857/mygoravel/filesystem"
+    "github.com/ryan053857/mygoravel/identity"
+)
+
+type PrepareFileInput struct {
+    Body struct {
+        Filename    string `json:"filename" minLength:"1"`
+        ContentType string `json:"content_type,omitempty"`
+        Size        int64  `json:"size" minimum:"0"`
+    }
+}
+
+type SignPartInput struct {
+    ID       uuid.UUID `path:"id"`
+    UploadID string    `path:"uploadID"`
+    Number   int32     `path:"number" minimum:"1" maximum:"10000"`
+}
+
+type CompleteMultipartInput struct {
+    ID       uuid.UUID `path:"id"`
+    UploadID string    `path:"uploadID"`
+    Body     struct {
+        Parts []filesystem.Part `json:"parts" minItems:"1"`
+    }
+}
+
+type DirectUpload struct {
+    files *filesystem.Service
+}
+
+func NewDirectUpload(files *filesystem.Service) *DirectUpload {
+    return &DirectUpload{files: files}
+}
+
+func (a *DirectUpload) Prepare(ctx context.Context, in *PrepareFileInput) (*FileOutput, error) {
+    owner, _ := identity.FromContext(ctx)
+    file, err := a.files.Prepare(ctx, owner, filesystem.FileInput{
+        Disk:        "s3",
+        Filename:    in.Body.Filename,
+        ContentType: in.Body.ContentType,
+        Size:        in.Body.Size,
+    })
+    if err != nil {
+        return nil, err
+    }
+    return &FileOutput{Body: file}, nil
+}
+
+func (a *DirectUpload) SignPut(ctx context.Context, in *FileIDInput) (*SignedOutput, error) {
+    owner, _ := identity.FromContext(ctx)
+    signed, err := a.files.SignPut(ctx, owner, in.ID)
+    if err != nil {
+        return nil, err
+    }
+    return &SignedOutput{Body: signed}, nil
+}
+
+func (a *DirectUpload) CreateMultipart(ctx context.Context, in *FileIDInput) (*MultipartOutput, error) {
+    owner, _ := identity.FromContext(ctx)
+    upload, err := a.files.CreateMultipart(ctx, owner, in.ID)
+    if err != nil {
+        return nil, err
+    }
+    return &MultipartOutput{Body: upload}, nil
+}
+
+func (a *DirectUpload) SignPart(ctx context.Context, in *SignPartInput) (*SignedOutput, error) {
+    owner, _ := identity.FromContext(ctx)
+    signed, err := a.files.SignPart(ctx, owner, in.ID, in.UploadID, in.Number)
+    if err != nil {
+        return nil, err
+    }
+    return &SignedOutput{Body: signed}, nil
+}
+
+func (a *DirectUpload) CompleteMultipart(ctx context.Context, in *CompleteMultipartInput) (*FileOutput, error) {
+    owner, _ := identity.FromContext(ctx)
+    file, err := a.files.CompleteMultipart(ctx, owner, in.ID, in.UploadID, in.Body.Parts)
+    if err != nil {
+        return nil, err
+    }
+    return &FileOutput{Body: file}, nil
+}
+
+func (a *DirectUpload) AbortMultipart(ctx context.Context, in *UploadIDInput) (*NoContentOutput, error) {
+    owner, _ := identity.FromContext(ctx)
+    if err := a.files.AbortMultipart(ctx, owner, in.ID, in.UploadID); err != nil {
+        return nil, err
+    }
+    return &NoContentOutput{}, nil
+}
+```
+
+浏览器端的完整流程如下。小于 5GiB 的文件可以走单次上传，这里统一用分片演示；`api` 是带上登录 token 调用应用接口、返回 JSON 的函数：
+
+```js
+const file = input.files[0]
+const record = await api('POST', '/files/prepare', { filename: file.name, content_type: file.type, size: file.size })
+const upload = await api('POST', `/files/${record.id}/multipart`)
+
+const parts = []
+for (let n = 1; n <= upload.part_count; n++) {
+  const chunk = file.slice((n - 1) * upload.part_size, n * upload.part_size)
+  const signed = await api('POST', `/files/${record.id}/multipart/${upload.upload_id}/parts/${n}/sign`)
+  const res = await fetch(signed.url, { method: signed.method, headers: signed.headers, body: chunk })
+  parts.push({ number: n, etag: res.headers.get('ETag') })
+}
+
+await api('POST', `/files/${record.id}/multipart/${upload.upload_id}/complete`, { parts })
+// 把 record.id 提交给业务接口，例如作为文章封面
+```
+
+每一片在上传前才签名，可以并发上传多片；某一片失败时，重新签名并重传这一片即可。
+
+<a id="rest-confirm"></a>
+### 在业务接口中确认
+
+客户端上传完成后，把文件 ID 提交给使用它的业务接口，由业务接口确认。例如创建文章时设置封面：
+
+```go
+type CreateArticleInput struct {
+    Body struct {
+        Title   string    `json:"title" minLength:"1" maxLength:"200"`
+        CoverID uuid.UUID `json:"cover_id"`
+    }
+}
+
+func (a *CreateArticle) Handle(ctx context.Context, in *CreateArticleInput) (*ArticleOutput, error) {
+    owner, _ := identity.FromContext(ctx)
+    cover, err := a.files.Confirm(ctx, owner, in.Body.CoverID)
+    if err != nil {
+        return nil, err
+    }
+    created, err := a.articles.Create(ctx, owner, article.CreateInput{
+        Title:    in.Body.Title,
+        CoverID:  cover.ID,
+        CoverURL: cover.URL,
+    })
+    if err != nil {
+        return nil, err
+    }
+    return newArticleOutput(created), nil
+}
+```
+
+用户提交了别人的文件 ID、已过期的 ID，或者文件还没上传完时，`Confirm` 会返回错误，接口直接返回它即可。需要确认与业务写入在同一事务中时，在业务服务内部使用 `WithDB(tx)`，见[确认文件](#confirming-files)。
+
+<a id="rest-limits"></a>
+### 请求体大小与超时
+
+服务端上传的请求体通常远大于普通接口。[默认中间件](middleware.md#default-middleware)中的 `BodyLimit` 把请求体限制在 1 MiB，`Timeout` 也会限制请求时长，需要为 `/files` 单独放宽，做法见[自行组装中间件](middleware.md#custom-stack)。上限至少应为 `max_upload_size` 加上表单的少量额外开销。Huma 不限制 `multipart/form-data` 请求体的大小，不需要再设置 `Operation.MaxBodyBytes`。
+
+直传接口只收发少量 JSON，使用默认限制即可，文件正文不经过应用服务器。
+
+<a id="rest-errors"></a>
+### 错误响应
+
+`filesystem` 的错误是 [errorx](errors.md) 业务错误，处理器原样返回时，会转换为下面的状态码，响应体中的 `code` 字段是稳定的错误码：
+
+| 错误 | 状态码 | `code` |
+| --- | --- | --- |
+| `filesystem.ErrInvalid` | 422 | `filesystem.invalid` |
+| `filesystem.ErrTooLarge` | 422 | `filesystem.too_large` |
+| `filesystem.ErrNotFound` | 404 | `filesystem.not_found` |
+| `filesystem.ErrNotUploaded` | 409 | `filesystem.not_uploaded` |
+| `filesystem.ErrUnsupported` | 422 | `filesystem.direct_upload_unsupported` |
+
+```json
+{
+  "status": 404,
+  "title": "Not Found",
+  "detail": "Not Found",
+  "code": "filesystem.not_found"
+}
+```
+
+需要本地化提示时，在翻译文件中以错误码为消息 ID 添加译文，见[本地化](localization.md)。
 
 <a id="cleanup"></a>
 ## 过期清理
 
-`Cleanup` 回收到期的记录，应用通过已有的调度器或命令定期调用它，例如每小时一次：
+存储中的对象只有一个删除入口：`Cleanup`。它每次最多处理 `limit` 条到期记录，返回成功清理的数量：
+
+- 超过 `temp_ttl` 仍未确认的 `temporary` 文件：中止未完成的分片会话，删除对象和记录；
+- 已 `Delete` 的文件：删除对象和记录。
 
 ```go
 n, err := fileService.Cleanup(ctx, 500)
 ```
 
-它最多处理 `limit` 条记录，返回成功清理的数量：
+`Cleanup` 被设计为异步队列中的定时任务：每次处理一批，可以反复执行，多个实例同时执行也是安全的。某条记录清理失败时，它会推迟 5 分钟再重试，错误合并返回，不影响其他记录。正在被确认的文件不会被误删：清理和确认通过带条件的更新互斥，只有一方能成功。
 
-- 超过 `temp_ttl` 仍未确认的 `temporary` 文件：中止未完成的分片会话，删除对象和记录；
-- 已删除但对象尚未清理的文件：删除对象和记录。
-
-某条记录清理失败时，它会推迟 5 分钟再重试，错误合并返回，不影响其他记录。正在被确认的文件不会被误删：清理和确认通过带条件的更新互斥，只有一方能成功。
+> [!NOTE]
+> 异步队列功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每小时一次。
 
 > [!NOTE]
 > 预签名地址无法撤销：如果客户端在文件被清理前拿到了签名，并在清理之后才开始上传，对象会重新出现在 S3 中。签名有效期只有 15 分钟，远短于 `temp_ttl`，这种情况很少见。需要彻底兜底时，可以为桶配置[未完成分片的生命周期规则](https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html)。
@@ -372,12 +820,12 @@ n, err := fileService.Cleanup(ctx, 500)
 | `filename / content_type / size` | 原始文件名、类型和大小 |
 | `owner_type / owner_id` | 上传者的主体类型和 ID |
 | `status` | `temporary`、`ready` 或 `deleted` |
-| `expires_at` | `temporary` 的回收时间，`deleted` 的清理重试时间；`ready` 为空 |
+| `expires_at` | `temporary` 的回收时间，`deleted` 的清理时间；`ready` 为空 |
 | `created_at / updated_at` | 创建和更新时间 |
 
 你可以为 `files` 表增加列，框架只读写上面这些列。所有状态变更都是带条件的单条 `UPDATE`，存储读写不占用数据库事务，多个进程同时操作同一个文件也是安全的。
 
-服务返回的错误可以用 `errors.Is` 匹配：
+服务返回的错误可以用 `errors.Is` 匹配，在 REST 接口中的状态码见[错误响应](#rest-errors)：
 
 | 错误 | 含义 |
 | --- | --- |

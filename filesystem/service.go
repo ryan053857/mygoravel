@@ -173,30 +173,22 @@ func (s *Service) Open(ctx context.Context, id uuid.UUID) (io.ReadCloser, File, 
 	return body, r, err
 }
 
-// Delete 把文件标为 deleted 并删除对象和记录；文件不存在视为成功。
-// 在事务中（WithDB(tx)）只标记删除，提交后由 Cleanup 删除对象，事务回滚则文件保留。
-// 对象删除失败时返回错误，记录保持 deleted，由 Cleanup 重试。
+// Delete 把文件标为 deleted，之后 Get、Open、Confirm 都视为不存在；文件不存在也返回成功。
+// 对象和记录由 Cleanup 删除，因此 Delete 只是一条 UPDATE，可以放进业务事务（WithDB(tx)），
+// 事务回滚时文件原样保留。
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
-	var r File
 	now := time.Now().UTC()
-	err := s.db.NewUpdate().Model(&r).
+	_, err := s.db.NewUpdate().Model((*File)(nil)).
 		Set("status = ?", StatusDeleted).Set("expires_at = ?", now).Set("updated_at = ?", now).
-		Where("id = ?", id).Returning("*").Scan(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return errors.Wrap(err, "filesystem: delete")
-	}
-	switch s.db.(type) {
-	case bun.Tx, *bun.Tx:
-		return nil
-	}
-	return s.purge(ctx, r)
+		Where("id = ?", id).Where("status <> ?", StatusDeleted).Exec(ctx)
+	return errors.Wrap(err, "filesystem: delete")
 }
 
-// Cleanup 回收最多 limit 条到期记录：过期未确认的 temporary 文件和对象清理失败的 deleted 文件。
-// 返回成功清理的数量；失败的记录推迟重试并合并返回错误。应用用调度器或命令定期调用。
+// Cleanup 回收最多 limit 条到期记录：过期未确认的 temporary 文件和已删除的文件，
+// 删除它们的对象、未完成的分片会话和记录。返回成功清理的数量；失败的记录推迟重试并合并返回错误。
+//
+// 它是文件清理唯一的执行入口，设计为由异步队列的定时任务反复调用：每次处理一批，可重入，
+// 多个实例同时执行也是安全的。
 func (s *Service) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, ErrInvalid

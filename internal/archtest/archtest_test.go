@@ -20,7 +20,7 @@ var dependencies = map[string][]string{
 	"identity":   {},
 	"page":       {"errorx"},
 	"database":   {"config"},
-	"filesystem": {"identity"},
+	"filesystem": {"errorx", "identity"},
 	"httpx":      {"errorx", "identity", "i18n", "logging"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
 	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem"},

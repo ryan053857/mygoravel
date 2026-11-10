@@ -7,15 +7,17 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cockroachdb/errors"
+	"github.com/ryan053857/mygoravel/errorx"
 )
 
+// 服务返回的业务错误。它们是 errorx 模板，rest 处理器直接返回即可得到对应的 HTTP 状态和错误码；
+// 也可以用 errors.Is 匹配。
 var (
-	ErrNotFound    = errors.New("filesystem: file not found")
-	ErrInvalid     = errors.New("filesystem: invalid input")
-	ErrTooLarge    = errors.New("filesystem: file too large")
-	ErrNotUploaded = errors.New("filesystem: object missing or size differs")
-	ErrUnsupported = errors.New("filesystem: disk does not support direct upload")
+	ErrNotFound    = errorx.Define(errorx.NotFound, "filesystem.not_found")                        // 404：不存在、已删除、已过期或不属于当前主体
+	ErrInvalid     = errorx.Define(errorx.InvalidArgument, "filesystem.invalid")                   // 422：输入不合法，如正文长度与 Size 不符
+	ErrTooLarge    = errorx.Define(errorx.InvalidArgument, "filesystem.too_large")                 // 422：超过 max_upload_size
+	ErrNotUploaded = errorx.Define(errorx.Conflict, "filesystem.not_uploaded")                     // 409：确认时对象尚未完整上传
+	ErrUnsupported = errorx.Define(errorx.InvalidArgument, "filesystem.direct_upload_unsupported") // 422：磁盘不支持客户端直传
 )
 
 // Object 是存储中实际对象的信息。
