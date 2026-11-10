@@ -240,9 +240,13 @@ func TestApprovalAcrossRuns(t *testing.T) {
 	if err != nil || next == nil {
 		t.Fatalf("last decision should continue: %v %v", next, err)
 	}
-	names, _ = collect(t, next, "")
-	if got := strings.Join(names, ","); got != "text:A1 ,text:已退款，B2 ,text:被拒绝。,done" {
+	names, events = collect(t, next, "")
+	if got := strings.Join(names, ","); got != "tool_result:refund_order,tool_result:refund_order,text:A1 ,text:已退款，B2 ,text:被拒绝。,done" {
 		t.Fatalf("events after approval %s", got)
+	}
+	// 继续的运行先发出这一批调用的结果，被拒绝的标记为 Denied。
+	if r1, r2 := events[0].Data.(ai.ToolResult), events[1].Data.(ai.ToolResult); r1.ID != "r1" || r1.Denied || r2.ID != "r2" || !r2.Denied {
+		t.Fatalf("results %+v %+v", r1, r2)
 	}
 	req := m.LastRequest()
 	var results []string
@@ -252,7 +256,7 @@ func TestApprovalAcrossRuns(t *testing.T) {
 		}
 	}
 	got := strings.Join(results, " ")
-	if !strings.Contains(got, "r1=refunded A1") || !strings.Contains(got, `r2={"error":"rejected","reason":"金额超限"}`) || !strings.Contains(got, "g1=") {
+	if !strings.Contains(got, "r1=refunded A1") || !strings.Contains(got, `r2={"approval":"rejected","reason":"金额超限"}`) || !strings.Contains(got, "g1=") {
 		t.Fatalf("tool results sent to model: %s\nfull request: %s", got, messagesOf(req))
 	}
 	if pending, _ := rs.Pending(ctx, "u1", "c1"); len(pending) != 0 {
@@ -325,7 +329,7 @@ func TestSteerBeforeApprovalIsDeliveredAfterIt(t *testing.T) {
 		t.Fatalf("approve: %v %v", next, err)
 	}
 	names, _ := collect(t, next, "")
-	if got := strings.Join(names, ","); !strings.HasPrefix(got, "user:还有 B2,text:") {
+	if got := strings.Join(names, ","); !strings.HasPrefix(got, "tool_result:refund_order,user:还有 B2,text:") {
 		t.Fatalf("events after approval %s", got)
 	}
 	if got := messagesOf(m.LastRequest()); !strings.HasSuffix(got, "tool:refunded A1 | user:还有 B2") {

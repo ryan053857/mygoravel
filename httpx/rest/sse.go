@@ -54,6 +54,11 @@ func addEventStream(api *API, op *huma.Operation, events map[string]any) {
 		for t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
+		required := []string{"data"}
+		if name != "" && name != "message" {
+			// 默认的 message 事件不带 event 字段。
+			required = append(required, "event")
+		}
 		schemas = append(schemas, &huma.Schema{
 			Title: "Event " + name,
 			Type:  huma.TypeObject,
@@ -62,7 +67,7 @@ func addEventStream(api *API, op *huma.Operation, events map[string]any) {
 				"event": {Type: huma.TypeString, Description: "The event name.", Extensions: map[string]any{"const": name}},
 				"data":  registry.Schema(t, true, name),
 			},
-			Required: []string{"event", "data"},
+			Required: required,
 		})
 	}
 	slices.SortFunc(schemas, func(a, b *huma.Schema) int { return strings.Compare(a.Title, b.Title) })
