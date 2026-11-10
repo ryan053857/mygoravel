@@ -8,11 +8,13 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/ryan053857/mygoravel/logging"
 )
 
 // ServeOptions 是 Serve 的运行时依赖。
 type ServeOptions struct {
-	// Logger 记录排空开始和服务器停止；nil 表示关闭这些日志。
+	// Logger 记录排空开始和服务器停止；nil 表示 slog.Default()。
 	Logger *slog.Logger
 	// OnDraining 在开始排空前调用（例如撤销 ready）；可空。
 	OnDraining func()
@@ -56,6 +58,7 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 		_ = ln.Close()
 		return errors.Wrap(err, "httpx: config")
 	}
+	logger := logging.Or(opts.Logger)
 	srv := cfg.server(handler)
 
 	// 所有请求 context 派生自 requestRoot，排空超时或结束后统一取消。
@@ -74,9 +77,7 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 	if opts.OnDraining != nil {
 		opts.OnDraining()
 	}
-	if opts.Logger != nil {
-		opts.Logger.Info("http server draining")
-	}
+	logger.Info("http server draining")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	shutdownErr := srv.Shutdown(shutdownCtx)
 	cancel()
@@ -92,9 +93,7 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 	if !returned && errors.Is(serveErr, http.ErrServerClosed) {
 		serveErr = nil
 	}
-	if opts.Logger != nil {
-		opts.Logger.Info("http server stopped")
-	}
+	logger.Info("http server stopped")
 	return errors.Join(errors.Wrap(serveErr, "httpx: serve"), errors.Wrap(shutdownErr, "httpx: shutdown"))
 }
 

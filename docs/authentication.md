@@ -176,7 +176,7 @@ rest.Register(api, op, func() func(context.Context, *actions.GetArticleInput) (*
 | 缺少所需的 scope | 403 | `auth.forbidden` |
 | 校验器返回 5xx 类错误 | 与错误分类对应，例如 503 | 无 |
 
-无论校验器返回什么错误码，客户端看到的都是统一的 `auth.unauthenticated`，不会因此得知 token 是“不存在”还是“已过期”。`401` 响应带有 `WWW-Authenticate: Bearer` 响应头。校验器返回 5xx 类错误时，响应的 `detail` 为 `authentication unavailable`，不包含校验器的错误码；框架会在配置了日志器的情况下记录一条诊断日志。
+无论校验器返回什么错误码，客户端看到的都是统一的 `auth.unauthenticated`，不会因此得知 token 是“不存在”还是“已过期”。`401` 响应带有 `WWW-Authenticate: Bearer` 响应头。校验器返回 5xx 类错误时，响应的 `detail` 为 `authentication unavailable`，不包含校验器的错误码；框架会记录一条诊断日志。
 
 例如，不带 token 创建文章：
 

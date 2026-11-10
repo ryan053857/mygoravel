@@ -19,7 +19,7 @@ mygoravel 是一个用于构建 HTTP API 的 Go 应用框架。它为配置加�
 <a id="why-mygoravel"></a>
 ### 为什么选择 mygoravel
 
-**依赖一目了然。** mygoravel 没有服务容器，也没有全局注册表。数据库连接、日志器、缓存都通过普通的 Go 构造函数参数传递，阅读入口文件就能知道应用由哪些部分组成。
+**依赖一目了然。** mygoravel 没有服务容器，也没有全局注册表。数据库连接、缓存都通过普通的 Go 构造函数参数传递，日志直接使用标准库的 `slog.Default()`，阅读入口文件就能知道应用由哪些部分组成。
 
 **约定开箱即用。** 每个请求都会自动获得请求 ID；所有错误都使用统一的 [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) 格式返回；每条路由都必须显式声明是公开的还是需要认证的——忘记声明会在启动时就报错，而不是上线后才发现接口没有受保护。
 
@@ -109,16 +109,16 @@ func run() error {
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
-    logger := logging.New(logging.DefaultConfig(), logging.Options{Writer: os.Stderr})
+    slog.SetDefault(logging.New(logging.Config{}))
     cfg := httpx.DefaultConfig()
     cfg.Addr = "127.0.0.1:8080"
 
     router := chi.NewRouter()
-    router.Use(httpx.Defaults(cfg, logger)...)
-    api := rest.New(rest.Options{Title: "Hello API", Version: "1.0.0", Router: router, Logger: logger})
+    router.Use(httpx.Defaults(cfg, nil)...)
+    api := rest.New(rest.Options{Title: "Hello API", Version: "1.0.0", Router: router})
     registerPing(api)
 
-    return httpx.ListenAndServe(ctx, cfg, api.Handler(), httpx.ServeOptions{Logger: logger})
+    return httpx.ListenAndServe(ctx, cfg, api.Handler(), httpx.ServeOptions{})
 }
 
 func main() {
@@ -131,7 +131,7 @@ func main() {
 
 这个程序只做了四件事：
 
-1. 创建日志器，安装[默认中间件](middleware.md#default-middleware)，再创建 API 实例；
+1. 安装全局日志器，安装[默认中间件](middleware.md#default-middleware)，再创建 API 实例；
 2. 通过 `registerPing` 注册一条 `GET /ping` 路由；
 3. 在 `127.0.0.1:8080` 上监听；
 4. 收到 Ctrl+C 或 `SIGTERM` 时，等待正在处理的请求完成后退出。

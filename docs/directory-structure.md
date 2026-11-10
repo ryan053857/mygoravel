@@ -73,7 +73,7 @@ blog/
 <a id="the-bootstrap-directory"></a>
 ### internal/bootstrap 目录
 
-`bootstrap` 包负责把应用“组装”起来：读取配置、打开数据库连接、创建日志器、构造业务服务、注册路由。在 mygoravel 中，这些工作都由普通的 Go 代码显式完成，[依赖装配](dependencies.md)一章会详细介绍。
+`bootstrap` 包负责把应用“组装”起来：读取配置、打开数据库连接、安装全局日志器、构造业务服务、注册路由。在 mygoravel 中，这些工作都由普通的 Go 代码显式完成，[依赖装配](dependencies.md)一章会详细介绍。
 
 <a id="business-packages"></a>
 ### 业务包

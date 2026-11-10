@@ -59,7 +59,7 @@
 
 前半部分由安装在 Router 上的中间件完成，作用于所有请求，详见[中间件](middleware.md)；认证由路由上声明的策略决定，详见[认证](authentication.md)；输入解析与验证见[请求](requests.md)和[验证](validation.md)；处理器返回的错误如何转换为 HTTP 响应，见[错误处理](errors.md)。
 
-中间件、日志器、语言目录等都是在创建 API 时显式传入的。因此，同一个进程中的两个 API 实例可以拥有各自不同的配置，互不影响。
+中间件、语言目录等都是在创建 API 时显式传入的；日志器默认使用 `slog.Default()`，也可以显式传入。因此，同一个进程中的两个 API 实例可以拥有各自不同的配置，互不影响。
 
 <a id="graceful-shutdown"></a>
 ### 平滑停止
@@ -68,7 +68,6 @@
 
 ```go
 return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{
-    Logger:     logger,
     OnDraining: draining.Set,
 })
 ```

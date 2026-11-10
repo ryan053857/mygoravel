@@ -42,8 +42,6 @@ func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {
 func TestInvalidParametersPanicInsteadOfDisabling(t *testing.T) {
 	for name, build := range map[string]func(){
 		"ClientIP":  func() { httpx.ClientIP(httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{{}}}) },
-		"AccessLog": func() { httpx.AccessLog(nil) },
-		"Recover":   func() { httpx.Recover(nil) },
 		"BodyLimit": func() { httpx.BodyLimit(httpx.BodyLimitConfig{}) },
 		"Timeout":   func() { httpx.Timeout(httpx.TimeoutConfig{}) },
 		"Locale":    func() { httpx.Locale(nil) },
@@ -100,3 +98,20 @@ func TestBodyLimitRejectsStreamedOverflow(t *testing.T) {
 type marker struct{}
 
 func (*marker) ServeHTTP(http.ResponseWriter, *http.Request) {}
+
+func TestNilLoggerFallsBackToSlogDefault(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	router := chi.NewRouter()
+	router.Use(httpx.Defaults(httpx.DefaultConfig(), nil)...)
+	router.Get("/", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+	id := rr.Header().Get("X-Request-ID")
+	if !strings.Contains(logs.String(), `"msg":"request panic"`) || !strings.Contains(logs.String(), `"msg":"http request"`) || strings.Count(logs.String(), id) != 2 {
+		t.Fatalf("logs=%q", logs.String())
+	}
+}

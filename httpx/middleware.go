@@ -23,7 +23,7 @@ import (
 
 // Defaults 返回每个应用都应安装的基础中间件，按执行顺序排列：
 // AssignRequestID、NoSniff、ClientIP、AccessLog、Recover、BodyLimit、Timeout。
-// 参数取自 cfg 的对应子段；cfg 不合法或 logger 为 nil 时 panic。
+// 参数取自 cfg 的对应子段，cfg 不合法时 panic；logger 为 nil 时使用 slog.Default()。
 //
 // RateLimit、Locale 等可选中间件需要时在其后另行安装；
 // 需要不同组合时（例如流式接口不设超时），直接挑选单个中间件自行组装。
@@ -131,12 +131,9 @@ func AddAccessLogAttrs(ctx context.Context, attrs ...slog.Attr) {
 }
 
 // AccessLog 在请求结束后记录方法、状态码、耗时、客户端地址与 AddAccessLogAttrs 追加的字段。
-// 安装在 Recover 之外，才能记录 panic 产生的 500。logger 为 nil 时 panic。
+// 安装在 Recover 之外，才能记录 panic 产生的 500。logger 为 nil 时使用 slog.Default()。
 func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
-	if logger == nil {
-		panic("httpx: AccessLog: nil logger")
-	}
-	logger = slog.New(logging.NewContextHandler(logger.Handler()))
+	logger = logging.Or(logger)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			access := &accessLog{}
@@ -160,12 +157,9 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // Recover 恢复处理器 panic 并记录堆栈：尚未写出响应时返回通用 500，否则中止连接。
-// logger 为 nil 时 panic。
+// logger 为 nil 时使用 slog.Default()。
 func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
-	if logger == nil {
-		panic("httpx: Recover: nil logger")
-	}
-	logger = slog.New(logging.NewContextHandler(logger.Handler()))
+	logger = logging.Or(logger)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rw := middleware.NewWrapResponseWriter(w, r.ProtoMajor)

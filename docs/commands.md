@@ -40,6 +40,7 @@ import (
     "context"
     "encoding/json"
     "io"
+    "log/slog"
 
     "github.com/spf13/cobra"
 
@@ -62,8 +63,9 @@ func New(out, errOut io.Writer) *cobra.Command {
         if err != nil {
             return err
         }
-        logger := logging.New(cfg.Logs, logging.Options{Writer: cmd.ErrOrStderr()})
-        return bootstrap.Serve(ctx, cfg, logger)
+        cfg.Logs.Writer = cmd.ErrOrStderr()
+        slog.SetDefault(logging.New(cfg.Logs))
+        return bootstrap.Serve(ctx, cfg)
     }))
 
     root.AddCommand(command.NewOpenAPI(func(_ context.Context, cmd *cobra.Command, _ []string) error {
@@ -164,7 +166,7 @@ type RunE func(ctx context.Context, cmd *cobra.Command, args []string) error
 <a id="serve-command"></a>
 ### serve 命令
 
-`serve` 的回调读取配置、创建日志器，然后交给 `bootstrap.Serve` 打开数据库并启动 HTTP 服务。配置加载失败时，`loadConfig` 用 `command.AsExitError` 把错误标记为 `ExitConfig`，部署脚本可以据此区分“配置写错了”和其他故障。
+`serve` 的回调读取配置、安装全局日志器，然后交给 `bootstrap.Serve` 打开数据库并启动 HTTP 服务。配置加载失败时，`loadConfig` 用 `command.AsExitError` 把错误标记为 `ExitConfig`，部署脚本可以据此区分“配置写错了”和其他故障。
 
 <a id="openapi-command"></a>
 ### openapi 命令

@@ -247,7 +247,7 @@ Content-Type: application/problem+json
 <a id="what-operators-see"></a>
 ### 服务端日志
 
-配置了日志器后，每个请求都有一条访问日志。对于业务错误，访问日志中会带上错误码，这就足够了：
+安装默认中间件后，每个请求都有一条访问日志。对于业务错误，访问日志中会带上错误码，这就足够了：
 
 ```json
 {"time":"…","level":"INFO","msg":"http request","method":"PUT","status":409,"duration":52417,"client":"203.0.113.7:51234","code":"article.slug_taken","request_id":"9F2K…"}

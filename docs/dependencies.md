@@ -60,7 +60,6 @@ package bootstrap
 
 import (
     "context"
-    "log/slog"
 
     "example.com/blog/internal/article"
     "example.com/blog/internal/article/articlehttp"
@@ -78,7 +77,7 @@ func Routes(api *rest.API, validate rest.TokenValidator, articles *article.Servi
     articlehttp.Register(api, rest.RequireBearer(api, validate, "articles"), articles)
 }
 
-func Serve(ctx context.Context, cfg settings.Config, logger *slog.Logger) (err error) {
+func Serve(ctx context.Context, cfg settings.Config) (err error) {
     var stack cleanup.Stack
     defer func() {
         err = stack.CloseWith(context.Background(), err)
@@ -98,15 +97,14 @@ func Serve(ctx context.Context, cfg settings.Config, logger *slog.Logger) (err e
 
     // 3. 安装中间件，创建 API 并注册路由
     router := chi.NewRouter()
-    router.Use(httpx.Defaults(cfg.HTTP, logger)...)
+    router.Use(httpx.Defaults(cfg.HTTP, nil)...)
     api := rest.New(rest.Options{
-        Title: "Blog API", Version: "1.0.0",
-        Router: router, Logger: logger,
+        Title: "Blog API", Version: "1.0.0", Router: router,
     })
     Routes(api, auth.Validator(cfg.Auth), articles)
 
     // 4. 开始监听，直到 ctx 被取消
-    return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{Logger: logger})
+    return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{})
 }
 ```
 

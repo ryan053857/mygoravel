@@ -85,9 +85,7 @@ func (a *API) httpError(ctx context.Context, err error) huma.StatusError {
 		TemplateData: errorx.PublicOf(err),
 	})
 	if lerr != nil {
-		if a.logger != nil {
-			a.logger.WarnContext(ctx, "missing error translation", "code", m.Code)
-		}
+		a.logger.WarnContext(ctx, "missing error translation", "code", m.Code)
 		return se
 	}
 	m.Detail = msg

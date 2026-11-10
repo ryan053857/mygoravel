@@ -53,7 +53,7 @@ func Register[I, O any](api *API, op huma.Operation, newHandler func() func(cont
 				return out, nil
 			}
 			se := api.httpError(ctx, err)
-			if se.GetStatus() >= 500 && api.logger != nil {
+			if se.GetStatus() >= 500 {
 				api.logger.ErrorContext(ctx, "request failed", "code", errorx.CodeOf(err), "error", fmt.Sprintf("%+v", err))
 			}
 			return out, se

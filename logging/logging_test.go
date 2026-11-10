@@ -13,14 +13,8 @@ import (
 
 func TestNewAndContextIsolation(t *testing.T) {
 	var bufA, bufB bytes.Buffer
-	logA := logging.New(logging.Config{Format: logging.FormatJSON}, logging.Options{
-		Writer: &bufA,
-		Attrs:  []slog.Attr{slog.String(logging.AttrService, "a")},
-	})
-	logB := logging.New(logging.Config{Format: logging.FormatJSON}, logging.Options{
-		Writer: &bufB,
-		Attrs:  []slog.Attr{slog.String(logging.AttrService, "b")},
-	})
+	logA := logging.New(logging.Config{Service: "a", Writer: &bufA})
+	logB := logging.New(logging.Config{Service: "b", Writer: &bufB})
 
 	ctxA := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "ra"))
 	ctxB := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "rb"))
@@ -47,7 +41,7 @@ func TestNewAndContextIsolation(t *testing.T) {
 
 func TestDoesNotTouchDefault(t *testing.T) {
 	before := slog.Default()
-	_ = logging.New(logging.Config{Format: logging.FormatText}, logging.Options{Writer: &bytes.Buffer{}})
+	_ = logging.New(logging.Config{Format: logging.FormatText, Writer: &bytes.Buffer{}})
 	if slog.Default() != before {
 		t.Fatal("logging.New must not replace slog.Default")
 	}
@@ -61,10 +55,44 @@ func TestConfigControlsLevelAndFormat(t *testing.T) {
 		t.Fatal("accepted unknown format")
 	}
 	var buf bytes.Buffer
-	logger := logging.New(logging.Config{Level: slog.LevelWarn, Format: logging.FormatText}, logging.Options{Writer: &buf})
+	logger := logging.New(logging.Config{Level: slog.LevelWarn, Format: logging.FormatText, Writer: &buf})
 	logger.Info("hidden")
 	logger.Warn("shown")
 	if strings.Contains(buf.String(), "hidden") || !strings.Contains(buf.String(), "level=WARN msg=shown") {
 		t.Fatalf("output=%q", buf.String())
+	}
+}
+
+func TestVersionAttr(t *testing.T) {
+	var buf bytes.Buffer
+	logging.New(logging.Config{Version: "v1.2.3", Writer: &buf}).Info("x")
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec[logging.AttrVersion] != "v1.2.3" {
+		t.Fatalf("rec=%v", rec)
+	}
+	if _, ok := rec[logging.AttrService]; ok {
+		t.Fatalf("empty service should be omitted: %v", rec)
+	}
+}
+
+func TestOrFallsBackToDefault(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	ctx := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "r1"))
+	logging.Or(nil).InfoContext(ctx, "hello")
+	if !strings.Contains(buf.String(), `"request_id":"r1"`) {
+		t.Fatalf("output=%q", buf.String())
+	}
+
+	var own bytes.Buffer
+	logging.Or(slog.New(slog.NewJSONHandler(&own, nil))).Info("mine")
+	if !strings.Contains(own.String(), "mine") || strings.Contains(buf.String(), "mine") {
+		t.Fatal("Or ignored the given logger")
 	}
 }

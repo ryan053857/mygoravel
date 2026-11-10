@@ -72,17 +72,16 @@ func Put(ctx context.Context, addr string, value string) error {
 <a id="using-in-services"></a>
 ### 在服务中使用
 
-业务服务通过构造函数接收 gocache 的 `cache.CacheInterface` 接口，与接收数据库连接的方式相同。下面为文章服务加上缓存，同时接收一个日志器，用来记录缓存故障：
+业务服务通过构造函数接收 gocache 的 `cache.CacheInterface` 接口，与接收数据库连接的方式相同。下面为文章服务加上缓存，缓存故障用全局日志器 `slog` 记录：
 
 ```go
 type Service struct {
-    db     *bun.DB
-    cache  cache.CacheInterface[string]
-    logger *slog.Logger
+    db    *bun.DB
+    cache cache.CacheInterface[string]
 }
 
-func NewService(db *bun.DB, c cache.CacheInterface[string], logger *slog.Logger) *Service {
-    return &Service{db: db, cache: c, logger: logger}
+func NewService(db *bun.DB, c cache.CacheInterface[string]) *Service {
+    return &Service{db: db, cache: c}
 }
 ```
 
@@ -137,9 +136,9 @@ func (s *Service) load(ctx context.Context, id uuid.UUID) (*Article, error) {
         if err := json.Unmarshal([]byte(raw), &item); err == nil {
             return &item, nil
         }
-        s.logger.WarnContext(ctx, "discard undecodable cache entry", "key", key)
+        slog.WarnContext(ctx, "discard undecodable cache entry", "key", key)
     case !errors.Is(err, store.NotFound{}):
-        s.logger.WarnContext(ctx, "read article cache", "key", key, "error", err)
+        slog.WarnContext(ctx, "read article cache", "key", key, "error", err)
     }
 
     item, err := s.find(ctx, id)
@@ -148,7 +147,7 @@ func (s *Service) load(ctx context.Context, id uuid.UUID) (*Article, error) {
     }
     data, _ := json.Marshal(item)
     if err := s.cache.Set(ctx, key, string(data), store.WithExpiration(10*time.Minute)); err != nil {
-        s.logger.WarnContext(ctx, "write article cache", "key", key, "error", err)
+        slog.WarnContext(ctx, "write article cache", "key", key, "error", err)
     }
     return item, nil
 }
@@ -185,7 +184,7 @@ gocache 在未命中时返回 `store.NotFound`，用 `errors.Is(err, store.NotFo
 ```go
 func (s *Service) invalidate(ctx context.Context, id uuid.UUID) {
     if err := s.cache.Delete(ctx, cacheKey(id)); err != nil {
-        s.logger.WarnContext(ctx, "invalidate article cache", "article_id", id, "error", err)
+        slog.WarnContext(ctx, "invalidate article cache", "article_id", id, "error", err)
     }
 }
 ```

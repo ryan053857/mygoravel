@@ -40,7 +40,7 @@ type Options struct {
 	Title   string
 	Version string
 	Mode    Mode
-	// Logger 记录 5xx 错误与缺失的错误翻译；可空。
+	// Logger 记录 5xx 错误与缺失的错误翻译；nil 表示 slog.Default()。
 	Logger *slog.Logger
 	// Languages 用于错误消息本地化，语言取自 httpx.Locale 写入的 context；可空。
 	Languages *goi18n.Bundle
@@ -53,9 +53,7 @@ type Options struct {
 
 // New 创建 chi + Huma API，并让未匹配的路由与方法返回 Problem Details。
 func New(opts Options) *API {
-	if opts.Logger != nil {
-		opts.Logger = slog.New(logging.NewContextHandler(opts.Logger.Handler()))
-	}
+	opts.Logger = logging.Or(opts.Logger)
 	if opts.Title == "" {
 		opts.Title = "API"
 	}

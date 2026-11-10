@@ -27,12 +27,12 @@ mygoravel 的中间件都是标准的 `func(http.Handler) http.Handler`，安装
 
 ```go
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, logger)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil)...)
 
-api := rest.New(rest.Options{Router: router, Logger: logger})
+api := rest.New(rest.Options{Router: router})
 ```
 
-这里使用了 `github.com/go-chi/chi/v5`。日志器的构造见[日志](logging.md)。
+这里使用了 `github.com/go-chi/chi/v5`。`Defaults` 的第二个参数是日志器，传 `nil` 时使用全局日志器 `slog.Default()`，见[日志](logging.md#creating-a-logger)。
 
 `httpx.Defaults` 按以下顺序包含这些中间件，每一个都可以单独使用：
 
@@ -100,9 +100,9 @@ http:
 把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值并校验），再把它交给 `httpx.Defaults` 和 `httpx.ListenAndServe`：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, logger)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil)...)
 // ...
-return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{Logger: logger})
+return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{})
 ```
 
 不经过 `config.Load` 时（例如在测试中），请从 `httpx.DefaultConfig()` 开始修改。零值的 `httpx.Config{}` 不合法，`httpx.Defaults` 会 panic，`httpx.ListenAndServe` 会返回错误。
@@ -143,7 +143,7 @@ http:
 限流不在默认中间件中。需要时在 `httpx.Defaults` 之后安装：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, logger)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil)...)
 router.Use(httpx.RateLimit(cfg.HTTP.RateLimit, httpx.KeyByIP))
 ```
 
@@ -202,8 +202,8 @@ router.Use(
     httpx.AssignRequestID(),
     httpx.NoSniff(),
     httpx.ClientIP(cfg.HTTP.ClientIP),
-    httpx.AccessLog(logger),
-    httpx.Recover(logger),
+    httpx.AccessLog(nil),
+    httpx.Recover(nil),
     httpx.Timeout(cfg.HTTP.Timeout),
     func(next http.Handler) http.Handler {
         small := httpx.BodyLimit(cfg.HTTP.BodyLimit)(next)
@@ -237,7 +237,7 @@ router.Use(
 var readOnly atomic.Bool // 由运维开关控制，例如收到某个信号时切换
 
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, logger)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil)...)
 router.Use(func(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if readOnly.Load() && r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -248,7 +248,7 @@ router.Use(func(next http.Handler) http.Handler {
     })
 })
 
-api := rest.New(rest.Options{Router: router, Logger: logger})
+api := rest.New(rest.Options{Router: router})
 ```
 
 安装在默认中间件之后，被拒绝的写请求同样带有请求 ID、出现在访问日志中，panic 也会被恢复。
@@ -291,5 +291,5 @@ requireArticles(&legacy)
 这些中间件不依赖 `rest` 包。如果你有一个普通的 `http.Handler`（例如标准库的 `http.ServeMux`），可以用 `chi.Chain` 为它安装：
 
 ```go
-handler := chi.Chain(httpx.Defaults(cfg.HTTP, logger)...).Handler(mux)
+handler := chi.Chain(httpx.Defaults(cfg.HTTP, nil)...).Handler(mux)
 ```

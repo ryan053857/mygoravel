@@ -29,7 +29,6 @@ mygoravel 的本地化基于 [go-i18n](https://github.com/nicksnyder/go-i18n)。
 package api
 
 import (
-    "log/slog"
 
     "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/httpx"
@@ -37,7 +36,7 @@ import (
     "github.com/ryan053857/mygoravel/i18n"
 )
 
-func NewAPI(cfg httpx.Config, logger *slog.Logger) (*rest.API, error) {
+func NewAPI(cfg httpx.Config) (*rest.API, error) {
     bundle, err := i18n.New(i18n.Options{
         Default: "zh-CN",
         Layers:  []i18n.Layer{i18n.FrameworkLayer()},
@@ -46,9 +45,9 @@ func NewAPI(cfg httpx.Config, logger *slog.Logger) (*rest.API, error) {
         return nil, err
     }
     router := chi.NewRouter()
-    router.Use(httpx.Defaults(cfg, logger)...)
+    router.Use(httpx.Defaults(cfg, nil)...)
     router.Use(httpx.Locale(bundle))
-    return rest.New(rest.Options{Router: router, Logger: logger, Languages: bundle}), nil
+    return rest.New(rest.Options{Router: router, Languages: bundle}), nil
 }
 ```
 
@@ -172,7 +171,7 @@ return ErrSlugTaken.Wrap(err, errorx.Public("slug", c.Slug))
 
 请求语言为中文时，得到的 `detail` 为 `slug“hello-world”已被使用`。
 
-如果找不到某个错误码的翻译，`detail` 会使用 HTTP 状态的通用描述，同时（在配置了日志器时）记录一条缺失翻译的警告日志，提醒你补充翻译。
+如果找不到某个错误码的翻译，`detail` 会使用 HTTP 状态的通用描述，同时记录一条缺失翻译的警告日志，提醒你补充翻译。
 
 > [!NOTE]
 > 只有业务错误会被翻译。验证错误、路由不存在、服务端内部错误等不带 `code` 的错误保持 Huma 的英文描述，客户端应根据状态码自行展示提示。

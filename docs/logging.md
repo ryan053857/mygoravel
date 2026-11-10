@@ -12,9 +12,15 @@
 <a id="introduction"></a>
 ## 简介
 
-mygoravel 使用 Go 标准库的 [`log/slog`](https://pkg.go.dev/log/slog) 记录结构化日志。框架没有全局日志器：你创建一个 `*slog.Logger`，并把它显式传给 API 和需要记录日志的服务。
+mygoravel 使用 Go 标准库的 [`log/slog`](https://pkg.go.dev/log/slog) 记录结构化日志，全局日志器就是 `slog.Default()`。在入口处安装一次：
 
-`logging` 包提供了两个便利：一是用几行配置构造日志器；二是让日志自动带上请求 ID 等关联字段。除此之外，你使用的都是标准的 slog API。
+```go
+slog.SetDefault(logging.New(cfg.Logs))
+```
+
+之后，框架组件（访问日志、panic 恢复、5xx 诊断、平滑停止）和业务代码都通过它记录日志，不需要把日志器层层传递。
+
+`logging` 包提供了两个便利：一是按配置构造日志器；二是让日志自动带上请求 ID 等关联字段。除此之外，你使用的都是标准的 slog API。
 
 <a id="creating-a-logger"></a>
 ## 创建日志器
@@ -25,6 +31,7 @@ mygoravel 使用 Go 标准库的 [`log/slog`](https://pkg.go.dev/log/slog) 记�
 logs:
   level: ${LOG_LEVEL:-info}
   format: json
+  service: blog
 ```
 
 | 字段 | 说明 | 默认值 |
@@ -32,38 +39,37 @@ logs:
 | `level` | 最低记录级别：`debug`、`info`、`warn`、`error` | `info` |
 | `format` | `json` 或 `text` | `json` |
 | `add_source` | 是否记录源码位置 | `false` |
+| `service` | 附加到每条日志的 `service` 字段，为空时省略 | 空 |
+| `version` | 附加到每条日志的 `version` 字段 | 构建信息中的模块版本，取不到时省略 |
 
-把 `logging.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值），然后调用 `logging.New`。输出位置和固定字段属于代码层面的决定，通过第二个参数传入：
+把 `logging.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值），然后在入口处构造并安装：
 
 ```go
-logger := logging.New(cfg.Logs, logging.Options{
-    Writer: os.Stderr,
-    Attrs: []slog.Attr{
-        slog.String("service", "blog"),
-        slog.String("version", "0.1.0"),
-    },
-})
+slog.SetDefault(logging.New(cfg.Logs))
 ```
 
-| 选项 | 说明 | 默认值 |
-| --- | --- | --- |
-| `Writer` | 日志输出位置 | `os.Stdout` |
-| `Attrs` | 附加到每条日志的固定字段 | 无 |
+`logging.Config` 的零值可以直接使用，不写 `logs` 段也能得到合理的日志。本地开发时，`text` 格式的输出更便于阅读；生产环境中，JSON 格式更便于日志系统采集和检索。
 
-`logging.Config` 和 `logging.Options` 的零值都可以直接使用。本地开发时，`text` 格式的输出更便于阅读；生产环境中，JSON 格式更便于日志系统采集和检索。
+日志默认输出到标准错误，这样当同一个程序作为命令行工具使用时（例如 `openapi` 命令），标准输出可以完整地留给命令结果。需要改变输出位置时（例如测试中写入缓冲区），在代码中设置 `Writer` 字段，它不会从配置文件读取：
 
-> [!TIP]
-> API 服务建议显式输出到 `os.Stderr`。这样，当同一个程序作为命令行工具使用时（例如 `openapi` 命令），标准输出可以完整地留给命令结果。
+```go
+cfg.Logs.Writer = cmd.ErrOrStderr()
+```
+
+`slog.SetDefault` 还会让标准库 `log` 包的输出也经过这个日志器，第三方库通过 `log.Printf` 打印的内容同样会变成结构化日志。
+
+> [!NOTE]
+> `logging.New` 本身不修改全局状态，是否安装为全局日志器由入口决定。框架组件的日志器参数为 `nil` 时使用 `slog.Default()`，因此也可以只给某个组件传入单独的日志器，例如 `rest.Options{Logger: auditLogger}`；需要关闭某个组件的日志时，传入 `slog.New(slog.DiscardHandler)`。
 
 <a id="writing-log-messages"></a>
 ## 写入日志
 
-需要记录业务事件的服务，像接收数据库一样，通过构造函数接收日志器，见[依赖装配](dependencies.md#constructor-injection)。然后使用 slog 的原生方法记录日志，以键值对的形式附加结构化字段。例如在文章发布成功后记录一条日志：
+业务代码直接使用 slog 的包级函数记录日志，以键值对的形式附加结构化字段。例如在文章发布成功后记录一条日志：
 
 ```go
 func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     // ……在事务中检查并更新文章状态
-    s.logger.InfoContext(ctx, "article published",
+    slog.InfoContext(ctx, "article published",
         "article_id", item.ID,
         "author_id", item.AuthorID,
     )
@@ -73,6 +79,8 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 
 请尽量使用带 `Context` 后缀的方法（`InfoContext`、`ErrorContext` 等）并传入当前的 `ctx`，这样日志才能自动带上请求 ID，见下一节。
 
+如果某个服务需要单独的日志器（例如写入审计日志），像接收数据库一样通过构造函数接收 `*slog.Logger` 即可，见[依赖装配](dependencies.md#constructor-injection)。
+
 字段名应当保持稳定，例如始终使用 `article_id` 而不是有时写 `articleId`，这样才方便在日志系统中检索和聚合。
 
 <a id="contextual-information"></a>
@@ -81,14 +89,14 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 <a id="request-correlation"></a>
 ### 请求关联
 
-[默认中间件](middleware.md#default-middleware)中的 `httpx.AccessLog` 会用传入的日志器为每个请求记录一条访问日志：
+安装[默认中间件](middleware.md#default-middleware)后，`httpx.AccessLog` 会为每个请求记录一条访问日志，`rest.New` 创建的 API 会为 5xx 错误记录诊断信息：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, logger)...)
-api := rest.New(rest.Options{Router: router, Logger: logger})
+router.Use(httpx.Defaults(cfg.HTTP, nil)...)
+api := rest.New(rest.Options{Router: router})
 ```
 
-`rest.New` 的 `Logger` 用于记录 5xx 错误的诊断信息。`httpx.AssignRequestID` 还会把请求 ID 放入请求的 context。之后，只要你在业务代码中用 `logging.New` 创建的日志器配合请求的 `ctx` 记录日志，这些日志就会自动带上 `request_id` 字段：
+`httpx.AssignRequestID` 还会把请求 ID 放入请求的 context。之后，只要你在业务代码中配合请求的 `ctx` 记录日志（`slog.InfoContext(ctx, ...)`），这些日志就会自动带上 `request_id` 字段：
 
 ```json
 {"level":"INFO","msg":"article published","service":"blog","request_id":"9F2K…","article_id":"0f8c…","author_id":"alice"}
@@ -110,10 +118,10 @@ ctx = logging.WithAttrs(ctx, slog.String("component", "article"))
 <a id="custom-handlers"></a>
 ### 使用自己的 slog Handler
 
-如果你已经有一个自己构造的 `*slog.Logger`（例如使用了第三方 Handler），它同样可以传给 API。若希望它在业务代码中也能读取 context 中的关联字段，使用 `logging.NewContextHandler` 包装它的 Handler：
+如果你使用自己的 slog Handler（例如第三方 Handler），用 `logging.NewContextHandler` 包装后再安装，日志就能读取 context 中的关联字段：
 
 ```go
-logger := slog.New(logging.NewContextHandler(myHandler))
+slog.SetDefault(slog.New(logging.NewContextHandler(myHandler)))
 ```
 
 <a id="error-logging"></a>

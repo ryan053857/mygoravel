@@ -100,16 +100,12 @@ TLS 终止、CORS 等功能，可以在反向代理中配置，也可以作为[�
 <a id="logging"></a>
 ## 日志
 
-建议把服务日志输出到标准错误，使用 JSON 格式（`logs.format` 的默认值），并通过 `Attrs` 附加服务名和版本号，便于日志平台采集和检索：
+`logging.New` 默认输出到标准错误，使用 JSON 格式。建议在配置中填写服务名，便于日志平台采集和检索；版本号默认取自构建信息，也可以在部署时通过环境变量指定：
 
-```go
-logger := logging.New(cfg.Logs, logging.Options{
-    Writer: os.Stderr,
-    Attrs: []slog.Attr{
-        slog.String("service", "blog"),
-        slog.String("version", version),
-    },
-})
+```yaml
+logs:
+  service: blog
+  version: ${APP_VERSION:-}
 ```
 
 排查问题时，可以使用响应头 `X-Request-ID` 中的请求 ID，在日志中找到同一请求的访问日志和错误诊断。详见[日志](logging.md)。
