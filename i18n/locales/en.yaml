@@ -6,6 +6,10 @@ ai.busy: The conversation is in progress, please try again later
 ai.awaiting_approval: The conversation is waiting for approval
 ai.not_pending: No such pending action
 apitoken.not_found: Token not found
+authz.not_member: Not found or no access
+authz.role_not_found: Role not found
+authz.role_exists: A role with this name already exists
+authz.invalid: Invalid input
 web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
 web.cross_origin: Cross-origin request rejected
