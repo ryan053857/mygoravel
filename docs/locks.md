@@ -113,7 +113,7 @@ if err := lk.Refresh(ctx, time.Minute); err != nil {
 <a id="database-store"></a>
 ## 使用数据库存储
 
-多实例部署时把锁保存在数据库中。`lock.NewDBStore` 接收应用的 `*bun.DB`，支持 PostgreSQL 和 SQLite：
+多实例部署时把锁保存在数据库中。`lock.NewDBStore` 接收应用的 `*bun.DB`，支持 PostgreSQL、SQLite 和 MySQL：
 
 ```go
 locker := lock.New(lock.NewDBStore(db))

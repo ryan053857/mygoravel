@@ -36,7 +36,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-队列目前只支持 PostgreSQL，发布 SQLite 的迁移会报错。
+队列目前只支持 PostgreSQL，发布 SQLite 或 MySQL 的迁移会报错。
 
 <a id="publishing-jobs"></a>
 ## 发布任务

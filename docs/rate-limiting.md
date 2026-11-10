@@ -121,7 +121,7 @@ attempts := ratelimit.NewDatabase(db, "login", ratelimit.Config{Rate: 5, Interva
 <a id="database-limiter"></a>
 ## 使用数据库存储
 
-`ratelimit.NewDatabase` 接收应用的 `*bun.DB`，支持 PostgreSQL 和 SQLite。第二个参数 `name` 区分共用一张表的不同限流器：同名的限流器共享配额，所以每个 `name` 应该只对应一种配额。
+`ratelimit.NewDatabase` 接收应用的 `*bun.DB`，支持 PostgreSQL、SQLite 和 MySQL。第二个参数 `name` 区分共用一张表的不同限流器：同名的限流器共享配额，所以每个 `name` 应该只对应一种配额。
 
 使用前先发布 `rate_limits` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
@@ -131,7 +131,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-每个 key 只占一行，保存以微秒计的理论到达时间。每次 `Allow` 是一个短事务：先锁住这一行，再读取当前时间计算是否放行，与内存限流器使用同一套算法，多个实例并发调用时计数也是精确的。时间取自应用服务器的时钟，各实例的时钟需要同步。在 PostgreSQL 上这张表是 `UNLOGGED` 表，不写 WAL，数据库崩溃后表会被清空，相当于所有 key 的配额回满。
+每个 key 只占一行，保存以微秒计的理论到达时间；超过 255 字节的 key（例如很长的邮箱）以 SHA-256 摘要保存。每次 `Allow` 是一个短事务：先锁住这一行，再读取当前时间计算是否放行，与内存限流器使用同一套算法，多个实例并发调用时计数也是精确的。时间取自应用服务器的时钟，各实例的时钟需要同步。在 PostgreSQL 上这张表是 `UNLOGGED` 表，不写 WAL，数据库崩溃后表会被清空，相当于所有 key 的配额回满。
 
 每次 `Allow` 都是一次数据库写入，因此不要用它做每个请求都经过的全局限流，那种场景请使用内存或 [Redis](#redis-limiter) 限流器，或者在网关中配置。
 

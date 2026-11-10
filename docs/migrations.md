@@ -105,7 +105,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 root.AddCommand(migrationCmd)
 ```
 
-`Publish` 的第一个参数是应用使用的数据库驱动。框架迁移按数据库类型各写了一份，发布时只复制对应的那一份；使用 SQLite 时传入 `sqlite.Driver`。
+`Publish` 的第一个参数是应用使用的数据库驱动。框架迁移按数据库类型各写了一份，发布时只复制对应的那一份；使用 SQLite 或 MySQL 时传入 `sqlite.Driver` 或 `mysql.Driver`。
 
 在应用根目录执行：
 

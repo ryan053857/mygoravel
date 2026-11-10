@@ -29,7 +29,7 @@ Go 应用会被编译成一个独立的二进制文件。对于根目录包含 `
 go build -trimpath -o bin/api .
 ```
 
-如果入口位于 `cmd/api`，则把构建目标改为 `./cmd/api`。`-trimpath` 会去掉二进制中的本地路径信息。PostgreSQL 和 SQLite 的驱动都是纯 Go 实现，可以用 `CGO_ENABLED=0` 构建不依赖系统库的静态二进制。
+如果入口位于 `cmd/api`，则把构建目标改为 `./cmd/api`。`-trimpath` 会去掉二进制中的本地路径信息。三种数据库的驱动都是纯 Go 实现，可以用 `CGO_ENABLED=0` 构建不依赖系统库的静态二进制。
 
 由于迁移文件和翻译文件都已通过 `embed` 嵌入，部署时只需要这一个二进制文件和 `config` 目录。请将 `go.mod` 和 `go.sum` 提交到版本库，并记录每次构建对应的提交，以便出现问题时准确定位版本。
 
@@ -66,7 +66,7 @@ CONFIG=--config=config/app.yaml,config/prod.yaml
 ./bin/api migrate up $CONFIG
 ```
 
-在 PostgreSQL 上，迁移器使用数据库锁，即使多个部署任务同时执行迁移，也只会串行运行。迁移成功后，再启动依赖新表结构的服务。滚动发布期间，新旧版本会同时运行，请确保数据库变更对两个版本都兼容，见[零停机变更](migrations.md#zero-downtime-changes)。
+在 PostgreSQL 和 MySQL 上，迁移器使用数据库锁，即使多个部署任务同时执行迁移，也只会串行运行。迁移成功后，再启动依赖新表结构的服务。滚动发布期间，新旧版本会同时运行，请确保数据库变更对两个版本都兼容，见[零停机变更](migrations.md#zero-downtime-changes)。
 
 <a id="starting-the-server"></a>
 ### 启动服务

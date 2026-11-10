@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"errors"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/uptrace/bun"
+	"strings"
 )
 
 func TestDatabase(t *testing.T) {
@@ -108,7 +111,7 @@ func TestDatabaseReadsClockAfterLock(t *testing.T) {
 		defer tx.Rollback()
 		sqlite := driver.Name() == "sqlite"
 		if !sqlite {
-			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM rate_limits WHERE name = 'clock' AND key = 'k' FOR UPDATE`); err != nil {
+			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM rate_limits WHERE name = 'clock' AND ? = 'k' FOR UPDATE`, bun.Ident("key")); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -123,8 +126,8 @@ func TestDatabaseReadsClockAfterLock(t *testing.T) {
 		}
 
 		// tat = 此刻 + ahead：此刻之后的调用都应放行。
-		_, err = tx.ExecContext(ctx, `UPDATE rate_limits SET tat = ? WHERE name = 'clock' AND key = 'k'`,
-			time.Now().Add(time.Hour).UnixMicro())
+		_, err = tx.ExecContext(ctx, `UPDATE rate_limits SET tat = ? WHERE name = 'clock' AND ? = 'k'`,
+			time.Now().Add(time.Hour).UnixMicro(), bun.Ident("key"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -133,6 +136,24 @@ func TestDatabaseReadsClockAfterLock(t *testing.T) {
 		}
 		if err := <-result; err != nil {
 			t.Fatalf("call that got the lock later was rejected: %v", err)
+		}
+	})
+}
+
+// 超过 255 字节的 key 以摘要保存：仍然按 key 区分配额，不受列长度和索引长度限制。
+func TestDatabaseLongKeys(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		l := ratelimit.NewDatabase(openDB(t, driver), "long", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1})
+		a, b := strings.Repeat("a", 4000), strings.Repeat("a", 3999)+"b"
+		if err := l.Allow(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Allow(ctx, b); err != nil {
+			t.Fatalf("different long keys share quota: %v", err)
+		}
+		if err := l.Allow(ctx, a); !errors.Is(err, ratelimit.ErrExceeded) {
+			t.Fatalf("long key not limited: %v", err)
 		}
 	})
 }
