@@ -44,6 +44,7 @@ func RequireBearer(api huma.API, validate TokenValidator, scopes ...string) func
 // RequireAuth 为路由声明名为 name 的安全方案：在 OpenAPI 组件中登记 scheme 并标记路由的 Security，
 // 同时安装运行时中间件。authenticate 返回的主体满足 scopes 中的全部权限后写入 identity.WithSubject；
 // 没有凭据返回 401，权限不足返回 403，认证后端故障返回对应的 5xx。
+// 认证通过后安装 httpx.CredentialCheck：SSE 等长连接期间定期重新运行 authenticate，凭据失效时结束连接。
 // 每条路由只能声明一种认证方案。RequireBearer 基于它实现。
 func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authenticate Authenticator, scopes ...string) func(op *huma.Operation) {
 	if name == "" || scheme == nil || authenticate == nil {
@@ -93,7 +94,24 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 					return
 				}
 			}
-			next(huma.WithContext(ctx, identity.WithSubject(ctx.Context(), sub)))
+			// 长连接期间（例如 SSE）重新运行 authenticate：凭据被撤销、主体变化或失去 scope 时结束连接。
+			recheck := func(c context.Context) error {
+				again, err := authenticate(huma.WithContext(ctx, c))
+				switch {
+				case err != nil && httpx.StatusOf(err) >= 500:
+					return err
+				case err != nil || again.ID != sub.ID:
+					return errUnauthenticated.New()
+				}
+				for _, sc := range scopeCopy {
+					if !again.HasScope(sc) {
+						return errForbidden.New(errorx.Public("scope", sc))
+					}
+				}
+				return nil
+			}
+			reqCtx := httpx.WithCredentialCheck(identity.WithSubject(ctx.Context(), sub), recheck)
+			next(huma.WithContext(ctx, reqCtx))
 		})
 	}
 }

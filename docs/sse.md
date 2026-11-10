@@ -6,6 +6,7 @@
     - [断线重连](#reconnecting)
 - [JSON API](#json-api)
 - [路由与超时](#routes-and-timeouts)
+- [凭据失效](#revoked-credentials)
 - [部署](#deployment)
 
 <a id="introduction"></a>
@@ -205,6 +206,23 @@ editor.Post("/admin/articles/publish", h.Publish)
 - 服务器配置中的 `http.write_timeout` 同样会切断长连接，SSE 会为当前请求取消它，不需要修改配置。
 
 停机时，`httpx.ListenAndServe` 一开始排空，`s.Done()` 就会关闭，处理器返回，连接结束，浏览器随后重连到其他实例。所以打开着的长连接不会让停机等满 `shutdown_timeout`，见[平滑停止](lifecycle.md#graceful-shutdown)。
+
+<a id="revoked-credentials"></a>
+## 凭据失效
+
+长连接只在建立时经过认证。之后会话被登出或[撤销](session.md#revoking-sessions)、API token 被[撤销](api-tokens.md#revoking-tokens)、用户被停用或失去所需的 scope，已经建立的连接也不应该继续收到消息。
+
+页面路由的 `web.Require` 和 JSON API 的 `rest.RequireBearer` 在认证通过后，都会在请求中登记一个重新校验函数。SSE 每 30 秒运行一次：
+
+| 校验结果 | 连接 |
+| --- | --- |
+| 仍然有效 | 保持 |
+| 会话不存在或已撤销、token 校验不通过、主体变了、`Resolve` 返回 4xx 类错误、缺少所需的 scope | 结束 |
+| 暂时无法判断，例如数据库故障、`Resolve` 返回 5xx 类错误 | 保持，30 秒后再查 |
+
+连接结束后，浏览器重连时按普通请求重新认证：页面跳转到登录页，JSON API 返回 `401`。所以凭据失效后，最多 30 秒连接就会断开，处理器不需要自己检查。
+
+页面会重新读取会话存储并经过 [`Options.Resolve`](views.md#login)；JSON API 会重新运行 token 校验器，校验器有副作用时（例如 `apitoken` 延长登录 token 的有效期），长连接期间也会每 30 秒发生一次。自己实现认证中间件时，用 `httpx.WithCredentialCheck` 登记同样的校验函数，SSE 会照样运行它。
 
 <a id="deployment"></a>
 ## 部署

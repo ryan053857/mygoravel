@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/gob"
+	"time"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/cockroachdb/errors"
@@ -65,6 +66,35 @@ func Login(ctx context.Context, sm *scs.SessionManager, sub identity.Subject) er
 // Logout 销毁当前会话，并让浏览器删除会话 cookie。
 func Logout(ctx context.Context, sm *scs.SessionManager) error {
 	return errors.Wrap(sm.Destroy(ctx), "session: destroy")
+}
+
+// Lookup 直接从会话存储读取 token 对应的会话，返回其中已登录的主体，不使用请求中已经加载的会话数据。
+// 会话不存在、已过期或已撤销时 ok 为 false。用于在长连接期间确认会话仍然有效。
+func Lookup(ctx context.Context, sm *scs.SessionManager, token string) (sub identity.Subject, ok bool, err error) {
+	if token == "" {
+		return identity.Subject{}, false, nil
+	}
+	var (
+		b     []byte
+		found bool
+	)
+	if cs, isCtx := sm.Store.(scs.CtxStore); isCtx {
+		b, found, err = cs.FindCtx(ctx, token)
+	} else {
+		b, found, err = sm.Store.Find(token)
+	}
+	if err != nil || !found {
+		return identity.Subject{}, false, errors.Wrap(err, "session: lookup")
+	}
+	deadline, values, err := sm.Codec.Decode(b)
+	if err != nil {
+		return identity.Subject{}, false, errors.Wrap(err, "session: decode")
+	}
+	if !time.Now().Before(deadline) {
+		return identity.Subject{}, false, nil
+	}
+	sub, ok = values[subjectKey].(identity.Subject)
+	return sub, ok && sub.ID != "", nil
 }
 
 // Subject 返回当前会话中已登录的主体。

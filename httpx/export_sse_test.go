@@ -8,3 +8,10 @@ func SetHeartbeatInterval(d time.Duration) func() {
 	heartbeatInterval = d
 	return func() { heartbeatInterval = old }
 }
+
+// SetCredentialInterval 供测试缩短 SSE 重新校验凭据的间隔，返回恢复函数。
+func SetCredentialInterval(d time.Duration) func() {
+	old := credentialInterval
+	credentialInterval = d
+	return func() { credentialInterval = old }
+}

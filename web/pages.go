@@ -25,6 +25,8 @@ var (
 	ErrNotFound = errorx.Define(errorx.NotFound, "web.not_found")
 	// ErrForbidden 表示已登录但缺少所需的 scope，与 rest.RequireBearer 使用同一个错误码。
 	ErrForbidden = errorx.Define(errorx.PermissionDenied, "auth.forbidden")
+	// errUnauthenticated 表示会话已经失效，与 rest.RequireBearer 使用同一个错误码。
+	errUnauthenticated = errorx.Define(errorx.Unauthenticated, "auth.unauthenticated")
 	// ErrCrossOrigin 表示跨站的非安全请求被拒绝。
 	ErrCrossOrigin = errorx.Define(errorx.PermissionDenied, "web.cross_origin")
 )
@@ -123,8 +125,39 @@ func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 				return
 			}
 		}
-		next.ServeHTTP(w, r.WithContext(identity.WithSubject(r.Context(), sub)))
+		token := p.opts.Sessions.Token(r.Context())
+		ctx := identity.WithSubject(r.Context(), sub)
+		ctx = httpx.WithCredentialCheck(ctx, func(c context.Context) error { return p.recheck(c, r, token, sub, access) })
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// recheck 在长连接期间重新确认会话：从存储重新读取（会话可能已被登出或撤销），经过 Options.Resolve
+// （用户可能已被停用），再检查 scope。存储或 Resolve 暂时故障时返回 5xx 类错误，连接保持。
+func (p *Pages) recheck(ctx context.Context, r *http.Request, token string, want identity.Subject, access Access) error {
+	stored, ok, err := session.Lookup(ctx, p.opts.Sessions, token)
+	if err != nil {
+		return err
+	}
+	if !ok || stored.ID != want.ID {
+		return errUnauthenticated.New()
+	}
+	sub := stored
+	if p.opts.Resolve != nil {
+		sub, err = p.opts.Resolve(r.WithContext(ctx), stored)
+		if err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError {
+			return err
+		}
+		if err != nil || sub.ID == "" {
+			return errUnauthenticated.New()
+		}
+	}
+	for _, scope := range access.scopes {
+		if !slices.Contains(sub.Scopes, scope) {
+			return ErrForbidden.New()
+		}
+	}
+	return nil
 }
 
 // Login 把 sub 记为当前会话的主体，见 session.Login。
