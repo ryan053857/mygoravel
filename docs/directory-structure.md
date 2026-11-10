@@ -34,7 +34,7 @@ blog/
 │   └── api/
 │       └── main.go          进程入口：执行命令行
 ├── internal/
-│   ├── cli/                 装配命令行：serve、routes、openapi、migrate、config
+│   ├── cli/                 装配命令行：serve、routes、openapi、migrate、config、seed
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务、注册路由
 │   ├── auth/                token 校验器
@@ -57,6 +57,7 @@ blog/
 | 文件 | 章节 |
 | --- | --- |
 | `cmd/api/main.go`、`internal/cli/cli.go` | [命令行](commands.md#declaring-the-cli) |
+| `internal/cli/seed.go` | [填充数据](migrations.md#seeding) |
 | `config/`、`.env`、`internal/settings` | [配置](configuration.md) |
 | `internal/bootstrap/serve.go` | [依赖装配](dependencies.md#assembling-the-application) |
 | `internal/auth/auth.go` | [认证](authentication.md#token-validators) |

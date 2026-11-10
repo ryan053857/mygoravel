@@ -8,6 +8,7 @@
 - [运行迁移](#running-migrations)
     - [迁移命令](#migration-commands)
     - [在代码中执行迁移](#creating-a-provider)
+- [填充数据](#seeding)
 - [修改已发布的迁移](#published-migrations)
     - [在 CI 中检查](#checking-in-ci)
     - [零停机变更](#zero-downtime-changes)
@@ -184,6 +185,81 @@ err = migrate.Up(ctx, provider)
 - 只使用 SQL 文件，不使用 goose 的全局 Go 迁移注册。
 
 版本记录表、事务和锁都由 goose 管理。`migrate.Up(ctx, provider)` 在调用 `provider.Up` 的基础上为错误附加了上下文信息。`migrate` 命令使用的也是同一个迁移器。
+
+<a id="seeding"></a>
+## 填充数据
+
+数据库中的初始数据分为两类，放在不同的地方：
+
+- **每个环境都必须有的数据**，例如角色或分类，写进迁移的 `Up` 部分。它们和表结构一起受版本控制，在每个环境中只执行一次。
+- **只在开发和演示时需要的数据**，例如几篇示例文章，写成一个应用自己的 `seed` 命令。
+
+下面是博客应用的 `internal/cli/seed.go`，它以 alice 的身份创建并发布两篇文章：
+
+```go
+package cli
+
+import (
+    "errors"
+
+    "github.com/spf13/cobra"
+
+    "example.com/blog/internal/article"
+    "example.com/blog/internal/settings"
+    "github.com/ryan053857/mygoravel/command"
+    "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/identity"
+)
+
+func seed() *cobra.Command {
+    return &cobra.Command{
+        Use:   "seed",
+        Short: "写入开发用的示例数据",
+        Args:  command.NoArgs,
+        RunE: func(cmd *cobra.Command, _ []string) error {
+            cfg, err := command.LoadConfig[settings.Config](cmd)
+            if err != nil {
+                return err
+            }
+            db, err := database.Open(cmd.Context(), cfg.Database)
+            if err != nil {
+                return command.AsExitError(command.ExitUnavailable, err)
+            }
+            defer db.Close()
+
+            svc := article.NewService(db)
+            alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
+            for _, c := range []article.Changes{
+                {Title: "Hello World", Slug: "hello-world", Content: "……"},
+                {Title: "Second Post", Slug: "second-post", Content: "……"},
+            } {
+                item, err := svc.Create(cmd.Context(), alice, c)
+                if errors.Is(err, article.ErrSlugTaken) {
+                    continue // 之前已经写入过
+                }
+                if err != nil {
+                    return err
+                }
+                if _, err := svc.Publish(cmd.Context(), alice, item.ID); err != nil {
+                    return err
+                }
+            }
+            return nil
+        },
+    }
+}
+```
+
+示例数据通过业务服务写入，而不是直接插入表中，这样它们和真实请求创建的数据经过相同的验证与规则，表结构变化时也不需要单独维护。slug 的唯一约束让命令可以重复执行：已经存在的文章会被跳过。
+
+把 `seed()` 加入[命令行装配](commands.md#declaring-the-cli)后，在本地准备数据库：
+
+```bash
+go run ./cmd/api migrate up
+go run ./cmd/api seed
+```
+
+`seed` 只用于开发环境，不要把它加入部署流程。需要大量随机数据时，可以用 [gofakeit](https://github.com/brianvoe/gofakeit) 生成 `article.Changes`。测试不依赖这些数据，每个测试在自己的数据库中准备数据，见[测试业务服务](testing.md#testing-services)。
 
 <a id="published-migrations"></a>
 ## 修改已发布的迁移

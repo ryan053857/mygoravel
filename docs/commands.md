@@ -56,6 +56,7 @@ func New() *cobra.Command {
         restcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
         restcmd.Routes(bootstrap.API, bootstrap.DocRoutes),
         command.Config[settings.Config](),
+        seed(),
     )
     return root
 }
