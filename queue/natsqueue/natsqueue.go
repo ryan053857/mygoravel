@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -278,3 +279,59 @@ func (c *claimed) Retry(_ context.Context, at time.Time) error {
 }
 
 func (c *claimed) Release(context.Context) error { return c.m.Nak() }
+
+// Stats 实现 queue.StatsReporter。有消费者的 topic 取消费者的状态：Ready 是等待投递的任务，
+// Running 是已投递、等待确认的任务（包括等待带延迟重试的任务）；还没有被领取过、没有消费者的 topic，
+// 流中的消息都算作 Ready。NATS 不区分延迟和等待重试的任务，Delayed 和 Retrying 为 queue.Unknown，
+// OldestReadyAt 为零值。
+func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
+	if err := d.ensureStream(ctx); err != nil {
+		return nil, err
+	}
+	stream, err := d.js.Stream(ctx, d.stream)
+	if err != nil {
+		return nil, errors.Wrap(err, "natsqueue: stats")
+	}
+	prefix := d.subject("")
+	byTopic := map[string]*queue.TopicStats{}
+	get := func(topic string) *queue.TopicStats {
+		if byTopic[topic] == nil {
+			byTopic[topic] = &queue.TopicStats{Topic: topic, Delayed: queue.Unknown, Retrying: queue.Unknown}
+		}
+		return byTopic[topic]
+	}
+
+	consumed := map[string]bool{}
+	consumers := stream.ListConsumers(ctx)
+	for info := range consumers.Info() {
+		topic, ok := strings.CutPrefix(info.Config.FilterSubject, prefix)
+		if !ok || !strings.HasPrefix(info.Name, "queue_") {
+			continue
+		}
+		consumed[topic] = true
+		s := get(topic)
+		s.Ready, s.Running = int(info.NumPending), info.NumAckPending
+	}
+	if err := consumers.Err(); err != nil {
+		return nil, errors.Wrap(err, "natsqueue: stats")
+	}
+
+	info, err := stream.Info(ctx, jetstream.WithSubjectFilter(prefix+">"))
+	if err != nil {
+		return nil, errors.Wrap(err, "natsqueue: stats")
+	}
+	for subject, n := range info.State.Subjects {
+		if topic, ok := strings.CutPrefix(subject, prefix); ok && !consumed[topic] {
+			get(topic).Ready = int(n)
+		}
+	}
+
+	var out []queue.TopicStats
+	for _, s := range byTopic {
+		if s.Ready+s.Running > 0 {
+			out = append(out, *s)
+		}
+	}
+	slices.SortFunc(out, func(a, b queue.TopicStats) int { return strings.Compare(a.Topic, b.Topic) })
+	return out, nil
+}

@@ -39,6 +39,7 @@ func TestDriver(t *testing.T) {
 			stream := "TEST_QUEUE_" + strings.ToUpper(rand.Text())
 			return natsqueue.New(connect(t), stream), dbtesting.Open(t, sqlite.Driver, queue.Migrations())
 		},
-		NoFencing: true,
+		NoFencing:    true,
+		PartialStats: true,
 	})
 }

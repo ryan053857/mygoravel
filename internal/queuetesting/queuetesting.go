@@ -4,6 +4,7 @@ package queuetesting
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -27,6 +28,8 @@ type Backend struct {
 	New func(t *testing.T) (queue.Driver, *bun.DB)
 	// NoFencing 表示驱动无法发现过期的租约：旧领取的确认仍然生效。
 	NoFencing bool
+	// PartialStats 表示驱动只报告 Ready 和 Running，Running 可能包括等待重试的任务。
+	PartialStats bool
 }
 
 // Run 运行全部场景。
@@ -47,6 +50,8 @@ func Run(t *testing.T, b Backend) {
 		{"graceful shutdown", gracefulShutdown},
 		{"shutdown timeout releases jobs", shutdownTimeoutReleases},
 		{"expired lease is reclaimed", expiredLeaseIsReclaimed},
+		{"observer events", observerEvents},
+		{"stats", stats},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
 			d, db := b.New(t)
@@ -75,11 +80,11 @@ func config() queue.Config {
 }
 
 // start 运行一个 Router，register 在运行前注册处理函数；返回的函数停止 Router 并等待它退出。
-func (s *setup) start(t *testing.T, cfg queue.Config, register func(r *message.Router, sub *queue.Subscriber)) func() {
+func (s *setup) start(t *testing.T, cfg queue.Config, register func(r *message.Router, sub *queue.Subscriber), opts ...queue.SubscriberOption) func() {
 	t.Helper()
 	logger := slog.New(slog.DiscardHandler)
 	r := queue.NewRouter(logger)
-	sub := queue.NewSubscriber(s.driver, cfg, logger, queue.WithFailedJobs(s.failed))
+	sub := queue.NewSubscriber(s.driver, cfg, logger, append([]queue.SubscriberOption{queue.WithFailedJobs(s.failed)}, opts...)...)
 	register(r, sub)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -463,6 +468,7 @@ func shutdownTimeoutReleases(t *testing.T, s *setup) {
 	cfg.ShutdownTimeout = 100 * time.Millisecond
 	started := make(chan struct{})
 	causes := make(chan error, 1)
+	var rec recorder
 	stop := s.start(t, cfg, func(r *message.Router, sub *queue.Subscriber) {
 		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
 			close(started)
@@ -470,12 +476,15 @@ func shutdownTimeoutReleases(t *testing.T, s *setup) {
 			causes <- context.Cause(ctx)
 			return ctx.Err()
 		})
-	})
+	}, queue.WithObserver(rec.observe))
 	s.publish(t, "jobs", 1)
 	<-started
 	stop()
 	if c := <-causes; !errors.Is(c, queue.ErrShuttingDown) {
 		t.Fatalf("cause %v", c)
+	}
+	if k := strings.Join(rec.kinds(t, 1), " "); k != "started released" {
+		t.Fatalf("events %q", k)
 	}
 	// 释放的任务立即可以领取，被释放的那次执行不计入次数。
 	claims := s.claim(t, "jobs", time.Second, time.Second)
@@ -524,4 +533,135 @@ func expiredLeaseIsReclaimed(t *testing.T, s *setup) {
 		t.Fatal(err)
 	}
 	s.empty(t, "jobs")
+}
+
+// recorder 收集 Observer 报告的事件。
+type recorder struct {
+	mu     sync.Mutex
+	events []queue.Event
+}
+
+func (r *recorder) observe(_ context.Context, e queue.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, e)
+}
+
+// kinds 返回第 n 个任务（payload.N）依次经历的事件。
+func (r *recorder) kinds(t *testing.T, n int) []string {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var kinds []string
+	for _, e := range r.events {
+		var p payload
+		if err := json.Unmarshal(e.Job.Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.N == n {
+			kinds = append(kinds, e.Kind.String())
+		}
+	}
+	return kinds
+}
+
+func observerEvents(t *testing.T, s *setup) {
+	var rec recorder
+	var first atomic.Bool
+	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
+		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+			switch {
+			case p.N == 2 && !first.Swap(true):
+				return errors.New("temporary")
+			case p.N == 3:
+				return queue.Permanent(errors.New("gone"))
+			}
+			return nil
+		})
+	}, queue.WithObserver(rec.observe), queue.WithObserver(func(context.Context, queue.Event) { panic("ignored") }))
+	for n := 1; n <= 3; n++ {
+		s.publish(t, "jobs", n)
+	}
+	want := map[int]string{
+		1: "started succeeded",
+		2: "started retrying started succeeded",
+		3: "started failed",
+	}
+	eventually(t, 5*time.Second, func() bool {
+		for n, w := range want {
+			if strings.Join(rec.kinds(t, n), " ") != w {
+				return false
+			}
+		}
+		return true
+	})
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	for _, e := range rec.events {
+		if e.Driver != s.driver.Name() || e.Job.Topic != "jobs" {
+			t.Fatalf("event %+v", e)
+		}
+		switch e.Kind {
+		case queue.JobRetrying:
+			if e.Err == nil || e.RetryAt.IsZero() || e.Job.Attempt != 1 {
+				t.Fatalf("retrying event %+v", e)
+			}
+		case queue.JobFailed:
+			if !queue.IsPermanent(e.Err) || e.Duration <= 0 {
+				t.Fatalf("failed event %+v", e)
+			}
+		case queue.JobSucceeded:
+			if e.Duration <= 0 {
+				t.Fatalf("succeeded event %+v", e)
+			}
+		}
+	}
+}
+
+func stats(t *testing.T, s *setup) {
+	ctx := context.Background()
+	// running：领取后未确认；retrying：领取后安排一小时后重试。
+	s.publish(t, "jobs", 1)
+	if c := s.claim(t, "jobs", time.Hour, 5*time.Second); len(c) != 1 {
+		t.Fatalf("claimed %d", len(c))
+	}
+	s.publish(t, "jobs", 2)
+	retry := s.claim(t, "jobs", time.Hour, 5*time.Second)
+	if len(retry) != 1 {
+		t.Fatalf("claimed %d", len(retry))
+	}
+	if err := retry[0].Retry(ctx, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// ready 和 delayed。
+	before := time.Now()
+	s.publish(t, "jobs", 3)
+	s.publish(t, "jobs", 4, queue.Delay(time.Hour))
+	s.publish(t, "other", 5)
+
+	var got []queue.TopicStats
+	eventually(t, 5*time.Second, func() bool {
+		var err error
+		got, err = queue.Stats(ctx, s.driver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(got) == 2 && got[0].Ready == 1 && got[1].Ready == 1
+	})
+	jobs, other := got[0], got[1]
+	if jobs.Topic != "jobs" || other.Topic != "other" {
+		t.Fatalf("stats %+v", got)
+	}
+	if s.backend.PartialStats {
+		if jobs.Running < 1 || jobs.Delayed != queue.Unknown || jobs.Retrying != queue.Unknown {
+			t.Fatalf("stats %+v", jobs)
+		}
+		return
+	}
+	if jobs.Delayed != 1 || jobs.Retrying != 1 || jobs.Running != 1 {
+		t.Fatalf("stats %+v", jobs)
+	}
+	if jobs.OldestReadyAt.Before(before.Add(-time.Second)) || jobs.OldestReadyAt.After(time.Now().Add(time.Second)) {
+		t.Fatalf("oldest ready at %v, published at %v", jobs.OldestReadyAt, before)
+	}
 }

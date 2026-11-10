@@ -69,6 +69,97 @@ func (f *FailedJobs) Retry(ctx context.Context, id uuid.UUID) error {
 	return errors.Wrapf(err, "queue: retry failed job %s", id)
 }
 
+// FailedJob 是一条失败任务记录。
+type FailedJob struct {
+	ID       uuid.UUID
+	Driver   string
+	Topic    string
+	Payload  []byte
+	Metadata map[string]string
+	// Attempts 是失败前执行的次数。
+	Attempts int
+	// Error 是最后一次的错误，包括堆栈。
+	Error    string
+	FailedAt time.Time
+}
+
+func (r *failedJob) export() FailedJob {
+	return FailedJob{ID: r.ID, Driver: r.Driver, Topic: r.Topic, Payload: r.Payload, Metadata: r.Metadata,
+		Attempts: r.Attempts, Error: r.Error, FailedAt: r.FailedAt}
+}
+
+// FailedQuery 是 FailedJobs.List 的条件。
+type FailedQuery struct {
+	// Topic 为空时列出全部 topic。
+	Topic string
+	// Limit 是最多返回的条数，0 表示 100。
+	Limit  int
+	Offset int
+}
+
+// List 按失败时间从新到旧列出失败任务。
+func (f *FailedJobs) List(ctx context.Context, q FailedQuery) ([]FailedJob, error) {
+	if q.Limit <= 0 {
+		q.Limit = 100
+	}
+	var rows []failedJob
+	sel := f.db.NewSelect().Model(&rows).OrderExpr("f.failed_at DESC, f.id").Limit(int64(q.Limit)).Offset(int64(max(q.Offset, 0)))
+	if q.Topic != "" {
+		sel = sel.Where("f.topic = ?", q.Topic)
+	}
+	if err := sel.Scan(ctx); err != nil {
+		return nil, errors.Wrap(err, "queue: list failed jobs")
+	}
+	jobs := make([]FailedJob, len(rows))
+	for i := range rows {
+		jobs[i] = rows[i].export()
+	}
+	return jobs, nil
+}
+
+// Get 返回一条失败任务，不存在时返回 ErrFailedJobNotFound。
+func (f *FailedJobs) Get(ctx context.Context, id uuid.UUID) (FailedJob, error) {
+	row := new(failedJob)
+	err := f.db.NewSelect().Model(row).Where("f.id = ?", id).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return FailedJob{}, ErrFailedJobNotFound
+	}
+	if err != nil {
+		return FailedJob{}, errors.Wrapf(err, "queue: get failed job %s", id)
+	}
+	return row.export(), nil
+}
+
+// Delete 删除一条失败任务，不存在时返回 ErrFailedJobNotFound。
+func (f *FailedJobs) Delete(ctx context.Context, id uuid.UUID) error {
+	res, err := f.db.NewDelete().Model((*failedJob)(nil)).Where("id = ?", id).Exec(ctx)
+	if err != nil {
+		return errors.Wrapf(err, "queue: delete failed job %s", id)
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return errors.Join(err, ErrFailedJobNotFound)
+	}
+	return nil
+}
+
+// Count 返回每个 topic 的失败任务数。
+func (f *FailedJobs) Count(ctx context.Context) (map[string]int, error) {
+	var rows []struct {
+		Topic string `bun:"topic"`
+		N     int    `bun:"n"`
+	}
+	err := f.db.NewSelect().Model((*failedJob)(nil)).Column("f.topic").ColumnExpr("COUNT(*) AS n").
+		Group("f.topic").Scan(ctx, &rows)
+	if err != nil {
+		return nil, errors.Wrap(err, "queue: count failed jobs")
+	}
+	counts := make(map[string]int, len(rows))
+	for _, r := range rows {
+		counts[r.Topic] = r.N
+	}
+	return counts, nil
+}
+
 // Cleanup 删除最多 limit 条在 before 之前失败的任务，返回删除的条数。由应用定时调用。
 func (f *FailedJobs) Cleanup(ctx context.Context, before time.Time, limit int) (int, error) {
 	if limit <= 0 {
