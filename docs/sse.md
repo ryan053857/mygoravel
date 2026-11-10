@@ -87,19 +87,26 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) error {
 <div hx-sse:connect="/admin/events"></div>
 ```
 
-处理器订阅通知，收到一条就推送一条，直到 `s.Done()` 关闭：
+处理器订阅[广播](broadcasting.md)的 `articles` 主题，收到一条就推送一条，直到 `s.Done()` 关闭：
 
 ```go
 func (h *Handlers) Events(w http.ResponseWriter, r *http.Request) error {
-    notices, unsubscribe := h.notifier.Subscribe()
-    defer unsubscribe()
+    sub := h.hub.Subscribe("articles")
+    defer sub.Close()
     return web.SSE(w, r, func(s *web.Stream) error {
         for {
             select {
             case <-s.Done():
                 return nil
-            case n := <-notices:
-                if err := s.Send(views.Notice(n)); err != nil {
+            case m, ok := <-sub.C():
+                if !ok {
+                    return nil // 订阅已结束，浏览器会重连
+                }
+                var ev ArticlePublished
+                if err := json.Unmarshal(m.Data, &ev); err != nil {
+                    return err
+                }
+                if err := s.SendEvent(web.Event{ID: ev.ID.String()}, views.Notice(ev)); err != nil {
                     return nil
                 }
             }
@@ -108,17 +115,14 @@ func (h *Handlers) Events(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-`notifier` 是应用自己的进程内广播。部署多个实例时，在一个实例上发布的文章也要通知到连在其他实例上的浏览器，需要跨实例广播，例如 PostgreSQL 的 `LISTEN/NOTIFY` 或 Redis Pub/Sub。
-
-> [!NOTE]
-> 框架的跨实例广播功能还在开发中。
+`h.hub` 是 `broadcast.Hub`。发布文章的请求可能在另一个实例上，Hub 把事件送到每个实例，见[广播](broadcasting.md)。
 
 连接元素自身没有内容可替换，组件要用 `<hx-partial>` 指定位置。一条消息里可以有多个 `<hx-partial>`，一次更新页面的多处：
 
 ```templ
-templ Notice(n Notice) {
+templ Notice(ev ArticlePublished) {
 	<hx-partial hx-target="#notices" hx-swap="afterbegin">
-		<p>{ n.Author } 发布了《{ n.Title }》</p>
+		<p>{ ev.Author } 发布了《{ ev.Title }》</p>
 	</hx-partial>
 }
 ```
@@ -130,13 +134,7 @@ templ Notice(n Notice) {
 
 连接断开后（例如网络切换、实例重启），htmx 会自动重连，间隔从 0.5 秒开始逐次加倍。
 
-需要补发断线期间的消息时，用 `SendEvent` 为每条消息带上 ID。浏览器重连时会把最后收到的 ID 放在 `Last-Event-ID` 请求头中发回，`s.LastEventID()` 返回它：
-
-```go
-for _, n := range h.notifier.Since(s.LastEventID()) {
-    _ = s.SendEvent(web.Event{ID: n.ID}, views.Notice(n))
-}
-```
+上面的处理器用 `SendEvent` 为每条消息带上了 ID。浏览器重连时会把最后收到的 ID 放在 `Last-Event-ID` 请求头中发回，`s.LastEventID()` 返回它，处理器据此从应用的数据中补发断线期间的消息，见[断线补发](broadcasting.md#replaying-missed-events)。
 
 `Event` 还可以设置 `Name`。有名字的事件不替换内容，htmx 会在页面上派发同名的 DOM 事件，可以用 `hx-trigger` 或 Alpine 的 `x-on` 监听。
 

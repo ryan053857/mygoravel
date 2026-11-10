@@ -152,11 +152,12 @@ func (rs *Runs) Start(ctx context.Context, userID, sessionID string, msg model.M
 			return nil, ErrAwaitingApproval.New()
 		}
 	}
-	return rs.start(ctx, key, msg, opts, false)
+	return rs.start(ctx, key, msg, opts, nil)
 }
 
-// start 开始运行。resumed 为 true 表示审批之后继续：上一次运行停下时还没送达的插话消息随之送达。
-func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, opts []agent.RunOption, resumed bool) (*Run, error) {
+// start 开始运行。results 非空表示审批之后继续：运行先发出这些调用结果，
+// 上一次运行停下时还没送达的插话消息随之送达。
+func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, opts []agent.RunOption, results []Event) (*Run, error) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	if rs.closed {
@@ -175,7 +176,11 @@ func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, o
 		changed: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	if resumed && prev != nil {
+	for _, ev := range results {
+		ev.ID = fmt.Sprintf("%s.%d", r.ID, len(r.events))
+		r.events = append(r.events, ev)
+	}
+	if results != nil && prev != nil {
 		prev.mu.Lock()
 		r.steered, prev.steered = prev.steered, nil
 		prev.mu.Unlock()
@@ -213,6 +218,15 @@ func (rs *Runs) Get(userID, sessionID string) (*Run, bool) {
 	return r, ok
 }
 
+// Steer 把消息插入对话正在进行的运行，见 Run.Steer。对话没有在运行时返回 ErrFinished。
+func (rs *Runs) Steer(userID, sessionID string, msg model.Message) error {
+	r, ok := rs.Get(userID, sessionID)
+	if !ok {
+		return ErrFinished
+	}
+	return r.Steer(msg)
+}
+
 // Pending 从会话存储读出对话中等待审批的工具调用，不依赖运行所在的进程。
 func (rs *Runs) Pending(ctx context.Context, userID, sessionID string) ([]ToolCall, error) {
 	_, pending, err := rs.pending(ctx, rs.key(userID, sessionID))
@@ -248,8 +262,7 @@ func (rs *Runs) Approve(ctx context.Context, userID, sessionID, callID string, o
 // Reject 拒绝一个等待审批的工具调用，把 reason 作为调用结果告诉模型，其余同 Approve。
 func (rs *Runs) Reject(ctx context.Context, userID, sessionID, callID, reason string, opts ...agent.RunOption) (*Run, error) {
 	return rs.resolve(ctx, rs.key(userID, sessionID), callID, opts, func(ToolCall) string {
-		b, _ := json.Marshal(map[string]string{"error": "rejected", "reason": reason})
-		return string(b)
+		return rejection(reason)
 	})
 }
 
@@ -271,7 +284,8 @@ func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opt
 		return nil, ErrNotPending.New(errorx.Public("call_id", callID))
 	}
 	p := pending[idx]
-	msg := model.NewToolMessage(p.call.ID, p.call.Name, result(p.call))
+	content := result(p.call)
+	msg := model.NewToolMessage(p.call.ID, p.call.Name, content)
 	if len(pending) > 1 {
 		// 还有其他调用等待决定：结果先写进对话，最后一个决定到来时再继续运行。
 		evt := event.NewResponseEvent(p.source.InvocationID, p.source.Author, &model.Response{
@@ -282,12 +296,53 @@ func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opt
 		evt.Branch, evt.FilterKey = p.source.Branch, p.source.FilterKey
 		return nil, rs.sessions.AppendEvent(ctx, sess, evt)
 	}
-	return rs.start(ctx, key, msg, opts, true)
+	// 继续的运行先发出这一批调用的结果，客户端据此更新审批状态。
+	var results []Event
+	answers := toolAnswers(sess)
+	for _, c := range p.batch {
+		text, ok := answers[c.ID]
+		if c.ID == p.call.ID {
+			text, ok = content, true
+		}
+		if ok {
+			results = append(results, Event{Name: EventToolResult, Data: newToolResult(c.ID, c.Name, text)})
+		}
+	}
+	return rs.start(ctx, key, msg, opts, results)
+}
+
+// rejection 是 Reject 写给模型的调用结果。
+func rejection(reason string) string {
+	b, _ := json.Marshal(map[string]string{"approval": "rejected", "reason": reason})
+	return string(b)
+}
+
+func newToolResult(id, name, content string) ToolResult {
+	var r struct{ Approval, Reason string }
+	denied := json.Unmarshal([]byte(content), &r) == nil && r.Approval == "rejected"
+	return ToolResult{ID: id, Name: name, Content: content, Denied: denied}
+}
+
+// toolAnswers 返回会话中各工具调用的结果。
+func toolAnswers(sess *session.Session) map[string]string {
+	out := map[string]string{}
+	for _, ev := range sess.Events {
+		if ev.Response == nil {
+			continue
+		}
+		for _, c := range ev.Choices {
+			if c.Message.Role == model.RoleTool {
+				out[c.Message.ToolID] = c.Message.Content
+			}
+		}
+	}
+	return out
 }
 
 type pendingCall struct {
 	call   ToolCall
 	source *event.Event
+	batch  []ToolCall // 同一次模型回复中需要审批的全部调用
 }
 
 // pending 找出对话中最后一次调用里需要审批、还没有结果的工具调用。
@@ -311,16 +366,20 @@ func (rs *Runs) pending(ctx context.Context, key session.Key) (*session.Session,
 				answered[c.Message.ToolID] = true
 			}
 			if len(c.Message.ToolCalls) > 0 {
-				calls = calls[:0]
+				calls = nil
+				var batch []ToolCall
 				for _, tc := range c.Message.ToolCalls {
 					if _, ok := rs.approval[tc.Function.Name]; ok {
-						calls = append(calls, pendingCall{toolCall(tc), ev})
+						batch = append(batch, toolCall(tc))
 					}
+				}
+				for _, call := range batch {
+					calls = append(calls, pendingCall{call, ev, batch})
 				}
 			}
 		}
 	}
-	out := calls[:0]
+	var out []pendingCall
 	for _, c := range calls {
 		if !answered[c.call.ID] {
 			out = append(out, c)
@@ -535,7 +594,7 @@ func (r *Run) consume(ctx context.Context, ch <-chan *event.Event, calls map[str
 				}
 			case model.RoleTool:
 				answered[m.ToolID] = true
-				r.emit(EventToolResult, ToolResult{ID: m.ToolID, Name: m.ToolName, Content: m.Content}, ev)
+				r.emit(EventToolResult, newToolResult(m.ToolID, m.ToolName, m.Content), ev)
 			case model.RoleAssistant:
 				if !streamedReasoning && m.ReasoningContent != "" {
 					r.emit(EventReasoning, Text{m.ReasoningContent}, ev)

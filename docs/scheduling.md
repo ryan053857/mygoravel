@@ -154,6 +154,7 @@ sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
 | --- | --- | --- |
 | [会话](session.md#cleanup) | `session.NewStore(db).Cleanup` | 每 10 分钟 |
 | [锁](locks.md#cleanup) | `lock.NewDBStore(db).Cleanup` | 每小时 |
+| [广播](broadcasting.md#database-backend) | `broadcast.NewDatabase(db, nil).Cleanup` | 每 10 分钟 |
 | [限流](rate-limiting.md#cleanup) | 任意一个 `ratelimit.NewDatabase(...)` 的 `Cleanup` | 每小时 |
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(ctx, before, limit)` | 每天 |

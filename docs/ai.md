@@ -22,7 +22,7 @@ agent 本身由 [trpc-agent-go](https://github.com/trpc-group/trpc-agent-go) 提
 - **后台运行**：一次回答可能持续几分钟，不受 HTTP 请求的时限约束。用户刷新页面或网络断开后，生成过程不受影响，重新连接后接着收到剩余的内容。
 - **中途插话**：模型还在查资料时，用户可以继续发消息，不需要等它答完，也不会打断它。
 - **审批**：退款、发布这类操作，模型调用工具后先停下，由人确认后才执行。审批可以在几小时后、在另一个进程中进行。
-- **事件流**：把运行过程转换成一组 JSON 事件，用 SSE 推给客户端，并生成 OpenAPI 文档。
+- **前端协议**：实现 Vercel AI SDK 的 UI 消息流协议，前端直接使用 `useChat`。
 
 本章为博客的编辑后台加一个写作助手：它可以搜索已有文章，帮编辑发布草稿。发布之前需要编辑确认。
 
@@ -108,115 +108,137 @@ Claude、Gemini 等其他接口的模型直接使用 trpc-agent-go 的对应包�
 <a id="conversation-api"></a>
 ## 对话接口
 
-每个对话用一个 ID 标识，由客户端生成，例如一个 UUID。对话属于当前登录的编辑，`Runs` 的方法都以主体 ID 和对话 ID 定位它，一个编辑无法读取其他人的对话。
+助手的接口使用 [Vercel AI SDK](https://ai-sdk.dev) 的 [UI 消息流协议](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol)，前端直接使用它的 `useChat`（React、Vue、Svelte 都有），流式显示、工具调用、审批和断线续传都不需要自己实现。
 
-接口分成两个：发消息的 `POST`，和接收回答的 `GET` 事件流。客户端先打开事件流，再发消息：
+每个对话用一个 ID 标识，由 `useChat` 生成。对话属于当前登录的编辑，`Runs` 的方法都以主体 ID 和对话 ID 定位它，一个编辑无法读取其他人的对话。
+
+服务端提供四个接口：
 
 ```go
-type MessageInput struct {
-    Conversation string `path:"conversation" format:"uuid"`
-    Body         struct {
+type ChatInput struct {
+    Body ai.UIRequest
+}
+
+type ConversationInput struct {
+    ID string `path:"id"`
+}
+
+type SteerInput struct {
+    ID   string `path:"id"`
+    Body struct {
         Text string `json:"text" minLength:"1" maxLength:"4000"`
     }
 }
 
-type StreamInput struct {
-    Conversation string `path:"conversation" format:"uuid"`
+type HistoryOutput struct {
+    Body []ai.UIMessage
 }
 
-// POST /assistant/{conversation}/messages
-func (h *Handlers) Send(ctx context.Context, in *MessageInput) (*struct{}, error) {
+// POST /assistant/chat：发送消息或审批结果，响应是这次回答的消息流。
+func (h *Handlers) Chat(ctx context.Context, in *ChatInput) (*huma.StreamResponse, error) {
     sub, _ := identity.FromContext(ctx)
-    _, err := h.runs.Send(ctx, sub.ID, in.Conversation, model.NewUserMessage(in.Body.Text))
-    return nil, err
-}
-
-// GET /assistant/{conversation}/events
-func (h *Handlers) Events(ctx context.Context, in *StreamInput) (*huma.StreamResponse, error) {
-    sub, _ := identity.FromContext(ctx)
-    run, ok := h.runs.Get(sub.ID, in.Conversation)
-    if !ok {
-        return nil, huma.Error404NotFound("no active run")
+    run, err := h.runs.Submit(ctx, sub.ID, in.Body)
+    if err != nil {
+        return nil, err
     }
-    return rest.SSE(func(s *httpx.Stream) error { return ai.Stream(s, run) }), nil
+    return ai.UIStream(run), nil
+}
+
+// GET /assistant/chat/{id}/stream：断线后接上进行中的回答。
+func (h *Handlers) Resume(ctx context.Context, in *ConversationInput) (*huma.StreamResponse, error) {
+    sub, _ := identity.FromContext(ctx)
+    run, _ := h.runs.Get(sub.ID, in.ID)
+    return ai.UIResume(run), nil
+}
+
+// POST /assistant/chat/{id}/steer：回答进行中插话。
+func (h *Handlers) Steer(ctx context.Context, in *SteerInput) (*struct{}, error) {
+    sub, _ := identity.FromContext(ctx)
+    return nil, h.runs.Steer(sub.ID, in.ID, model.NewUserMessage(in.Body.Text))
+}
+
+// GET /assistant/chat/{id}/messages：打开页面时加载对话历史。
+func (h *Handlers) History(ctx context.Context, in *ConversationInput) (*HistoryOutput, error) {
+    sub, _ := identity.FromContext(ctx)
+    messages, err := h.runs.UIMessages(ctx, sub.ID, in.ID)
+    return &HistoryOutput{messages}, err
 }
 ```
 
-事件流用 `rest.RegisterSSE` 注册，`ai.Events` 描述各个事件，用于生成 OpenAPI 文档：
+两个流式接口用 `rest.RegisterSSE` 注册，`ai.UIEvents` 描述消息流，用于生成 OpenAPI 文档：
 
 ```go
-rest.RegisterSSE(api, op, ai.Events, func() func(context.Context, *StreamInput) (*huma.StreamResponse, error) {
-    return h.Events
+rest.RegisterSSE(api, op, ai.UIEvents, func() func(context.Context, *ChatInput) (*huma.StreamResponse, error) {
+    return h.Chat
 })
 ```
 
-`ai.Stream` 依次推送下面的事件，最后一个总是 `done`：
+前端按这四个接口配置 `useChat`：
 
-| 事件 | 数据 | 含义 |
-| --- | --- | --- |
-| `text` | `{"text"}` | 回答的一段增量文本 |
-| `reasoning` | `{"text"}` | 思考过程的一段增量文本，只有推理模型会发出 |
-| `user` | `{"text"}` | 一条插话进入了对话 |
-| `tool_call` | `{"id", "name", "arguments"}` | 模型调用了工具 |
-| `tool_result` | `{"id", "name", "content"}` | 工具返回了结果 |
-| `error` | `{"message"}` | 运行出错，例如模型服务不可用 |
-| `done` | `{"pending", "canceled"}` | 运行结束，`pending` 是等待审批的调用 |
+```tsx
+const { messages, sendMessage, addToolApprovalResponse } = useChat({
+  id: conversationId,
+  messages: initialMessages, // 来自 GET /assistant/chat/{id}/messages
+  resume: true,
+  transport: new DefaultChatTransport({
+    api: '/api/v1/assistant/chat',
+    headers: { Authorization: `Bearer ${token}` },
+    // 历史保存在服务端，只发送最后一条消息
+    prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, message: messages.at(-1) } }),
+  }),
+  sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+});
+```
 
-`Runs.Send` 在后台开始一次运行后立即返回，运行不会因为请求结束而停止。它也不受 [`httpx.Timeout`](middleware.md#request-timeout) 的影响，助手的路由和其他 API 装在同一组中间件下即可。
+`Runs.Submit` 在后台开始一次运行后立即返回，运行不会因为请求结束而停止。它也不受 [`httpx.Timeout`](middleware.md#request-timeout) 的影响，助手的路由和其他 API 装在同一组中间件下即可。对话正在回答时再次提交，`Submit` 返回 `ai.ErrBusy`（`409`）。
 
-需要停止生成时，调用 `run.Cancel()`。已经生成的内容保留在对话中，事件流以 `canceled` 为 `true` 的 `done` 结束。
+需要停止生成时，调用 `run.Cancel()`。已经生成的内容保留在对话中，消息流以 `abort` 结束。
 
 <a id="steering"></a>
 ### 中途插话
 
-对话正在运行时，`Runs.Send` 不会开始新的运行，而是把消息插入当前这次运行：
+回答进行中，`useChat` 的 `sendMessage` 会等这次回答结束后才发送。要让模型在回答过程中就看到新消息，前端改为调用插话接口：
+
+```ts
+await fetch(`/api/v1/assistant/chat/${conversationId}/steer`, { method: 'POST', body: JSON.stringify({ text }), headers })
+```
 
 - 模型正在调用工具时，消息在这批工具调用结束后、模型下一次思考之前进入对话。模型会同时看到工具的结果和这条新消息。
 - 模型已经在给出最终回答时，它先答完，然后接着回答这条消息。
 
-两种情况下，消息都不会打断模型，也不会丢失。消息进入对话时，事件流中出现一个 `user` 事件，前端可以在这时把它显示在对话中。
+两种情况下，消息都不会打断模型，也不会丢失。消息进入对话时，回答中出现一个 `steering-message` 片段，前端把它显示在对话中。对话没有在回答时，`Runs.Steer` 返回 `ai.ErrFinished`，前端改用 `sendMessage`。
 
 <a id="reconnecting"></a>
 ### 断线重连
 
-每个事件都带有 ID。浏览器的 `EventSource` 断线后会自动重连，并在 `Last-Event-ID` 请求头中带上最后收到的 ID，`ai.Stream` 从它之后接着推送。
+`useChat` 设置了 `resume: true` 时，页面打开和网络恢复后会请求 `GET {api}/{id}/stream`。回答还在进行时，`ai.UIResume` 从头重放它，`useChat` 用重放的内容重建这条回答；没有进行中的回答时返回 `204`。
 
-运行结束后，`Runs.Get` 还会在 1 分钟内返回它，让断线的客户端取得最后的事件，用 `ai.KeepFinished` 可以修改这个时长。更早的对话内容从会话存储中读取，用来渲染对话历史：
-
-```go
-sess, err := sessions.GetSession(ctx, session.Key{AppName: "blog", UserID: sub.ID, SessionID: id})
-```
+已经完成的内容由 `Runs.UIMessages` 从对话存储中读出，作为 `useChat` 的初始消息。
 
 <a id="approval"></a>
 ## 审批
 
-`ai.RequireApproval` 列出的工具，模型调用时不会执行。运行在其他工具执行完后停下，`done` 事件的 `pending` 列出等待审批的调用：
+`ai.RequireApproval` 列出的工具，模型调用时不会执行。运行在其他工具执行完后停下，消息流为每个调用发出 `tool-approval-request`，`useChat` 中这个工具片段的状态变为 `approval-requested`，前端显示确认按钮：
 
-```json
-{"pending": [{"id": "call_0", "name": "publish_article", "arguments": "{\"id\": \"0193...\"}"}]}
+```tsx
+{part.state === 'approval-requested' && (
+  <>
+    <button onClick={() => addToolApprovalResponse({ id: part.approval.id, approved: true })}>发布</button>
+    <button onClick={() => addToolApprovalResponse({ id: part.approval.id, approved: false, reason: '暂不发布' })}>取消</button>
+  </>
+)}
 ```
 
-编辑确认后，用 `Runs.Approve` 执行这个调用，结果告诉模型，对话在后台继续运行；`Runs.Reject` 把拒绝的理由告诉模型：
+所有调用都有了决定后，`useChat` 自动把它们提交给 `POST /assistant/chat`。`Runs.Submit` 对批准的调用执行工具，对拒绝的调用把理由告诉模型，然后对话继续运行，新的回答接在同一条消息后面。
 
-```go
-// POST /assistant/{conversation}/calls/{call}/approve
-func (h *Handlers) Approve(ctx context.Context, in *CallInput) (*struct{}, error) {
-    sub, _ := identity.FromContext(ctx)
-    _, err := h.runs.Approve(ctx, sub.ID, in.Conversation, in.Call)
-    return nil, err
-}
-```
+待审批的调用保存在对话中，所以审批可以在任何时候、在任何一个实例上进行。页面重新打开时，`Runs.UIMessages` 返回的历史中这些调用仍然处于 `approval-requested` 状态。不使用 `useChat` 时，用 `Runs.Pending` 读出它们，用 `Runs.Approve` 和 `Runs.Reject` 逐个处理。
 
-待审批的调用保存在对话中，所以审批可以在任何时候、在任何一个实例上进行。页面重新打开时，用 `runs.Pending` 读出它们，重新显示确认按钮。
-
-模型一次可能调用多个需要审批的工具。每个调用分别决定：只剩最后一个时，`Approve` 和 `Reject` 才继续运行，并返回这次运行；在此之前它们返回 `nil`。
-
-对话等待审批期间，`Send` 返回 `ai.ErrAwaitingApproval`（`409`），因为模型在得到调用结果之前不能回答新问题。等待审批前已经插入、还没有进入对话的消息，在审批之后的运行中送达。
+对话等待审批期间不能发送新消息，`Submit` 返回 `ai.ErrAwaitingApproval`（`409`），因为模型在得到调用结果之前不能回答新问题。等待审批前已经插入、还没有进入对话的消息，在审批之后的运行中送达。
 
 <a id="pages"></a>
 ## 在页面中使用
 
-服务端渲染的页面用 `web.SSE` 推送 HTML 片段，`run.Events` 返回和 `ai.Stream` 相同的事件，由你渲染成组件：
+服务端渲染的页面不使用 `useChat`，而是用 `web.SSE` 推送 HTML 片段。`run.Events` 依次返回运行中的事件（回答文本、工具调用、结束），由你渲染成组件：
 
 ```go
 return web.SSE(w, r, func(s *web.Stream) error {
