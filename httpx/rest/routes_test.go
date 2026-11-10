@@ -3,6 +3,7 @@ package rest_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
 )
@@ -47,17 +49,17 @@ func TestRoutesIncludesTypedNativeAndHiddenRoutesWithoutRuntime(t *testing.T) {
 	mounted.Get("/ready", native)
 	api.Router().Mount("/inventory/health", mounted)
 
-	routes := api.Routes()
-	var inventory []rest.Route
+	routes := httpx.Routes(api.Router())
+	var inventory []httpx.Route
 	for _, route := range routes {
 		if strings.HasPrefix(route.Path, "/inventory/") {
 			inventory = append(inventory, route)
 		}
 	}
-	want := []rest.Route{
+	want := []httpx.Route{
 		{Method: http.MethodGet, Path: "/inventory/assets/*", Access: "unknown"},
 		{Method: http.MethodGet, Path: "/inventory/health/ready", Access: "unknown"},
-		{Method: http.MethodGet, Path: "/inventory/hidden", Access: "unknown"},
+		{Method: http.MethodGet, Path: "/inventory/hidden", OperationID: "item-hidden", Summary: "隐藏条目详情", Access: "public"},
 		{Method: http.MethodGet, Path: "/inventory/items", OperationID: "item-list", Summary: "查看条目列表\n支持分页", Access: "public"},
 		{Method: http.MethodPost, Path: "/inventory/items", OperationID: "item-create", Summary: "创建条目", Access: "bearer", Scopes: []string{"items:write", "items:read"}},
 		{Method: http.MethodGet, Path: "/inventory/private", OperationID: "item-private", Access: "bearer"},
@@ -66,19 +68,19 @@ func TestRoutesIncludesTypedNativeAndHiddenRoutesWithoutRuntime(t *testing.T) {
 		t.Fatalf("routes = %#v, want %#v", inventory, want)
 	}
 	for _, path := range []string{"/docs", "/openapi.json", "/openapi.yaml", "/openapi-3.0.json", "/openapi-3.0.yaml", "/schemas/{schema}"} {
-		if !slices.ContainsFunc(routes, func(r rest.Route) bool {
-			return reflect.DeepEqual(r, rest.Route{Method: http.MethodGet, Path: path, Access: rest.AccessDocs})
+		if !slices.ContainsFunc(routes, func(r httpx.Route) bool {
+			return reflect.DeepEqual(r, httpx.Route{Method: http.MethodGet, Path: path, Access: httpx.AccessDocs})
 		}) {
 			t.Errorf("missing documentation endpoint %s", path)
 		}
 	}
 	for range 10 {
-		if !reflect.DeepEqual(api.Routes(), routes) {
+		if !reflect.DeepEqual(httpx.Routes(api.Router()), routes) {
 			t.Fatal("route ordering changed between snapshots")
 		}
 	}
 	routes[0].Path = "changed"
-	if api.Routes()[0].Path == "changed" {
+	if httpx.Routes(api.Router())[0].Path == "changed" {
 		t.Fatal("snapshot mutation changed the API")
 	}
 	for i, r := range routes {
@@ -86,7 +88,7 @@ func TestRoutesIncludesTypedNativeAndHiddenRoutesWithoutRuntime(t *testing.T) {
 			routes[i].Scopes[0] = "changed"
 		}
 	}
-	if !slices.ContainsFunc(api.Routes(), func(r rest.Route) bool { return slices.Equal(r.Scopes, []string{"items:write", "items:read"}) }) {
+	if !slices.ContainsFunc(httpx.Routes(api.Router()), func(r httpx.Route) bool { return slices.Equal(r.Scopes, []string{"items:write", "items:read"}) }) {
 		t.Fatal("scope mutation changed the API")
 	}
 }
@@ -105,7 +107,7 @@ func TestRoutesDoesNotInferNativeSecurity(t *testing.T) {
 		Security: []map[string][]string{{"api-key": {}}},
 	}, func(context.Context, *pingIn) (*pingOut, error) { return nil, nil })
 	for _, path := range []string{"/native", "/native-security"} {
-		if !slices.ContainsFunc(api.Routes(), func(route rest.Route) bool {
+		if !slices.ContainsFunc(httpx.Routes(api.Router()), func(route httpx.Route) bool {
 			return route.Path == path && route.OperationID != "" && route.Access == "unknown"
 		}) {
 			t.Errorf("route %s must retain its ID without inferring access", path)
@@ -121,19 +123,19 @@ func TestRoutesExpandsOpaqueMountMethodsWithoutInvokingHandler(t *testing.T) {
 				t.Fatal("route inspection invoked the mounted handler")
 			}))
 
-			var got []rest.Route
-			for _, route := range api.Routes() {
+			var got []httpx.Route
+			for _, route := range httpx.Routes(api.Router()) {
 				if strings.HasPrefix(route.Path, "/opaque") {
 					got = append(got, route)
 				}
 			}
-			var want []rest.Route
+			var want []httpx.Route
 			for _, method := range []string{
 				http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead,
 				http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut,
 				"QUERY", http.MethodTrace,
 			} {
-				want = append(want, rest.Route{Method: method, Path: "/opaque/*", Access: "unknown"})
+				want = append(want, httpx.Route{Method: method, Path: "/opaque/*", Access: "unknown"})
 			}
 			// chi 隐藏 /opaque 和 /opaque/ 的挂载占位项，只展开通配路径上的方法。
 			if !reflect.DeepEqual(got, want) {
@@ -148,9 +150,52 @@ func TestRoutesMarksOnlyHumaDocumentationEndpoints(t *testing.T) {
 	// 与文档端点相似但由应用注册的路由不能被误标为 docs。
 	api.Router().Get("/openapi", func(http.ResponseWriter, *http.Request) {})
 	api.Router().Get("/docs/guide", func(http.ResponseWriter, *http.Request) {})
-	for _, route := range api.Routes() {
-		if (route.Path == "/openapi" || route.Path == "/docs/guide") && route.Access != rest.AccessUnknown {
+	for _, route := range httpx.Routes(api.Router()) {
+		if (route.Path == "/openapi" || route.Path == "/docs/guide") && route.Access != httpx.AccessUnknown {
 			t.Errorf("%s marked as %s", route.Path, route.Access)
 		}
+	}
+}
+
+// API 挂在上层 Router 的子路由中时，路由表给出完整路径，BasePath 写入 OpenAPI 的 servers。
+func TestRoutesUnderMountedAPI(t *testing.T) {
+	router := chi.NewRouter()
+	var api *rest.API
+	router.Route("/api/v1", func(r chi.Router) {
+		api = rest.New(rest.Options{Mode: rest.ModeOpenAPI, Router: r, BasePath: "/api/v1"})
+		op := huma.Operation{OperationID: "ping", Method: http.MethodGet, Path: "/ping"}
+		rest.Public()(&op)
+		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) { return nil })
+	})
+	router.Get("/health", func(http.ResponseWriter, *http.Request) {})
+	routes := httpx.Routes(router)
+	if !slices.ContainsFunc(routes, func(r httpx.Route) bool {
+		return r.Path == "/api/v1/ping" && r.OperationID == "ping" && r.Access == httpx.AccessPublic
+	}) || !slices.ContainsFunc(routes, func(r httpx.Route) bool {
+		return r.Path == "/api/v1/openapi.json" && r.Access == httpx.AccessDocs
+	}) || !slices.ContainsFunc(routes, func(r httpx.Route) bool {
+		return r.Path == "/health" && r.Access == httpx.AccessUnknown
+	}) {
+		t.Fatalf("routes = %#v", routes)
+	}
+	if servers := api.OpenAPI().Servers; len(servers) != 1 || servers[0].URL != "/api/v1" {
+		t.Fatalf("servers = %#v", servers)
+	}
+}
+
+func TestDocsPageUsesBasePath(t *testing.T) {
+	router := chi.NewRouter()
+	router.Route("/api/v1", func(r chi.Router) {
+		rest.New(rest.Options{Router: r, BasePath: "/api/v1"})
+	})
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/docs", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "/api/v1/openapi") {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"url":"/api/v1"`) {
+		t.Fatalf("openapi status=%d", rr.Code)
 	}
 }

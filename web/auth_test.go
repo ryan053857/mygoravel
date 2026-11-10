@@ -17,7 +17,6 @@ import (
 
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 )
 
@@ -28,29 +27,27 @@ func authServer(t *testing.T, store scs.Store, configure ...func(*web.Options)) 
 	for _, f := range configure {
 		f(&o)
 	}
-	sm := o.Sessions
 	pages := web.New(o)
 	router := chi.NewRouter()
-	router.Group(func(r chi.Router) {
-		r.Use(pages.Middleware)
-		r.Post("/login", pages.Handle(func(w http.ResponseWriter, r *http.Request) error {
-			sub := identity.Subject{ID: r.FormValue("user"), Type: identity.SubjectUser}
-			if sub.ID == "root" {
-				sub.Scopes = []string{"admin"}
-			}
-			if err := session.Login(r.Context(), sm, sub); err != nil {
-				return err
-			}
-			web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/me"))
-			return nil
-		}))
-		me := func(w http.ResponseWriter, r *http.Request) {
-			sub, _ := identity.FromContext(r.Context())
-			fmt.Fprintf(w, "%s via %s", sub.ID, sub.Method)
+	public := pages.Routes(router, web.Public)
+	public.Post("/login", func(w http.ResponseWriter, r *http.Request) error {
+		sub := identity.Subject{ID: r.FormValue("user"), Type: identity.SubjectUser}
+		if sub.ID == "root" {
+			sub.Scopes = []string{"admin"}
 		}
-		r.With(pages.Require()).Get("/me", me)
-		r.With(pages.Require("admin")).Get("/admin", me)
+		if err := pages.Login(r.Context(), sub); err != nil {
+			return err
+		}
+		web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/me"))
+		return nil
 	})
+	me := func(w http.ResponseWriter, r *http.Request) error {
+		sub, _ := identity.FromContext(r.Context())
+		_, err := fmt.Fprintf(w, "%s via %s", sub.ID, sub.Method)
+		return err
+	}
+	pages.Routes(router, web.Require()).Get("/me", me)
+	pages.Routes(router, web.Require("admin")).Get("/admin", me)
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv
@@ -171,7 +168,7 @@ func TestRequireResolve(t *testing.T) {
 	}
 }
 
-func TestMiddlewareRejectsCrossOrigin(t *testing.T) {
+func TestRejectsCrossOrigin(t *testing.T) {
 	srv := authServer(t, memstore.New())
 	req, _ := http.NewRequest("POST", srv.URL+"/login", strings.NewReader("user=alice"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -209,8 +206,7 @@ func TestSessionStoreFailureRendersErrorPage(t *testing.T) {
 func TestTrustedOrigins(t *testing.T) {
 	o := options()
 	o.TrustedOrigins = []string{"https://admin.example.com"}
-	pages := web.New(o)
-	h := pages.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	h := handle(web.New(o), func(http.ResponseWriter, *http.Request) error { return nil })
 	req := httptest.NewRequest("POST", "/x", nil)
 	req.Header.Set("Origin", "https://admin.example.com")
 	if rr := serve(h, req); rr.Code != 200 {

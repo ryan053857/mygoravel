@@ -67,7 +67,7 @@ api := rest.New(rest.Options{Router: router})
 
 `httpx.Timeout` 为请求的 context 设置超时，默认 30 秒，参数来自 `http.timeout` 段。超时后 context 被取消，传入了 `ctx` 的数据库查询和外部调用随之停止。
 
-它不在 `httpx.Defaults` 中，需要单独安装：有些应用只想给部分路由设置超时，例如只给 `/api` 下的路由。
+它不在 `httpx.Defaults` 中，需要单独安装：有些应用只想给部分路由设置超时，例如只给 `/api/v1` 下的路由。
 
 [服务端推送](sse.md)不受它影响：SSE 开始推送后摆脱这个超时，连接一直保持到客户端断开，所以流式路由可以和普通路由装在同一组中间件下。
 

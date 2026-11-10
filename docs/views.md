@@ -4,6 +4,7 @@
 - [安装 templ](#installing-templ)
 - [布局](#layouts)
 - [装配页面](#assembling-pages)
+- [注册页面路由](#page-routes)
 - [登录](#login)
 - [渲染页面](#rendering-pages)
 - [局部更新](#partial-updates)
@@ -80,55 +81,94 @@ templ ErrorFragment(status int, message string) {
 <a id="assembling-pages"></a>
 ## 装配页面
 
-在入口的 [`HTTP` 方法](dependencies.md#assembling-the-application)中创建[会话](session.md#assembling-sessions)和 `web.Pages`，再挂载内嵌脚本和 404 页面：
+在入口的 [`HTTP` 方法](dependencies.md#assembling-the-application)中创建[会话](session.md#assembling-sessions)和 `web.Pages`，再挂载内嵌脚本和 404 页面。下面是 `internal/bootstrap/http.go` 中 `HTTP` 方法的新写法：
 
 ```go
-import (
-    "github.com/ryan053857/mygoravel/session"
-    "github.com/ryan053857/mygoravel/web"
-    layout "example.com/blog/internal/web"
-)
+func (a *App) HTTP(ctx context.Context) error {
+    sessions := session.New(a.cfg.Session, session.NewStore(a.db))
+    pages := web.New(web.Options{
+        Sessions:      sessions,
+        Login:         "/login",
+        ErrorPage:     layout.ErrorPage,
+        ErrorFragment: layout.ErrorFragment,
+        ErrorTarget:   "#flash",
+    })
 
-sessions := session.New(a.cfg.Session, session.NewStore(a.db))
-pages := web.New(web.Options{
-    Sessions:      sessions,
-    Login:         "/login",
-    ErrorPage:     layout.ErrorPage,
-    ErrorFragment: layout.ErrorFragment,
-    ErrorTarget:   "#flash",
-})
+    router := chi.NewRouter()
+    router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+    router.Handle(web.AssetsPath+"*", web.Assets())
+    router.NotFound(pages.NotFound)
 
-router := chi.NewRouter()
-router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
-router.Handle(web.AssetsPath+"*", web.Assets())
-router.NotFound(pages.NotFound)
+    router.Route("/api/v1", func(r chi.Router) {
+        r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
+        opts := API
+        opts.Router, opts.BasePath = r, "/api/v1"
+        Routes(rest.New(opts), auth.Validator(a.cfg.Auth), a.articles)
+    })
+    router.Group(func(r chi.Router) {
+        r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
+        PageRoutes(r, pages, a.users, a.articles)
+    })
+    return httpx.ListenAndServe(ctx, a.cfg.HTTP, router, httpx.ServeOptions{})
+}
 
-router.Route("/api", func(r chi.Router) {
-    r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
-    opts := API
-    opts.Router = r
-    Routes(rest.New(opts), auth.Validator(a.cfg.Auth), a.articles)
-})
-
-router.Group(func(r chi.Router) {
-    r.Use(pages.Middleware, httpx.Timeout(a.cfg.HTTP.Timeout))
-    authweb.Register(r, pages, sessions, a.users)
-    articleweb.Register(r, pages, a.articles)
-})
+// PageRoutes 注册应用的全部页面，HTTP 方法和 DocRouter 共用它。
+func PageRoutes(r chi.Router, pages *web.Pages, users *user.Service, articles *article.Service) {
+    authweb.Register(r, pages, users)
+    articleweb.Register(r, pages, articles)
+}
 ```
 
 几点说明：
 
-- `pages.Middleware` 是每个页面路由都需要的中间件：先拒绝跨站的非安全请求，再加载和保存会话。它使用 Go 标准库的 `http.CrossOriginProtection`，htmx 发出的是同源请求，表单不需要 CSRF token，见[跨站请求伪造](session.md#csrf)。
-- 这段代码在 `internal/bootstrap/http.go` 的 `HTTP` 方法中，`API`、`Routes` 见[依赖装配](dependencies.md#assembling-the-application)。`a.users` 是应用自己的用户服务，和 `a.articles` 一样在 `open` 中构造。
-- 页面和 JSON API 共用一个 Router。API 挂在 `/api` 下，不经过会话；`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
+- 页面和 JSON API 共用一个 Router。API 挂在 `/api/v1` 下，不经过会话；`BasePath` 让 OpenAPI 文档中的地址带上这个前缀，见 [API 版本](routing.md#api-versioning)。`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
+- `a.users` 是应用自己的用户服务，和 `a.articles` 一样在 `open` 中构造，见[依赖装配](dependencies.md#assembling-the-application)。
 - `web.New` 接管会话的错误处理：会话存储出错时记录日志，并用 `ErrorPage` 呈现 `500`。
 - [请求超时](middleware.md#request-timeout)按路由组安装，[服务端推送](sse.md)的路由不能有超时。
+
+<a id="page-routes"></a>
+## 注册页面路由
+
+页面路由通过 `pages.Routes` 注册，它的第二个参数是这一组路由的访问策略：`web.Public` 允许未登录访问，`web.Require(scopes...)` 要求登录，见[登录](#login)。下面是 `internal/article/articleweb/routes.go`：
+
+```go
+package articleweb
+
+func Register(r chi.Router, pages *web.Pages, articles *article.Service) {
+    h := &Handlers{articles: articles}
+    editor := pages.Routes(r, web.Require("articles"))
+    editor.Get("/admin/articles/{id}/edit", h.Edit)
+    editor.Put("/admin/articles/{id}", h.Update)
+    editor.Post("/admin/articles/preview", h.Preview)
+}
+```
+
+页面处理器的签名是 `func(w http.ResponseWriter, r *http.Request) error`。注册的每条路由会依次：拒绝跨站的非安全请求（Go 标准库的 `http.CrossOriginProtection`，htmx 发出的是同源请求，表单不需要 CSRF token，见[跨站请求伪造](session.md#csrf)）、加载和保存会话、检查访问策略，最后调用处理器，并呈现它返回的错误。
+
+与 JSON API 的 [`rest.Public`、`rest.RequireBearer`](routing.md#access-policies) 一样，每条页面路由都必须显式声明访问策略：不经过 `pages.Routes` 就无法注册页面处理器，`web.Access` 的零值也会让注册 panic。因此不会因为漏写而意外公开一个后台页面。
+
+[routes 命令](commands.md#routes-command)同时列出 JSON API 和页面，页面的访问策略显示为 `public` 或 `session: articles`。命令使用的 `DocRouter` 以文档模式注册全部路由，不打开数据库，页面使用 `web.ModeRoutes`，不需要会话：
+
+```go
+// DocRouter 在文档模式下构造全部路由，routes 命令用它。
+func DocRouter() chi.Routes {
+    router := chi.NewRouter()
+    router.Route("/api/v1", func(r chi.Router) {
+        opts := API
+        opts.Mode, opts.Router, opts.BasePath = rest.ModeOpenAPI, r, "/api/v1"
+        DocRoutes(rest.New(opts))
+    })
+    PageRoutes(router, web.New(web.Options{Mode: web.ModeRoutes}), nil, nil)
+    return router
+}
+```
+
+`PageRoutes` 收到的服务都是 `nil`。处理器只是被登记，不会被调用，所以不受影响。
 
 <a id="login"></a>
 ## 登录
 
-`pages.Require` 要求请求已经登录，并具备给出的全部 scope：
+`web.Require` 要求请求已经登录，并具备给出的全部 scope：
 
 | 情况 | 结果 |
 | --- | --- |
@@ -136,12 +176,20 @@ router.Group(func(r chi.Router) {
 | 缺少所需的 scope | 呈现 `403`，见[错误页](#error-pages) |
 | 通过 | 主体写入请求的 context，处理器和业务服务用 `identity.FromContext` 读取 |
 
-登录页由应用自己实现。下面是 `internal/auth/authweb/routes.go` 中的登录和登出处理器。`users` 是应用自己的用户服务，`Authenticate` 校验密码，见[哈希](hashing.md#hashing-passwords)：
+登录页由应用自己实现，注册为公开路由。下面是 `internal/auth/authweb/routes.go`，`users` 是应用自己的用户服务，`Authenticate` 校验密码，见[哈希](hashing.md#hashing-passwords)：
 
 ```go
 type LoginInput struct {
     Email    string `json:"email" format:"email"`
     Password string `json:"password" minLength:"1"`
+}
+
+func Register(r chi.Router, pages *web.Pages, users *user.Service) {
+    h := &Handlers{pages: pages, users: users}
+    public := pages.Routes(r, web.Public)
+    public.Get("/login", h.LoginPage)
+    public.Post("/login", h.Login)
+    pages.Routes(r, web.Require()).Post("/logout", h.Logout)
 }
 
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
@@ -153,7 +201,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
         u, err := h.users.Authenticate(r.Context(), f.Data.Email, f.Data.Password)
         if err == nil {
             sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser, Scopes: u.Scopes}
-            if err := session.Login(r.Context(), h.sessions, sub); err != nil {
+            if err := h.pages.Login(r.Context(), sub); err != nil {
                 return err
             }
             web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
@@ -168,7 +216,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
-    if err := session.Logout(r.Context(), h.sessions); err != nil {
+    if err := h.pages.Logout(r.Context()); err != nil {
         return err
     }
     web.Redirect(w, r, "/login")
@@ -176,9 +224,9 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-`session.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
+`pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
 
-会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时设置 `Options.Resolve`，它在 `pages.Require` 保护的每个请求中收到登录时保存的主体，返回当前的主体：
+会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时设置 `Options.Resolve`，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回当前的主体：
 
 ```go
 pages := web.New(web.Options{
@@ -208,22 +256,6 @@ pages := web.New(web.Options{
 
 <a id="rendering-pages"></a>
 ## 渲染页面
-
-页面处理器的签名是 `func(w http.ResponseWriter, r *http.Request) error`，用 `pages.Handle` 适配成 chi 能用的处理器。下面是 `internal/article/articleweb/routes.go`：
-
-```go
-package articleweb
-
-func Register(r chi.Router, pages *web.Pages, articles *article.Service) {
-    h := &Handlers{articles: articles}
-    r.Group(func(r chi.Router) {
-        r.Use(pages.Require("articles"))
-        r.Get("/admin/articles/{id}/edit", pages.Handle(h.Edit))
-        r.Put("/admin/articles/{id}", pages.Handle(h.Update))
-        r.Post("/admin/articles/preview", pages.Handle(h.Preview))
-    })
-}
-```
 
 处理器调用业务服务，再用 `web.Render` 渲染组件。返回的错误交给 `pages` 呈现：
 
@@ -293,7 +325,7 @@ htmx 请求由 `fetch` 发出，浏览器会自动跟随 `303` 等跳转，跳�
 web.Redirect(w, r, "/admin/articles")
 ```
 
-在 `pages.Handle` 中，直接调用 `http.Redirect` 也可以，htmx 请求的 3xx 会被改写为 `HX-Redirect`。
+在页面处理器中，直接调用 `http.Redirect` 也可以，htmx 请求的 3xx 会被改写为 `HX-Redirect`。
 
 跳转地址来自请求时（例如登录后的 `next` 参数），用 `web.LocalPath` 确认它是本站路径，防止跳到其他站点：
 

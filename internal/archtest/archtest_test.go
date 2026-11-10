@@ -227,7 +227,7 @@ func TestCoreDoesNotLinkRedis(t *testing.T) {
 }
 
 // TestCommandCoreIsLight 确保只用 command 核心包的应用（例如常驻 worker）
-// 不会链接 HTTP API 和数据库组件；它们分别在 command/restcmd 和 command/migratecmd 中。
+// 不会链接 HTTP API 和数据库组件；它们分别在 command/httpcmd 和 command/migratecmd 中。
 func TestCommandCoreIsLight(t *testing.T) {
 	out, err := exec.Command("go", "list", "-deps", module+"/command").CombinedOutput()
 	if err != nil {

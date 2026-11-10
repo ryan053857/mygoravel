@@ -15,7 +15,7 @@
 
 HTTP 请求本身是无状态的。会话让服务器在多次请求之间记住同一个浏览器的数据：数据保存在服务端，浏览器通过 cookie 携带会话 token。在 mygoravel 中，会话用于服务端渲染的[页面](views.md)；JSON API 不使用会话，用 Bearer token [认证](authentication.md)。
 
-mygoravel 的会话基于 [alexedwards/scs](https://github.com/alexedwards/scs)。`session` 包只补上框架需要的部分：从配置创建 `*scs.SessionManager`，以及一个支持 PostgreSQL 和 SQLite 的 Bun 存储。读写会话数据直接使用 scs 的原生方法。
+mygoravel 的会话基于 [alexedwards/scs](https://github.com/alexedwards/scs)。`session` 包只补上框架需要的部分：从配置创建 `*scs.SessionManager`，以及一个支持 PostgreSQL、SQLite 和 MySQL 的 Bun 存储。读写会话数据直接使用 scs 的原生方法。
 
 用会话登录用户、保护页面，见[登录](views.md#login)。
 
@@ -65,7 +65,7 @@ pages := web.New(web.Options{Sessions: sessions, Login: "/login", ...})
 
 `session.New` 的第二个参数是会话存储。`memstore` 把会话放在进程内存中，适合开发和测试；重启后会话丢失，多实例部署时也不共享，生产环境请使用[数据库存储](#database-store)。
 
-页面路由组安装的 `pages.Middleware` 在请求开始时加载会话，在响应写出前保存修改过的会话并设置 cookie，见[装配页面](views.md#assembling-pages)。读写会话数据和登录都依赖它。会话存储出错时，`pages` 记录日志并呈现 `500` 错误页。
+通过 `pages.Routes` 注册的每条页面路由都会在请求开始时加载会话，在响应写出前保存修改过的会话并设置 cookie，见[注册页面路由](views.md#page-routes)。读写会话数据和登录都依赖它。会话存储出错时，`pages` 记录日志并呈现 `500` 错误页。
 
 <a id="session-data"></a>
 ## 读写会话数据
@@ -109,7 +109,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 n, err := store.RevokeOthers(ctx, sessions)
 ```
 
-`ctx` 是处理器收到的 context，路由需要用 [`pages.Require`](views.md#login) 保护。修改密码后通常也调用它。
+`ctx` 是处理器收到的 context，路由需要用 [`web.Require`](views.md#login) 保护。修改密码后通常也调用它。
 
 管理员封禁账号或调整权限后，用 `RevokeSubject` 撤销该用户的全部会话：
 
@@ -160,4 +160,4 @@ sessions := session.New(a.cfg.Session, goredisstore.New(a.rdb))
 
 浏览器会在跨站请求中自动携带 cookie，因此使用会话的页面需要防御跨站请求伪造（CSRF）。JSON API 使用的 Bearer token 不会被自动携带，不存在这个问题。
 
-默认的 `same_site: lax` 已经阻止大多数跨站请求携带会话 cookie。`pages.Middleware` 还使用 Go 标准库的 `http.CrossOriginProtection`，根据浏览器发送的 `Sec-Fetch-Site` 和 `Origin` 请求头拒绝跨站的非安全请求（`POST`、`PUT`、`DELETE` 等），不需要在表单中放 CSRF token。被拒绝的请求呈现为 `403` 错误页；需要放行其他站点时，在 `web.Options` 的 `TrustedOrigins` 中列出它们。
+默认的 `same_site: lax` 已经阻止大多数跨站请求携带会话 cookie。页面路由还使用 Go 标准库的 `http.CrossOriginProtection`，根据浏览器发送的 `Sec-Fetch-Site` 和 `Origin` 请求头拒绝跨站的非安全请求（`POST`、`PUT`、`DELETE` 等），不需要在表单中放 CSRF token。被拒绝的请求呈现为 `403` 错误页；需要放行其他站点时，在 `web.Options` 的 `TrustedOrigins` 中列出它们。

@@ -11,6 +11,7 @@
     - [按业务动作组织处理器](#http-actions)
     - [共享响应结构](#shared-responses)
     - [查看全部路由](#listing-routes)
+- [API 版本](#api-versioning)
 - [OpenAPI 文档](#openapi)
     - [在线查看](#viewing-docs)
     - [离线导出](#exporting-openapi)
@@ -395,6 +396,33 @@ func toDTO(a *article.Article) ArticleDTO {
 ```
 
 该命令复用应用的路由注册入口，离线生成路由表，不需要启动 HTTP 服务或连接数据库。路由的真实声明仍保存在各模块的 `routes.go` 中，查看命令不需要另一份手工维护的路由清单。
+
+<a id="api-versioning"></a>
+## API 版本
+
+只提供 JSON API 的应用通常直接挂在根路径，由部署决定前缀，例如 `https://api.example.com/v1`。和[页面](views.md)共用一个 Router 时，把 API 挂在带版本号的子路由下，并把同一个前缀设为 `BasePath`：
+
+```go
+router.Route("/api/v1", func(r chi.Router) {
+    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
+    opts := API
+    opts.Router, opts.BasePath = r, "/api/v1"
+    Routes(rest.New(opts), auth.Validator(cfg.Auth), articles)
+})
+```
+
+路由按子路由注册，接口地址是 `/api/v1/articles`。`BasePath` 写入 OpenAPI 文档的 `servers`，文档页 `/api/v1/docs` 和生成的客户端据此拼出完整地址；`routes` 命令显示的也是完整路径。
+
+需要不兼容的修改时，新版本挂在另一个子路由下，用自己的 `rest.API`。两个版本各有一份 OpenAPI 文档，共用同一套业务服务：
+
+```go
+router.Route("/api/v2", func(r chi.Router) {
+    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
+    opts := APIv2
+    opts.Router, opts.BasePath = r, "/api/v2"
+    RoutesV2(rest.New(opts), auth.Validator(cfg.Auth), articles)
+})
+```
 
 <a id="openapi"></a>
 ## OpenAPI 文档

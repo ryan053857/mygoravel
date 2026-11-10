@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/a-h/templ"
+
+	"github.com/ryan053857/mygoravel/httpx"
 )
 
 //go:embed assets
@@ -25,12 +27,18 @@ const (
 // 文件名带版本号，响应可以永久缓存。
 func Assets() http.Handler {
 	files := http.FileServerFS(assets)
-	return http.StripPrefix(AssetsPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return assetsHandler{http.StripPrefix(AssetsPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		r.URL.Path = "assets/" + r.URL.Path
 		files.ServeHTTP(w, r)
-	}))
+	}))}
 }
+
+// assetsHandler 在路由表中显示为公开路由。
+type assetsHandler struct{ http.Handler }
+
+// DescribeRoute 实现 httpx.RouteDescriber。
+func (assetsHandler) DescribeRoute() httpx.Route { return httpx.Route{Access: httpx.AccessPublic} }
 
 var scripts = `<script src="` + AssetsPath + `htmx-` + HTMXVersion + `.min.js"></script>
 <script src="` + AssetsPath + `hx-sse-` + HTMXVersion + `.min.js"></script>

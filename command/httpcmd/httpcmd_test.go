@@ -1,4 +1,4 @@
-package restcmd_test
+package httpcmd_test
 
 import (
 	"bytes"
@@ -10,12 +10,14 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/go-chi/chi/v5"
 	"github.com/spf13/cobra"
 
 	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/command/restcmd"
+	"github.com/ryan053857/mygoravel/command/httpcmd"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/web"
 )
 
 func newRoot(cmds ...*cobra.Command) *cobra.Command {
@@ -61,8 +63,24 @@ func registerRoutes(t *testing.T) func(*rest.API) {
 	}
 }
 
+// docRouter 模拟应用的 DocRouter：JSON API 以文档模式注册，页面以 ModeRoutes 注册。
+func docRouter(t *testing.T) func() chi.Routes {
+	return func() chi.Routes {
+		router := chi.NewRouter()
+		registerRoutes(t)(rest.New(rest.Options{Mode: rest.ModeOpenAPI, Router: router}))
+		pages := web.New(web.Options{Mode: web.ModeRoutes})
+		page := func(http.ResponseWriter, *http.Request) error {
+			t.Fatal("page handler must not run")
+			return nil
+		}
+		pages.Routes(router, web.Public).Get("/login", page)
+		pages.Routes(router, web.Require("articles")).Get("/admin/articles/{id}/edit", page)
+		return router
+	}
+}
+
 func TestOpenAPI(t *testing.T) {
-	root := newRoot(restcmd.OpenAPI(rest.Options{Title: "Blog API", Version: "1.0.0"}, registerRoutes(t)))
+	root := newRoot(httpcmd.OpenAPI(rest.Options{Title: "Blog API", Version: "1.0.0"}, registerRoutes(t)))
 	// openapi 不读取配置文件
 	out, _, err := execute(root, "openapi", "--config", filepath.Join(t.TempDir(), "missing.yaml"))
 	if err != nil {
@@ -82,15 +100,16 @@ func TestRoutes(t *testing.T) {
 		want []string
 		omit []string
 	}{
-		{"default", nil, []string{"GET /articles article-list public 获取文章 列表", "POST /articles article-create bearer: articles 创建文章", "GET /livez - unknown -"}, []string{"/docs", "/openapi", "/schemas"}},
+		{"default", nil, []string{"GET /articles article-list public 获取文章 列表", "POST /articles article-create bearer: articles 创建文章", "GET /livez - unknown -", "GET /login - public -"}, []string{"/docs", "/openapi", "/schemas"}},
 		{"all", []string{"--all"}, []string{"GET /articles article-list public 获取文章 列表", "GET /docs - docs -", "GET /openapi.json - docs -", "GET /schemas/{schema} - docs -"}, nil},
 		{"method", []string{"--method", "post"}, []string{"POST /articles article-create bearer: articles 创建文章"}, []string{"article-list", "/livez", "/docs"}},
 		{"path", []string{"--path", "live"}, []string{"GET /livez - unknown -"}, []string{"article-create", "article-list", "/docs"}},
+		{"pages", []string{"--path", "/admin"}, []string{"GET /admin/articles/{id}/edit - session: articles -"}, []string{"/login", "article-create"}},
 		{"combined", []string{"--path", "articles", "--method", "get"}, []string{"GET /articles article-list public 获取文章 列表"}, []string{"article-create", "/docs"}},
 		{"empty", []string{"--path", "missing"}, nil, []string{"article-create", "article-list", "/docs", "/livez"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := newRoot(restcmd.Routes(rest.Options{}, registerRoutes(t)))
+			root := newRoot(httpcmd.Routes(docRouter(t)))
 			out, stderr, err := execute(root, append([]string{"routes"}, tc.args...)...)
 			if err != nil || stderr != "" {
 				t.Fatalf("err=%v stderr=%s", err, stderr)
@@ -125,7 +144,8 @@ func TestUsageErrors(t *testing.T) {
 		{"openapi", "extra"},
 	} {
 		mustNotRegister := func(*rest.API) { t.Fatal("invalid arguments built the API") }
-		root := newRoot(restcmd.OpenAPI(rest.Options{}, mustNotRegister), restcmd.Routes(rest.Options{}, mustNotRegister))
+		mustNotBuild := func() chi.Routes { t.Fatal("invalid arguments built the router"); return nil }
+		root := newRoot(httpcmd.OpenAPI(rest.Options{}, mustNotRegister), httpcmd.Routes(mustNotBuild))
 		if _, _, err := execute(root, args...); command.ExitCode(err) != command.ExitUsage {
 			t.Errorf("args=%v exit=%d err=%v", args, command.ExitCode(err), err)
 		}

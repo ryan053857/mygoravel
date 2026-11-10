@@ -14,7 +14,7 @@ import (
 )
 
 // Store 是基于 Bun 的会话存储，实现 scs.CtxStore 和 scs.IterableCtxStore，
-// 查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供 PostgreSQL 与 SQLite 的表结构。
+// 查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供三种数据库的表结构。
 //
 // 每行记录登录主体的 ID，RevokeSubject 和 RevokeOthers 据此撤销某个主体的会话。
 // 删除和撤销只给行打上 revoked_at 标记，读取时跳过：撤销前已在处理中的请求结束时会再次提交会话，
@@ -65,15 +65,19 @@ func (s *Store) CommitCtx(ctx context.Context, token string, b []byte, expiry ti
 	}
 	sub, _ := values[subjectKey].(identity.Subject)
 	r := &row{Token: token, SubjectID: sub.ID, Data: b, Expiry: expiry.UTC()}
-	q := s.db.NewInsert().Model(r)
 	if s.db.Dialect().Name() == dialect.MySQL {
-		q = q.On("DUPLICATE KEY UPDATE").
-			Set("subject_id = VALUES(subject_id)").Set("data = VALUES(data)").Set("expiry = VALUES(expiry)")
-	} else {
-		q = q.On("CONFLICT (token) DO UPDATE").
-			Set("subject_id = EXCLUDED.subject_id").Set("data = EXCLUDED.data").Set("expiry = EXCLUDED.expiry")
+		// MySQL 8 用行别名引用新值，VALUES() 函数已不推荐使用；Bun 的插入构造器不生成行别名。
+		var subject any
+		if r.SubjectID != "" {
+			subject = r.SubjectID
+		}
+		_, err = s.db.NewRaw(`INSERT INTO sessions (token, subject_id, data, expiry) VALUES (?, ?, ?, ?) AS new
+ON DUPLICATE KEY UPDATE subject_id = new.subject_id, data = new.data, expiry = new.expiry`,
+			r.Token, subject, r.Data, r.Expiry).Exec(ctx)
+		return errors.Wrap(err, "session: commit")
 	}
-	_, err = q.Exec(ctx)
+	_, err = s.db.NewInsert().Model(r).On("CONFLICT (token) DO UPDATE").
+		Set("subject_id = EXCLUDED.subject_id").Set("data = EXCLUDED.data").Set("expiry = EXCLUDED.expiry").Exec(ctx)
 	return errors.Wrap(err, "session: commit")
 }
 

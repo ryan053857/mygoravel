@@ -41,8 +41,8 @@ func TestHandleErrors(t *testing.T) {
 	o := options()
 	o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 	p := web.New(o)
-	conflict := p.Handle(func(http.ResponseWriter, *http.Request) error { return errLocked.New() })
-	internal := p.Handle(func(http.ResponseWriter, *http.Request) error { return errorx.Define(errorx.Internal, "x.y").New() })
+	conflict := handle(p, func(http.ResponseWriter, *http.Request) error { return errLocked.New() })
+	internal := handle(p, func(http.ResponseWriter, *http.Request) error { return errorx.Define(errorx.Internal, "x.y").New() })
 
 	rr := serve(conflict, zh(t, httptest.NewRequest("GET", "/", nil)))
 	if rr.Code != 409 || rr.Body.String() != "page 409 没有访问权限" {
@@ -70,7 +70,7 @@ func TestHandleErrorAfterResponseStarted(t *testing.T) {
 	o := options()
 	o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 	p := web.New(o)
-	h := p.Handle(func(w http.ResponseWriter, r *http.Request) error {
+	h := handle(p, func(w http.ResponseWriter, r *http.Request) error {
 		_, _ = w.Write([]byte("partial"))
 		return errorx.Define(errorx.Internal, "x.y").New()
 	})
@@ -81,7 +81,7 @@ func TestHandleErrorAfterResponseStarted(t *testing.T) {
 }
 
 func TestHandleRewritesRedirectsForHTMX(t *testing.T) {
-	h := pages().Handle(func(w http.ResponseWriter, r *http.Request) error {
+	h := handle(pages(), func(w http.ResponseWriter, r *http.Request) error {
 		http.Redirect(w, r, "/articles", http.StatusSeeOther)
 		return nil
 	})
@@ -103,7 +103,7 @@ func TestNotFound(t *testing.T) {
 }
 
 func TestErrorSetsRetryAfter(t *testing.T) {
-	h := pages().Handle(func(http.ResponseWriter, *http.Request) error {
+	h := handle(pages(), func(http.ResponseWriter, *http.Request) error {
 		return errorx.Define(errorx.ResourceExhausted, "rate_limit.exceeded").New(errorx.RetryAfter(1500 * time.Millisecond))
 	})
 	rr := serve(h, httptest.NewRequest("POST", "/login", nil))

@@ -72,7 +72,7 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-每条消息按 `hx-target` 和 `hx-swap` 放进 `#progress`，`fn` 返回后响应结束。开始写事件之前，错误照常返回给 `pages` 呈现；开始之后，返回的错误只会记录日志。
+每条消息按 `hx-target` 和 `hx-swap` 放进 `#progress`，`fn` 返回后响应结束。开始写事件之前，错误照常由 `pages` 呈现；开始之后，返回的错误只会记录日志。
 
 `s.Context()` 在浏览器断开或服务器开始停机时取消，传给业务服务，让它们随之停止。
 
@@ -190,7 +190,16 @@ rest.RegisterSSE(api, op, map[string]any{"progress": PublishProgress{}},
 <a id="routes-and-timeouts"></a>
 ## 路由与超时
 
-SSE 路由和普通路由装在同一组中间件下即可。开始推送之后，连接不再受请求时限的约束：
+SSE 路由和普通页面注册在一起即可，例如直接加进 `articleweb.Register`（见[注册页面路由](views.md#page-routes)）：
+
+```go
+editor := pages.Routes(r, web.Require("articles"))
+// ...
+editor.Get("/admin/events", h.Events)
+editor.Post("/admin/articles/publish", h.Publish)
+```
+
+开始推送之后，连接不再受请求时限的约束：
 
 - [`httpx.Timeout`](middleware.md#request-timeout) 的超时不再取消 `s.Context()`，它只在客户端断开或服务器停机时取消。
 - 服务器配置中的 `http.write_timeout` 同样会切断长连接，SSE 会为当前请求取消它，不需要修改配置。
