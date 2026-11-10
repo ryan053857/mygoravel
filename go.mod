@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/ThreeDotsLabs/watermill v1.5.3
 	github.com/a-h/templ v0.3.1100
+	github.com/adhocore/gronx v1.20.6
 	github.com/alexedwards/scs/v2 v2.9.0
 	github.com/aws/aws-sdk-go-v2 v1.47.8
 	github.com/aws/aws-sdk-go-v2/config v1.32.40

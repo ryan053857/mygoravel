@@ -146,8 +146,11 @@ n, err := attempts.Cleanup(ctx, 1000)
 
 清理作用于整张表，不限于调用者的 `name`，用任意一个数据库限流器调用即可。`Cleanup` 可以反复执行，多个实例同时执行也是安全的。
 
-> [!NOTE]
-> 定时任务功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每小时一次。
+用[定时任务](scheduling.md#framework-cleanups)定期执行，例如每小时一次：
+
+```go
+sched.Add("rate-limits:cleanup", "@hourly", schedule.Cleanup(attempts.Cleanup, 1000))
+```
 
 <a id="redis-limiter"></a>
 ## 使用 Redis 存储

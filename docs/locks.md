@@ -61,6 +61,9 @@ func (s *Service) PublishScheduled(ctx context.Context) error {
 
 释放锁不受 `ctx` 取消影响：请求或命令被取消后，`Do` 仍会释放锁。
 
+> [!TIP]
+> 按时触发的任务交给[调度器](scheduling.md)执行时，调度器已经保证每次触发只在一个实例上执行，任务里不需要再加锁。锁适合调度器之外的场景，例如下面的缓存重建。
+
 <a id="waiting-for-locks"></a>
 ## 等待锁
 
@@ -135,8 +138,11 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 n, err := store.Cleanup(ctx, 1000)
 ```
 
-> [!NOTE]
-> 定时任务功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每天一次。
+用[定时任务](scheduling.md#framework-cleanups)定期执行，例如每小时一次。[调度器](scheduling.md#multiple-instances)本身也用锁去重，每次触发会留下一行，同样由它清理：
+
+```go
+sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(store.Cleanup, 1000))
+```
 
 <a id="redis-store"></a>
 ## 使用 Redis 存储
