@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -25,9 +26,9 @@ var (
 	errForbidden       = errorx.Define(errorx.PermissionDenied, "auth.forbidden")
 )
 
-// RequireBearer 要求请求携带有效的 Authorization: Bearer token，
-// 校验器返回有效主体，并满足 scopes 中的全部权限。
-func RequireBearer(api huma.API, validate TokenValidator, scopes ...string) func(op *huma.Operation) {
+// RequireBearer 要求请求携带有效的 Authorization: Bearer token，校验器返回有效主体，
+// 并且主体能执行 permissions 中的全部权限（identity.Subject.Can）。
+func RequireBearer(api huma.API, validate TokenValidator, permissions ...string) func(op *huma.Operation) {
 	if validate == nil {
 		panic("rest: nil token validator")
 	}
@@ -38,15 +39,20 @@ func RequireBearer(api huma.API, validate TokenValidator, scopes ...string) func
 			return identity.Subject{}, nil
 		}
 		return validate(ctx.Context(), token)
-	}, scopes...)
+	}, permissions...)
 }
 
 // RequireAuth 为路由声明名为 name 的安全方案：在 OpenAPI 组件中登记 scheme 并标记路由的 Security，
-// 同时安装运行时中间件。authenticate 返回的主体满足 scopes 中的全部权限后写入 identity.WithSubject；
-// 没有凭据返回 401，权限不足返回 403，认证后端故障返回对应的 5xx。
-// 认证通过后安装 httpx.CredentialCheck：SSE 等长连接期间定期重新运行 authenticate，凭据失效时结束连接。
+// 同时安装运行时中间件。运行时依次：
+//
+//   - authenticate 识别调用者：没有凭据或凭据无效返回 401，认证后端故障返回对应的 5xx；
+//   - 主体的 Tenant 由凭据设置且与本次请求的租户（identity.TenantFromContext）不同时返回 403；
+//   - 调用 Options.Resolve（如果有）得到本次请求的主体，错误的处理见 Options.Resolve；
+//   - 主体能执行 permissions 中的全部权限后写入 identity.WithSubject，否则返回 403。
+//
+// 认证通过后安装 httpx.CredentialCheck：SSE 等长连接期间定期重新执行以上检查，凭据失效或失去权限时结束连接。
 // 每条路由只能声明一种认证方案。RequireBearer 基于它实现。
-func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authenticate Authenticator, scopes ...string) func(op *huma.Operation) {
+func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authenticate Authenticator, permissions ...string) func(op *huma.Operation) {
 	if name == "" || scheme == nil || authenticate == nil {
 		panic("rest: RequireAuth requires a scheme name, a security scheme and an authenticator")
 	}
@@ -55,7 +61,11 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 	if scheme.Type == "http" && scheme.Scheme != "" {
 		challenge = strings.ToUpper(scheme.Scheme[:1]) + scheme.Scheme[1:]
 	}
-	scopeCopy := append([]string(nil), scopes...)
+	required := append([]string(nil), permissions...)
+	var resolve func(context.Context, identity.Subject) (identity.Subject, error)
+	if a, ok := api.(*API); ok {
+		resolve = a.resolve
+	}
 	return func(op *huma.Operation) {
 		if op.Metadata == nil {
 			op.Metadata = map[string]any{}
@@ -64,56 +74,78 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 			panic("rest: duplicate authentication declaration")
 		}
 		op.Metadata[authMetadata] = name
-		if len(scopeCopy) > 0 {
+		if len(required) > 0 {
 			if op.Extensions == nil {
 				op.Extensions = map[string]any{}
 			}
-			op.Extensions["x-required-scopes"] = scopeCopy
+			op.Extensions["x-required-permissions"] = required
 		}
 		op.Security = []map[string][]string{{name: {}}}
 		op.Middlewares = append(op.Middlewares, func(ctx huma.Context, next func(huma.Context)) {
 			ctx.SetHeader("Cache-Control", "no-store")
-			sub, err := authenticate(ctx)
-			if err != nil && httpx.StatusOf(err) >= 500 {
+			sub, err := establish(ctx, authenticate, resolve, required)
+			switch {
+			case err == nil:
+			case httpx.StatusOf(err) >= 500:
 				if a, ok := api.(*API); ok {
 					a.logger.ErrorContext(ctx.Context(), "authentication backend failed", "scheme", name, "error", err)
 				}
 				writeError(api, ctx, huma.NewErrorWithContext(ctx, httpx.StatusOf(err), "authentication unavailable"))
 				return
-			}
-			if err != nil || sub.ID == "" {
+			case errors.Is(err, errUnauthenticated):
 				if challenge != "" {
 					ctx.SetHeader("WWW-Authenticate", challenge)
 				}
-				writeError(api, ctx, problem(api, ctx, errUnauthenticated.New()))
+				writeError(api, ctx, problem(api, ctx, err))
+				return
+			default:
+				writeError(api, ctx, problem(api, ctx, err))
 				return
 			}
-			for _, sc := range scopeCopy {
-				if !sub.HasScope(sc) {
-					writeError(api, ctx, problem(api, ctx, errForbidden.New(errorx.Public("scope", sc))))
-					return
-				}
-			}
-			// 长连接期间（例如 SSE）重新运行 authenticate：凭据被撤销、主体变化或失去 scope 时结束连接。
+			// 长连接期间（例如 SSE）重新执行全部检查：凭据被撤销、主体变化、不再是租户成员或失去权限时结束连接。
 			recheck := func(c context.Context) error {
-				again, err := authenticate(huma.WithContext(ctx, c))
-				switch {
-				case err != nil && httpx.StatusOf(err) >= 500:
-					return err
-				case err != nil || again.ID != sub.ID:
+				again, err := establish(huma.WithContext(ctx, c), authenticate, resolve, required)
+				if err == nil && again.ID != sub.ID {
 					return errUnauthenticated.New()
 				}
-				for _, sc := range scopeCopy {
-					if !again.HasScope(sc) {
-						return errForbidden.New(errorx.Public("scope", sc))
-					}
-				}
-				return nil
+				return err
 			}
 			reqCtx := httpx.WithCredentialCheck(identity.WithSubject(ctx.Context(), sub), recheck)
 			next(huma.WithContext(ctx, reqCtx))
 		})
 	}
+}
+
+// establish 识别调用者并得到本次请求的主体，步骤见 RequireAuth。返回的错误已按响应归类：
+// 5xx 类错误表示后端故障；errUnauthenticated 表示没有有效的凭据；其他 4xx 类错误按其分类响应。
+func establish(ctx huma.Context, authenticate Authenticator, resolve func(context.Context, identity.Subject) (identity.Subject, error), required []string) (identity.Subject, error) {
+	sub, err := authenticate(ctx)
+	if err != nil && httpx.StatusOf(err) >= 500 {
+		return identity.Subject{}, err
+	}
+	if err != nil || sub.ID == "" {
+		return identity.Subject{}, errUnauthenticated.New()
+	}
+	if sub.Tenant != "" && sub.Tenant != identity.TenantFromContext(ctx.Context()) {
+		return identity.Subject{}, errForbidden.New()
+	}
+	if resolve != nil {
+		sub, err = resolve(ctx.Context(), sub)
+		switch {
+		case err != nil && httpx.StatusOf(err) >= 500:
+			return identity.Subject{}, err
+		case err != nil && errorx.KindOf(err) == errorx.Unauthenticated, err == nil && sub.ID == "":
+			return identity.Subject{}, errUnauthenticated.New()
+		case err != nil:
+			return identity.Subject{}, err
+		}
+	}
+	for _, perm := range required {
+		if !sub.Can(perm) {
+			return identity.Subject{}, errForbidden.New(errorx.Public("permission", perm))
+		}
+	}
+	return sub, nil
 }
 
 // registerScheme 在 OpenAPI 组件中登记安全方案。

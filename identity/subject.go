@@ -1,6 +1,9 @@
 package identity
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // SubjectType 描述主体类别。
 type SubjectType string
@@ -11,15 +14,47 @@ const (
 )
 
 // Subject 是已认证主体；ID 为不透明标识。
+//
+// Permissions 是主体在 Tenant 中拥有的权限，Scopes 是本次请求所用凭据被限制在内的权限，
+// 两者共同决定 Can：例如用户拥有 articles:*，他创建的只读令牌的 Scopes 为 articles:read。
 type Subject struct {
-	ID         string
-	Type       SubjectType
-	Method     string   // 认证方式，如 bearer
-	Scopes     []string // 已验证 scope
-	Credential string   // 本次请求所用凭据的 ID，如 API token 的 ID；用于登出当前设备、在设备列表中标出当前设备，可为空
+	ID          string
+	Type        SubjectType
+	Method      string   // 认证方式，如 bearer、session
+	Credential  string   // 本次请求所用凭据的 ID，如 API token 的 ID；用于登出当前设备、在设备列表中标出当前设备，可为空
+	Tenant      string   // 本次请求所在的租户，"" 表示平台本身；由凭据设置时，凭据只能在这个租户中使用
+	Permissions []string // 主体在 Tenant 中拥有的权限，支持通配符，见 Can
+	Scopes      []string // 凭据的权限限制，支持通配符；nil 表示不限制，空切片表示什么都不允许
+}
+
+// Can 报告主体能否执行 perm：Permissions 授予了它，并且 Scopes 为 nil 或也允许它。
+//
+// 权限是以冒号分隔的名称，例如 articles:write。授予时可以用 * 作为最后一段，
+// 匹配以前面各段开头的全部权限：articles:* 匹配 articles:write 和 articles:comments:delete，
+// 单独的 * 匹配全部权限。perm 本身不应包含通配符。
+func (s Subject) Can(perm string) bool {
+	return Grants(s.Permissions, perm) && (s.Scopes == nil || Grants(s.Scopes, perm))
+}
+
+// Grants 报告 granted 中是否有权限匹配 perm，通配符规则见 Subject.Can。
+func Grants(granted []string, perm string) bool {
+	if perm == "" {
+		return false
+	}
+	for _, g := range granted {
+		if g == perm || g == "*" {
+			return true
+		}
+		if prefix, ok := strings.CutSuffix(g, ":*"); ok && strings.HasPrefix(perm, prefix+":") {
+			return true
+		}
+	}
+	return false
 }
 
 type ctxKey struct{}
+
+type tenantKey struct{}
 
 // WithSubject 将主体写入 context。
 func WithSubject(ctx context.Context, sub Subject) context.Context {
@@ -32,12 +67,13 @@ func FromContext(ctx context.Context) (Subject, bool) {
 	return sub, ok
 }
 
-// HasScope 报告是否具备指定 scope。
-func (s Subject) HasScope(scope string) bool {
-	for _, sc := range s.Scopes {
-		if sc == scope {
-			return true
-		}
-	}
-	return false
+// WithTenant 将本次请求所在的租户写入 context，通常由 rest.Options.Tenant 或 web.Options.Tenant 完成。
+func WithTenant(ctx context.Context, tenant string) context.Context {
+	return context.WithValue(ctx, tenantKey{}, tenant)
+}
+
+// TenantFromContext 返回本次请求所在的租户；没有设置时为 ""，即平台本身。
+func TenantFromContext(ctx context.Context) string {
+	tenant, _ := ctx.Value(tenantKey{}).(string)
+	return tenant
 }

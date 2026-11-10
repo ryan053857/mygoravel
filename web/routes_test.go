@@ -53,8 +53,8 @@ func TestRoutesDescribeAccess(t *testing.T) {
 		})
 		want := []httpx.Route{
 			{Method: "GET", Path: "/_web/*", Access: "public"},
-			{Method: "PUT", Path: "/admin/articles/{id}", Access: "session", Scopes: []string{"articles"}},
-			{Method: "GET", Path: "/admin/articles/{id}/edit", Access: "session", Scopes: []string{"articles"}},
+			{Method: "PUT", Path: "/admin/articles/{id}", Access: "session", Permissions: []string{"articles"}},
+			{Method: "GET", Path: "/admin/articles/{id}/edit", Access: "session", Permissions: []string{"articles"}},
 			{Method: "GET", Path: "/healthz", Access: "unknown"},
 			{Method: "GET", Path: "/login", Access: "public"},
 			{Method: "POST", Path: "/login", Access: "public"},

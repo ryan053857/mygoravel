@@ -7,7 +7,7 @@
 - [个人访问令牌](#personal-access-tokens)
 - [设备与令牌列表](#listing-tokens)
 - [撤销令牌](#revoking-tokens)
-- [跟随用户的最新权限](#current-permissions)
+- [加载权限](#loading-permissions)
 - [过期清理](#cleanup)
 - [单页应用](#single-page-applications)
 
@@ -61,10 +61,10 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 
 ```go
 tokens := apitoken.NewStore(a.db, a.cfg.APIToken)
-requireArticles := rest.RequireBearer(api, tokens.Validate, "articles")
+requireArticles := rest.RequireBearer(api, tokens.Validate, "articles:read")
 ```
 
-`Validate` 返回的主体 `Method` 为 `bearer`，`Scopes` 是 token 的 scope，`Credential` 是 token 的 ID。它每分钟最多为一个 token 写一次库，记录最近使用时间并延长登录 token 的有效期，因此空闲时长的精度约为一分钟。
+`Validate` 返回的主体 `Method` 为 `bearer`，`Credential` 是 token 的 ID。token 只说明“这是谁”，不携带用户的权限：权限在每个请求中[加载](#loading-permissions)。它每分钟最多为一个 token 写一次库，记录最近使用时间并延长登录 token 的有效期，因此空闲时长的精度约为一分钟。
 
 <a id="login-and-logout"></a>
 ## 登录与登出
@@ -100,7 +100,7 @@ func issueToken(users *user.Service, tokens *apitoken.Store) func(context.Contex
         if err != nil {
             return nil, err
         }
-        sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser, Scopes: u.Scopes}
+        sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser}
         plain, err := tokens.Login(ctx, sub, apitoken.Device{
             Remember:  in.Body.Remember,
             IP:        in.ip,
@@ -144,7 +144,7 @@ rest.Register(api, op, func() func(context.Context, *struct{}) (*struct{}, error
 <a id="personal-access-tokens"></a>
 ## 个人访问令牌
 
-用户可以为脚本或第三方集成创建长期有效的令牌，并只授予部分 scope。下面是“API 令牌”[页面](views.md)的创建处理器，令牌明文只显示这一次：
+用户可以为脚本或第三方集成创建令牌，并把它限制在部分权限内。下面是“API 令牌”[页面](views.md)的创建处理器，令牌明文只显示这一次：
 
 ```go
 type CreateTokenInput struct {
@@ -160,7 +160,10 @@ func (h *Handlers) CreateToken(w http.ResponseWriter, r *http.Request) error {
         return web.Render(w, r, http.StatusUnprocessableEntity, views.NewToken(f))
     }
     sub, _ := identity.FromContext(r.Context())
-    plain, err := h.tokens.Create(r.Context(), sub, f.Data.Name, []string{"articles:read"}, time.Time{})
+    plain, err := h.tokens.Create(r.Context(), sub, apitoken.Personal{
+        Name:   f.Data.Name,
+        Scopes: []string{"articles:read"},
+    })
     if err != nil {
         return err
     }
@@ -168,7 +171,16 @@ func (h *Handlers) CreateToken(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-`Create` 的最后一个参数是过期时间，零值表示不过期。scope 由应用决定，通常应当是用户已有 scope 的子集。个人访问令牌不按空闲时间过期，也不受 `RevokeOthers` 影响。
+`apitoken.Personal` 的字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `Name` | 在令牌列表中显示的名称，1 到 255 个字符 |
+| `Scopes` | 令牌被限制在内的权限，至少一个，支持通配符，例如 `articles:*` |
+| `Tenant` | 不为空时，令牌只能在这个租户中使用 |
+| `ExpiresAt` | 过期时间，零值表示不过期 |
+
+令牌能做的是**用户当前的权限与 `Scopes` 的交集**：`Scopes` 写了 `*`，也不会超出用户本人的权限；用户被收回权限后，令牌随之收窄，不需要重新创建。个人访问令牌不按空闲时间过期，也不受 `RevokeOthers` 影响。
 
 <a id="listing-tokens"></a>
 ## 设备与令牌列表
@@ -210,31 +222,29 @@ func (s *Service) SignOutEverywhere(ctx context.Context, userID string) error {
 
 “退出其他设备”也是如此：在页面中发起时，调用会话存储的 `RevokeOthers`，再调用 `tokens.RevokeOthers(ctx, sub)`。此时主体来自会话，没有 token 凭据，所以会撤销全部登录 token。在单页应用中发起时则反过来，调用会话存储的 `RevokeSubject`，再调用 `tokens.RevokeOthers`。见[撤销会话](session.md#revoking-sessions)。
 
-<a id="current-permissions"></a>
-## 跟随用户的最新权限
+<a id="loading-permissions"></a>
+## 加载权限
 
-token 的 scope 是签发时确定的。用户被收回权限、账号被停用之后，已签发的 token 仍然按原来的 scope 通过检查，直到被撤销或过期。需要立即生效时，在 `Validate` 外面包一层，用用户当前的状态收窄主体：
+token 不保存用户的权限，所以权限变化、账号停用都能立即生效。权限由 `rest.Options.Resolve` 在每个请求中按用户当前的状态加载，见[每次请求加载权限](authentication.md#resolving-subjects)：
 
 ```go
-validate := func(ctx context.Context, token string) (identity.Subject, error) {
-    sub, err := tokens.Validate(ctx, token)
-    if err != nil {
-        return sub, err
-    }
-    u, err := users.Get(ctx, sub.ID)
-    if err != nil {
-        return identity.Subject{}, err
-    }
-    if u.Disabled {
-        return identity.Subject{}, auth.ErrUnauthenticated.New()
-    }
-    sub.Scopes = slices.DeleteFunc(sub.Scopes, func(sc string) bool { return !slices.Contains(u.Scopes, sc) })
-    return sub, nil
-}
-requireArticles := rest.RequireBearer(api, validate, "articles")
+api := rest.New(rest.Options{
+    Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+        u, err := users.Get(ctx, sub.ID)
+        if err != nil {
+            return identity.Subject{}, err
+        }
+        if u.Disabled {
+            return identity.Subject{}, auth.ErrUnauthenticated.New()
+        }
+        sub.Permissions = u.Permissions
+        return sub, nil
+    },
+    // ...
+})
 ```
 
-返回值的处理方式见[Token 校验器](authentication.md#token-validators)。这与页面的 [`Options.Resolve`](views.md#login) 作用相同。
+个人访问令牌的 `Scopes` 由 `Validate` 填入，`Resolve` 不需要处理：`sub.Can` 同时检查两者。
 
 <a id="cleanup"></a>
 ## 过期清理

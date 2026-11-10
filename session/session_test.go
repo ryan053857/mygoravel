@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -86,7 +85,7 @@ func newApp(t *testing.T, store scs.Store) *httptest.Server {
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		sub := identity.Subject{ID: in.User, Type: identity.SubjectUser}
 		if in.User == "root" {
-			sub.Scopes = []string{"admin"}
+			sub.Permissions = []string{"admin"}
 		}
 		if err := session.Login(r.Context(), sm, sub); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -107,7 +106,7 @@ func newApp(t *testing.T, store scs.Store) *httptest.Server {
 			switch {
 			case !ok:
 				w.WriteHeader(http.StatusUnauthorized)
-			case scope != "" && !slices.Contains(sub.Scopes, scope):
+			case scope != "" && !sub.Can(scope):
 				w.WriteHeader(http.StatusForbidden)
 			default:
 				_ = json.NewEncoder(w).Encode(map[string]string{"id": sub.ID, "method": sub.Method})

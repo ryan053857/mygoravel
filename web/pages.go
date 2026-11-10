@@ -6,7 +6,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 
 	"github.com/a-h/templ"
@@ -44,7 +43,7 @@ const (
 	ModeRoutes
 )
 
-// Options 创建 Pages。运行模式下，除 Resolve、TrustedOrigins、Logger 外都必须设置。
+// Options 创建 Pages。运行模式下，除 Tenant、Resolve、TrustedOrigins、Logger 外都必须设置。
 type Options struct {
 	Mode Mode
 	// Sessions 是页面使用的会话，由 session.New 创建。Pages 接管它的错误处理：
@@ -52,10 +51,15 @@ type Options struct {
 	Sessions *scs.SessionManager
 	// Login 是登录页地址。Require 的路由把未登录的请求带到这里，并在 next 参数中附上原地址。
 	Login string
-	// Resolve 在 Require 保护的每个请求中，把登录时保存的主体转换为当前的主体，例如重新查询用户的状态和权限；
-	// nil 时直接使用保存的主体。返回 4xx 类错误或 ID 为空的主体表示主体已失效：销毁会话并按未登录处理；
-	// 返回 5xx 类错误时呈现错误页。scope 检查使用返回的主体，主体的 Method 为 session。
-	Resolve func(r *http.Request, stored identity.Subject) (identity.Subject, error)
+	// Tenant 从请求中取出本次请求所在的租户，例如路径参数 chi.URLParam(r, "tenant")、子域名或自定义域名；
+	// 结果在每条页面路由（包括公开路由）开始时写入 identity.WithTenant。nil 表示始终是平台本身（""）。
+	Tenant func(r *http.Request) string
+	// Resolve 在 Require 保护的每个请求中，把登录时保存的主体转换为本次请求的主体，
+	// 例如重新查询用户的状态、按 identity.TenantFromContext 加载用户在租户中的权限；nil 时直接使用保存的主体。
+	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效：销毁会话并按未登录处理；
+	// 其他错误按分类呈现错误页，例如不是租户成员时返回 errorx.NotFound 得到 404。
+	// 权限检查使用返回的主体，主体的 Method 为 session。
+	Resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
 	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求。
 	// message 来自 httpx.ErrorDetail：业务错误的译文，或状态描述。
 	ErrorPage func(status int, message string) templ.Component
@@ -103,8 +107,8 @@ func New(opts Options) *Pages {
 	return p
 }
 
-// authorize 按 access 检查登录和 scope，通过后把主体写入 identity.WithSubject。
-// 设置了 Options.Resolve 时，主体和 scope 取自它的返回值。
+// authorize 按 access 检查登录和权限，通过后把主体写入 identity.WithSubject。
+// 设置了 Options.Resolve 时，主体和权限取自它的返回值。
 func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 	if !access.login {
 		return next
@@ -119,22 +123,22 @@ func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 			Redirect(w, r, p.opts.Login+"?next="+url.QueryEscape(returnTo(r)))
 			return
 		}
-		for _, scope := range access.scopes {
-			if !slices.Contains(sub.Scopes, scope) {
+		for _, perm := range access.permissions {
+			if !sub.Can(perm) {
 				p.Error(w, r, ErrForbidden.New())
 				return
 			}
 		}
 		token := p.opts.Sessions.Token(r.Context())
 		ctx := identity.WithSubject(r.Context(), sub)
-		ctx = httpx.WithCredentialCheck(ctx, func(c context.Context) error { return p.recheck(c, r, token, sub, access) })
+		ctx = httpx.WithCredentialCheck(ctx, func(c context.Context) error { return p.recheck(c, token, sub, access) })
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// recheck 在长连接期间重新确认会话：从存储重新读取（会话可能已被登出或撤销），经过 Options.Resolve
-// （用户可能已被停用），再检查 scope。存储或 Resolve 暂时故障时返回 5xx 类错误，连接保持。
-func (p *Pages) recheck(ctx context.Context, r *http.Request, token string, want identity.Subject, access Access) error {
+// recheck 在长连接期间重新确认会话：从存储重新读取（会话可能已被登出或撤销），检查凭据绑定的租户，
+// 经过 Options.Resolve（用户可能已被停用或移出租户），再检查权限。存储或 Resolve 暂时故障时返回 5xx 类错误，连接保持。
+func (p *Pages) recheck(ctx context.Context, token string, want identity.Subject, access Access) error {
 	stored, ok, err := session.Lookup(ctx, p.opts.Sessions, token)
 	if err != nil {
 		return err
@@ -142,18 +146,23 @@ func (p *Pages) recheck(ctx context.Context, r *http.Request, token string, want
 	if !ok || stored.ID != want.ID {
 		return errUnauthenticated.New()
 	}
+	if stored.Tenant != "" && stored.Tenant != identity.TenantFromContext(ctx) {
+		return ErrForbidden.New()
+	}
 	sub := stored
 	if p.opts.Resolve != nil {
-		sub, err = p.opts.Resolve(r.WithContext(ctx), stored)
-		if err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError {
+		sub, err = p.opts.Resolve(ctx, stored)
+		switch {
+		case err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError:
+			return err
+		case err != nil && errorx.KindOf(err) == errorx.Unauthenticated, err == nil && sub.ID == "":
+			return errUnauthenticated.New()
+		case err != nil:
 			return err
 		}
-		if err != nil || sub.ID == "" {
-			return errUnauthenticated.New()
-		}
 	}
-	for _, scope := range access.scopes {
-		if !slices.Contains(sub.Scopes, scope) {
+	for _, perm := range access.permissions {
+		if !sub.Can(perm) {
 			return ErrForbidden.New()
 		}
 	}
@@ -171,19 +180,28 @@ func (p *Pages) Logout(ctx context.Context) error {
 }
 
 // subject 返回当前请求的主体：会话中保存的主体，经过 Options.Resolve 转换。
-// Resolve 认为主体已失效时销毁会话，返回 ok 为 false；只有需要呈现错误页时返回 err。
+// 未登录，或 Resolve 认为主体已失效（此时销毁会话）时返回 ok 为 false；需要呈现错误页时返回 err，
+// 例如保存的主体绑定了其他租户、不是租户成员。
 func (p *Pages) subject(r *http.Request) (identity.Subject, bool, error) {
 	ctx := r.Context()
 	stored, ok := session.Subject(ctx, p.opts.Sessions)
-	if !ok || p.opts.Resolve == nil {
-		return stored, ok, nil
+	if !ok {
+		return identity.Subject{}, false, nil
 	}
-	sub, err := p.opts.Resolve(r, stored)
-	if err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError {
+	if stored.Tenant != "" && stored.Tenant != identity.TenantFromContext(ctx) {
+		return identity.Subject{}, false, ErrForbidden.New()
+	}
+	if p.opts.Resolve == nil {
+		return stored, true, nil
+	}
+	sub, err := p.opts.Resolve(ctx, stored)
+	switch {
+	case err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError:
 		return identity.Subject{}, false, errors.Wrap(err, "resolve subject")
-	}
-	if err != nil || sub.ID == "" {
+	case err != nil && errorx.KindOf(err) == errorx.Unauthenticated, err == nil && sub.ID == "":
 		return identity.Subject{}, false, session.Logout(ctx, p.opts.Sessions)
+	case err != nil:
+		return identity.Subject{}, false, err
 	}
 	sub.Method = "session"
 	return sub, true, nil

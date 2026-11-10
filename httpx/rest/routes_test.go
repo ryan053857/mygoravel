@@ -61,7 +61,7 @@ func TestRoutesIncludesTypedNativeAndHiddenRoutesWithoutRuntime(t *testing.T) {
 		{Method: http.MethodGet, Path: "/inventory/health/ready", Access: "unknown"},
 		{Method: http.MethodGet, Path: "/inventory/hidden", OperationID: "item-hidden", Summary: "隐藏条目详情", Access: "public"},
 		{Method: http.MethodGet, Path: "/inventory/items", OperationID: "item-list", Summary: "查看条目列表\n支持分页", Access: "public"},
-		{Method: http.MethodPost, Path: "/inventory/items", OperationID: "item-create", Summary: "创建条目", Access: "bearer", Scopes: []string{"items:write", "items:read"}},
+		{Method: http.MethodPost, Path: "/inventory/items", OperationID: "item-create", Summary: "创建条目", Access: "bearer", Permissions: []string{"items:write", "items:read"}},
 		{Method: http.MethodGet, Path: "/inventory/private", OperationID: "item-private", Access: "bearer"},
 	}
 	if !reflect.DeepEqual(inventory, want) {
@@ -85,11 +85,11 @@ func TestRoutesIncludesTypedNativeAndHiddenRoutesWithoutRuntime(t *testing.T) {
 	}
 	for i, r := range routes {
 		if r.OperationID == "item-create" {
-			routes[i].Scopes[0] = "changed"
+			routes[i].Permissions[0] = "changed"
 		}
 	}
-	if !slices.ContainsFunc(httpx.Routes(api.Router()), func(r httpx.Route) bool { return slices.Equal(r.Scopes, []string{"items:write", "items:read"}) }) {
-		t.Fatal("scope mutation changed the API")
+	if !slices.ContainsFunc(httpx.Routes(api.Router()), func(r httpx.Route) bool { return slices.Equal(r.Permissions, []string{"items:write", "items:read"}) }) {
+		t.Fatal("permission mutation changed the API")
 	}
 }
 

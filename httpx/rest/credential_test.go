@@ -20,7 +20,7 @@ import (
 func TestRequireBearerInstallsCredentialCheck(t *testing.T) {
 	var (
 		mu      sync.Mutex
-		subject = identity.Subject{ID: "alice", Type: identity.SubjectUser, Scopes: []string{"events"}}
+		subject = identity.Subject{ID: "alice", Type: identity.SubjectUser, Permissions: []string{"events"}}
 		valid   = true
 		down    bool
 	)
@@ -62,11 +62,11 @@ func TestRequireBearerInstallsCredentialCheck(t *testing.T) {
 	if err := httpx.CheckCredential(ctx); err != nil {
 		t.Fatalf("validator unavailable treated as revoked: %v", err)
 	}
-	set(func() { down = false; subject.Scopes = nil })
+	set(func() { down = false; subject.Permissions = nil })
 	if err := httpx.CheckCredential(ctx); httpx.StatusOf(err) != http.StatusForbidden {
 		t.Fatalf("scope removed: %v", err)
 	}
-	set(func() { subject.Scopes = []string{"events"}; subject.ID = "bob" })
+	set(func() { subject.Permissions = []string{"events"}; subject.ID = "bob" })
 	if err := httpx.CheckCredential(ctx); httpx.StatusOf(err) != http.StatusUnauthorized {
 		t.Fatalf("subject changed: %v", err)
 	}
