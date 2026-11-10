@@ -11,7 +11,7 @@ import (
 )
 
 // Store 是基于 Bun 的会话存储，实现 scs.CtxStore 和 scs.IterableCtxStore，
-// 支持 PostgreSQL、MySQL 与 SQLite。表结构由 Migrations 提供。
+// 查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供 PostgreSQL 与 SQLite 的表结构。
 //
 // Store 不在后台清理过期会话：过期会话读不到，由应用定时调用 Cleanup 删除。
 type Store struct {

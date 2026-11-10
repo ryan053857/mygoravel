@@ -11,33 +11,38 @@ import (
 )
 
 // Database 把计数存在数据库中，多个实例共享同一份配额，表结构由 Migrations 提供。
-// 每个 key 只存一个理论到达时间（tat），一次 Allow 是一条原子的 upsert，时间取数据库时钟。
+// 每个 key 只存一个理论到达时间（tat），一次 Allow 是一条原子的 upsert。
+// PostgreSQL 取数据库时钟；SQLite 只在单机上使用，取应用时钟，tat 存为 Unix 微秒。
 //
-// 目前只支持 PostgreSQL。每次 Allow 都是一次写入，适合登录、验证码、发邮件这类低频操作；
+// 支持 PostgreSQL 和 SQLite。每次 Allow 都是一次写入，适合登录、验证码、发邮件这类低频操作；
 // 每个请求都要经过的全局限流请使用 Memory。
 type Database struct {
 	gcra
-	db   bun.IDB
-	name string
+	db     bun.IDB
+	name   string
+	sqlite bool
 }
 
 // NewDatabase 创建数据库限流器。name 区分共用 rate_limits 表的不同限流器，
 // 同名的限流器共享配额，因此 name 应与 cfg 一一对应。
-// db 必须已执行 rate_limits 迁移；db 为 nil、name 为空、cfg 不合法或数据库不是 PostgreSQL 时 panic。
+// db 必须已执行 rate_limits 迁移；db 为 nil、name 为空、cfg 不合法或数据库不是 PostgreSQL 或 SQLite 时 panic。
 func NewDatabase(db bun.IDB, name string, cfg Config) *Database {
 	switch {
 	case db == nil:
 		panic("ratelimit: NewDatabase: nil database")
 	case name == "":
 		panic("ratelimit: NewDatabase: empty name")
-	case db.Dialect().Name() != dialect.PG:
-		panic("ratelimit: NewDatabase: only PostgreSQL is supported")
+	case db.Dialect().Name() != dialect.PG && db.Dialect().Name() != dialect.SQLite:
+		panic("ratelimit: NewDatabase: only PostgreSQL and SQLite are supported")
 	}
-	return &Database{gcra: newGCRA("NewDatabase", cfg), db: db, name: name}
+	return &Database{gcra: newGCRA("NewDatabase", cfg), db: db, name: name, sqlite: db.Dialect().Name() == dialect.SQLite}
 }
 
 // Allow 实现 Limiter。
 func (d *Database) Allow(ctx context.Context, key string) error {
+	if d.sqlite {
+		return d.allowSQLite(ctx, key)
+	}
 	// tat 不超过 now + ahead 时放行并推后 step；否则不更新，RETURNING 不返回行。
 	var allowed bool
 	err := d.db.NewRaw(`
@@ -62,6 +67,36 @@ SELECT (extract(epoch FROM tat - statement_timestamp()) * 1000000)::bigint - ?
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return errors.Wrap(err, "ratelimit: allow")
 	}
+	return d.exceeded(wait)
+}
+
+// allowSQLite 与 PostgreSQL 的逻辑相同，tat 与当前时间都是应用时钟的 Unix 微秒。
+func (d *Database) allowSQLite(ctx context.Context, key string) error {
+	now, step, ahead := time.Now().UnixMicro(), d.step.Microseconds(), d.ahead.Microseconds()
+	var allowed bool
+	err := d.db.NewRaw(`
+INSERT INTO rate_limits AS r (name, key, tat) VALUES (?, ?, ?)
+ON CONFLICT (name, key) DO UPDATE
+   SET tat = max(r.tat, ?) + ?
+ WHERE r.tat <= ?
+RETURNING true`,
+		d.name, key, now+step, now, step, now+ahead).Scan(ctx, &allowed)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return errors.Wrap(err, "ratelimit: allow")
+	}
+	var wait int64
+	err = d.db.NewRaw(`SELECT tat - ? FROM rate_limits WHERE name = ? AND key = ?`, now+ahead, d.name, key).Scan(ctx, &wait)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return errors.Wrap(err, "ratelimit: allow")
+	}
+	return d.exceeded(wait)
+}
+
+// exceeded 把以微秒计的等待时间转换为 ErrExceeded。
+func (d *Database) exceeded(wait int64) error {
 	retry := time.Duration(wait) * time.Microsecond
 	if retry <= 0 {
 		// 两条语句之间行被 Cleanup 删除或配额恰好回满，按一个 step 估计。
@@ -78,9 +113,14 @@ func (d *Database) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("ratelimit: cleanup limit must be positive")
 	}
+	// SQLite 的 tat 是应用时钟的 Unix 微秒。
+	var now any = bun.Safe("statement_timestamp()")
+	if d.sqlite {
+		now = time.Now().UnixMicro()
+	}
 	res, err := d.db.NewRaw(`
 DELETE FROM rate_limits WHERE (name, key) IN (
-    SELECT name, key FROM rate_limits WHERE tat <= statement_timestamp() ORDER BY tat LIMIT ?)`, limit).Exec(ctx)
+    SELECT name, key FROM rate_limits WHERE tat <= ? ORDER BY tat LIMIT ?)`, now, limit).Exec(ctx)
 	if err != nil {
 		return 0, errors.Wrap(err, "ratelimit: cleanup")
 	}

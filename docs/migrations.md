@@ -95,15 +95,17 @@ var FS embed.FS
 
 文件上传等可选功能自带迁移 SQL。使用这些功能时，把迁移发布到你的应用目录，审查并纳入版本控制，然后交给应用现有的 goose 迁移流程执行。
 
-发布命令需要显式注册。下面是加入已有命令装配代码的片段：`root` 是 `command.Root` 返回的根命令，`migrations.FS` 是应用嵌入的迁移，`dbConfig` 是应用命令装配中从配置取出数据库配置的函数。需要导入 `command/migratecmd`、`database/migrate` 和 `filesystem` 包：
+发布命令需要显式注册。下面是加入已有命令装配代码的片段：`root` 是 `command.Root` 返回的根命令，`migrations.FS` 是应用嵌入的迁移，`dbConfig` 是应用命令装配中从配置取出数据库配置的函数。需要导入 `command/migratecmd`、`database`、`database/migrate` 和 `filesystem` 包：
 
 ```go
 migrationCmd := migratecmd.New(migrations.FS, dbConfig)
-migrationCmd.AddCommand(migratecmd.Publish(
+migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
     migrate.Source{Name: "filesystem", FS: filesystem.Migrations()},
 ))
 root.AddCommand(migrationCmd)
 ```
+
+`Publish` 的第一个参数是应用使用的数据库类型。框架迁移按数据库类型各写了一份，发布时只复制对应的那一份；使用 SQLite 时传入 `database.SQLite`。
 
 在应用根目录执行：
 
@@ -143,15 +145,15 @@ func main() {
     root := command.Root("migrations", "新建或发布迁移")
     root.AddCommand(
         migratecmd.Make(database.Postgres),
-        migratecmd.Publish(migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}),
+        migratecmd.Publish(database.Postgres, migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}),
     )
     command.Execute(root)
 }
 ```
 
-`migratecmd.Make` 的参数是应用使用的数据库类型。执行 `go run ./cmd/publish make create_articles_table` 或 `go run ./cmd/publish publish --dir migrations` 生成第一个 SQL 后，再添加应用的 `migrations/embed.go` 和迁移执行命令。这个入口也可以一直保留，供开发时使用。
+`migratecmd.Make` 和 `migratecmd.Publish` 的第一个参数都是应用使用的数据库类型。执行 `go run ./cmd/publish make create_articles_table` 或 `go run ./cmd/publish publish --dir migrations` 生成第一个 SQL 后，再添加应用的 `migrations/embed.go` 和迁移执行命令。这个入口也可以一直保留，供开发时使用。
 
-自定义命令或工具也可以直接调用 `migrate.Publish("migrations", sources...)`；`sources` 是应用显式选择的 `[]migrate.Source`。每个来源的 `Name` 是稳定的包标识，`FS` 根目录直接包含带数字版本的 SQL。来源按传入顺序发布，同一来源的文件按数字版本排序。
+自定义命令或工具也可以直接调用 `migrate.Publish("migrations", database.Postgres, sources...)`；`sources` 是应用显式选择的 `[]migrate.Source`。每个来源的 `Name` 是稳定的包标识，`FS` 根目录下按数据库类型分为 `postgres`、`sqlite` 等目录，每个目录直接包含带数字版本的 SQL。来源按传入顺序发布，同一来源的文件按数字版本排序。各数据库的同名文件描述同一次变更，共用一个来源标记。
 
 <a id="running-migrations"></a>
 ## 运行迁移

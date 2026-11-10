@@ -110,7 +110,7 @@ if err := lk.Refresh(ctx, time.Minute); err != nil {
 <a id="database-store"></a>
 ## 使用数据库存储
 
-多实例部署时把锁保存在数据库中。`lock.NewDBStore` 接收应用的 `*bun.DB`，支持 PostgreSQL、MySQL 和 SQLite：
+多实例部署时把锁保存在数据库中。`lock.NewDBStore` 接收应用的 `*bun.DB`，支持 PostgreSQL 和 SQLite：
 
 ```go
 locker := lock.New(lock.NewDBStore(db))
@@ -119,7 +119,7 @@ locker := lock.New(lock.NewDBStore(db))
 使用前先发布 `locks` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(
+migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
     migrate.Source{Name: "lock", FS: lock.Migrations()},
 ))
 ```

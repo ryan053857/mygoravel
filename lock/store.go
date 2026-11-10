@@ -8,7 +8,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// DBStore 是基于 Bun 的锁存储，支持 PostgreSQL、MySQL 与 SQLite。表结构由 Migrations 提供。
+// DBStore 是基于 Bun 的锁存储。查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供 PostgreSQL 与 SQLite 的表结构。
 // 过期时间按应用服务器时钟计算，各实例的时钟需要同步。
 //
 // DBStore 不在后台清理过期的锁：过期的锁会被下一次 Acquire 直接取得，残留行由应用定时调用 Cleanup 删除。

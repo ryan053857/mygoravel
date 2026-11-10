@@ -14,7 +14,7 @@
 
 HTTP 请求本身是无状态的。会话让服务器在多次请求之间记住同一个浏览器的数据：数据保存在服务端，浏览器通过 cookie 携带会话 token。
 
-mygoravel 的会话基于 [alexedwards/scs](https://github.com/alexedwards/scs)。`session` 包只补上框架需要的部分：从配置创建 `*scs.SessionManager`，以及一个支持 PostgreSQL、MySQL 和 SQLite 的 Bun 存储。读写会话数据直接使用 scs 的原生方法。
+mygoravel 的会话基于 [alexedwards/scs](https://github.com/alexedwards/scs)。`session` 包只补上框架需要的部分：从配置创建 `*scs.SessionManager`，以及一个支持 PostgreSQL 和 SQLite 的 Bun 存储。读写会话数据直接使用 scs 的原生方法。
 
 用会话登录用户、保护路由，见[会话认证](authentication.md#session-authentication)。
 
@@ -111,7 +111,7 @@ sessions := session.New(cfg.Session, store, nil)
 使用前先发布 `sessions` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(
+migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
     migrate.Source{Name: "session", FS: session.Migrations()},
 ))
 ```

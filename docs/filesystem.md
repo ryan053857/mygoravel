@@ -39,7 +39,7 @@
 使用前先发布 `files` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(
+migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
     migrate.Source{Name: "filesystem", FS: filesystem.Migrations()},
 ))
 ```

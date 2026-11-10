@@ -1,5 +1,3 @@
-//go:build integration
-
 package filesystem_test
 
 import (
@@ -16,6 +14,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
+	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
@@ -201,127 +200,129 @@ func registerFileRoutes(api *rest.API, auth func(*huma.Operation), files *filesy
 }
 
 func TestRESTUploadAndConfirm(t *testing.T) {
-	e := newEnv(t)
-	api := rest.New(rest.Options{Title: "test"})
-	users := map[string]identity.Subject{"alice": alice, "bob": bob}
-	auth := rest.RequireBearer(api, func(_ huma.Context, token string) (identity.Subject, error) {
-		return users[token], nil
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		e := newEnv(t, driver)
+		api := rest.New(rest.Options{Title: "test"})
+		users := map[string]identity.Subject{"alice": alice, "bob": bob}
+		auth := rest.RequireBearer(api, func(_ huma.Context, token string) (identity.Subject, error) {
+			return users[token], nil
+		})
+		registerFileRoutes(api, auth, e.svc)
+		server := httptest.NewServer(api.Handler())
+		t.Cleanup(server.Close)
+
+		call := func(token, method, path, contentType string, body []byte, out any) (int, map[string]any) {
+			t.Helper()
+			req, _ := http.NewRequest(method, server.URL+path, bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", contentType)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			var raw json.RawMessage
+			_ = json.NewDecoder(resp.Body).Decode(&raw)
+			var problem map[string]any
+			_ = json.Unmarshal(raw, &problem)
+			if out != nil {
+				_ = json.Unmarshal(raw, out)
+			}
+			return resp.StatusCode, problem
+		}
+		form := func(name, content string) (string, []byte) {
+			var buf bytes.Buffer
+			w := multipart.NewWriter(&buf)
+			part, _ := w.CreateFormFile("file", name)
+			_, _ = part.Write([]byte(content))
+			_ = w.Close()
+			return w.FormDataContentType(), buf.Bytes()
+		}
+		jsonBody := func(v any) []byte {
+			b, _ := json.Marshal(v)
+			return b
+		}
+
+		ct, body := form("cover.png", "png-bytes")
+		var file filesystem.File
+		if code, p := call("alice", http.MethodPost, "/files", ct, body, &file); code != http.StatusCreated {
+			t.Fatalf("upload = %d %v", code, p)
+		}
+		if file.Status != filesystem.StatusTemporary || file.Size != 9 || !strings.HasSuffix(file.URL, ".png") {
+			t.Fatalf("file = %+v", file)
+		}
+
+		// 他人引用临时文件得到 404 和业务错误码。
+		code, p := call("bob", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": file.ID}), nil)
+		if code != http.StatusNotFound || p["code"] != "filesystem.not_found" {
+			t.Fatalf("bob confirm = %d %v", code, p)
+		}
+		var article struct {
+			CoverURL string `json:"cover_url"`
+		}
+		if code, p := call("alice", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": file.ID}), &article); code != http.StatusCreated || article.CoverURL != file.URL {
+			t.Fatalf("create article = %d %v %+v", code, p, article)
+		}
+
+		// S3 单次直传：未上传就确认得到 409，签名上传后确认成功。
+		var prepared filesystem.File
+		if code, p := call("alice", http.MethodPost, "/files/prepare", "application/json", jsonBody(map[string]any{"filename": "a.txt", "size": 3}), &prepared); code != http.StatusCreated {
+			t.Fatalf("prepare = %d %v", code, p)
+		}
+		code, p = call("alice", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": prepared.ID}), nil)
+		if code != http.StatusConflict || p["code"] != "filesystem.not_uploaded" {
+			t.Fatalf("confirm before upload = %d %v", code, p)
+		}
+		var signed filesystem.SignedRequest
+		if code, p := call("alice", http.MethodPost, "/files/"+prepared.ID.String()+"/sign", "application/json", nil, &signed); code != http.StatusOK || signed.Method != http.MethodPut {
+			t.Fatalf("sign = %d %v", code, p)
+		}
+		sendSigned(t, signed, []byte("abc"))
+		if code, p := call("alice", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": prepared.ID}), nil); code != http.StatusCreated {
+			t.Fatalf("confirm direct upload = %d %v", code, p)
+		}
+
+		// S3 分片直传：创建会话、逐片签名上传、合并，再由业务接口确认。
+		data := bytes.Repeat([]byte("z"), 16<<20+10)
+		var big filesystem.File
+		if code, p := call("alice", http.MethodPost, "/files/prepare", "application/json", jsonBody(map[string]any{"filename": "big.bin", "size": len(data)}), &big); code != http.StatusCreated {
+			t.Fatalf("prepare big = %d %v", code, p)
+		}
+		var up filesystem.Multipart
+		if code, p := call("alice", http.MethodPost, "/files/"+big.ID.String()+"/multipart", "application/json", nil, &up); code != http.StatusCreated || up.PartCount != 2 {
+			t.Fatalf("create multipart = %d %v %+v", code, p, up)
+		}
+		var parts []filesystem.Part
+		for n := 1; n <= up.PartCount; n++ {
+			var req filesystem.SignedRequest
+			path := "/files/" + big.ID.String() + "/multipart/" + up.UploadID + "/parts/" + strconv.Itoa(n) + "/sign"
+			if code, p := call("alice", http.MethodPost, path, "application/json", nil, &req); code != http.StatusOK {
+				t.Fatalf("sign part %d = %d %v", n, code, p)
+			}
+			chunk := data[int64(n-1)*up.PartSize : min(int64(n)*up.PartSize, int64(len(data)))]
+			parts = append(parts, filesystem.Part{Number: int32(n), ETag: sendSigned(t, req, chunk)})
+		}
+		completePath := "/files/" + big.ID.String() + "/multipart/" + up.UploadID + "/complete"
+		if code, p := call("alice", http.MethodPost, completePath, "application/json", jsonBody(map[string]any{"parts": parts}), nil); code != http.StatusOK {
+			t.Fatalf("complete = %d %v", code, p)
+		}
+		if code, p := call("alice", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": big.ID}), nil); code != http.StatusCreated {
+			t.Fatalf("confirm multipart = %d %v", code, p)
+		}
+
+		// 放弃分片：204，之后会话不可再用于签名合并。
+		var abandoned filesystem.File
+		call("alice", http.MethodPost, "/files/prepare", "application/json", jsonBody(map[string]any{"filename": "x.bin", "size": len(data)}), &abandoned)
+		var session filesystem.Multipart
+		call("alice", http.MethodPost, "/files/"+abandoned.ID.String()+"/multipart", "application/json", nil, &session)
+		if code, p := call("alice", http.MethodDelete, "/files/"+abandoned.ID.String()+"/multipart/"+session.UploadID, "application/json", nil, nil); code != http.StatusNoContent {
+			t.Fatalf("abort = %d %v", code, p)
+		}
+
+		tooBig, _ := json.Marshal(map[string]any{"filename": "a.bin", "size": int64(2 * filesystem.GiB)})
+		code, p = call("alice", http.MethodPost, "/files/prepare", "application/json", tooBig, nil)
+		if code != http.StatusUnprocessableEntity || p["code"] != "filesystem.too_large" {
+			t.Fatalf("too large = %d %v", code, p)
+		}
 	})
-	registerFileRoutes(api, auth, e.svc)
-	server := httptest.NewServer(api.Handler())
-	t.Cleanup(server.Close)
-
-	call := func(token, method, path, contentType string, body []byte, out any) (int, map[string]any) {
-		t.Helper()
-		req, _ := http.NewRequest(method, server.URL+path, bytes.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Content-Type", contentType)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		var raw json.RawMessage
-		_ = json.NewDecoder(resp.Body).Decode(&raw)
-		var problem map[string]any
-		_ = json.Unmarshal(raw, &problem)
-		if out != nil {
-			_ = json.Unmarshal(raw, out)
-		}
-		return resp.StatusCode, problem
-	}
-	form := func(name, content string) (string, []byte) {
-		var buf bytes.Buffer
-		w := multipart.NewWriter(&buf)
-		part, _ := w.CreateFormFile("file", name)
-		_, _ = part.Write([]byte(content))
-		_ = w.Close()
-		return w.FormDataContentType(), buf.Bytes()
-	}
-	jsonBody := func(v any) []byte {
-		b, _ := json.Marshal(v)
-		return b
-	}
-
-	ct, body := form("cover.png", "png-bytes")
-	var file filesystem.File
-	if code, p := call("alice", http.MethodPost, "/files", ct, body, &file); code != http.StatusCreated {
-		t.Fatalf("upload = %d %v", code, p)
-	}
-	if file.Status != filesystem.StatusTemporary || file.Size != 9 || !strings.HasSuffix(file.URL, ".png") {
-		t.Fatalf("file = %+v", file)
-	}
-
-	// 他人引用临时文件得到 404 和业务错误码。
-	code, p := call("bob", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": file.ID}), nil)
-	if code != http.StatusNotFound || p["code"] != "filesystem.not_found" {
-		t.Fatalf("bob confirm = %d %v", code, p)
-	}
-	var article struct {
-		CoverURL string `json:"cover_url"`
-	}
-	if code, p := call("alice", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": file.ID}), &article); code != http.StatusCreated || article.CoverURL != file.URL {
-		t.Fatalf("create article = %d %v %+v", code, p, article)
-	}
-
-	// S3 单次直传：未上传就确认得到 409，签名上传后确认成功。
-	var prepared filesystem.File
-	if code, p := call("alice", http.MethodPost, "/files/prepare", "application/json", jsonBody(map[string]any{"filename": "a.txt", "size": 3}), &prepared); code != http.StatusCreated {
-		t.Fatalf("prepare = %d %v", code, p)
-	}
-	code, p = call("alice", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": prepared.ID}), nil)
-	if code != http.StatusConflict || p["code"] != "filesystem.not_uploaded" {
-		t.Fatalf("confirm before upload = %d %v", code, p)
-	}
-	var signed filesystem.SignedRequest
-	if code, p := call("alice", http.MethodPost, "/files/"+prepared.ID.String()+"/sign", "application/json", nil, &signed); code != http.StatusOK || signed.Method != http.MethodPut {
-		t.Fatalf("sign = %d %v", code, p)
-	}
-	sendSigned(t, signed, []byte("abc"))
-	if code, p := call("alice", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": prepared.ID}), nil); code != http.StatusCreated {
-		t.Fatalf("confirm direct upload = %d %v", code, p)
-	}
-
-	// S3 分片直传：创建会话、逐片签名上传、合并，再由业务接口确认。
-	data := bytes.Repeat([]byte("z"), 16<<20+10)
-	var big filesystem.File
-	if code, p := call("alice", http.MethodPost, "/files/prepare", "application/json", jsonBody(map[string]any{"filename": "big.bin", "size": len(data)}), &big); code != http.StatusCreated {
-		t.Fatalf("prepare big = %d %v", code, p)
-	}
-	var up filesystem.Multipart
-	if code, p := call("alice", http.MethodPost, "/files/"+big.ID.String()+"/multipart", "application/json", nil, &up); code != http.StatusCreated || up.PartCount != 2 {
-		t.Fatalf("create multipart = %d %v %+v", code, p, up)
-	}
-	var parts []filesystem.Part
-	for n := 1; n <= up.PartCount; n++ {
-		var req filesystem.SignedRequest
-		path := "/files/" + big.ID.String() + "/multipart/" + up.UploadID + "/parts/" + strconv.Itoa(n) + "/sign"
-		if code, p := call("alice", http.MethodPost, path, "application/json", nil, &req); code != http.StatusOK {
-			t.Fatalf("sign part %d = %d %v", n, code, p)
-		}
-		chunk := data[int64(n-1)*up.PartSize : min(int64(n)*up.PartSize, int64(len(data)))]
-		parts = append(parts, filesystem.Part{Number: int32(n), ETag: sendSigned(t, req, chunk)})
-	}
-	completePath := "/files/" + big.ID.String() + "/multipart/" + up.UploadID + "/complete"
-	if code, p := call("alice", http.MethodPost, completePath, "application/json", jsonBody(map[string]any{"parts": parts}), nil); code != http.StatusOK {
-		t.Fatalf("complete = %d %v", code, p)
-	}
-	if code, p := call("alice", http.MethodPost, "/articles", "application/json", jsonBody(map[string]any{"title": "x", "cover_id": big.ID}), nil); code != http.StatusCreated {
-		t.Fatalf("confirm multipart = %d %v", code, p)
-	}
-
-	// 放弃分片：204，之后会话不可再用于签名合并。
-	var abandoned filesystem.File
-	call("alice", http.MethodPost, "/files/prepare", "application/json", jsonBody(map[string]any{"filename": "x.bin", "size": len(data)}), &abandoned)
-	var session filesystem.Multipart
-	call("alice", http.MethodPost, "/files/"+abandoned.ID.String()+"/multipart", "application/json", nil, &session)
-	if code, p := call("alice", http.MethodDelete, "/files/"+abandoned.ID.String()+"/multipart/"+session.UploadID, "application/json", nil, nil); code != http.StatusNoContent {
-		t.Fatalf("abort = %d %v", code, p)
-	}
-
-	tooBig, _ := json.Marshal(map[string]any{"filename": "a.bin", "size": int64(2 * filesystem.GiB)})
-	code, p = call("alice", http.MethodPost, "/files/prepare", "application/json", tooBig, nil)
-	if code != http.StatusUnprocessableEntity || p["code"] != "filesystem.too_large" {
-		t.Fatalf("too large = %d %v", code, p)
-	}
 }

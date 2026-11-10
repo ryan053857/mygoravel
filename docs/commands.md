@@ -88,7 +88,7 @@ func main() {
 | `command.Run(use, short, run)` | 任意名称，例如 `serve`、`worker` | 是 |
 | `command.Config[C]()` | `config check`、`config show` | 是 |
 | `migratecmd.New(fsys, dbConfig)` | `migrate up`、`migrate status`、`migrate down` | 是 |
-| `migratecmd.Publish(sources...)` | 显式挂载的 `migrate publish` | 否 |
+| `migratecmd.Publish(driver, sources...)` | 显式挂载的 `migrate publish` | 否 |
 | `restcmd.OpenAPI(opts, register)` | `openapi` | 否 |
 | `restcmd.Routes(opts, register)` | `routes` | 否 |
 
@@ -179,7 +179,7 @@ VERSION         STATE    APPLIED AT           FILE
 
 命令都会加载配置。`make` 只读取 `driver` 来生成对应数据库的骨架；其他命令会连接数据库，并在结束后关闭连接。数据库连不上时以 `ExitUnavailable` 退出，部署脚本可以据此重试。迁移文件的编写与嵌入见[迁移](migrations.md)。
 
-需要文件上传等功能自带的 SQL 时，可在 `migratecmd.New` 返回的命令上显式添加 `migratecmd.Publish(sources...)`。其中 `sources` 是应用选择的 `[]migrate.Source`，例如 `migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}`。注册后可以执行：
+需要文件上传等功能自带的 SQL 时，可在 `migratecmd.New` 返回的命令上显式添加 `migratecmd.Publish(driver, sources...)`。其中 `driver` 是应用使用的数据库类型，`sources` 是应用选择的 `[]migrate.Source`，例如 `migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}`。注册后可以执行：
 
 ```bash
 go run ./cmd/api migrate publish --dir migrations

@@ -13,14 +13,17 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/ryan053857/mygoravel/database"
 )
 
 const sourceMarker = "-- mygoravel: "
 
 var sourceName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
-// Source 是一个迁移来源。Name 是稳定标识，FS 根目录直接包含带数字版本前缀的 SQL，
-// 例如 0001_create_files.sql。已发布的源文件不改名，升级只追加更高版本。
+// Source 是一个迁移来源。Name 是稳定标识；FS 根目录下按数据库类型分目录（postgres、sqlite），
+// 每个目录直接包含带数字版本前缀的 SQL，例如 postgres/0001_create_files.sql。
+// 各数据库的同名文件描述同一次变更，因此共用一个来源标记。已发布的源文件不改名，升级只追加更高版本。
 type Source struct {
 	Name string
 	FS   fs.FS
@@ -34,15 +37,15 @@ type publication struct {
 	data    []byte
 }
 
-// Publish 把 sources 中尚未发布的迁移复制到 dir，返回本次写入的文件名。
+// Publish 把 sources 中 driver 对应目录下尚未发布的迁移复制到 dir，返回本次写入的文件名。
 // 每个文件首行写入来源标记（如 "-- mygoravel: files/0001_create_files"），
 // 目录中已有相同标记的迁移会被跳过，应用可以自由修改或重命名已发布的文件。
 // 新文件的版本取当前 UTC 时间戳，并保证大于目录中已有的最大版本。
-func Publish(dir string, sources ...Source) ([]string, error) {
+func Publish(dir string, driver database.Driver, sources ...Source) ([]string, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, errors.New("migrate: publish directory is required")
 	}
-	items, err := publications(sources)
+	items, err := publications(driver, sources)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +83,11 @@ func Publish(dir string, sources ...Source) ([]string, error) {
 	return written, nil
 }
 
-// publications 在写入前读取并校验全部来源，按来源顺序、来源内按版本排序。
-func publications(sources []Source) ([]publication, error) {
+// publications 在写入前读取并校验全部来源中 driver 的迁移，按来源顺序、来源内按版本排序。
+func publications(driver database.Driver, sources []Source) ([]publication, error) {
+	if driver == "" {
+		return nil, errors.New("migrate: publish driver is required")
+	}
 	if len(sources) == 0 {
 		return nil, errors.New("migrate: at least one migration source is required")
 	}
@@ -98,7 +104,14 @@ func publications(sources []Source) ([]publication, error) {
 		if source.FS == nil {
 			return nil, errors.Newf("migrate: source %s has nil filesystem", source.Name)
 		}
-		names, err := fs.Glob(source.FS, "*.sql")
+		if info, err := fs.Stat(source.FS, string(driver)); err != nil || !info.IsDir() {
+			return nil, errors.Newf("migrate: source %s has no %s migrations", source.Name, driver)
+		}
+		files, err := fs.Sub(source.FS, string(driver))
+		if err != nil {
+			return nil, errors.Wrapf(err, "migrate: read source %s", source.Name)
+		}
+		names, err := fs.Glob(files, "*.sql")
 		if err != nil {
 			return nil, errors.Wrapf(err, "migrate: read source %s", source.Name)
 		}
@@ -113,7 +126,7 @@ func publications(sources []Source) ([]publication, error) {
 				return nil, errors.Newf("migrate: source %s has duplicate version in %s and %s", source.Name, previous, name)
 			}
 			versions[version] = name
-			data, err := fs.ReadFile(source.FS, name)
+			data, err := fs.ReadFile(files, name)
 			if err != nil {
 				return nil, errors.Wrapf(err, "migrate: read %s/%s", source.Name, name)
 			}
