@@ -8,14 +8,15 @@ import (
 
 	"errors"
 	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/ratelimit"
 	"github.com/uptrace/bun"
 	"strings"
 )
 
 func TestDatabase(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
-		db := openDB(t, driver)
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := dbtesting.Open(t, driver, ratelimit.Migrations())
 		n := 0
 		testLimiter(t, func(cfg ratelimit.Config) ratelimit.Limiter {
 			n++
@@ -25,9 +26,9 @@ func TestDatabase(t *testing.T) {
 }
 
 func TestDatabaseNamesAreIsolated(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		db := openDB(t, driver)
+		db := dbtesting.Open(t, driver, ratelimit.Migrations())
 		cfg := ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1}
 		login, reset := ratelimit.NewDatabase(db, "login", cfg), ratelimit.NewDatabase(db, "reset", cfg)
 		if err := login.Allow(ctx, "alice"); err != nil {
@@ -43,9 +44,9 @@ func TestDatabaseNamesAreIsolated(t *testing.T) {
 }
 
 func TestDatabaseConcurrentCallsAreExact(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		l := ratelimit.NewDatabase(openDB(t, driver), "burst", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 5})
+		l := ratelimit.NewDatabase(dbtesting.Open(t, driver, ratelimit.Migrations()), "burst", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 5})
 		results := make(chan error, 20)
 		for range cap(results) {
 			go func() { results <- l.Allow(ctx, "k") }()
@@ -63,9 +64,9 @@ func TestDatabaseConcurrentCallsAreExact(t *testing.T) {
 }
 
 func TestDatabaseCleanup(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		db := openDB(t, driver)
+		db := dbtesting.Open(t, driver, ratelimit.Migrations())
 		short := ratelimit.NewDatabase(db, "short", ratelimit.Config{Rate: 1, Interval: 10 * time.Millisecond, Burst: 1})
 		long := ratelimit.NewDatabase(db, "long", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1})
 		for _, key := range []string{"a", "b", "c"} {
@@ -96,9 +97,9 @@ func TestDatabaseCleanup(t *testing.T) {
 // 调用等锁期间，另一个事务把 tat 推到“此刻刚好用完配额”，调用拿到锁时已经晚于此刻，应当放行。
 // 若在等锁之前读取时间，调用会用更早的时间判断，被错误地拒绝。
 func TestDatabaseReadsClockAfterLock(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		db := openDB(t, driver)
+		db := dbtesting.Open(t, driver, ratelimit.Migrations())
 		l := ratelimit.NewDatabase(db, "clock", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 2})
 		if err := l.Allow(ctx, "k"); err != nil {
 			t.Fatal(err)
@@ -142,9 +143,9 @@ func TestDatabaseReadsClockAfterLock(t *testing.T) {
 
 // 超过 255 字节的 key 以摘要保存：仍然按 key 区分配额，不受列长度和索引长度限制。
 func TestDatabaseLongKeys(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		l := ratelimit.NewDatabase(openDB(t, driver), "long", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1})
+		l := ratelimit.NewDatabase(dbtesting.Open(t, driver, ratelimit.Migrations()), "long", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1})
 		a, b := strings.Repeat("a", 4000), strings.Repeat("a", 3999)+"b"
 		if err := l.Allow(ctx, a); err != nil {
 			t.Fatal(err)

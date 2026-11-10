@@ -90,6 +90,9 @@ func uniqueKey(msg string) string {
 	return key
 }
 
+// IsDeadlock 报告事务是否因死锁被数据库中止（1213）。InnoDB 已回滚整个事务，可以重试。
+func IsDeadlock(err error) bool { return hasNumber(err, 1213) }
+
 // IsForeignKeyViolation 报告是否为外键冲突：插入或更新时引用的行不存在（1452），
 // 或删除、更新仍被引用的行（1451）。
 func IsForeignKeyViolation(err error) bool { return hasNumber(err, 1451, 1452) }

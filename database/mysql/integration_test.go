@@ -14,6 +14,7 @@ import (
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/database/migrate"
 	"github.com/ryan053857/mygoravel/database/mysql"
+	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
 func TestSessionSettings(t *testing.T) {
@@ -150,5 +151,18 @@ func TestMigrateWaitsForLock(t *testing.T) {
 	}
 	if ver, err := p.GetDBVersion(ctx); err != nil || ver != 1 {
 		t.Fatalf("version=%d err=%v", ver, err)
+	}
+}
+
+func TestDeadlock(t *testing.T) {
+	db := dbtest.Open(t, mysql.Driver, nil)
+	ctx := context.Background()
+	for _, q := range []string{"CREATE TABLE t (id INT PRIMARY KEY, n INT NOT NULL)", "INSERT INTO t VALUES (1, 0), (2, 0)"} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := dbtesting.Deadlock(t, db); !mysql.IsDeadlock(err) || mysql.IsUniqueViolation(err) {
+		t.Fatalf("err=%v", err)
 	}
 }

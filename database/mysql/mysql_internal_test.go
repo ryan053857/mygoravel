@@ -54,6 +54,9 @@ func TestConstraintErrors(t *testing.T) {
 	if err := (&driver.MySQLError{Number: 3819}); !IsCheckViolation(err) || IsForeignKeyViolation(err) {
 		t.Error("check")
 	}
+	if err := (&driver.MySQLError{Number: 1213}); !IsDeadlock(err) || IsCheckViolation(err) {
+		t.Error("deadlock")
+	}
 	if IsUniqueViolation(errors.New("Duplicate entry 'x' for key 't.k'")) {
 		t.Error("plain error matched")
 	}

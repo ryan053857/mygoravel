@@ -13,6 +13,7 @@
 - [执行查询](#running-queries)
     - [处理“未找到”](#handling-not-found)
 - [事务](#transactions)
+    - [隔离级别与死锁](#isolation-and-deadlocks)
 - [处理约束错误](#constraint-errors)
 - [测试](#testing)
 
@@ -139,6 +140,8 @@ URL 上的查询参数原样交给 go-sql-driver/mysql，例如 `?tls=true`。�
 | DDL 能否回滚 | 能 | 能 | 不能 |
 | 字符串比较 | 区分大小写 | 区分大小写 | 默认不区分 |
 | `RETURNING` | 支持 | 支持 | 不支持 |
+| 默认隔离级别 | READ COMMITTED | 写事务依次执行 | REPEATABLE READ，带间隙锁 |
+| 死锁 | `postgres.IsDeadlock` 识别 | 不会发生 | `mysql.IsDeadlock` 识别，更常见 |
 | 部署 | 多实例 | 单实例 | 多实例 |
 
 
@@ -219,7 +222,7 @@ mygoravel 约定主键使用 UUIDv7，由应用在插入前生成，迁移中声
 item := &Article{ID: uuid.Must(uuid.NewV7()), AuthorID: subject.ID}
 ```
 
-在插入之前就有 ID，同一事务中的关联记录、对象存储的键或者幂等重试都可以直接使用它。UUIDv7 以毫秒时间戳开头，新记录总是追加在索引末尾，写入性能接近自增 ID；对外暴露时也不会泄露记录数量或被逐个遍历，但它包含创建时间，也不能代替[授权](authorization.md)检查。只在内部使用、不出现在接口中的大表，可以在迁移中改用 `bigint GENERATED ALWAYS AS IDENTITY`。
+在插入之前就有 ID，同一事务中的关联记录、对象存储的键或者幂等重试都可以直接使用它。UUIDv7 以毫秒时间戳开头，新记录总是追加在索引末尾，写入性能接近自增 ID；对外暴露时也不会泄露记录数量或被逐个遍历，但它包含创建时间，也不能代替[授权](authorization.md)检查。只在内部使用、不出现在接口中的大表，可以在迁移中改用自增主键：PostgreSQL 为 `bigint GENERATED ALWAYS AS IDENTITY`，MySQL 为 `BIGINT AUTO_INCREMENT`，SQLite 为 `INTEGER PRIMARY KEY`。
 
 <a id="timestamps"></a>
 ### 自动维护时间戳
@@ -301,7 +304,17 @@ _, err = db.NewDelete().
 
 软删除由 Bun 根据模型标签处理，直接执行原生 SQL 时需要自行处理 `deleted_at` 条件。上述时间戳钩子只处理插入和更新查询，`NewDelete()` 的软删除不会通过其中的 `*bun.UpdateQuery` 分支刷新 `updated_at`。
 
-软删除的记录仍然参与数据库唯一约束。本例的 `articles_slug_key` 会继续保留已删除文章的 slug；如果业务允许复用，可在迁移中改为仅覆盖 `deleted_at IS NULL` 的唯一索引，见 Bun 的[唯一索引说明](https://bun.uptrace.dev/guide/soft-deletes.html#unique-indexes)。
+软删除的记录仍然参与数据库唯一约束。本例的 `articles_slug_key` 会继续保留已删除文章的 slug；如果业务允许复用，可以在迁移中把它改为只约束未删除记录的唯一索引。PostgreSQL 和 SQLite 使用部分索引；MySQL 不支持部分索引，用函数索引让已删除记录的值为 `NULL`，`NULL` 不参与唯一比较：
+
+```sql
+-- PostgreSQL、SQLite
+CREATE UNIQUE INDEX articles_slug_key ON articles (slug) WHERE deleted_at IS NULL;
+
+-- MySQL
+CREATE UNIQUE INDEX articles_slug_key ON articles ((IF(deleted_at IS NULL, slug, NULL)));
+```
+
+索引沿用原来的名字，[处理约束错误](#constraint-errors)的代码不需要修改。
 
 <a id="running-queries"></a>
 ## 执行查询
@@ -361,6 +374,25 @@ err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 > 在回调内部，所有操作都必须使用传入的 `tx`，而不是外层的 `db`。使用 `db` 的操作不属于这个事务，回滚时也不会被撤销。
 
 请避免在事务中执行网络请求或删除缓存等外部操作。缓存失效应当在事务提交成功之后进行，见[缓存](cache.md#invalidation)。如需嵌套事务或保存点，请参阅 Bun 的相关文档。
+
+<a id="isolation-and-deadlocks"></a>
+### 隔离级别与死锁
+
+三种数据库的默认隔离级别不同：PostgreSQL 是 READ COMMITTED，MySQL 是 REPEATABLE READ，SQLite 的写事务依次执行。无论哪种数据库，“先读取、检查、再修改”的逻辑都应当放在一个事务中，并用 `FOR UPDATE` 锁住要修改的行（SQLite 不需要），见[在事务中检查](authorization.md#checking-in-transactions)。
+
+MySQL 更容易出现死锁：在 REPEATABLE READ 下，范围查询和查询不存在的行会加间隙锁；`INSERT IGNORE` 和唯一键检查遇到已存在的行会加共享锁，之后再 `FOR UPDATE` 要升级为排他锁。多个事务同时这样做，就会互相等待。需要“不存在就插入、存在就锁住”时，用一条 upsert 直接取得排他锁，框架的数据库限流器就是这样做的。
+
+数据库检测到死锁时会中止其中一个事务，`postgres.IsDeadlock` 和 `mysql.IsDeadlock` 可以识别这个错误。被中止的事务已经整体回滚，可以直接重试：
+
+```go
+for attempt := 1; ; attempt++ {
+    err := s.db.RunInTx(ctx, nil, publish)
+    if postgres.IsDeadlock(err) && attempt < 3 {
+        continue
+    }
+    return err
+}
+```
 
 <a id="constraint-errors"></a>
 ## 处理约束错误
