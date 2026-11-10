@@ -60,10 +60,12 @@ func load(b *goi18n.Bundle, src fs.FS) error {
 	})
 }
 
-// MatchAcceptLanguage 返回 b 中与 Accept-Language 头最匹配的语言，匹配失败时返回默认语言。
-func MatchAcceptLanguage(b *goi18n.Bundle, header string) string {
+// Match 按语言偏好在 b 中协商语言，匹配失败时返回默认语言。
+// prefs 使用 Accept-Language 格式（如 "en-US,en;q=0.9"），多个值视为同一列表依次拼接，
+// 可直接传入 HTTP 头或 gRPC metadata 中的全部取值。
+func Match(b *goi18n.Bundle, prefs ...string) string {
 	supported := b.LanguageTags()
-	tags, _, err := language.ParseAcceptLanguage(header)
+	tags, _, err := language.ParseAcceptLanguage(strings.Join(prefs, ","))
 	if err != nil || len(tags) == 0 {
 		return supported[0].String()
 	}

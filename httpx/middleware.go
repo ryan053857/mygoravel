@@ -177,7 +177,7 @@ func Locale(languages *goi18n.Bundle) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			locale := i18n.MatchAcceptLanguage(languages, r.Header.Get("Accept-Language"))
+			locale := i18n.Match(languages, r.Header.Values("Accept-Language")...)
 			w.Header().Set("Content-Language", locale)
 			next.ServeHTTP(w, r.WithContext(i18n.WithLocale(r.Context(), languages, locale)))
 		})

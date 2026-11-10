@@ -10,6 +10,7 @@
     - [覆盖内置消息](#overriding-built-in-messages)
 - [获取翻译](#retrieving-translations)
 - [翻译错误消息](#translating-errors)
+- [在 HTTP 之外使用](#outside-http)
 
 <a id="introduction"></a>
 ## 简介
@@ -160,3 +161,31 @@ return ErrSlugTaken.Wrap(err, errorx.Public("slug", c.Slug))
 
 > [!NOTE]
 > 只有业务错误会被翻译。验证错误、路由不存在、服务端内部错误等不带 `code` 的错误保持 Huma 的英文描述，客户端应根据状态码自行展示提示。
+
+<a id="outside-http"></a>
+## 在 HTTP 之外使用
+
+`i18n` 包本身不依赖 HTTP：语言保存在 context 中，`i18n.T` 只读取 context。`httpx.Locale` 只是 HTTP 的入口，替你调用了 `i18n.WithLocale`。后台任务、gRPC 等其他入口不经过这个中间件，需要自己把语言写入 context，否则 `i18n.T` 会原样返回消息 ID。
+
+后台任务通常没有请求头，语言来自任务数据或用户资料：
+
+```go
+func (w *Mailer) SendWelcome(ctx context.Context, job WelcomeJob) error {
+    ctx = i18n.WithLocale(ctx, w.languages, job.Locale)
+    subject := i18n.T(ctx, "mail.welcome.subject", map[string]any{"name": job.Name})
+    // ...
+}
+```
+
+`job.Locale` 应当是语言目录中已有的语言。如果它来自用户输入或客户端的偏好设置，先用 `i18n.Match` 协商：
+
+```go
+locale := i18n.Match(w.languages, user.PreferredLanguage)
+```
+
+`i18n.Match` 接受 `Accept-Language` 格式的偏好列表，匹配失败时返回默认语言。它可以接收多个值，因此也可以直接传入 gRPC metadata 中的 `accept-language`：
+
+```go
+locale := i18n.Match(languages, metadata.ValueFromIncomingContext(ctx, "accept-language")...)
+ctx = i18n.WithLocale(ctx, languages, locale)
+```

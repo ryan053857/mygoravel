@@ -100,7 +100,7 @@ func TestInvalidInput(t *testing.T) {
 	}
 }
 
-func TestMatchAcceptLanguage(t *testing.T) {
+func TestMatch(t *testing.T) {
 	bundle, err := i18n.New(i18n.LocaleZhCN)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func TestMatchAcceptLanguage(t *testing.T) {
 		"en-US": "en", "en-US,en;q=0.9": "en", "en-GB": "en", "zh-Hans": "zh-CN",
 		"fr": "zh-CN", "": "zh-CN", "???": "zh-CN",
 	} {
-		if got := i18n.MatchAcceptLanguage(bundle, header); got != want {
+		if got := i18n.Match(bundle, header); got != want {
 			t.Fatalf("%q: got %q want %q", header, got, want)
 		}
 	}
@@ -117,7 +117,13 @@ func TestMatchAcceptLanguage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := i18n.MatchAcceptLanguage(en, "fr"); got != "en" {
+	if got := i18n.Match(en, "fr"); got != "en" {
 		t.Fatal(got)
+	}
+	if got := i18n.Match(en); got != "en" {
+		t.Fatalf("no preferences should use default, got %q", got)
+	}
+	if got := i18n.Match(bundle, "fr", "en;q=0.5"); got != "en" {
+		t.Fatalf("multiple values should form one list, got %q", got)
 	}
 }
