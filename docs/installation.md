@@ -34,7 +34,7 @@ mygoravel 是一个用于构建 HTTP API 的 Go 应用框架。它为配置加�
 ### 环境要求
 
 - Go 1.27.3 或更高版本（精确的工具链要求以框架的 [go.mod](../go.mod) 为准）
-- PostgreSQL（仅在使用数据库功能且选择 PostgreSQL 时需要；SQLite 不需要额外安装）
+- PostgreSQL 或 MySQL 8.4（仅在使用数据库功能且选择它们时需要；SQLite 不需要额外安装）
 
 本章创建的最小 API 只需要 Go 工具链。
 
@@ -179,7 +179,7 @@ mygoravel 还为你生成了接口文档。在浏览器中打开 `http://localho
 - 用[配置](configuration.md)把监听地址、日志级别等参数放进 YAML 文件；
 - 阅读[路由](routing.md)、[请求](requests.md)和[响应](responses.md)，编写真正的业务接口；
 - 用[认证](authentication.md)保护需要登录才能访问的接口；
-- 用[数据库](database.md)连接 PostgreSQL 或 SQLite，用[迁移](migrations.md)管理表结构；
+- 用[数据库](database.md)连接 PostgreSQL、SQLite 或 MySQL，用[迁移](migrations.md)管理表结构；
 - 用[命令行](commands.md)为应用加上 `serve`、`migrate`、`openapi`、`routes` 等子命令。
 
 如果想先了解一个 mygoravel 应用整体是如何组织的，可以阅读[目录结构](directory-structure.md)和[依赖装配](dependencies.md)。

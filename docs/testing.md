@@ -242,12 +242,12 @@ svc := article.NewService(dbtest.Open(t, postgres.Driver, migrations.FS))
 
 使用 SQLite 的应用传入 `sqlite.Driver`，`dbtest` 在 `t.TempDir()` 中创建数据库文件。它不需要任何外部服务，也不需要环境变量，可以和普通测试一样直接用 `go test ./...` 运行，不必加 `integration` 构建标签。
 
-PostgreSQL 的 `dbtest` 通过环境变量 `POSTGRES_TEST_URL` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
+PostgreSQL 和 MySQL 的 `dbtest` 分别通过环境变量 `POSTGRES_TEST_URL` 和 `MYSQL_TEST_URL` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
 
 > [!WARNING]
-> 请为 `POSTGRES_TEST_URL` 使用专门的测试数据库实例，不要指向任何存放真实数据的数据库。
+> 请为这两个变量使用专门的测试数据库实例，不要指向任何存放真实数据的数据库。
 
-PostgreSQL 测试文件开头的 `//go:build integration` 让这些测试只在显式指定 `-tags=integration` 时运行，普通的 `go test ./...` 不会执行它们。
+PostgreSQL 和 MySQL 测试文件开头的 `//go:build integration` 让这些测试只在显式指定 `-tags=integration` 时运行，普通的 `go test ./...` 不会执行它们。
 
 <a id="running-database-tests-locally"></a>
 ### 在本地运行数据库测试
@@ -273,7 +273,15 @@ export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?
 go test -race -count=1 -tags=integration ./...
 ```
 
-测试完成后，执行 `docker stop app-test-postgres` 即可清理。Redis 的集成测试见 [Redis](redis.md#testing)。
+测试完成后，执行 `docker stop app-test-postgres` 即可清理。使用 MySQL 时，用 `mysql:8.4` 镜像启动，等 `mysqladmin ping` 成功后设置 `MYSQL_TEST_URL`：
+
+```bash
+docker run --name app-test-mysql --rm -d \
+  -e MYSQL_ROOT_PASSWORD=mysql \
+  -p 127.0.0.1:53306:3306 mysql:8.4
+export MYSQL_TEST_URL='mysql://root:mysql@127.0.0.1:53306/'
+```
+Redis 的集成测试见 [Redis](redis.md#testing)。
 
 <a id="command-tests"></a>
 ## 命令测试

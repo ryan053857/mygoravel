@@ -36,7 +36,7 @@ go run ./cmd/api migrate make create_articles_table
 
 | 名称 | 生成的骨架 |
 | --- | --- |
-| `create_articles_table` | `CREATE TABLE articles`，带 UUID 主键 `id`、`created_at`、`updated_at`；`Down` 中 `DROP TABLE articles`。SQLite 中这三列都是 `TEXT`，时间列没有默认值，见[使用 SQLite](database.md#sqlite) |
+| `create_articles_table` | `CREATE TABLE articles`，带 UUID 主键 `id`、`created_at`、`updated_at`；`Down` 中 `DROP TABLE articles`。SQLite 中这三列都是 `TEXT`，MySQL 中是 `CHAR(36)` 和 `DATETIME(6)` |
 | `add_published_at_to_articles_table`、`drop_summary_from_articles_table` | `ALTER TABLE articles`，补全后才能执行 |
 | 其他名称，例如 `backfill_article_slugs` | 只有 goose 注解 |
 
@@ -197,7 +197,7 @@ err = migrate.Up(ctx, provider)
 
 `NewProvider` 返回的是原生的 `*goose.Provider`，你可以直接调用它的 `Up`、`Down`、`Status` 等方法。它已经配置好了以下行为：
 
-- 在 PostgreSQL 上使用会话锁，保证多个实例同时执行迁移时也只会串行运行；SQLite 只有一个数据库文件，不加锁；
+- 在 PostgreSQL 和 MySQL 上使用会话锁（MySQL 为 `GET_LOCK`），保证多个实例同时执行迁移时也只会串行运行；SQLite 只有一个数据库文件，不加锁；
 - 只使用 SQL 文件，不使用 goose 的全局 Go 迁移注册。
 
 版本记录表、事务和锁都由 goose 管理。`migrate.Up(ctx, provider)` 在调用 `provider.Up` 的基础上为错误附加了上下文信息。`migrate` 命令使用的也是同一个迁移器。
@@ -308,7 +308,7 @@ err := migrate.CheckPublished("migrations", "baseline/migrations")
 <a id="recovering-non-transactional-migrations"></a>
 ## 非事务迁移失败后的恢复
 
-某些操作不能在事务中执行，例如 `CREATE INDEX CONCURRENTLY`。这时需要在迁移文件中使用 goose 的 `-- +goose NO TRANSACTION` 指令。
+某些操作不能在事务中执行，例如 `CREATE INDEX CONCURRENTLY`。这时需要在迁移文件中使用 goose 的 `-- +goose NO TRANSACTION` 指令。MySQL 的 DDL 会隐式提交事务，所以在 MySQL 上**每个**包含 DDL 的迁移都相当于非事务迁移。
 
 > [!WARNING]
 > 非事务迁移失败时，可能已有部分语句生效，而迁移的版本号却没有更新。此时直接重新执行可能会失败或造成重复的变更。
@@ -319,4 +319,4 @@ err := migrate.CheckPublished("migrations", "baseline/migrations")
 2. 根据实际结构，手动清理或补全变更；
 3. 确认数据库处于迁移前或迁移后的一致状态后，再重新执行迁移。
 
-为了降低风险，建议每个非事务迁移只包含一条语句。
+为了降低风险，建议每个非事务迁移只包含一条语句；使用 MySQL 时，建议每个迁移只包含一条 DDL。

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +37,8 @@ func RequireURL(t testing.TB, driver database.Driver) string {
 }
 
 // Open 用 driver 为当前测试创建一个空的临时数据库，migrations 非 nil 时执行迁移，返回 *bun.DB；测试结束时删除。
-// PostgreSQL 在 POSTGRES_TEST_URL 指向的服务器上建库；SQLite 在 t.TempDir() 中建文件，不需要任何外部服务。
+// PostgreSQL 和 MySQL 在 POSTGRES_TEST_URL、MYSQL_TEST_URL 指向的服务器上建库；
+// SQLite 在 t.TempDir() 中建文件，不需要任何外部服务。
 func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -49,6 +51,8 @@ func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 	switch driver.Name() {
 	case "postgres":
 		db = openPostgres(ctx, t, driver)
+	case "mysql":
+		db = openMySQL(ctx, t, driver)
 	case "sqlite":
 		var err error
 		db, err = database.Open(ctx, driver, database.Config{DSN: filepath.Join(t.TempDir(), "test.db")})
@@ -117,6 +121,50 @@ func openPostgres(ctx context.Context, t testing.TB, driver database.Driver) *bu
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal(err)
 	}
+	return db
+}
+
+func openMySQL(ctx context.Context, t testing.TB, driver database.Driver) *bun.DB {
+	t.Helper()
+	adminURL := RequireURL(t, driver)
+	admin, err := database.Open(ctx, driver, database.Config{DSN: adminURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+
+	name := "test_" + randomName()
+	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		db, err := database.Open(cleanCtx, driver, database.Config{DSN: adminURL})
+		if err != nil {
+			t.Errorf("dbtest: reopen admin: %v", err)
+			return
+		}
+		defer db.Close()
+		if _, err := db.ExecContext(cleanCtx, "DROP DATABASE IF EXISTS "+name); err != nil {
+			t.Errorf("dbtest: drop database: %v", err)
+		}
+	})
+
+	u, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.Path = "/" + name
+	db, err := database.Open(ctx, driver, database.Config{DSN: u.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("dbtest: close database: %v", err)
+		}
+	})
 	return db
 }
 

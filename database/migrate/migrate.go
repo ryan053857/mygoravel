@@ -12,7 +12,7 @@ import (
 )
 
 // NewProvider 按 db 的方言装配 goose 迁移执行器。fsys 根目录为应用线性 SQL 迁移；禁用全局 goose 注册机制。
-// PostgreSQL 使用会话锁，多个实例同时迁移时串行执行；SQLite 是单个文件，不加锁。
+// PostgreSQL 和 MySQL 使用会话锁，多个实例同时迁移时串行执行；SQLite 是单个文件，不加锁。
 func NewProvider(db *bun.DB, fsys fs.FS) (*goose.Provider, error) {
 	if db == nil {
 		return nil, errors.New("migrate: nil db")
@@ -29,6 +29,8 @@ func NewProvider(db *bun.DB, fsys fs.FS) (*goose.Provider, error) {
 			return nil, errors.Wrap(err, "migrate")
 		}
 		gooseDialect, opts = goose.DialectPostgres, append(opts, goose.WithSessionLocker(locker))
+	case dialect.MySQL:
+		gooseDialect, opts = goose.DialectMySQL, append(opts, goose.WithSessionLocker(mysqlLocker{}))
 	case dialect.SQLite:
 		gooseDialect = goose.DialectSQLite3
 	default:
