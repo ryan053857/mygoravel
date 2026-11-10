@@ -32,20 +32,23 @@ func RequireDSN(t testing.TB) string {
 	return dsn
 }
 
-// Open 为当前测试创建一个空的临时数据库，migrations 非 nil 时执行迁移，返回 *bun.DB；测试结束时删除。
+// Open 用 driver 为当前测试创建一个空的临时数据库，migrations 非 nil 时执行迁移，返回 *bun.DB；测试结束时删除。
 // PostgreSQL 在 DATABASE_TEST_DSN 指向的服务器上建库；SQLite 在 t.TempDir() 中建文件，不需要任何外部服务。
 func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	if driver == nil {
+		t.Fatal("dbtest: nil driver")
+	}
 	var db *bun.DB
-	switch driver {
-	case database.Postgres:
-		db = openPostgres(ctx, t)
-	case database.SQLite:
+	switch driver.Name() {
+	case "postgres":
+		db = openPostgres(ctx, t, driver)
+	case "sqlite":
 		var err error
-		db, err = database.Open(ctx, database.Config{Driver: database.SQLite, DSN: filepath.Join(t.TempDir(), "test.db")})
+		db, err = database.Open(ctx, driver, database.Config{DSN: filepath.Join(t.TempDir(), "test.db")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +58,7 @@ func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 			}
 		})
 	default:
-		t.Fatalf("dbtest: unsupported driver %q", driver)
+		t.Fatalf("dbtest: unsupported driver %q", driver.Name())
 	}
 
 	if migrations != nil {
@@ -70,10 +73,10 @@ func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 	return db
 }
 
-func openPostgres(ctx context.Context, t testing.TB) *bun.DB {
+func openPostgres(ctx context.Context, t testing.TB, driver database.Driver) *bun.DB {
 	t.Helper()
 	adminDSN := RequireDSN(t)
-	admin, err := database.Open(ctx, database.Config{Driver: database.Postgres, DSN: adminDSN})
+	admin, err := database.Open(ctx, driver, database.Config{DSN: adminDSN})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +89,7 @@ func openPostgres(ctx context.Context, t testing.TB) *bun.DB {
 	t.Cleanup(func() {
 		cleanCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		db, err := database.Open(cleanCtx, database.Config{Driver: database.Postgres, DSN: adminDSN})
+		db, err := database.Open(cleanCtx, driver, database.Config{DSN: adminDSN})
 		if err != nil {
 			t.Errorf("dbtest: reopen admin: %v", err)
 			return

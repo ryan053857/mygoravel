@@ -2,6 +2,8 @@
 
 package lock_test
 
-import "github.com/ryan053857/mygoravel/database"
+import (
+	"github.com/ryan053857/mygoravel/database/postgres"
+)
 
-func init() { testDrivers = append(testDrivers, database.Postgres) }
+func init() { testDrivers = append(testDrivers, postgres.Driver) }

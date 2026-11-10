@@ -98,7 +98,7 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/errorx"
     "github.com/ryan053857/mygoravel/identity"
 )
@@ -126,7 +126,7 @@ func (s *Service) Update(ctx context.Context, subject identity.Subject, id uuid.
 
         item.Title, item.Slug, item.Content = c.Title, c.Slug, c.Content
         _, err = tx.NewUpdate().Model(item).Column("title", "slug", "content", "updated_at").WherePK().Exec(ctx)
-        if database.IsUniqueViolation(err, "articles_slug_key") {
+        if postgres.IsUniqueViolation(err, "articles_slug_key") {
             return ErrSlugTaken.Wrap(err, errorx.Public("slug", c.Slug)) // ② 可预期，保留底层原因
         }
         if err != nil {

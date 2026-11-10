@@ -13,6 +13,7 @@ import (
 	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/command/migratecmd"
 	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/postgres"
 )
 
 type settings struct {
@@ -47,7 +48,7 @@ func execute(root *cobra.Command, args ...string) (stdout, stderr string, err er
 
 func TestExitCodes(t *testing.T) {
 	// 端口 1 上没有 PostgreSQL，连接会立即被拒绝
-	unreachable := writeConfig(t, "database:\n  driver: postgres\n  dsn: postgres://postgres@127.0.0.1:1/blog?sslmode=disable&connect_timeout=2\n")
+	unreachable := writeConfig(t, "database:\n  dsn: postgres://postgres@127.0.0.1:1/blog?sslmode=disable&connect_timeout=2\n")
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
 	for _, tc := range []struct {
 		args []string
@@ -58,7 +59,7 @@ func TestExitCodes(t *testing.T) {
 		{[]string{"migrate", "up", "extra"}, command.ExitUsage},
 		{[]string{"migrate", "status", "--unknown"}, command.ExitUsage},
 	} {
-		root := newRoot(migratecmd.New(fstest.MapFS{}, dbConfig))
+		root := newRoot(migratecmd.New(fstest.MapFS{}, postgres.Driver, dbConfig))
 		if _, _, err := execute(root, tc.args...); command.ExitCode(err) != tc.want {
 			t.Errorf("args=%v exit=%d want=%d err=%v", tc.args, command.ExitCode(err), tc.want, err)
 		}
@@ -66,7 +67,7 @@ func TestExitCodes(t *testing.T) {
 }
 
 func TestHelpWithoutSubcommand(t *testing.T) {
-	out, _, err := execute(newRoot(migratecmd.New(fstest.MapFS{}, dbConfig)), "migrate")
+	out, _, err := execute(newRoot(migratecmd.New(fstest.MapFS{}, postgres.Driver, dbConfig)), "migrate")
 	if err != nil || !bytes.Contains([]byte(out), []byte("status")) {
 		t.Fatalf("out=%q err=%v", out, err)
 	}

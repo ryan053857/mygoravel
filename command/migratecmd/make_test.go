@@ -9,15 +9,14 @@ import (
 
 	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/command/migratecmd"
-	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/postgres"
+	"github.com/ryan053857/mygoravel/database/sqlite"
 )
 
-func TestMakeReadsDriverFromConfiguration(t *testing.T) {
+func TestMakeUsesCommandDriverWithoutConfiguration(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "migrations")
-	// 只读取 driver，不连接数据库：dsn 指向的目录不存在也没关系
-	cfg := writeConfig(t, "database:\n  driver: sqlite\n  dsn: /nonexistent/app.db\n")
-	root := newRoot(migratecmd.New(fstest.MapFS{}, dbConfig))
-	out, _, err := execute(root, "migrate", "make", "create_articles_table", "--dir", dir, "--config", cfg)
+	root := newRoot(migratecmd.New(fstest.MapFS{}, sqlite.Driver, dbConfig))
+	out, _, err := execute(root, "migrate", "make", "create_articles_table", "--dir", dir, "--config", filepath.Join(dir, "absent.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +32,7 @@ func TestMakeReadsDriverFromConfiguration(t *testing.T) {
 
 func TestStandaloneMakeWithoutConfiguration(t *testing.T) {
 	dir := t.TempDir()
-	out, _, err := execute(newRoot(migratecmd.Make(database.Postgres)), "make", "create_articles_table", "--dir", dir)
+	out, _, err := execute(newRoot(migratecmd.Make(postgres.Driver)), "make", "create_articles_table", "--dir", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +44,7 @@ func TestStandaloneMakeWithoutConfiguration(t *testing.T) {
 
 func TestMakeRequiresExactlyOneName(t *testing.T) {
 	for _, args := range [][]string{{"make"}, {"make", "a", "b"}} {
-		_, _, err := execute(newRoot(migratecmd.Make(database.Postgres)), args...)
+		_, _, err := execute(newRoot(migratecmd.Make(postgres.Driver)), args...)
 		if command.ExitCode(err) != command.ExitUsage {
 			t.Fatalf("args=%v err=%v exit=%d", args, err, command.ExitCode(err))
 		}

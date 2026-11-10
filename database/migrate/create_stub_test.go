@@ -11,10 +11,11 @@ import (
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/ryan053857/mygoravel/database/sqlite"
 )
 
 func TestCreatedStubsRunOnSQLite(t *testing.T) {
-	testStubsRun(t, database.SQLite)
+	testStubsRun(t, sqlite.Driver)
 }
 
 // testStubsRun 检查建表骨架和空骨架不经修改即可执行。

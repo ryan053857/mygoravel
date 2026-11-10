@@ -129,7 +129,7 @@ attempts := ratelimit.NewDatabase(db, "login", ratelimit.Config{Rate: 5, Interva
 使用前先发布 `rate_limits` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "ratelimit", FS: ratelimit.Migrations()},
 ))
 ```

@@ -220,3 +220,28 @@ func TestCommandCoreIsLight(t *testing.T) {
 		}
 	}
 }
+
+// TestDatabaseCoreDoesNotLinkDrivers 确保应用只链接自己 import 的数据库驱动：
+// 核心包、迁移与迁移命令都不依赖 pgx 或 SQLite，两个驱动子包也互不依赖。
+func TestDatabaseCoreDoesNotLinkDrivers(t *testing.T) {
+	pgx, sqlite := []string{"github.com/jackc/pgx"}, []string{"modernc.org/sqlite"}
+	for pkg, forbidden := range map[string][]string{
+		module + "/database":           append(pgx, sqlite...),
+		module + "/database/migrate":   append(pgx, sqlite...),
+		module + "/command/migratecmd": append(pgx, sqlite...),
+		module + "/database/postgres":  sqlite,
+		module + "/database/sqlite":    pgx,
+	} {
+		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			for _, driver := range forbidden {
+				if under(dep, driver) {
+					t.Errorf("%s depends on %s", pkg, dep)
+				}
+			}
+		}
+	}
+}

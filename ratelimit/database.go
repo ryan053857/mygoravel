@@ -74,7 +74,7 @@ SELECT (extract(epoch FROM tat - statement_timestamp()) * 1000000)::bigint - ?
 //
 // 当前时间必须在取得写锁之后读取：先读时间再排队等锁，时间较早的调用可能后执行，
 // 看到被其他调用推后的 tat，从而被多算几微秒、错误地拒绝。写事务在 BEGIN 时取得写锁
-// （database 包为 SQLite 设置了 _txlock=immediate），因此在事务内读取时间，
+// （database/sqlite 驱动设置了 _txlock=immediate），因此在事务内读取时间，
 // 执行顺序与时间顺序一致。
 func (d *Database) allowSQLite(ctx context.Context, key string) error {
 	step, ahead := d.step.Microseconds(), d.ahead.Microseconds()

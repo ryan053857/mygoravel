@@ -85,7 +85,7 @@ func Publish(dir string, driver database.Driver, sources ...Source) ([]string, e
 
 // publications 在写入前读取并校验全部来源中 driver 的迁移，按来源顺序、来源内按版本排序。
 func publications(driver database.Driver, sources []Source) ([]publication, error) {
-	if driver == "" {
+	if driver == nil {
 		return nil, errors.New("migrate: publish driver is required")
 	}
 	if len(sources) == 0 {
@@ -104,10 +104,10 @@ func publications(driver database.Driver, sources []Source) ([]publication, erro
 		if source.FS == nil {
 			return nil, errors.Newf("migrate: source %s has nil filesystem", source.Name)
 		}
-		if info, err := fs.Stat(source.FS, string(driver)); err != nil || !info.IsDir() {
-			return nil, errors.Newf("migrate: source %s has no %s migrations", source.Name, driver)
+		if info, err := fs.Stat(source.FS, driver.Name()); err != nil || !info.IsDir() {
+			return nil, errors.Newf("migrate: source %s has no %s migrations", source.Name, driver.Name())
 		}
-		files, err := fs.Sub(source.FS, string(driver))
+		files, err := fs.Sub(source.FS, driver.Name())
 		if err != nil {
 			return nil, errors.Wrapf(err, "migrate: read source %s", source.Name)
 		}

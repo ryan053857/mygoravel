@@ -150,14 +150,14 @@ import (
 
     "example.com/blog/internal/article"
     "example.com/blog/migrations"
-    "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/database/dbtest"
+    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/identity"
 )
 
 func TestDraftVisibilityAndPublishing(t *testing.T) {
     ctx := context.Background()
-    svc := article.NewService(dbtest.Open(t, database.Postgres, migrations.FS))
+    svc := article.NewService(dbtest.Open(t, postgres.Driver, migrations.FS))
     alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
     bob := identity.Subject{ID: "bob", Type: identity.SubjectUser}
 
@@ -205,7 +205,7 @@ func TestDraftVisibilityAndPublishing(t *testing.T) {
 func TestLoadConfig(t *testing.T) {
     t.Setenv("HTTP_ADDR", ":9000")
     path := filepath.Join(t.TempDir(), "config.yaml")
-    data := "http:\n  addr: ${HTTP_ADDR}\ndatabase:\n  driver: postgres\n  dsn: postgres://localhost/test\n"
+    data := "http:\n  addr: ${HTTP_ADDR}\ndatabase:\n  dsn: postgres://localhost/test\n"
     if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
         t.Fatal(err)
     }
@@ -235,12 +235,12 @@ func TestLoadConfig(t *testing.T) {
 上一节的 `service_test.go` 就是这样使用它的：
 
 ```go
-svc := article.NewService(dbtest.Open(t, database.Postgres, migrations.FS))
+svc := article.NewService(dbtest.Open(t, postgres.Driver, migrations.FS))
 ```
 
 `dbtest.Open` 返回一个已执行迁移的 `*bun.DB`，你可以把它直接传给业务服务进行测试。迁移参数传 `nil` 时会创建一个空数据库。
 
-使用 SQLite 的应用传入 `database.SQLite`，`dbtest` 在 `t.TempDir()` 中创建数据库文件。它不需要任何外部服务，也不需要环境变量，可以和普通测试一样直接用 `go test ./...` 运行，不必加 `integration` 构建标签。
+使用 SQLite 的应用传入 `sqlite.Driver`，`dbtest` 在 `t.TempDir()` 中创建数据库文件。它不需要任何外部服务，也不需要环境变量，可以和普通测试一样直接用 `go test ./...` 运行，不必加 `integration` 构建标签。
 
 PostgreSQL 的 `dbtest` 通过环境变量 `DATABASE_TEST_DSN` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
 
