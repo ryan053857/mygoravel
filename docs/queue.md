@@ -36,7 +36,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-队列支持 PostgreSQL 和 SQLite，发布时按应用的数据库选择对应的迁移；MySQL 暂不支持，发布它的迁移会报错。
+队列支持 PostgreSQL、MySQL 和 SQLite，发布时按应用的数据库选择对应的迁移。PostgreSQL 和 MySQL 上，多个 worker 用 `SKIP LOCKED` 跳过彼此正在领取的任务，可以部署在多台机器上。
 
 使用 SQLite 时，同一时刻只有一个连接可以写入，领取、确认任务和业务写入排队进行：
 

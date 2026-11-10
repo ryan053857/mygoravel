@@ -11,7 +11,7 @@ import (
 
 // 领取任务后进程崩溃：租约到期后任务被重新领取，旧的领取不能再确认或修改它。
 func TestExpiredLeaseIsReclaimedAndFenced(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := dbtesting.Open(t, driver, Migrations())
 		ctx := context.Background()
 		cfg := DefaultConfig()
@@ -56,16 +56,5 @@ func TestExpiredLeaseIsReclaimedAndFenced(t *testing.T) {
 		if n, _ := db.NewSelect().Model((*job)(nil)).Count(ctx); n != 0 {
 			t.Fatalf("ack did not delete the job")
 		}
-	})
-}
-
-// forEachDriver 在每种数据库上运行 test，跳过队列尚不支持的 MySQL。
-func forEachDriver(t *testing.T, test func(t *testing.T, driver database.Driver)) {
-	t.Helper()
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		if driver.Name() == "mysql" {
-			t.Skip("队列暂不支持 MySQL")
-		}
-		test(t, driver)
 	})
 }

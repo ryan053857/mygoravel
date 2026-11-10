@@ -26,17 +26,6 @@ type payload struct {
 	N int `json:"n"`
 }
 
-// forEachDriver 在每种数据库上运行 test，跳过队列尚不支持的 MySQL。
-func forEachDriver(t *testing.T, test func(t *testing.T, driver database.Driver)) {
-	t.Helper()
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		if driver.Name() == "mysql" {
-			t.Skip("队列暂不支持 MySQL")
-		}
-		test(t, driver)
-	})
-}
-
 // openDB 打开一个已执行队列迁移的测试数据库。
 func openDB(t *testing.T, driver database.Driver) *bun.DB {
 	t.Helper()
@@ -126,7 +115,7 @@ func attr(ctx context.Context, key string) string {
 }
 
 func TestPublishAndHandle(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		type seen struct {
 			n                         int
@@ -160,7 +149,7 @@ func TestPublishAndHandle(t *testing.T) {
 }
 
 func TestPublishInTransaction(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		ctx := context.Background()
 		var handled atomic.Int64
@@ -197,7 +186,7 @@ func TestPublishInTransaction(t *testing.T) {
 }
 
 func TestDelay(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		got := make(chan time.Time, 1)
 		start(t, db, testConfig(), func(r *message.Router, sub *queue.Subscriber) {
@@ -220,7 +209,7 @@ func TestDelay(t *testing.T) {
 }
 
 func TestRetryWithBackoff(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		var attempts []string
 		var mu sync.Mutex
@@ -274,7 +263,7 @@ func failedRows(t *testing.T, db bun.IDB) []failedRow {
 }
 
 func TestFailedJobs(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		ctx := context.Background()
 		cfg := testConfig()
@@ -320,7 +309,7 @@ func TestFailedJobs(t *testing.T) {
 }
 
 func TestPermanentFailures(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		start(t, db, testConfig(), func(r *message.Router, sub *queue.Subscriber) {
 			queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
@@ -346,7 +335,7 @@ func TestPermanentFailures(t *testing.T) {
 }
 
 func TestCompetingSubscribers(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		const n = 40
 		cfg := testConfig()
@@ -394,7 +383,7 @@ func TestCompetingSubscribers(t *testing.T) {
 }
 
 func TestFailingJobDoesNotBlockOthers(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		var ok atomic.Int64
 		start(t, db, testConfig(), func(r *message.Router, sub *queue.Subscriber) {
@@ -414,7 +403,7 @@ func TestFailingJobDoesNotBlockOthers(t *testing.T) {
 }
 
 func TestLeaseIsExtended(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		cfg := testConfig()
 		cfg.Lease = time.Second
@@ -442,7 +431,7 @@ func TestLeaseIsExtended(t *testing.T) {
 }
 
 func TestGracefulShutdown(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		started := make(chan struct{})
 		var finished atomic.Bool
@@ -472,7 +461,7 @@ func TestGracefulShutdown(t *testing.T) {
 }
 
 func TestShutdownTimeoutReleasesJobs(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		cfg := testConfig()
 		cfg.ShutdownTimeout = 100 * time.Millisecond
@@ -508,7 +497,7 @@ func TestShutdownTimeoutReleasesJobs(t *testing.T) {
 }
 
 func TestOpenTransactionDoesNotStallQueue(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		if driver == sqlite.Driver {
 			t.Skip("SQLite 同一时刻只有一个写者，未提交的写事务会让领取等待")
 		}
@@ -543,7 +532,7 @@ func TestOpenTransactionDoesNotStallQueue(t *testing.T) {
 }
 
 func TestCleanupFailedJobs(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
 		ctx := context.Background()
 		now := time.Now().UTC()
@@ -567,6 +556,34 @@ func TestCleanupFailedJobs(t *testing.T) {
 		}
 		if rows := failedRows(t, db); len(rows) != 1 || rows[0].Attempts != 4 {
 			t.Fatalf("remaining %+v", rows)
+		}
+	})
+}
+
+// 多个任务同时转入失败表时不能互相阻塞（MySQL 可重复读下的间隙锁会让它们死锁）。
+func TestConcurrentFailures(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := openDB(t, driver)
+		const n = 20
+		start(t, db, testConfig(), func(r *message.Router, sub *queue.Subscriber) {
+			queue.Handle(r, sub, "jobs", func(context.Context, payload) error {
+				return queue.Permanent(errors.New("gone"))
+			})
+		})
+		err := db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
+			for i := range n {
+				publish(t, tx, "jobs", i)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		eventually(t, 5*time.Second, func() bool { return len(failedRows(t, db)) == n })
+		for _, r := range failedRows(t, db) {
+			if r.Attempts != 1 {
+				t.Fatalf("job retried after a permanent failure: %+v", r)
+			}
 		}
 	})
 }

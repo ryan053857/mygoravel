@@ -1,12 +1,14 @@
 package queue
 
 import (
+	"database/sql"
 	"math"
 	"math/rand/v2"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
 )
 
 // driverDatabase 是 queue_failed_jobs.driver 中数据库驱动的名称。
@@ -49,4 +51,13 @@ func backoff(attempts int) time.Duration {
 	// 先按秒封顶再转换，否则次数很大时 float64 转 Duration 会溢出。
 	seconds := min(math.Pow(float64(max(attempts, 1)), 4)*(0.9+0.2*rand.Float64()), maxBackoff.Seconds())
 	return time.Duration(seconds * float64(time.Second))
+}
+
+// txOptions 返回队列事务的选项。MySQL 默认的可重复读会在“删除可能不存在的行再插入”时加间隙锁，
+// 两个任务同时转入失败表就会死锁；读已提交下不加间隙锁。其他数据库使用默认选项。
+func txOptions(db bun.IDB) *sql.TxOptions {
+	if db.Dialect().Name() == dialect.MySQL {
+		return &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+	}
+	return nil
 }
