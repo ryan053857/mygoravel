@@ -6,7 +6,6 @@
     - [单元测试](#unit-tests)
     - [集成测试](#integration-tests)
     - [架构测试](#architecture-tests)
-    - [外部模块消费测试](#consumer-tests)
 - [持续集成](#continuous-integration)
 - [编码风格](#coding-style)
 - [编写文档](#writing-documentation)
@@ -75,11 +74,6 @@ go test -race -count=1 -tags=integration ./...
 ### 架构测试
 
 `internal/archtest` 检查框架各个包之间的依赖方向。例如 `errorx`、`identity` 等基础包不能依赖 HTTP 或数据库相关的包，`database` 只能依赖 `config`。如果你的修改引入了新的包依赖，请先确认它符合分层设计，再相应地更新测试中的规则。
-
-<a id="consumer-tests"></a>
-### 外部模块消费测试
-
-`internal/consumetest`（需要 `integration` 标签）模拟一个外部应用使用框架的过程：它把当前代码打包成模块代理格式，在一个临时 module 中通过 `GOPROXY` 下载它，然后运行 HTTP、配置、错误和命令等公开 API 的契约测试。这可以确保框架作为一个独立模块被引用时能够正常工作，而不仅仅是在仓库内部可以编译。
 
 <a id="continuous-integration"></a>
 ## 持续集成
