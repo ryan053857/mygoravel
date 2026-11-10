@@ -17,7 +17,7 @@ func TestMigrateCommandsOnPostgres(t *testing.T) {
 	if err := db.QueryRowContext(context.Background(), "SELECT current_database()").Scan(&name); err != nil {
 		t.Fatal(err)
 	}
-	dsn, err := url.Parse(dbtest.RequireDSN(t))
+	dsn, err := url.Parse(dbtest.RequireURL(t, postgres.Driver))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,21 +20,23 @@ import (
 	"github.com/ryan053857/mygoravel/database/migrate"
 )
 
-// EnvDSN 是 PostgreSQL 测试管理员连接的环境变量。
-const EnvDSN = "DATABASE_TEST_DSN"
+// EnvURL 返回 driver 的测试服务器管理员连接所在的环境变量，例如 POSTGRES_TEST_URL。
+func EnvURL(driver database.Driver) string {
+	return strings.ToUpper(driver.Name()) + "_TEST_URL"
+}
 
-// RequireDSN 返回 PostgreSQL 测试管理员 DSN，未设置时使测试失败。
-func RequireDSN(t testing.TB) string {
+// RequireURL 返回 driver 的测试服务器管理员连接，环境变量未设置时使测试失败。
+func RequireURL(t testing.TB, driver database.Driver) string {
 	t.Helper()
-	dsn := os.Getenv(EnvDSN)
-	if dsn == "" {
-		t.Fatalf("%s is required for this test", EnvDSN)
+	url := os.Getenv(EnvURL(driver))
+	if url == "" {
+		t.Fatalf("%s is required for this test", EnvURL(driver))
 	}
-	return dsn
+	return url
 }
 
 // Open 用 driver 为当前测试创建一个空的临时数据库，migrations 非 nil 时执行迁移，返回 *bun.DB；测试结束时删除。
-// PostgreSQL 在 DATABASE_TEST_DSN 指向的服务器上建库；SQLite 在 t.TempDir() 中建文件，不需要任何外部服务。
+// PostgreSQL 在 POSTGRES_TEST_URL 指向的服务器上建库；SQLite 在 t.TempDir() 中建文件，不需要任何外部服务。
 func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -75,7 +78,7 @@ func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 
 func openPostgres(ctx context.Context, t testing.TB, driver database.Driver) *bun.DB {
 	t.Helper()
-	adminDSN := RequireDSN(t)
+	adminDSN := RequireURL(t, driver)
 	admin, err := database.Open(ctx, driver, database.Config{DSN: adminDSN})
 	if err != nil {
 		t.Fatal(err)

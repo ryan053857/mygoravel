@@ -60,6 +60,18 @@ func newGCRA(name string, cfg Config) gcra {
 	return gcra{step: step, ahead: step * time.Duration(cfg.Burst-1)}
 }
 
+// take 为 now 时刻的一次调用做出决定。tat 是 key 的理论到达时间，没有记录时为零值。
+// 放行时返回新的 tat；拒绝时返回下一次调用可以成功的最短等待时间，tat 保持不变。
+func (g gcra) take(tat, now time.Time) (next time.Time, wait time.Duration) {
+	if tat.Before(now) {
+		tat = now
+	}
+	if wait := tat.Sub(now) - g.ahead; wait > 0 {
+		return tat, wait
+	}
+	return tat.Add(g.step), 0
+}
+
 func exceeded(wait time.Duration) error {
 	return ErrExceeded.New(errorx.RetryAfter(wait))
 }

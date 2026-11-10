@@ -12,9 +12,13 @@ import (
 // 过期时间按应用服务器时钟计算，各实例的时钟需要同步。
 //
 // DBStore 不在后台清理过期的锁：过期的锁会被下一次 Acquire 直接取得，残留行由应用定时调用 Cleanup 删除。
+// 锁名最长 MaxNameLength 字节，所有数据库一致。
 type DBStore struct {
 	db bun.IDB
 }
+
+// MaxNameLength 是 DBStore 中锁名的最大字节数，与 locks 表 name 列的长度一致。
+const MaxNameLength = 255
 
 type row struct {
 	bun.BaseModel `bun:"table:locks,alias:l"`
@@ -34,6 +38,9 @@ func NewDBStore(db bun.IDB) *DBStore {
 
 // Acquire 实现 Store：先插入，name 已存在时只接管已过期的锁。两步各自原子，并发时最多一方成功。
 func (s *DBStore) Acquire(ctx context.Context, name, owner string, ttl time.Duration) (bool, error) {
+	if len(name) > MaxNameLength {
+		return false, errors.Newf("lock: name longer than %d bytes", MaxNameLength)
+	}
 	now := time.Now().UTC()
 	expires := now.Add(ttl)
 	res, err := s.db.NewInsert().Model(&row{Name: name, Owner: owner, ExpiresAt: expires}).Ignore().Exec(ctx)

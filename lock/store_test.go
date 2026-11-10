@@ -2,6 +2,7 @@ package lock_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +50,19 @@ func TestDBStoreCleanup(t *testing.T) {
 		}
 		if ok, _ := store.Acquire(ctx, "live", "other", time.Hour); ok {
 			t.Fatal("live lock removed")
+		}
+	})
+}
+
+func TestDBStoreRejectsLongNames(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		store := lock.NewDBStore(openDB(t, driver))
+		ctx := context.Background()
+		if ok, err := store.Acquire(ctx, strings.Repeat("n", lock.MaxNameLength), "o", time.Minute); !ok || err != nil {
+			t.Fatalf("max length ok=%v err=%v", ok, err)
+		}
+		if ok, err := store.Acquire(ctx, strings.Repeat("n", lock.MaxNameLength+1), "o", time.Minute); ok || err == nil {
+			t.Fatalf("over length ok=%v err=%v", ok, err)
 		}
 	})
 }

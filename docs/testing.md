@@ -242,10 +242,10 @@ svc := article.NewService(dbtest.Open(t, postgres.Driver, migrations.FS))
 
 使用 SQLite 的应用传入 `sqlite.Driver`，`dbtest` 在 `t.TempDir()` 中创建数据库文件。它不需要任何外部服务，也不需要环境变量，可以和普通测试一样直接用 `go test ./...` 运行，不必加 `integration` 构建标签。
 
-PostgreSQL 的 `dbtest` 通过环境变量 `DATABASE_TEST_DSN` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
+PostgreSQL 的 `dbtest` 通过环境变量 `POSTGRES_TEST_URL` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
 
 > [!WARNING]
-> 请为 `DATABASE_TEST_DSN` 使用专门的测试数据库实例，不要指向任何存放真实数据的数据库。
+> 请为 `POSTGRES_TEST_URL` 使用专门的测试数据库实例，不要指向任何存放真实数据的数据库。
 
 PostgreSQL 测试文件开头的 `//go:build integration` 让这些测试只在显式指定 `-tags=integration` 时运行，普通的 `go test ./...` 不会执行它们。
 
@@ -269,7 +269,7 @@ docker exec app-test-postgres pg_isready -U postgres
 然后设置环境变量并运行测试：
 
 ```bash
-export DATABASE_TEST_DSN='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
+export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
 go test -race -count=1 -tags=integration ./...
 ```
 

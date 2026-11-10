@@ -124,7 +124,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-表中每行是一把锁：`name` 是主键，`owner` 是持有者随机生成的标识，`expires_at` 是过期时间。取得锁时先插入，锁已存在时只接管已过期的锁，两步都是单条原子语句。过期时间按应用服务器的时钟计算，各实例的时钟需要同步。
+表中每行是一把锁：`name` 是主键，最长 255 字节（`lock.MaxNameLength`），`owner` 是持有者随机生成的标识，`expires_at` 是过期时间。取得锁时先插入，锁已存在时只接管已过期的锁，两步都是单条原子语句。过期时间按应用服务器的时钟计算，各实例的时钟需要同步。
 
 <a id="cleanup"></a>
 ### 过期清理

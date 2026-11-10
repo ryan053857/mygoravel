@@ -123,12 +123,8 @@ func TestDatabaseReadsClockAfterLock(t *testing.T) {
 		}
 
 		// tat = 此刻 + ahead：此刻之后的调用都应放行。
-		if sqlite {
-			_, err = tx.ExecContext(ctx, `UPDATE rate_limits SET tat = ? WHERE name = 'clock' AND key = 'k'`,
-				time.Now().Add(time.Hour).UnixMicro())
-		} else {
-			_, err = tx.ExecContext(ctx, `UPDATE rate_limits SET tat = clock_timestamp() + interval '1 hour' WHERE name = 'clock' AND key = 'k'`)
-		}
+		_, err = tx.ExecContext(ctx, `UPDATE rate_limits SET tat = ? WHERE name = 'clock' AND key = 'k'`,
+			time.Now().Add(time.Hour).UnixMicro())
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -223,7 +223,7 @@ _, err := db.NewUpdate().
     Exec(ctx)
 ```
 
-如果使用 `Set(...)` 显式指定更新表达式，需要同时设置 `Set("updated_at = ?", time.Now().UTC())`。`Model((*Article)(nil))` 没有模型实例可供此钩子修改，原生 SQL 也不会调用模型钩子；这些写入路径需要自行维护时间戳。迁移中的 `DEFAULT now()` 只提供插入默认值，不会在更新时自动刷新时间。
+如果使用 `Set(...)` 显式指定更新表达式，需要同时设置 `Set("updated_at = ?", time.Now().UTC())`。`Model((*Article)(nil))` 没有模型实例可供此钩子修改，原生 SQL 也不会调用模型钩子；这些写入路径需要自行维护时间戳。迁移中的时间列不设默认值，时间总是由应用写入。
 
 <a id="soft-deletes"></a>
 ### 软删除
