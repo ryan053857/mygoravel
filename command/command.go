@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,88 +11,46 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ryan053857/mygoravel/config"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/httpx/rest"
 )
 
-// App 声明应用的命令行。C 是应用的根配置结构体。
-// 字段为空时不安装对应的命令；config check/show 总是安装。
-type App[C any] struct {
-	// Name 是可执行文件名，Short 是帮助中的一句话描述。
-	Name, Short string
-	// ConfigFile 是 --config 的默认值，空值为 config.yaml。
-	ConfigFile string
+const configFlag = "config"
 
-	// API 是 openapi、routes 命令创建 API 时使用的选项，Mode 固定为 rest.ModeOpenAPI。
-	API rest.Options
-	// Routes 注册应用的全部路由；设置后安装 openapi 和 routes。
-	// 文档模式不调用处理器工厂，所以这里可以传入 nil 服务。
-	Routes func(api *rest.API)
-
-	// Serve 打开资源并启动 HTTP 服务，直到 ctx 被取消；设置后安装 serve。
-	Serve func(ctx context.Context, cfg C) error
-
-	// Migrations 是 SQL 迁移文件所在的 fs.FS，Database 从配置中取出数据库配置；
-	// 两者都设置后安装 migrate up/status/down。
-	Migrations fs.FS
-	Database   func(cfg C) database.Config
-}
-
-// New 按 app 构造根命令。返回的是原生 *cobra.Command，可以继续 AddCommand。
-func New[C any](app App[C]) *cobra.Command {
+// Root 返回应用的根命令，用 AddCommand 装配需要的命令。
+// 根命令定义了所有子命令共用的 --config 选项（默认 config.yaml），
+// 并把未知命令、未知选项和多余参数标记为 ExitUsage。
+func Root(name, short string) *cobra.Command {
 	root := &cobra.Command{
-		Use:           app.Name,
-		Short:         app.Short,
+		Use:           name,
+		Short:         short,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          noArgs,
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return AsExitError(ExitUsage, err) })
-	file := app.ConfigFile
-	if file == "" {
-		file = "config.yaml"
-	}
-	root.PersistentFlags().String(configFlag, file, "配置文件路径")
-
-	if app.Serve != nil {
-		root.AddCommand(leaf("serve", "启动 HTTP 服务", func(cmd *cobra.Command) error {
-			cfg, err := LoadConfig[C](cmd)
-			if err != nil {
-				return err
-			}
-			return app.Serve(cmd.Context(), cfg)
-		}))
-	}
-	if app.Routes != nil {
-		build := func() *rest.API {
-			opts := app.API
-			opts.Mode = rest.ModeOpenAPI
-			api := rest.New(opts)
-			app.Routes(api)
-			return api
-		}
-		root.AddCommand(openAPICommand(build), routesCommand(build))
-	}
-	if app.Migrations != nil && app.Database != nil {
-		root.AddCommand(migrateCommand(app.Migrations, func(cmd *cobra.Command) (database.Config, error) {
-			cfg, err := LoadConfig[C](cmd)
-			return app.Database(cfg), err
-		}))
-	}
-	root.AddCommand(configCommand[C]())
+	root.PersistentFlags().String(configFlag, "config.yaml", "配置文件路径")
 	return root
 }
 
-const configFlag = "config"
+// Run 构造一个加载配置后执行 run 的命令，适合 serve、worker 这类常驻进程，
+// 也适合一次性任务。run 的 ctx 在进程收到 SIGINT、SIGTERM 时被取消。
+func Run[C any](use, short string, run func(ctx context.Context, cfg C) error) *cobra.Command {
+	return leaf(use, short, func(cmd *cobra.Command) error {
+		cfg, err := LoadConfig[C](cmd)
+		if err != nil {
+			return err
+		}
+		return run(cmd.Context(), cfg)
+	})
+}
 
-// LoadConfig 按 --config 加载并校验配置。失败时错误带 ExitConfig 退出码。
-// 自定义命令挂在 New 返回的根命令下时，可以用它读取配置。
+// LoadConfig 按 --config 加载并校验配置，失败时错误带 ExitConfig 退出码。
+// cmd 必须挂在 Root 返回的根命令下。
 func LoadConfig[C any](cmd *cobra.Command) (C, error) {
 	path, err := cmd.Flags().GetString(configFlag)
 	if err != nil {
 		var zero C
-		return zero, errors.Wrap(err, "command: --config flag is not defined")
+		return zero, errors.Wrap(err, "command: --config is defined by command.Root")
 	}
 	cfg, err := config.Load[C](path)
 	return cfg, AsExitError(ExitConfig, err)

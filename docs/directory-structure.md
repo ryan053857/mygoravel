@@ -31,7 +31,7 @@ blog/
 │   └── api/
 │       └── main.go          进程入口：执行命令行
 ├── internal/
-│   ├── cli/                 声明命令行：serve、routes、openapi、migrate、config
+│   ├── cli/                 装配命令行：serve、routes、openapi、migrate、config
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务、注册路由
 │   ├── auth/                token 校验器

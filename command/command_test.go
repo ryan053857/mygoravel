@@ -55,6 +55,15 @@ func execute(root *cobra.Command, args ...string) (stdout, stderr string, err er
 
 const minimalConfig = "name: blog\ndatabase:\n  dsn: postgres://localhost/blog\n"
 
+// newRoot 返回装配了 cmds 的根命令。
+func newRoot(cmds ...*cobra.Command) *cobra.Command {
+	root := command.Root("api", "test")
+	root.AddCommand(cmds...)
+	return root
+}
+
+func dbConfig(s settings) database.Config { return s.Database }
+
 type input struct{}
 type output struct{ Body string }
 
@@ -83,45 +92,30 @@ func registerRoutes(t *testing.T) func(*rest.API) {
 	}
 }
 
-func TestInstallsOnlyDeclaredCommands(t *testing.T) {
-	names := func(root *cobra.Command) []string {
-		var got []string
-		for _, c := range root.Commands() {
-			got = append(got, c.Name())
-		}
-		return got
+func TestRootHasNoCommandsByDefault(t *testing.T) {
+	root := command.Root("api", "test")
+	if len(root.Commands()) != 0 {
+		t.Fatalf("commands = %v", root.Commands())
 	}
-	if got := names(command.New(command.App[settings]{Name: "api"})); !slices.Equal(got, []string{"config"}) {
-		t.Fatalf("minimal app commands = %v", got)
-	}
-	full := command.New(command.App[settings]{
-		Name:       "api",
-		Routes:     func(*rest.API) {},
-		Serve:      func(context.Context, settings) error { return nil },
-		Migrations: fstest.MapFS{},
-		Database:   func(s settings) database.Config { return s.Database },
-	})
-	if got := names(full); !slices.Equal(got, []string{"config", "migrate", "openapi", "routes", "serve"}) {
-		t.Fatalf("full app commands = %v", got)
+	out, _, err := execute(root)
+	if err != nil || !strings.Contains(out, "--config") {
+		t.Fatalf("help out=%q err=%v", out, err)
 	}
 }
 
-func TestServeReceivesConfigAndContext(t *testing.T) {
+func TestRunReceivesConfigAndContext(t *testing.T) {
 	path := writeConfig(t, minimalConfig)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var got settings
-	root := command.New(command.App[settings]{
-		Name: "api",
-		Serve: func(serveCtx context.Context, cfg settings) error {
-			if serveCtx != ctx {
-				t.Fatal("serve did not receive the command context")
-			}
-			got = cfg
-			return nil
-		},
-	})
-	root.SetArgs([]string{"serve", "--config", path})
+	root := newRoot(command.Run("work", "worker", func(runCtx context.Context, cfg settings) error {
+		if runCtx != ctx {
+			t.Fatal("run did not receive the command context")
+		}
+		got = cfg
+		return nil
+	}))
+	root.SetArgs([]string{"work", "--config", path})
 	if err := root.ExecuteContext(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -140,15 +134,14 @@ func TestConfigErrorsExitWithConfigCode(t *testing.T) {
 		{"serve", "--config", missing},
 		{"migrate", "status", "--config", missing},
 	} {
-		root := command.New(command.App[settings]{
-			Name: "api",
-			Serve: func(context.Context, settings) error {
+		root := newRoot(
+			command.Config[settings](),
+			command.Run("serve", "serve", func(context.Context, settings) error {
 				t.Fatal("serve ran with invalid config")
 				return nil
-			},
-			Migrations: fstest.MapFS{},
-			Database:   func(s settings) database.Config { return s.Database },
-		})
+			}),
+			command.Migrate(fstest.MapFS{}, dbConfig),
+		)
 		if _, _, err := execute(root, args...); command.ExitCode(err) != command.ExitConfig {
 			t.Errorf("args=%v exit=%d err=%v", args, command.ExitCode(err), err)
 		}
@@ -157,7 +150,7 @@ func TestConfigErrorsExitWithConfigCode(t *testing.T) {
 
 func TestConfigCheckAndShow(t *testing.T) {
 	path := writeConfig(t, "name: blog\ndatabase:\n  dsn: postgres://localhost/blog\n")
-	root := func() *cobra.Command { return command.New(command.App[settings]{Name: "api"}) }
+	root := func() *cobra.Command { return newRoot(command.Config[settings]()) }
 
 	if out, _, err := execute(root(), "config", "check", "--config", path); err != nil || out != "" {
 		t.Fatalf("check out=%q err=%v", out, err)
@@ -175,18 +168,9 @@ func TestConfigCheckAndShow(t *testing.T) {
 	}
 }
 
-func TestConfigFileDefault(t *testing.T) {
-	path := writeConfig(t, minimalConfig)
-	root := command.New(command.App[settings]{Name: "api", ConfigFile: path})
-	if _, _, err := execute(root, "config", "check"); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestLoadConfigInCustomCommand(t *testing.T) {
 	path := writeConfig(t, minimalConfig)
-	root := command.New(command.App[settings]{Name: "api"})
-	root.AddCommand(&cobra.Command{Use: "hello", RunE: func(cmd *cobra.Command, _ []string) error {
+	root := newRoot(&cobra.Command{Use: "hello", RunE: func(cmd *cobra.Command, _ []string) error {
 		cfg, err := command.LoadConfig[settings](cmd)
 		if err != nil {
 			return err
@@ -206,11 +190,7 @@ func TestLoadConfigInCustomCommand(t *testing.T) {
 }
 
 func TestOpenAPI(t *testing.T) {
-	root := command.New(command.App[settings]{
-		Name:   "api",
-		API:    rest.Options{Title: "Blog API", Version: "1.0.0"},
-		Routes: registerRoutes(t),
-	})
+	root := newRoot(command.OpenAPI(rest.Options{Title: "Blog API", Version: "1.0.0"}, registerRoutes(t)))
 	// openapi 不读取配置文件
 	out, _, err := execute(root, "openapi", "--config", filepath.Join(t.TempDir(), "missing.yaml"))
 	if err != nil {
@@ -238,7 +218,7 @@ func TestRoutes(t *testing.T) {
 		{"empty", []string{"--path", "missing"}, nil, []string{"article-create", "article-list", "/docs", "/livez"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := command.New(command.App[settings]{Name: "api", Routes: registerRoutes(t)})
+			root := newRoot(command.Routes(rest.Options{}, registerRoutes(t)))
 			out, stderr, err := execute(root, append([]string{"routes"}, tc.args...)...)
 			if err != nil || stderr != "" {
 				t.Fatalf("err=%v stderr=%s", err, stderr)
@@ -278,18 +258,17 @@ func TestUsageErrors(t *testing.T) {
 		{"config", "check", "extra"},
 		{"migrate", "up", "extra"},
 	} {
-		root := command.New(command.App[settings]{
-			Name: "api",
-			Routes: func(*rest.API) {
-				t.Fatal("invalid arguments built the API")
-			},
-			Serve: func(context.Context, settings) error {
+		mustNotRegister := func(*rest.API) { t.Fatal("invalid arguments built the API") }
+		root := newRoot(
+			command.OpenAPI(rest.Options{}, mustNotRegister),
+			command.Routes(rest.Options{}, mustNotRegister),
+			command.Run("serve", "serve", func(context.Context, settings) error {
 				t.Fatal("invalid arguments ran serve")
 				return nil
-			},
-			Migrations: fstest.MapFS{},
-			Database:   func(s settings) database.Config { return s.Database },
-		})
+			}),
+			command.Migrate(fstest.MapFS{}, dbConfig),
+			command.Config[settings](),
+		)
 		if _, _, err := execute(root, args...); command.ExitCode(err) != command.ExitUsage {
 			t.Errorf("args=%v exit=%d err=%v", args, command.ExitCode(err), err)
 		}
@@ -299,11 +278,7 @@ func TestUsageErrors(t *testing.T) {
 func TestMigrateReportsUnavailableDatabase(t *testing.T) {
 	// 端口 1 上没有 PostgreSQL，连接会立即被拒绝
 	path := writeConfig(t, "name: blog\ndatabase:\n  dsn: postgres://postgres@127.0.0.1:1/blog?sslmode=disable&connect_timeout=2\n")
-	root := command.New(command.App[settings]{
-		Name:       "api",
-		Migrations: fstest.MapFS{},
-		Database:   func(s settings) database.Config { return s.Database },
-	})
+	root := newRoot(command.Migrate(fstest.MapFS{}, dbConfig))
 	if _, _, err := execute(root, "migrate", "status", "--config", path); command.ExitCode(err) != command.ExitUnavailable {
 		t.Fatalf("exit=%d err=%v", command.ExitCode(err), err)
 	}

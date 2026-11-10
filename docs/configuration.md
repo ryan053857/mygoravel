@@ -165,7 +165,7 @@ config: config.yaml: invalid configuration: storage: endpoint is required
 <a id="inspecting-configuration"></a>
 ## 检查配置
 
-用[命令行](commands.md#declaring-the-cli)声明了配置类型的应用，自带两个检查配置的命令：
+在[命令行](commands.md#declaring-the-cli)中装配 `command.Config` 后，应用就有了两个检查配置的命令：
 
 ```bash
 ./bin/api config check --config prod.yaml   # 只加载并校验，不访问网络

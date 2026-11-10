@@ -1,9 +1,9 @@
 # 命令行
 
 - [简介](#introduction)
-- [声明命令行](#declaring-the-cli)
+- [装配命令行](#declaring-the-cli)
 - [内置命令](#built-in-commands)
-    - [serve 命令](#serve-command)
+    - [Run：serve 与常驻进程](#run-command)
     - [openapi 命令](#openapi-command)
     - [routes 命令](#routes-command)
     - [migrate 命令](#migrate-command)
@@ -15,7 +15,7 @@
 <a id="introduction"></a>
 ## 简介
 
-一个 API 应用除了启动 HTTP 服务，通常还需要执行一些运维任务：检查配置、执行数据库迁移、导出接口文档、查看路由。mygoravel 的 `command` 包基于 [Cobra](https://github.com/spf13/cobra) 实现了这些命令，你只需要告诉它应用独有的部分：配置类型、路由注册函数、服务入口和迁移文件。
+一个 API 应用除了启动 HTTP 服务，通常还需要执行一些运维任务：检查配置、执行数据库迁移、导出接口文档、查看路由。mygoravel 的 `command` 包基于 [Cobra](https://github.com/spf13/cobra) 实现了这些命令。每个命令都是一个独立的 `*cobra.Command`，应用按需把它们装配到根命令上，用不到的命令不会出现。
 
 完成本章后，你的应用可以这样使用：
 
@@ -28,9 +28,9 @@
 ```
 
 <a id="declaring-the-cli"></a>
-## 声明命令行
+## 装配命令行
 
-下面是博客应用完整的 `internal/cli/cli.go`：
+`command.Root` 创建根命令，然后用 Cobra 原生的 `AddCommand` 装配应用需要的命令。下面是博客应用完整的 `internal/cli/cli.go`：
 
 ```go
 package cli
@@ -38,32 +38,27 @@ package cli
 import (
     "github.com/spf13/cobra"
 
-    "example.com/blog/internal/auth"
     "example.com/blog/internal/bootstrap"
     "example.com/blog/internal/settings"
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/httpx/rest"
 )
 
 // New 返回应用的根命令。
 func New() *cobra.Command {
-    return command.New(command.App[settings.Config]{
-        Name:  "api",
-        Short: "Blog API",
-
-        API: rest.Options{Title: "Blog API", Version: "1.0.0"},
-        Routes: func(api *rest.API) {
-            bootstrap.Routes(api, auth.Validator(auth.Config{}), nil)
-        },
-
-        Serve: bootstrap.Serve,
-
-        Migrations: migrations.FS,
-        Database:   func(cfg settings.Config) database.Config { return cfg.Database },
-    })
+    root := command.Root("api", "Blog API")
+    root.AddCommand(
+        command.Run("serve", "启动 HTTP 服务", bootstrap.Serve),
+        command.Migrate(migrations.FS, dbConfig),
+        command.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
+        command.Routes(bootstrap.API, bootstrap.DocRoutes),
+        command.Config[settings.Config](),
+    )
+    return root
 }
+
+func dbConfig(cfg settings.Config) database.Config { return cfg.Database }
 ```
 
 入口文件 `cmd/api/main.go` 只有一行：
@@ -83,45 +78,55 @@ func main() {
 
 `command.Execute` 执行根命令。收到 `SIGINT` 或 `SIGTERM` 时，它会取消命令的 context；命令失败时，它把错误写到标准错误，并以对应的[退出码](#exit-codes)结束进程。
 
-`App` 的类型参数是应用的配置结构（见[配置](configuration.md#loading-configuration)）。各字段的作用如下，字段为空时不安装对应的命令：
+`command.Root` 在根命令上定义了 `--config` 选项（默认 `config.yaml`），所有子命令共用它。需要配置的命令由框架负责读取 `--config`、调用 `config.Load` 并校验，你的代码只会拿到校验通过的配置。配置结构 `settings.Config` 见[配置](configuration.md#loading-configuration)，类型参数通常可以从你传入的函数推断出来。
 
-| 字段 | 作用 | 安装的命令 |
+| 构造函数 | 创建的命令 | 需要配置 |
 | --- | --- | --- |
-| `Name`、`Short` | 可执行文件名和一句话描述，显示在帮助中 | |
-| `ConfigFile` | `--config` 选项的默认值，为空时是 `config.yaml` | `config check`、`config show`（总是安装） |
-| `API`、`Routes` | 创建 API 的选项，以及注册全部路由的函数 | `openapi`、`routes` |
-| `Serve` | 打开资源并启动 HTTP 服务 | `serve` |
-| `Migrations`、`Database` | 嵌入的迁移文件，以及从配置中取出数据库配置的函数 | `migrate up`、`migrate status`、`migrate down` |
+| `command.Run(use, short, run)` | 任意名称，例如 `serve`、`worker` | 是 |
+| `command.Migrate(fsys, dbConfig)` | `migrate up`、`migrate status`、`migrate down` | 是 |
+| `command.Config[C]()` | `config check`、`config show` | 是 |
+| `command.OpenAPI(opts, register)` | `openapi` | 否 |
+| `command.Routes(opts, register)` | `routes` | 否 |
 
-`--config` 是根命令上的选项，所有子命令都可以使用。框架负责读取它、调用 `config.Load` 并校验配置，你的代码只会拿到校验通过的配置。
+不提供 HTTP API 的应用，例如一个只消费消息队列的常驻进程，只装配它需要的命令即可：
+
+```go
+root := command.Root("worker", "订单事件消费者")
+root.AddCommand(
+    command.Run("run", "消费订单事件", consumer.Run),
+    command.Migrate(migrations.FS, dbConfig),
+)
+```
 
 <a id="built-in-commands"></a>
 ## 内置命令
 
-<a id="serve-command"></a>
-### serve 命令
+<a id="run-command"></a>
+### Run：serve 与常驻进程
 
-`serve` 加载配置，然后调用 `Serve(ctx, cfg)`。这里的 `bootstrap.Serve` 负责安装日志器、打开数据库并启动 HTTP 服务，见[依赖装配](dependencies.md#assembling-the-application)。`ctx` 会在进程收到停止信号时被取消，HTTP 服务据此[平滑停止](lifecycle.md)。
+`command.Run` 创建一个先加载配置、再调用 `run(ctx, cfg)` 的命令。`ctx` 会在进程收到停止信号时被取消，常驻进程据此退出。博客应用的 `bootstrap.Serve` 负责安装日志器、打开数据库并启动 HTTP 服务，见[依赖装配](dependencies.md#assembling-the-application)，HTTP 服务会据此[平滑停止](lifecycle.md)：
 
 ```bash
 ./bin/api serve --config config.yaml
 ```
 
+`Run` 不限于常驻进程，任何“读取配置然后做一件事”的命令都可以用它创建，例如数据回填、发送一次报表。
+
 <a id="openapi-command"></a>
 ### openapi 命令
 
-`openapi` 以[文档模式](routing.md#exporting-openapi)创建 API，调用 `Routes` 注册路由，然后把 OpenAPI 文档输出到标准输出：
+`command.OpenAPI(opts, register)` 以[文档模式](routing.md#exporting-openapi)和 `opts` 创建 API，调用 `register` 注册路由，然后把 OpenAPI 文档输出到标准输出：
 
 ```bash
 ./bin/api openapi > openapi.json
 ```
 
-`Routes` 和 `serve` 调用的是同一个 `bootstrap.Routes`，因此导出的文档与实际运行的接口始终一致。文档模式不会调用处理器工厂，也不会调用 token 校验器，所以上面传入空的认证配置和 `nil` 服务即可。这个命令不读取配置文件，也不连接数据库。
+博客应用的 `bootstrap.API` 和 `bootstrap.DocRoutes` 定义在 `internal/bootstrap` 中，与 `serve` 共用同一份 API 选项和路由注册（见[依赖装配](dependencies.md#assembling-the-application)），因此导出的文档与实际运行的接口始终一致。文档模式不会调用处理器工厂，也不会调用 token 校验器，所以这个命令不读取配置文件，也不连接数据库。
 
 <a id="routes-command"></a>
 ### routes 命令
 
-当业务模块变多时，你可以用 `routes` 查看整个应用的路由，不必逐个打开模块中的 `routes.go`。它和 `openapi` 一样在文档模式下注册路由，不需要配置文件：
+当业务模块变多时，你可以用 `routes` 查看整个应用的路由，不必逐个打开模块中的 `routes.go`。`command.Routes` 的参数与 `command.OpenAPI` 相同，同样在文档模式下注册路由，不需要配置文件：
 
 ```bash
 ./bin/api routes
@@ -148,7 +153,7 @@ Huma 自动注册的 `/docs`、`/openapi.json`、`/schemas/{schema}` 等文档�
 <a id="migrate-command"></a>
 ### migrate 命令
 
-设置 `Migrations` 和 `Database` 后，应用获得三个迁移命令：
+`command.Migrate(fsys, dbConfig)` 创建三个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`dbConfig` 从应用配置中取出数据库配置：
 
 ```bash
 ./bin/api migrate up       # 执行全部未执行的迁移
@@ -169,6 +174,8 @@ VERSION         STATE    APPLIED AT           FILE
 <a id="config-command"></a>
 ### config 命令
 
+`command.Config[C]()` 创建两个检查配置的命令，`C` 是应用的配置结构：
+
 - `config check` 只加载并校验配置，不访问网络。发布前运行它，可以尽早发现缺失的环境变量或写错的字段；
 - `config show` 输出加载后的配置，包括默认值和展开后的环境变量。默认输出 YAML，`--format json` 输出 JSON。
 
@@ -182,11 +189,9 @@ VERSION         STATE    APPLIED AT           FILE
 <a id="custom-commands"></a>
 ## 自定义命令
 
-`command.New` 返回的是原生的 `*cobra.Command`，可以继续添加自定义命令。需要读取配置时，调用 `command.LoadConfig`，它使用同一个 `--config` 选项，失败时同样带 `ExitConfig` 退出码：
+根命令和内置命令都是原生的 `*cobra.Command`，任意 Cobra 命令都可以一起装配。需要读取配置时，调用 `command.LoadConfig`，它使用同一个 `--config` 选项，失败时同样带 `ExitConfig` 退出码：
 
 ```go
-root := command.New(command.App[settings.Config]{ /* ... */ })
-
 root.AddCommand(&cobra.Command{
     Use:   "ping-db",
     Short: "检查数据库能否连通",

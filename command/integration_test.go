@@ -10,7 +10,6 @@ import (
 	"testing/fstest"
 
 	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 )
 
@@ -33,11 +32,7 @@ func TestMigrateCommands(t *testing.T) {
 	}
 	run := func(args ...string) string {
 		t.Helper()
-		root := command.New(command.App[settings]{
-			Name:       "api",
-			Migrations: migrations,
-			Database:   func(s settings) database.Config { return s.Database },
-		})
+		root := newRoot(command.Migrate(migrations, dbConfig))
 		out, _, err := execute(root, append(args, "--config", path)...)
 		if err != nil {
 			t.Fatalf("%v: %v", args, err)

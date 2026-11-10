@@ -8,7 +8,9 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-func configCommand[C any]() *cobra.Command {
+// Config 构造 config check/show 命令，C 是应用的根配置结构体。
+// check 只加载并校验配置；show 输出加载后的配置，--format 为 yaml（默认）或 json。
+func Config[C any]() *cobra.Command {
 	var format string
 	show := leaf("show", "输出加载后的配置", func(cmd *cobra.Command) error {
 		if format != "yaml" && format != "json" {

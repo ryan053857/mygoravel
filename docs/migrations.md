@@ -78,14 +78,12 @@ var FS embed.FS
 <a id="migration-commands"></a>
 ### 迁移命令
 
-在[声明命令行](commands.md#declaring-the-cli)时设置 `Migrations` 和 `Database` 两个字段，应用就有了迁移命令：
+在[装配命令行](commands.md#declaring-the-cli)时加入 `command.Migrate`，应用就有了 `migrate up`、`migrate status` 和 `migrate down` 三个命令：
 
 ```go
-command.New(command.App[settings.Config]{
-    // ...
-    Migrations: migrations.FS,
-    Database:   func(cfg settings.Config) database.Config { return cfg.Database },
-})
+root.AddCommand(command.Migrate(migrations.FS, func(cfg settings.Config) database.Config {
+    return cfg.Database
+}))
 ```
 
 之后，你就可以在部署流程中执行：

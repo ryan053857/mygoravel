@@ -74,9 +74,18 @@ import (
     "github.com/ryan053857/mygoravel/logging"
 )
 
-// Routes 注册应用的全部路由。serve、openapi 和 routes 命令共用它。
+// API 是应用的 API 选项，serve、openapi 和 routes 命令共用它。
+var API = rest.Options{Title: "Blog API", Version: "1.0.0"}
+
+// Routes 注册应用的全部路由，serve、openapi 和 routes 命令共用它。
 func Routes(api *rest.API, validate rest.TokenValidator, articles *article.Service) {
     articlehttp.Register(api, rest.RequireBearer(api, validate, "articles"), articles)
+}
+
+// DocRoutes 在文档模式下注册路由。文档模式不调用处理器工厂和 token 校验器，
+// 所以不需要配置和服务。
+func DocRoutes(api *rest.API) {
+    Routes(api, auth.Validator(auth.Config{}), nil)
 }
 
 func Serve(ctx context.Context, cfg settings.Config) (err error) {
@@ -103,9 +112,9 @@ func Serve(ctx context.Context, cfg settings.Config) (err error) {
     // 4. 安装中间件，创建 API 并注册路由
     router := chi.NewRouter()
     router.Use(httpx.Defaults(cfg.HTTP, nil)...)
-    api := rest.New(rest.Options{
-        Title: "Blog API", Version: "1.0.0", Router: router,
-    })
+    opts := API
+    opts.Router = router
+    api := rest.New(opts)
     Routes(api, auth.Validator(cfg.Auth), articles)
 
     // 5. 开始监听，直到 ctx 被取消
@@ -113,7 +122,7 @@ func Serve(ctx context.Context, cfg settings.Config) (err error) {
 }
 ```
 
-其中 `settings.Config` 是应用的[配置结构](configuration.md#loading-configuration)，`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)），`article` 和 `articlehttp` 是应用自己的业务包（见[路由](routing.md#organizing-routes)）。路由声明保留在各模块的 `routes.go`，`bootstrap.Routes` 统一调用各模块的 `Register`，让 `serve`、`openapi` 和 [routes](commands.md#routes-command) 命令复用同一份声明。后两个命令在文档模式下注册，不打开运行时资源；action 在处理器工厂内部构造，只有 `serve` 会调用它们。
+其中 `settings.Config` 是应用的[配置结构](configuration.md#loading-configuration)，`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)），`article` 和 `articlehttp` 是应用自己的业务包（见[路由](routing.md#organizing-routes)）。路由声明保留在各模块的 `routes.go`，`bootstrap.Routes` 统一调用各模块的 `Register`，让 `serve`、`openapi` 和 [routes](commands.md#routes-command) 命令复用同一份声明。后两个命令通过 `DocRoutes` 在文档模式下注册，不打开运行时资源；action 在处理器工厂内部构造，只有 `serve` 会调用它们。
 
 整个过程就是普通的函数调用：先创建被依赖的对象，再创建依赖它们的对象。`httpx.ListenAndServe` 返回后，`defer` 中的 `stack.CloseWith` 才会关闭数据库连接，因此正在处理的请求不会因为数据库提前关闭而失败。请求处理与停机的完整顺序见[请求生命周期](lifecycle.md)。
 

@@ -17,15 +17,17 @@ import (
 	"github.com/ryan053857/mygoravel/database/migrate"
 )
 
-func migrateCommand(fsys fs.FS, dbConfig func(*cobra.Command) (database.Config, error)) *cobra.Command {
-	// withProvider 连接数据库并创建迁移器，run 结束后关闭连接。连接失败时以 ExitUnavailable 退出。
+// Migrate 构造 migrate up/status/down 命令。fsys 的根目录直接包含 SQL 迁移文件，
+// dbConfig 从应用配置中取出数据库配置。数据库连不上时以 ExitUnavailable 退出。
+func Migrate[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command {
+	// withProvider 连接数据库并创建迁移器，run 结束后关闭连接。
 	withProvider := func(run func(context.Context, io.Writer, *goose.Provider) error) func(*cobra.Command) error {
 		return func(cmd *cobra.Command) error {
-			cfg, err := dbConfig(cmd)
+			cfg, err := LoadConfig[C](cmd)
 			if err != nil {
 				return err
 			}
-			db, err := database.Open(cmd.Context(), cfg)
+			db, err := database.Open(cmd.Context(), dbConfig(cfg))
 			if err != nil {
 				return AsExitError(ExitUnavailable, err)
 			}
