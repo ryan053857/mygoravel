@@ -53,13 +53,14 @@ func (s *Service) Find(ctx context.Context, id uuid.UUID) (*Article, error) {
 <a id="assembling-the-application"></a>
 ## 在入口中组装应用
 
-应用的入口（通常是 `internal/bootstrap` 包）负责创建所有依赖，并按正确的顺序把它们连接起来。下面是博客应用完整的 `internal/bootstrap/serve.go`，`serve` 命令会调用其中的 `Serve`（见[命令行](commands.md#root-command)）：
+应用的入口（通常是 `internal/bootstrap` 包）负责创建所有依赖，并按正确的顺序把它们连接起来。下面是博客应用完整的 `internal/bootstrap/serve.go`，`serve` 命令会调用其中的 `Serve`（见[命令行](commands.md#declaring-the-cli)）：
 
 ```go
 package bootstrap
 
 import (
     "context"
+    "log/slog"
 
     "example.com/blog/internal/article"
     "example.com/blog/internal/article/articlehttp"
@@ -70,6 +71,7 @@ import (
     "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
+    "github.com/ryan053857/mygoravel/logging"
 )
 
 // Routes 注册应用的全部路由。serve、openapi 和 routes 命令共用它。
@@ -83,7 +85,10 @@ func Serve(ctx context.Context, cfg settings.Config) (err error) {
         err = stack.CloseWith(context.Background(), err)
     }()
 
-    // 1. 打开资源，并登记关闭操作
+    // 1. 安装全局日志器
+    slog.SetDefault(logging.New(cfg.Logs))
+
+    // 2. 打开资源，并登记关闭操作
     db, err := database.Open(ctx, cfg.Database)
     if err != nil {
         return err
@@ -92,10 +97,10 @@ func Serve(ctx context.Context, cfg settings.Config) (err error) {
         return db.Close()
     })
 
-    // 2. 构造业务服务
+    // 3. 构造业务服务
     articles := article.NewService(db)
 
-    // 3. 安装中间件，创建 API 并注册路由
+    // 4. 安装中间件，创建 API 并注册路由
     router := chi.NewRouter()
     router.Use(httpx.Defaults(cfg.HTTP, nil)...)
     api := rest.New(rest.Options{
@@ -103,7 +108,7 @@ func Serve(ctx context.Context, cfg settings.Config) (err error) {
     })
     Routes(api, auth.Validator(cfg.Auth), articles)
 
-    // 4. 开始监听，直到 ctx 被取消
+    // 5. 开始监听，直到 ctx 被取消
     return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{})
 }
 ```

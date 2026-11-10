@@ -275,7 +275,7 @@ go test -race -count=1 -tags=integration ./...
 <a id="command-tests"></a>
 ## 命令测试
 
-测试命令行时，不需要启动新的进程。用 `bytes.Buffer` 接收输出，通过 `SetArgs` 指定参数，然后执行命令并检查输出和退出码。下面是博客应用完整的 `internal/cli/cli_test.go`，它测试的是[命令行](commands.md#root-command)一章中真实的 `cli.New`：
+测试命令行时，不需要启动新的进程。`cli.New` 返回的是原生的 `*cobra.Command`，用 Cobra 的 `SetOut`、`SetArgs` 把输出重定向到 `bytes.Buffer` 并指定参数，然后执行命令并检查输出和退出码。下面是博客应用完整的 `internal/cli/cli_test.go`，它测试的是[命令行](commands.md#declaring-the-cli)一章中真实的 `cli.New`：
 
 ```go
 package cli_test
@@ -292,8 +292,10 @@ import (
 )
 
 func run(args ...string) (string, error) {
-    var out, errOut bytes.Buffer
-    root := cli.New(&out, &errOut)
+    var out bytes.Buffer
+    root := cli.New()
+    root.SetOut(&out)
+    root.SetErr(&out)
     root.SetArgs(args)
     err := root.ExecuteContext(context.Background())
     return out.String(), err
@@ -309,9 +311,8 @@ func TestOpenAPIDoesNotNeedConfig(t *testing.T) {
     }
 }
 
-func TestRoutesDoesNotNeedConfig(t *testing.T) {
-    out, err := run("routes", "--method", "post", "--path", "/articles",
-        "--config", filepath.Join(t.TempDir(), "missing.yaml"))
+func TestRoutesFilters(t *testing.T) {
+    out, err := run("routes", "--method", "post", "--path", "/articles")
     if err != nil {
         t.Fatal(err)
     }
@@ -331,7 +332,7 @@ func TestConfigCheckReportsMissingFile(t *testing.T) {
 }
 ```
 
-前两个测试确认 `openapi`、`routes` 命令可以离线查看真实的接口声明，`routes` 同时检查方法和路径过滤；最后一个测试确认配置文件缺失时，`config check` 以 `ExitConfig` 退出。
+前两个测试确认 `openapi`、`routes` 命令可以离线查看真实的接口声明，不需要配置文件；最后一个测试确认配置文件缺失时，`config check` 以 `ExitConfig` 退出。
 
 <a id="testing-shutdown"></a>
 ## 测试平滑停止

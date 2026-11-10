@@ -29,9 +29,9 @@ blog/
 ├── config.yaml
 ├── cmd/
 │   └── api/
-│       └── main.go          进程入口：信号处理、退出码
+│       └── main.go          进程入口：执行命令行
 ├── internal/
-│   ├── cli/                 命令行：serve、routes、openapi、migrate、config
+│   ├── cli/                 声明命令行：serve、routes、openapi、migrate、config
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务、注册路由
 │   ├── auth/                token 校验器
@@ -53,7 +53,7 @@ blog/
 
 | 文件 | 章节 |
 | --- | --- |
-| `cmd/api/main.go`、`internal/cli/cli.go` | [命令行](commands.md#root-command) |
+| `cmd/api/main.go`、`internal/cli/cli.go` | [命令行](commands.md#declaring-the-cli) |
 | `internal/settings` | [配置](configuration.md#loading-configuration) |
 | `internal/bootstrap/serve.go` | [依赖装配](dependencies.md#assembling-the-application) |
 | `internal/auth/auth.go` | [认证](authentication.md#token-validators) |
@@ -61,19 +61,19 @@ blog/
 | `internal/article/articlehttp/routes.go` | [模块内注册](routing.md#module-registration) |
 | `internal/article/articlehttp/actions/` 下的 `create_article.go`、`get_article.go`、`publish_article.go` | [按业务动作组织处理器](routing.md#http-actions) |
 | `internal/article/articlehttp/actions/dto.go` | [共享响应结构](routing.md#shared-responses) |
-| `migrations/`、`internal/cli/migrate.go` | [迁移](migrations.md#embedding-migrations) |
+| `migrations/` | [迁移](migrations.md#embedding-migrations) |
 
 目录不必一次建齐，等真正有代码要放时再创建即可。
 
 <a id="the-cmd-directory"></a>
 ### cmd 目录
 
-`cmd` 目录存放应用的进程入口。每个子目录对应一个可执行文件，例如 `cmd/api` 构建出 API 服务。入口文件应当尽量短小：处理系统信号、构造[命令行](commands.md)、根据退出码结束进程。
+`cmd` 目录存放应用的进程入口。每个子目录对应一个可执行文件，例如 `cmd/api` 构建出 API 服务。入口文件应当尽量短小，通常只有一行 `command.Execute(cli.New())`，见[命令行](commands.md#declaring-the-cli)。
 
 <a id="the-bootstrap-directory"></a>
 ### internal/bootstrap 目录
 
-`bootstrap` 包负责把应用“组装”起来：读取配置、打开数据库连接、安装全局日志器、构造业务服务、注册路由。在 mygoravel 中，这些工作都由普通的 Go 代码显式完成，[依赖装配](dependencies.md)一章会详细介绍。
+`bootstrap` 包负责把应用“组装”起来：安装全局日志器、打开数据库连接、构造业务服务、注册路由。在 mygoravel 中，这些工作都由普通的 Go 代码显式完成，[依赖装配](dependencies.md)一章会详细介绍。
 
 <a id="business-packages"></a>
 ### 业务包

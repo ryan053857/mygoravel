@@ -5,8 +5,8 @@
     - [迁移文件结构](#migration-structure)
 - [嵌入迁移文件](#embedding-migrations)
 - [运行迁移](#running-migrations)
-    - [创建迁移器](#creating-a-provider)
     - [迁移命令](#migration-commands)
+    - [在代码中执行迁移](#creating-a-provider)
 - [修改已发布的迁移](#published-migrations)
     - [在 CI 中检查](#checking-in-ci)
     - [零停机变更](#zero-downtime-changes)
@@ -75,10 +75,34 @@ var FS embed.FS
 <a id="running-migrations"></a>
 ## 运行迁移
 
-<a id="creating-a-provider"></a>
-### 创建迁移器
+<a id="migration-commands"></a>
+### 迁移命令
 
-使用 `migrate.NewProvider` 创建一个 goose 迁移器（Provider），然后调用它的方法：
+在[声明命令行](commands.md#declaring-the-cli)时设置 `Migrations` 和 `Database` 两个字段，应用就有了迁移命令：
+
+```go
+command.New(command.App[settings.Config]{
+    // ...
+    Migrations: migrations.FS,
+    Database:   func(cfg settings.Config) database.Config { return cfg.Database },
+})
+```
+
+之后，你就可以在部署流程中执行：
+
+```bash
+./bin/api migrate up --config config.yaml
+./bin/api migrate status --config config.yaml
+```
+
+命令负责加载配置、连接数据库和关闭连接。数据库连不上时，命令以 `ExitUnavailable` 退出，部署脚本可以据此重试。各命令的输出见 [migrate 命令](commands.md#migrate-command)。
+
+迁移成功后，再启动依赖新表结构的 API 服务。完整的发布流程见[部署](deployment.md#running-migrations)。
+
+<a id="creating-a-provider"></a>
+### 在代码中执行迁移
+
+在测试或自定义命令中，可以用 `migrate.NewProvider` 创建一个 goose 迁移器（Provider），然后调用它的方法：
 
 ```go
 provider, err := migrate.NewProvider(db.DB, migrations.FS)
@@ -95,80 +119,7 @@ err = migrate.Up(ctx, provider)
 - 使用 PostgreSQL 的会话锁，保证多个实例同时执行迁移时也只会串行运行；
 - 只使用 SQL 文件，不使用 goose 的全局 Go 迁移注册。
 
-版本记录表、事务和锁都由 goose 管理。上面用到的 `migrate.Up(ctx, provider)` 在调用 `provider.Up` 的基础上为错误附加了上下文信息。
-
-<a id="migration-commands"></a>
-### 迁移命令
-
-推荐使用 `command.NewMigrate` 为应用添加迁移命令，它会创建 `migrate up`、`migrate status` 和 `migrate down` 三个子命令。下面是博客应用完整的 `internal/cli/migrate.go`，在[根命令](commands.md#root-command)中通过 `root.AddCommand(newMigrateCommand())` 安装：
-
-```go
-package cli
-
-import (
-    "context"
-    "encoding/json"
-
-    "github.com/pressly/goose/v3"
-    "github.com/spf13/cobra"
-
-    "example.com/blog/migrations"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/database/migrate"
-)
-
-func newMigrateCommand() *cobra.Command {
-    return command.NewMigrate(
-        withProvider(func(ctx context.Context, _ *cobra.Command, p *goose.Provider) error {
-            return migrate.Up(ctx, p)
-        }),
-        withProvider(func(ctx context.Context, cmd *cobra.Command, p *goose.Provider) error {
-            statuses, err := p.Status(ctx)
-            if err != nil {
-                return err
-            }
-            return json.NewEncoder(cmd.OutOrStdout()).Encode(statuses)
-        }),
-        withProvider(func(ctx context.Context, _ *cobra.Command, p *goose.Provider) error {
-            _, err := p.Down(ctx)
-            return err
-        }),
-    )
-}
-
-// withProvider 打开数据库并创建迁移器，执行 run 之后关闭连接。
-func withProvider(run func(context.Context, *cobra.Command, *goose.Provider) error) command.RunE {
-    return func(ctx context.Context, cmd *cobra.Command, _ []string) error {
-        cfg, err := loadConfig(cmd)
-        if err != nil {
-            return err
-        }
-        db, err := database.Open(ctx, cfg.Database)
-        if err != nil {
-            return command.AsExitError(command.ExitUnavailable, err)
-        }
-        defer db.Close()
-
-        provider, err := migrate.NewProvider(db.DB, migrations.FS)
-        if err != nil {
-            return err
-        }
-        return run(ctx, cmd, provider)
-    }
-}
-```
-
-`loadConfig` 与 `serve` 命令共用，定义在 `cli.go` 中。数据库连不上时，命令以 `ExitUnavailable` 退出，部署脚本可以据此重试。
-
-之后，你就可以在部署流程中执行：
-
-```bash
-./bin/api migrate up --config config.yaml
-./bin/api migrate status --config config.yaml
-```
-
-迁移成功后，再启动依赖新表结构的 API 服务。完整的发布流程见[部署](deployment.md#running-migrations)。
+版本记录表、事务和锁都由 goose 管理。`migrate.Up(ctx, provider)` 在调用 `provider.Up` 的基础上为错误附加了上下文信息。`migrate` 命令使用的也是同一个迁移器。
 
 <a id="published-migrations"></a>
 ## 修改已发布的迁移

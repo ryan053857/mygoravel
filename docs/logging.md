@@ -53,7 +53,8 @@ slog.SetDefault(logging.New(cfg.Logs))
 日志默认输出到标准错误，这样当同一个程序作为命令行工具使用时（例如 `openapi` 命令），标准输出可以完整地留给命令结果。需要改变输出位置时（例如测试中写入缓冲区），在代码中设置 `Writer` 字段，它不会从配置文件读取：
 
 ```go
-cfg.Logs.Writer = cmd.ErrOrStderr()
+var buf bytes.Buffer
+cfg.Logs.Writer = &buf
 ```
 
 `slog.SetDefault` 还会让标准库 `log` 包的输出也经过这个日志器，第三方库通过 `log.Printf` 打印的内容同样会变成结构化日志。

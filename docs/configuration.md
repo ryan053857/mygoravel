@@ -165,10 +165,11 @@ config: config.yaml: invalid configuration: storage: endpoint is required
 <a id="inspecting-configuration"></a>
 ## 检查配置
 
-加载后的配置可以直接编码输出，用来在部署前检查：
+用[命令行](commands.md#declaring-the-cli)声明了配置类型的应用，自带两个检查配置的命令：
 
-```go
-return json.NewEncoder(cmd.OutOrStdout()).Encode(cfg)
+```bash
+./bin/api config check --config prod.yaml   # 只加载并校验，不访问网络
+./bin/api config show --config prod.yaml    # 输出加载后的配置，--format json 输出 JSON
 ```
 
-框架的 `command.NewConfig` 提供了现成的 `config check` 和 `config show` 子命令骨架，详见[命令行](commands.md)。配置检查只做加载和校验，不访问网络；"数据库能否连通"这类检查建议放在独立的 `doctor` 命令中。
+`config show` 的输出包括默认值和展开后的环境变量，可以用来确认最终生效的配置。配置文件缺失或校验失败时，命令以 `ExitConfig` 退出，见 [config 命令](commands.md#config-command)。

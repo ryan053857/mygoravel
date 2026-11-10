@@ -2,143 +2,132 @@ package command
 
 import (
 	"context"
-	"io"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/ryan053857/mygoravel/config"
+	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/httpx/rest"
 )
 
-// 命令退出码。
-const (
-	ExitOK          = 0
-	ExitFailure     = 1
-	ExitUsage       = 2
-	ExitConfig      = 3
-	ExitUnavailable = 4
-	ExitInternal    = 5
-)
+// App 声明应用的命令行。C 是应用的根配置结构体。
+// 字段为空时不安装对应的命令；config check/show 总是安装。
+type App[C any] struct {
+	// Name 是可执行文件名，Short 是帮助中的一句话描述。
+	Name, Short string
+	// ConfigFile 是 --config 的默认值，空值为 config.yaml。
+	ConfigFile string
 
-// IO 绑定命令输入输出；stdout 给结果，stderr 给诊断。
-type IO struct {
-	In  io.Reader
-	Out io.Writer
-	Err io.Writer
+	// API 是 openapi、routes 命令创建 API 时使用的选项，Mode 固定为 rest.ModeOpenAPI。
+	API rest.Options
+	// Routes 注册应用的全部路由；设置后安装 openapi 和 routes。
+	// 文档模式不调用处理器工厂，所以这里可以传入 nil 服务。
+	Routes func(api *rest.API)
+
+	// Serve 打开资源并启动 HTTP 服务，直到 ctx 被取消；设置后安装 serve。
+	Serve func(ctx context.Context, cfg C) error
+
+	// Migrations 是 SQL 迁移文件所在的 fs.FS，Database 从配置中取出数据库配置；
+	// 两者都设置后安装 migrate up/status/down。
+	Migrations fs.FS
+	Database   func(cfg C) database.Config
 }
 
-func bindIO(cmd *cobra.Command, io IO) {
-	if io.In != nil {
-		cmd.SetIn(io.In)
-	}
-	if io.Out != nil {
-		cmd.SetOut(io.Out)
-	}
-	if io.Err != nil {
-		cmd.SetErr(io.Err)
-	}
-}
-
-// RunE 是带 context 的命令函数。
-type RunE func(ctx context.Context, cmd *cobra.Command, args []string) error
-
-func wrap(run RunE) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		if len(args) > 0 {
-			return AsExitError(ExitUsage, errors.New("unexpected positional arguments"))
-		}
-		return run(cmd.Context(), cmd, args)
-	}
-}
-
-// Root 返回应用根命令。
-func Root(name, short string, io IO) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:           name,
-		Short:         short,
+// New 按 app 构造根命令。返回的是原生 *cobra.Command，可以继续 AddCommand。
+func New[C any](app App[C]) *cobra.Command {
+	root := &cobra.Command{
+		Use:           app.Name,
+		Short:         app.Short,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Args:          func(cmd *cobra.Command, args []string) error { return AsExitError(ExitUsage, cobra.NoArgs(cmd, args)) },
-		RunE:          func(cmd *cobra.Command, args []string) error { return cmd.Help() },
+		Args:          noArgs,
+		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return AsExitError(ExitUsage, err) })
-	bindIO(cmd, io)
-	return cmd
-}
-
-// NewServe 构造 serve 命令；run 负责打开资源并启动 HTTP。
-func NewServe(run RunE) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "启动 HTTP API",
-		RunE:  wrap(run),
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return AsExitError(ExitUsage, err) })
+	file := app.ConfigFile
+	if file == "" {
+		file = "config.yaml"
 	}
-	return cmd
-}
+	root.PersistentFlags().String(configFlag, file, "配置文件路径")
 
-// NewMigrate 构造 migrate 根命令，并挂 up/status/down。
-func NewMigrate(up, status, down RunE) *cobra.Command {
-	root := Root("migrate", "数据库迁移", IO{})
-	root.AddCommand(&cobra.Command{Use: "up", Short: "应用迁移", RunE: wrap(up)})
-	root.AddCommand(&cobra.Command{Use: "status", Short: "迁移状态", RunE: wrap(status)})
-	root.AddCommand(&cobra.Command{Use: "down", Short: "回滚一步", RunE: wrap(down)})
+	if app.Serve != nil {
+		root.AddCommand(leaf("serve", "启动 HTTP 服务", func(cmd *cobra.Command) error {
+			cfg, err := LoadConfig[C](cmd)
+			if err != nil {
+				return err
+			}
+			return app.Serve(cmd.Context(), cfg)
+		}))
+	}
+	if app.Routes != nil {
+		build := func() *rest.API {
+			opts := app.API
+			opts.Mode = rest.ModeOpenAPI
+			api := rest.New(opts)
+			app.Routes(api)
+			return api
+		}
+		root.AddCommand(openAPICommand(build), routesCommand(build))
+	}
+	if app.Migrations != nil && app.Database != nil {
+		root.AddCommand(migrateCommand(app.Migrations, func(cmd *cobra.Command) (database.Config, error) {
+			cfg, err := LoadConfig[C](cmd)
+			return app.Database(cfg), err
+		}))
+	}
+	root.AddCommand(configCommand[C]())
 	return root
 }
 
-// NewOpenAPI 构造离线 OpenAPI 输出命令。
-func NewOpenAPI(run RunE) *cobra.Command {
-	return &cobra.Command{Use: "openapi", Short: "离线输出 OpenAPI", RunE: wrap(run)}
-}
+const configFlag = "config"
 
-// NewConfig 构造 config check/show。
-func NewConfig(check, show RunE) *cobra.Command {
-	root := Root("config", "配置工具", IO{})
-	root.AddCommand(&cobra.Command{Use: "check", Short: "离线校验配置", RunE: wrap(check)})
-	showCmd := &cobra.Command{Use: "show", Short: "输出脱敏配置", RunE: wrap(show)}
-	showCmd.Flags().String("format", "yaml", "输出格式: yaml/json")
-	root.AddCommand(showCmd)
-	return root
-}
-
-// NewDoctor 构造外部依赖探测命令。
-func NewDoctor(run RunE) *cobra.Command {
-	return &cobra.Command{Use: "doctor", Short: "探测外部依赖", RunE: wrap(run)}
-}
-
-// AsExitError 将错误映射为退出码包装。
-func AsExitError(code int, err error) error {
-	if err == nil {
-		return nil
+// LoadConfig 按 --config 加载并校验配置。失败时错误带 ExitConfig 退出码。
+// 自定义命令挂在 New 返回的根命令下时，可以用它读取配置。
+func LoadConfig[C any](cmd *cobra.Command) (C, error) {
+	path, err := cmd.Flags().GetString(configFlag)
+	if err != nil {
+		var zero C
+		return zero, errors.Wrap(err, "command: --config flag is not defined")
 	}
-	return &ExitError{Code: code, Err: err}
+	cfg, err := config.Load[C](path)
+	return cfg, AsExitError(ExitConfig, err)
 }
 
-// ExitError 携带进程退出码。
-type ExitError struct {
-	Code int
-	Err  error
+// Execute 执行根命令：SIGINT、SIGTERM 会取消命令的 context；
+// 失败时把错误写到标准错误，并以 ExitCode(err) 结束进程。
+func Execute(root *cobra.Command) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := root.ExecuteContext(ctx)
+	stop()
+	if err != nil {
+		fmt.Fprintln(root.ErrOrStderr(), err)
+		os.Exit(ExitCode(err))
+	}
 }
 
-func (e *ExitError) Error() string { return e.Err.Error() }
-func (e *ExitError) Unwrap() error { return e.Err }
+// leaf 构造不接受位置参数的命令。
+func leaf(use, short string, run func(cmd *cobra.Command) error) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: short,
+		Args:  noArgs,
+		RunE:  func(cmd *cobra.Command, _ []string) error { return run(cmd) },
+	}
+}
 
-// ExitCode 从错误链提取退出码。显式标记的退出码优先；其次按 errorx.Kind 映射：
-// Unavailable 为 ExitUnavailable，Internal 和未分类错误为 ExitInternal，
-// 其余业务错误为 ExitFailure。
-func ExitCode(err error) int {
-	if err == nil {
-		return ExitOK
-	}
-	var ee *ExitError
-	if errors.As(err, &ee) {
-		return ee.Code
-	}
-	switch errorx.KindOf(err) {
-	case errorx.Unavailable:
-		return ExitUnavailable
-	case errorx.Internal:
-		return ExitInternal
-	default:
-		return ExitFailure
-	}
+// group 构造只包含子命令的命令；直接执行时输出帮助。
+func group(use, short string, children ...*cobra.Command) *cobra.Command {
+	cmd := leaf(use, short, func(cmd *cobra.Command) error { return cmd.Help() })
+	cmd.AddCommand(children...)
+	return cmd
+}
+
+func noArgs(cmd *cobra.Command, args []string) error {
+	return AsExitError(ExitUsage, cobra.NoArgs(cmd, args))
 }

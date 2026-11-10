@@ -33,7 +33,7 @@ go build -trimpath -o bin/api .
 <a id="release-process"></a>
 ## 发布流程
 
-一次典型的发布按以下顺序进行。下面的命令假设你已经按照[命令行](commands.md)一章为应用安装了对应的子命令和 `--config` 选项。
+一次典型的发布按以下顺序进行。下面的命令假设你已经按照[命令行](commands.md)一章声明了应用的命令行。
 
 <a id="checking-configuration"></a>
 ### 检查配置
@@ -44,10 +44,10 @@ go build -trimpath -o bin/api .
 ./bin/api config check --config config.yaml
 ```
 
-必要时，再用 `doctor` 命令确认数据库等外部依赖可以连通：
+必要时，再用 `migrate status` 确认数据库可以连通，同时查看哪些迁移将要执行。数据库连不上时，命令以 `ExitUnavailable`（4）退出：
 
 ```bash
-./bin/api doctor --config config.yaml
+./bin/api migrate status --config config.yaml
 ```
 
 <a id="running-migrations"></a>
