@@ -10,6 +10,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
 
 	"github.com/ryan053857/mygoravel/logging"
 )
@@ -282,14 +283,18 @@ func (s *Subscriber) claim(topic string, n int) ([]job, error) {
 	now := time.Now().UTC()
 	ready := s.db.NewSelect().Model((*job)(nil)).Column("j.id").
 		Where("j.topic = ?", topic).Where("j.available_at <= ?", now).
-		OrderExpr("j.available_at, j.id").Limit(int64(n)).For("UPDATE SKIP LOCKED")
+		OrderExpr("j.available_at, j.id").Limit(int64(n))
+	// PostgreSQL 跳过其他实例正在领取的行；SQLite 同一时刻只有一个写者，整条 UPDATE 本身就是互斥的。
+	if s.db.Dialect().Name() != dialect.SQLite {
+		ready = ready.For("UPDATE SKIP LOCKED")
+	}
 	var jobs []job
 	err := s.db.NewUpdate().Model((*job)(nil)).
 		Set("available_at = ?", now.Add(s.cfg.Lease)).
 		Set("reserved_at = ?", now).
 		Set("attempts = j.attempts + 1").
 		Where("j.id IN (?)", ready).
-		Returning("j.*").
+		Returning("*").
 		Scan(ctx, &jobs)
 	return jobs, errors.Wrapf(err, "queue: claim %q", topic)
 }

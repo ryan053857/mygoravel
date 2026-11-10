@@ -129,7 +129,7 @@ URL 上的查询参数原样交给 go-sql-driver/mysql，例如 `?tls=true`。�
 <a id="dialect-differences"></a>
 ### 数据库差异
 
-数据库类型由驱动包选定，Bun 的查询在三种数据库上写法相同，框架的会话、API 令牌、锁、限流和文件服务在三种数据库上行为一致（[队列](queue.md)目前只支持 PostgreSQL）。仍然需要留意的是数据库本身的差异：
+数据库类型由驱动包选定，Bun 的查询在三种数据库上写法相同，框架的会话、API 令牌、锁、限流和文件服务在三种数据库上行为一致（[队列](queue.md)支持 PostgreSQL 和 SQLite，暂不支持 MySQL）。仍然需要留意的是数据库本身的差异：
 
 | | PostgreSQL | SQLite | MySQL |
 | --- | --- | --- | --- |
