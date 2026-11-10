@@ -752,7 +752,7 @@ func (a *CreateArticle) Handle(ctx context.Context, in *CreateArticleInput) (*Ar
 <a id="rest-limits"></a>
 ### 请求体大小与超时
 
-服务端上传的请求体通常远大于普通接口。[默认中间件](middleware.md#default-middleware)中的 `BodyLimit` 把请求体限制在 1 MiB，`Timeout` 也会限制请求时长，需要为 `/files` 单独放宽，做法见[自行组装中间件](middleware.md#custom-stack)。上限至少应为 `max_upload_size` 加上表单的少量额外开销。Huma 不限制 `multipart/form-data` 请求体的大小，不需要再设置 `Operation.MaxBodyBytes`。
+服务端上传的请求体通常远大于普通接口。[默认中间件](middleware.md#default-middleware)中的 `BodyLimit` 把请求体限制在 1 MiB，[请求超时](middleware.md#request-timeout)也会限制上传时长。需要为 `/files` 单独放宽，做法见[自行组装中间件](middleware.md#custom-stack)。上限至少应为 `max_upload_size` 加上表单的少量额外开销。Huma 不限制 `multipart/form-data` 请求体的大小，不需要再设置 `Operation.MaxBodyBytes`。
 
 直传接口只收发少量 JSON，使用默认限制即可，文件正文不经过应用服务器。
 

@@ -2,6 +2,7 @@
 
 - [简介](#introduction)
 - [默认中间件](#default-middleware)
+- [请求超时](#request-timeout)
 - [HTTP 配置](#http-configuration)
     - [请求 ID](#request-id)
     - [可信代理](#trusted-proxies)
@@ -25,11 +26,12 @@ mygoravel 的中间件都是标准的 `func(http.Handler) http.Handler`，安装
 <a id="default-middleware"></a>
 ## 默认中间件
 
-`httpx.Defaults` 返回每个应用都应该安装的基础中间件。先把它们安装到 Router 上，再把 Router 交给 `rest.New`：
+`httpx.Defaults` 返回每个应用都应该安装的基础中间件。先把它们和[请求超时](#request-timeout)安装到 Router 上，再把 Router 交给 `rest.New`：
 
 ```go
 router := chi.NewRouter()
 router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+router.Use(httpx.Timeout(cfg.HTTP.Timeout))
 
 api := rest.New(rest.Options{Router: router})
 ```
@@ -47,12 +49,12 @@ api := rest.New(rest.Options{Router: router})
 | `AccessLog(cfg.AccessLog, logger)` | 每个请求记录一条访问日志，见[访问日志](#access-log) |
 | `Recover(logger)` | 处理器 panic 时记录堆栈；若尚未写出响应则返回通用的 500 错误，若已开始写响应则中止连接 |
 | `BodyLimit(cfg.BodyLimit)` | 限制请求体大小，超出时返回 413 |
-| `Timeout(cfg.Timeout)` | 为请求 context 设置超时 |
 
 以下中间件是可选的，需要时在 `httpx.Defaults` 之后另行安装：
 
 | 中间件 | 行为 |
 | --- | --- |
+| `Timeout(cfg.Timeout)` | 为请求 context 设置超时，见[请求超时](#request-timeout) |
 | `RateLimit(limiter, key)` | 按客户端限流，超出时返回 429，见[限流](rate-limiting.md) |
 
 框架的其他部分不依赖这些中间件是否安装。没有 `AccessLog` 时，`httpx.AddAccessLogAttrs` 什么也不做；没有 `Locale` 时，错误消息不翻译，`i18n.T` 原样返回消息 ID；没有 `AssignRequestID` 时，`httpx.RequestID` 返回空字符串。
@@ -60,6 +62,25 @@ api := rest.New(rest.Options{Router: router})
 认证不在默认中间件中，因为它是按路由启用的，见[认证](authentication.md)。健康检查也由你自己注册，见[请求生命周期](lifecycle.md#health-checks)。
 
 <a id="configuring-middleware"></a>
+<a id="request-timeout"></a>
+## 请求超时
+
+`httpx.Timeout` 为请求的 context 设置超时，默认 30 秒，参数来自 `http.timeout` 段。超时后 context 被取消，传入了 `ctx` 的数据库查询和外部调用随之停止。
+
+它不在 `httpx.Defaults` 中，因为不是每条路由都应该有超时：SSE 这类流式响应会一直保持连接，到期就会被切断。只有 JSON API 时，像上面那样把它装在 Router 上即可。同一个 Router 上还有流式路由时，用 chi 的 `Route` 或 `Group` 只为需要的路由安装，例如：
+
+```go
+router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+
+router.Route("/api", func(r chi.Router) {
+    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
+    api := rest.New(rest.Options{Router: r})
+    // 注册 API 路由
+})
+
+router.Get("/events", streamEvents) // 不设超时
+```
+
 <a id="http-configuration"></a>
 ## HTTP 配置
 
@@ -226,7 +247,6 @@ router.Use(
     httpx.ClientIP(cfg.HTTP.ClientIP),
     httpx.AccessLog(cfg.HTTP.AccessLog, nil),
     httpx.Recover(nil),
-    httpx.Timeout(cfg.HTTP.Timeout),
     func(next http.Handler) http.Handler {
         small := httpx.BodyLimit(cfg.HTTP.BodyLimit)(next)
         large := httpx.BodyLimit(httpx.BodyLimitConfig{MaxBytes: 20 << 20})(next)
@@ -241,7 +261,7 @@ router.Use(
 )
 ```
 
-上传路由本身还要把 Huma 的 `Operation.MaxBodyBytes` 设为相同的上限，见[请求体大小](requests.md#body-size)。用同样的方式，也可以为流式接口去掉 `Timeout`。
+上传路由本身还要把 Huma 的 `Operation.MaxBodyBytes` 设为相同的上限，见[请求体大小](requests.md#body-size)。
 
 自行组装时请保持 `AccessLog` 在 `Recover` 之外，这样 panic 产生的 500 才会出现在访问日志中。
 

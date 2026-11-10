@@ -115,6 +115,7 @@ func run() error {
 
     router := chi.NewRouter()
     router.Use(httpx.Defaults(cfg, nil, nil)...)
+    router.Use(httpx.Timeout(cfg.Timeout))
     api := rest.New(rest.Options{Title: "Hello API", Version: "1.0.0", Router: router})
     registerPing(api)
 

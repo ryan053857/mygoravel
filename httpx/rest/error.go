@@ -30,28 +30,6 @@ type ErrorModel struct {
 // GetHeaders 实现 huma.HeadersError，返回随错误写出的响应头，例如 Retry-After。
 func (e *ErrorModel) GetHeaders() http.Header { return e.headers }
 
-// HTTPStatus 将 errorx.Kind 映射为 HTTP 状态。
-func HTTPStatus(err error) int {
-	switch errorx.KindOf(err) {
-	case errorx.InvalidArgument:
-		return http.StatusUnprocessableEntity
-	case errorx.Unauthenticated:
-		return http.StatusUnauthorized
-	case errorx.PermissionDenied:
-		return http.StatusForbidden
-	case errorx.NotFound:
-		return http.StatusNotFound
-	case errorx.Conflict:
-		return http.StatusConflict
-	case errorx.ResourceExhausted:
-		return http.StatusTooManyRequests
-	case errorx.Unavailable:
-		return http.StatusServiceUnavailable
-	default:
-		return http.StatusInternalServerError
-	}
-}
-
 // FromError 将处理器错误转换为 HTTP 错误，nil 输入返回 nil：
 //   - 业务错误转为带 code 的 ErrorModel，detail 为 HTTP 状态描述，
 //     带 errorx.RetryAfter 时设置 Retry-After 响应头（秒，向上取整）；
@@ -69,7 +47,7 @@ func FromError(err error) huma.StatusError {
 		}
 		return huma.Error500InternalServerError("unexpected error occurred")
 	}
-	status := HTTPStatus(err)
+	status := httpx.StatusOf(err)
 	m := &ErrorModel{
 		ErrorModel: huma.ErrorModel{Status: status, Title: http.StatusText(status), Detail: http.StatusText(status)},
 		Code:       code,

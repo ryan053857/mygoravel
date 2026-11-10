@@ -35,7 +35,7 @@
 <a id="request-flow"></a>
 ### 请求的处理过程
 
-按[依赖装配](dependencies.md#assembling-the-application)中的写法安装 `httpx.Defaults` 后，一个请求从进入到返回，会依次经过：
+按[依赖装配](dependencies.md#assembling-the-application)中的写法安装 `httpx.Defaults` 和 `httpx.Timeout` 后，一个请求从进入到返回，会依次经过：
 
 ```text
 确定请求 ID，写入安全响应头

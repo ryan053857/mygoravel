@@ -6,6 +6,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/identity"
 )
 
@@ -71,11 +72,11 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 		op.Middlewares = append(op.Middlewares, func(ctx huma.Context, next func(huma.Context)) {
 			ctx.SetHeader("Cache-Control", "no-store")
 			sub, err := authenticate(ctx)
-			if err != nil && HTTPStatus(err) >= 500 {
+			if err != nil && httpx.StatusOf(err) >= 500 {
 				if a, ok := api.(*API); ok {
 					a.logger.ErrorContext(ctx.Context(), "authentication backend failed", "scheme", name, "error", err)
 				}
-				writeError(api, ctx, huma.NewErrorWithContext(ctx, HTTPStatus(err), "authentication unavailable"))
+				writeError(api, ctx, huma.NewErrorWithContext(ctx, httpx.StatusOf(err), "authentication unavailable"))
 				return
 			}
 			if err != nil || sub.ID == "" {

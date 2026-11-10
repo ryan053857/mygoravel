@@ -162,3 +162,14 @@ func TestDefaultsNegotiateBuiltinLocale(t *testing.T) {
 		}
 	}
 }
+
+// Defaults 不设置请求超时：Timeout 按路由组安装，流式路由不能有超时。
+func TestDefaultsSetNoDeadline(t *testing.T) {
+	handler := chi.Chain(httpx.Defaults(httpx.DefaultConfig(), slog.New(slog.DiscardHandler), nil)...).
+		HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := r.Context().Deadline(); ok {
+				t.Error("Defaults set a request deadline")
+			}
+		})
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+}

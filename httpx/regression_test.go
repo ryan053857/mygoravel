@@ -159,7 +159,7 @@ func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
 func TestRequestTimeoutReachesHandler(t *testing.T) {
 	cfg := httpx.DefaultConfig()
 	cfg.Timeout.Duration = 10 * time.Millisecond
-	handler := defaults(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := httpx.Timeout(cfg.Timeout)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 		if !errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 			t.Fatal(r.Context().Err())

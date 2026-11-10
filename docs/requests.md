@@ -146,7 +146,7 @@ http:
 <a id="timeouts"></a>
 ### 超时与取消
 
-`httpx.Timeout` 中间件为每个请求的 context 设置超时，默认 30 秒，可以在配置文件中调整：
+`httpx.Timeout` 中间件为请求的 context 设置超时，默认 30 秒，可以在配置文件中调整。它不在默认中间件中，需要单独安装，见[请求超时](middleware.md#request-timeout)：
 
 ```yaml
 http:

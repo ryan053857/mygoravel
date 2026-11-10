@@ -20,12 +20,12 @@ import (
 )
 
 // Defaults 返回每个应用都应安装的基础中间件，按执行顺序排列：
-// AssignRequestID、NoSniff、ClientIP、Locale、AccessLog、Recover、BodyLimit、Timeout。
+// AssignRequestID、NoSniff、ClientIP、Locale、AccessLog、Recover、BodyLimit。
 // 参数取自 cfg 的对应子段，cfg 不合法时 panic；logger 为 nil 时使用 slog.Default()；
 // languages 为 nil 时只使用框架内置的中英文消息，默认语言为 zh-CN。
 //
-// RateLimit 等可选中间件需要时在其后另行安装；
-// 需要不同组合时（例如流式接口不设超时），直接挑选单个中间件自行组装。
+// Timeout 不在其中：它按路由组安装，SSE 等流式路由不能有请求超时。
+// RateLimit 等可选中间件同样需要时在其后另行安装；需要不同组合时，直接挑选单个中间件自行组装。
 func Defaults(cfg Config, logger *slog.Logger, languages *goi18n.Bundle) []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
 		AssignRequestID(cfg.RequestID),
@@ -35,7 +35,6 @@ func Defaults(cfg Config, logger *slog.Logger, languages *goi18n.Bundle) []func(
 		AccessLog(cfg.AccessLog, logger),
 		Recover(logger),
 		BodyLimit(cfg.BodyLimit),
-		Timeout(cfg.Timeout),
 	}
 }
 
@@ -152,7 +151,8 @@ func BodyLimit(cfg BodyLimitConfig) func(http.Handler) http.Handler {
 	}
 }
 
-// Timeout 为请求 context 设置 cfg.Duration 的超时。
+// Timeout 为请求 context 设置 cfg.Duration 的超时。它不在 Defaults 中，
+// 安装在需要超时的路由组上，例如 JSON API 和普通页面；流式路由不安装。
 // 它只取消 context，由处理器决定如何响应。cfg 不合法时 panic。
 func Timeout(cfg TimeoutConfig) func(http.Handler) http.Handler {
 	mustValid("Timeout", cfg.Validate())
