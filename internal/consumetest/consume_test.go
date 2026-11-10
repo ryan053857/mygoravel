@@ -69,7 +69,7 @@ func TestExternalModuleConsumesFramework(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(moduleDir, version+".info"), info, 0644))
 	must(t, os.WriteFile(filepath.Join(moduleDir, "list"), []byte(version+"\n"), 0644))
 	// 在独立 module 中运行框架的公开契约测试。
-	for _, pkg := range []string{"httpx/rest", "config", "errorx", "command", "command/restcmd", "command/migratecmd", "filesystem", "filesystem/local", "filesystem/s3"} {
+	for _, pkg := range []string{"httpx/rest", "config", "errorx", "command", "command/restcmd", "command/migratecmd", "filesystem", "filesystem/local", "filesystem/s3", "mail", "mail/mailtest", "mail/logmail", "mail/smtp", "mail/resend"} {
 		destination := filepath.Join(dir, filepath.Base(pkg))
 		must(t, os.MkdirAll(destination, 0755))
 		files, err := filepath.Glob(filepath.Join(root, pkg, "*_test.go"))

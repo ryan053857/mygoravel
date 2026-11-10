@@ -39,6 +39,8 @@ go test -race ./...
 
 `filesystem/s3` 的存储流程测试使用 [gofakes3](https://github.com/johannesboyne/gofakes3) 的内存后端，通过 `httptest` 自动启动 S3 服务，真实 AWS SDK 会向它发送请求。它覆盖对象读写、服务端分片上传、预签名直传、分片合并和取消，不需要 AWS 凭证或独立 S3 容器。
 
+`mail/smtp` 的测试在进程内启动一个最小的 SMTP 服务器，`mail/resend` 的测试用 `httptest` 代替 Resend API，都不需要外部服务或 API key。
+
 <a id="integration-tests"></a>
 ### 集成测试
 

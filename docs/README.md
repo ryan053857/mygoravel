@@ -35,6 +35,7 @@
 - [命令行](commands.md)
 - [缓存](cache.md)
 - [文件存储与上传](filesystem.md)
+- [邮件](mail.md)
 - [本地化](localization.md)
 
 ## 安全
