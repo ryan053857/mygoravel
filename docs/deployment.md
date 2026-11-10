@@ -6,6 +6,7 @@
     - [检查配置](#checking-configuration)
     - [执行迁移](#running-migrations)
     - [启动服务](#starting-the-server)
+- [选择运行形态](#process-forms)
 - [健康检查](#health-checks)
 - [平滑停止](#graceful-shutdown)
 - [反向代理与网络](#reverse-proxies)
@@ -71,10 +72,34 @@ CONFIG=--config=config/app.yaml,config/prod.yaml
 ### 启动服务
 
 ```bash
-./bin/api serve $CONFIG
+./bin/api start $CONFIG
 ```
 
+`start` 在一个进程中运行 HTTP 服务、队列 worker 和定时任务调度器，也可以用 `serve`、`work`、`schedule` 分别启动它们，见下一节。
+
 数据库密码、token 等敏感信息建议通过部署平台的环境变量或密钥管理功能提供，在配置文件中用 `${DATABASE_URL}` 这样的方式引用，而不是直接写入文件。生产环境通常不放 `.env` 文件。
+
+<a id="process-forms"></a>
+## 选择运行形态
+
+按[命令行](commands.md#running-together)一章装配的应用有三个常驻部分，可以一起运行，也可以分开部署，代码相同，只是启动的命令不同：
+
+| 形态 | 命令 | 适合 |
+| --- | --- | --- |
+| 一体 | `start` | 起步阶段和中小规模：一个进程、一份配置，部署和监控都最简单 |
+| 分开 | `serve`、`work`、`schedule` | 任务量大，或者耗时的任务拖慢了接口；各自按负载增减实例 |
+
+从一体改为分开时，只需要把部署中的 `start` 换成三组分别运行 `serve`、`work` 和 `schedule` 的实例。
+
+两种形态都可以运行多个实例：
+
+- **HTTP 服务**按常规做法放在负载均衡之后。
+- **队列 worker** 竞争领取任务，每个任务只会被一个实例领取，增减实例不需要协调。
+- **调度器**通过锁保证每次触发只执行一次，前提是所有实例共用同一个锁存储，即数据库或 Redis 存储，见[多个实例](scheduling.md#multiple-instances)。使用 `lock.NewMemoryStore()` 时，多个实例会重复执行每个任务。单独部署 `schedule` 时，运行两个实例可以避免单点。
+
+worker 和调度器不监听端口，部署平台按进程是否存活判断它们的状态；它们出错退出时进程以非 0 状态结束，由平台重启。
+
+所有部分共用同一个数据库连接池。估算 `max_open_conns` 时，要把 HTTP 请求、队列各 topic 的 `concurrency` 和同时执行的定时任务都算进去；分开部署时按各自的负载分别设置，所有实例的连接数之和不应超过数据库的上限。
 
 <a id="health-checks"></a>
 ## 健康检查
@@ -93,8 +118,9 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 
 收到信号后，`httpx.ListenAndServe` 会开始排空请求，详见[请求生命周期](lifecycle.md#graceful-shutdown)。配置停机时间时请注意：
 
-- `http.shutdown_timeout` 决定了排空请求的最长时间；
-- 部署平台的停止宽限期（例如 Kubernetes 的 `terminationGracePeriodSeconds`）应当大于 `shutdown_timeout` 加上关闭数据库等资源所需的时间，否则进程可能在清理完成前被强制终止。
+- `http.shutdown_timeout` 决定了排空请求的最长时间；`queue.shutdown_timeout` 决定了 worker 等待处理中任务的最长时间；调度器最多等待执行中的任务 30 秒；
+- 一体运行时三者同时开始停止，停机时间取其中最长的一个，而不是相加；
+- 部署平台的停止宽限期（例如 Kubernetes 的 `terminationGracePeriodSeconds`）应当大于上面的停机时间加上关闭数据库等资源所需的时间，否则进程可能在清理完成前被强制终止。超时未完成的队列任务会在其他实例上重新执行，定时任务不会补跑。
 
 <a id="reverse-proxies"></a>
 ## 反向代理与网络
@@ -126,6 +152,7 @@ logs:
 - **只运行一个实例。** 多台机器无法共享同一个数据库文件。同一台机器上的多个进程可以同时打开它，因此滚动发布时先启动新进程、再停止旧进程是安全的；在 Kubernetes 中请使用 `replicas: 1` 和 `Recreate` 策略，避免数据卷同时挂载到两个节点。
 - **把数据库目录放在持久化存储上。** SQLite 在数据库文件旁边维护 `app.db-wal` 和 `app.db-shm` 两个文件，它们和 `app.db` 必须在同一目录，请挂载整个目录，而不是单个文件。不要使用 NFS 等网络文件系统，它们上面的文件锁不可靠。
 - **迁移不加锁。** 请在同一个部署任务中先执行 `migrate up`，再启动服务，不要让多个任务同时执行迁移。
+- **队列需要 PostgreSQL。** 定时任务可以使用 SQLite 上的锁存储；单实例下也可以使用 `lock.NewMemoryStore()`。
 
 需要运行多个实例，或者写入量超过单机承受能力时，请改用 PostgreSQL。
 

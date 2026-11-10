@@ -37,7 +37,7 @@ func TestApprovalSurvivesRestart(t *testing.T) {
 	if err := db.QueryRow("SELECT current_database()").Scan(&name); err != nil {
 		t.Fatal(err)
 	}
-	u, err := url.Parse(dbtest.RequireDSN(t))
+	u, err := url.Parse(dbtest.RequireURL(t, postgres.Driver))
 	if err != nil {
 		t.Fatal(err)
 	}

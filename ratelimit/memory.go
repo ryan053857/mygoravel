@@ -29,14 +29,11 @@ func (m *Memory) Allow(_ context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sweep(now)
-	tat := m.tats[key]
-	if tat.Before(now) {
-		tat = now
-	}
-	if wait := tat.Sub(now) - m.ahead; wait > 0 {
+	next, wait := m.take(m.tats[key], now)
+	if wait > 0 {
 		return exceeded(wait)
 	}
-	m.tats[key] = tat.Add(m.step)
+	m.tats[key] = next
 	return nil
 }
 

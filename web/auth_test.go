@@ -8,21 +8,26 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 )
 
-func authServer(t *testing.T, store scs.Store) *httptest.Server {
+func authServer(t *testing.T, store scs.Store, configure ...func(*web.Options)) *httptest.Server {
 	t.Helper()
 	o := options()
 	o.Sessions.Store = store
+	for _, f := range configure {
+		f(&o)
+	}
 	sm := o.Sessions
 	pages := web.New(o)
 	router := chi.NewRouter()
@@ -101,6 +106,68 @@ func TestRequire(t *testing.T) {
 	resp, body := get(t, c, srv.URL+"/admin", "HX-Request", "true", "HX-Request-Type", "partial")
 	if resp.StatusCode != 403 || body != "fragment 403 Forbidden" || resp.Header.Get("HX-Retarget") != "#flash" {
 		t.Fatalf("missing scope htmx: %d %q %v", resp.StatusCode, body, resp.Header)
+	}
+}
+
+func TestRequireResolve(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		scopes   []string
+		disabled bool
+		down     bool
+	)
+	set := func(f func()) { mu.Lock(); f(); mu.Unlock() }
+	// resolve 模拟每次请求查询用户的当前权限和状态，返回的主体不带 Method。
+	resolve := func(_ *http.Request, stored identity.Subject) (identity.Subject, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case down:
+			return identity.Subject{}, errorx.Define(errorx.Unavailable, "users.unavailable").New()
+		case disabled:
+			return identity.Subject{}, errorx.Define(errorx.Unauthenticated, "users.disabled").New()
+		}
+		return identity.Subject{ID: stored.ID, Type: stored.Type, Scopes: scopes}, nil
+	}
+	srv := authServer(t, memstore.New(), func(o *web.Options) { o.Resolve = resolve })
+	c := noFollow(t)
+	login := func() {
+		t.Helper()
+		resp, err := c.PostForm(srv.URL+"/login", map[string][]string{"user": {"alice"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+
+	login()
+	if resp, _ := get(t, c, srv.URL+"/admin"); resp.StatusCode != 403 {
+		t.Fatalf("before grant: %d", resp.StatusCode)
+	}
+	// 授权后不需要重新登录。
+	set(func() { scopes = []string{"admin"} })
+	if resp, body := get(t, c, srv.URL+"/admin"); resp.StatusCode != 200 || body != "alice via session" {
+		t.Fatalf("after grant: %d %q", resp.StatusCode, body)
+	}
+
+	set(func() { down = true })
+	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 503 || !strings.HasPrefix(body, "page 503") {
+		t.Fatalf("resolver down: %d %q", resp.StatusCode, body)
+	}
+
+	// 停用后跳转登录页，并销毁会话：恢复后旧会话也不再有效。
+	set(func() { down, disabled = false, true })
+	resp, _ := get(t, c, srv.URL+"/me")
+	if resp.StatusCode != 303 || resp.Header.Get("Location") != "/login?next=%2Fme" {
+		t.Fatalf("disabled: %d %v", resp.StatusCode, resp.Header)
+	}
+	set(func() { disabled = false })
+	if resp, _ := get(t, c, srv.URL+"/me"); resp.StatusCode != 303 {
+		t.Fatalf("session not destroyed: %d", resp.StatusCode)
+	}
+	login()
+	if resp, _ := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 {
+		t.Fatalf("login again: %d", resp.StatusCode)
 	}
 }
 

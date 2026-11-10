@@ -168,7 +168,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
 | `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、SSE，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[服务端推送](sse.md) |
 | `database` | 用应用选定的驱动打开连接池 | [数据库](database.md) |
-| `database/postgres`、`database/sqlite` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
+| `database/postgres`、`database/sqlite`、`database/mysql` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |

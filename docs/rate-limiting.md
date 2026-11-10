@@ -131,7 +131,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-每个 key 只占一行，每次 `Allow` 是一条原子的 SQL 语句，多个实例并发调用时计数也是精确的。在 PostgreSQL 上，时间取自数据库时钟；这张表是 `UNLOGGED` 表，不写 WAL，数据库崩溃后表会被清空，相当于所有 key 的配额回满。SQLite 只在单机上使用，时间取自应用时钟。
+每个 key 只占一行，保存以微秒计的理论到达时间。每次 `Allow` 是一个短事务：先锁住这一行，再读取当前时间计算是否放行，与内存限流器使用同一套算法，多个实例并发调用时计数也是精确的。时间取自应用服务器的时钟，各实例的时钟需要同步。在 PostgreSQL 上这张表是 `UNLOGGED` 表，不写 WAL，数据库崩溃后表会被清空，相当于所有 key 的配额回满。
 
 每次 `Allow` 都是一次数据库写入，因此不要用它做每个请求都经过的全局限流，那种场景请使用内存或 [Redis](#redis-limiter) 限流器，或者在网关中配置。
 

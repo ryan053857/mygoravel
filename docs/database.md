@@ -3,6 +3,8 @@
 - [简介](#introduction)
 - [配置](#configuration)
     - [使用 SQLite](#sqlite)
+    - [使用 MySQL](#mysql)
+    - [数据库差异](#dialect-differences)
 - [连接数据库](#connecting)
 - [定义模型](#defining-models)
     - [主键](#primary-keys)
@@ -17,10 +19,11 @@
 <a id="introduction"></a>
 ## 简介
 
-几乎每个 API 都需要与数据库交互。mygoravel 支持 PostgreSQL 和 SQLite，并使用以下组件：
+几乎每个 API 都需要与数据库交互。mygoravel 支持 PostgreSQL、SQLite 和 MySQL，并使用以下组件：
 
 - [pgx](https://github.com/jackc/pgx)：PostgreSQL 驱动，由 `database/postgres` 包提供；
 - [modernc.org/sqlite](https://gitlab.com/cznic/sqlite)：纯 Go 的 SQLite 驱动，不需要 cgo，由 `database/sqlite` 包提供；
+- [go-sql-driver/mysql](https://github.com/go-sql-driver/mysql)：MySQL 驱动，由 `database/mysql` 包提供；
 - [Bun](https://bun.uptrace.dev)：SQL 优先的 Go ORM，负责查询构建和模型映射；
 - [goose](https://github.com/pressly/goose)：数据库迁移，见[迁移](migrations.md)。
 
@@ -97,6 +100,47 @@ db, err := database.Open(ctx, sqlite.Driver, cfg.Database)
 
 部署和备份见[使用 SQLite 部署](deployment.md#sqlite)。
 
+<a id="mysql"></a>
+### 使用 MySQL
+
+mygoravel 支持 MySQL 8.4 LTS，不保证兼容 MariaDB。使用 `database/mysql` 包的驱动，`dsn` 是 URL：
+
+```yaml
+database:
+  dsn: mysql://blog:${DATABASE_PASSWORD}@localhost:3306/blog
+```
+
+```go
+db, err := database.Open(ctx, mysql.Driver, cfg.Database)
+```
+
+URL 上的查询参数原样交给 go-sql-driver/mysql，例如 `?tls=true`。以下设置由驱动固定，`dsn` 中的同名参数会被覆盖：
+
+- 时间按 UTC 读写：连接的 `time_zone` 是 `+00:00`，写入的时间先转换为 UTC，读出的 `DATETIME` 是 UTC 的 `time.Time`；
+- `RowsAffected` 返回 `WHERE` 匹配到的行数，与 PostgreSQL 和 SQLite 一致。MySQL 默认返回实际改变的行数，值没有变化的 `UPDATE` 会返回 0。
+
+使用 MySQL 时需要注意：
+
+- 时间列请声明为 `DATETIME(6)`，`DATETIME` 只精确到秒；
+- 默认的排序规则比较字符串时不区分大小写，`'Hello' = 'hello'` 为真，唯一约束也是如此。需要区分大小写的列（例如 token）请声明 `COLLATE utf8mb4_bin`；
+- DDL 会隐式提交事务，迁移失败时已经执行的语句不会回滚，见[迁移失败后的恢复](migrations.md#recovering-non-transactional-migrations)；
+- 不支持 `RETURNING`。
+
+<a id="dialect-differences"></a>
+### 数据库差异
+
+数据库类型由驱动包选定，Bun 的查询在三种数据库上写法相同。仍然需要留意的是数据库本身的差异：
+
+| | PostgreSQL | SQLite | MySQL |
+| --- | --- | --- | --- |
+| 驱动与 `dsn` | `postgres.Driver`，`postgres://` 连接串 | `sqlite.Driver`，文件路径 | `mysql.Driver`，`mysql://` URL |
+| 约束错误按什么匹配 | 约束名 | `表.列` | 约束名或索引名 |
+| `SELECT ... FOR UPDATE` | 支持 | 不需要，写事务独占数据库 | 支持 |
+| DDL 能否回滚 | 能 | 能 | 不能 |
+| 字符串比较 | 区分大小写 | 区分大小写 | 默认不区分 |
+| `RETURNING` | 支持 | 支持 | 不支持 |
+| 部署 | 多实例 | 单实例 | 多实例 |
+
 
 <a id="connecting"></a>
 ## 连接数据库
@@ -169,7 +213,7 @@ type Article struct {
 <a id="primary-keys"></a>
 ### 主键
 
-mygoravel 约定主键使用 UUIDv7，由应用在插入前生成，迁移中声明为 `id uuid PRIMARY KEY`（SQLite 中为 `id TEXT PRIMARY KEY`）：
+mygoravel 约定主键使用 UUIDv7，由应用在插入前生成，迁移中声明为 `id uuid PRIMARY KEY`（SQLite 中为 `id TEXT PRIMARY KEY`，MySQL 中为 `id CHAR(36) PRIMARY KEY`）：
 
 ```go
 item := &Article{ID: uuid.Must(uuid.NewV7()), AuthorID: subject.ID}
@@ -223,7 +267,7 @@ _, err := db.NewUpdate().
     Exec(ctx)
 ```
 
-如果使用 `Set(...)` 显式指定更新表达式，需要同时设置 `Set("updated_at = ?", time.Now().UTC())`。`Model((*Article)(nil))` 没有模型实例可供此钩子修改，原生 SQL 也不会调用模型钩子；这些写入路径需要自行维护时间戳。迁移中的 `DEFAULT now()` 只提供插入默认值，不会在更新时自动刷新时间。
+如果使用 `Set(...)` 显式指定更新表达式，需要同时设置 `Set("updated_at = ?", time.Now().UTC())`。`Model((*Article)(nil))` 没有模型实例可供此钩子修改，原生 SQL 也不会调用模型钩子；这些写入路径需要自行维护时间戳。迁移中的时间列不设默认值，时间总是由应用写入。
 
 <a id="soft-deletes"></a>
 ### 软删除
@@ -343,13 +387,13 @@ func (s *Service) Create(ctx context.Context, subject identity.Subject, c Change
 }
 ```
 
-判断函数由驱动包提供，`postgres` 和 `sqlite` 包中各有一组同名函数：
+判断函数由驱动包提供，`postgres`、`sqlite` 和 `mysql` 包中各有一组同名函数：
 
-| 函数 | 判断的约束 | PostgreSQL | SQLite |
-| --- | --- | --- | --- |
-| `IsUniqueViolation(err, names...)` | 唯一约束与主键 | 23505 | `SQLITE_CONSTRAINT_UNIQUE`、`SQLITE_CONSTRAINT_PRIMARYKEY` |
-| `IsForeignKeyViolation(err)` | 外键约束 | 23503 | `SQLITE_CONSTRAINT_FOREIGNKEY` |
-| `IsCheckViolation(err)` | 检查约束 | 23514 | `SQLITE_CONSTRAINT_CHECK` |
+| 函数 | 判断的约束 | PostgreSQL | SQLite | MySQL |
+| --- | --- | --- | --- | --- |
+| `IsUniqueViolation(err, names...)` | 唯一约束与主键 | 23505 | `SQLITE_CONSTRAINT_UNIQUE`、`SQLITE_CONSTRAINT_PRIMARYKEY` | 1062 |
+| `IsForeignKeyViolation(err)` | 外键约束 | 23503 | `SQLITE_CONSTRAINT_FOREIGNKEY` | 1451、1452 |
+| `IsCheckViolation(err)` | 检查约束 | 23514 | `SQLITE_CONSTRAINT_CHECK` | 3819 |
 
 `IsUniqueViolation` 可以传入约束名，只在指定的约束冲突时返回 `true`。推荐总是指定约束名，为不同的约束返回不同的业务错误，例如“slug 已被使用”和“邮箱已注册”；其他错误则保留原因继续返回。
 
@@ -359,6 +403,8 @@ SQLite 的错误中没有约束名，只有冲突的列，因此在 SQLite 上�
 sqlite.IsUniqueViolation(err, "articles.slug")
 sqlite.IsUniqueViolation(err, "files.disk, files.key")
 ```
+
+MySQL 与 PostgreSQL 一样按约束名或索引名匹配，主键的名字是 `PRIMARY`。
 
 <a id="testing"></a>
 ## 测试

@@ -243,16 +243,27 @@ func TestCommandCoreIsLight(t *testing.T) {
 }
 
 // TestDatabaseCoreDoesNotLinkDrivers 确保应用只链接自己 import 的数据库驱动：
-// 核心包、迁移与迁移命令都不依赖 pgx 或 SQLite，两个驱动子包也互不依赖。
+// 核心包、迁移与迁移命令不依赖任何驱动，各驱动子包也互不依赖。
 func TestDatabaseCoreDoesNotLinkDrivers(t *testing.T) {
-	pgx, sqlite := []string{"github.com/jackc/pgx"}, []string{"modernc.org/sqlite"}
-	for pkg, forbidden := range map[string][]string{
-		module + "/database":           append(pgx, sqlite...),
-		module + "/database/migrate":   append(pgx, sqlite...),
-		module + "/command/migratecmd": append(pgx, sqlite...),
-		module + "/database/postgres":  sqlite,
-		module + "/database/sqlite":    pgx,
-	} {
+	drivers := map[string]string{
+		"postgres": "github.com/jackc/pgx",
+		"sqlite":   "modernc.org/sqlite",
+		"mysql":    "github.com/go-sql-driver/mysql",
+	}
+	all := []string{drivers["postgres"], drivers["sqlite"], drivers["mysql"]}
+	checks := map[string][]string{
+		module + "/database":           all,
+		module + "/database/migrate":   all,
+		module + "/command/migratecmd": all,
+	}
+	for name, own := range drivers {
+		for _, other := range all {
+			if other != own {
+				checks[module+"/database/"+name] = append(checks[module+"/database/"+name], other)
+			}
+		}
+	}
+	for pkg, forbidden := range checks {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)

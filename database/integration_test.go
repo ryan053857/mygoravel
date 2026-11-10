@@ -210,7 +210,7 @@ func TestNonTransactionalMigrationRequiresManualRecovery(t *testing.T) {
 }
 
 func TestDatabaseIsolationWithDSNFormats(t *testing.T) {
-	parsed, err := pgx.ParseConfig(dbtest.RequireDSN(t))
+	parsed, err := pgx.ParseConfig(dbtest.RequireURL(t, postgres.Driver))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestDatabaseIsolationWithDSNFormats(t *testing.T) {
 	uri.RawQuery = query.Encode()
 	for name, dsn := range map[string]string{"keyword": keyword, "database-query": uri.String()} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv(dbtest.EnvDSN, dsn)
+			t.Setenv(dbtest.EnvURL(postgres.Driver), dsn)
 			db := dbtest.Open(t, postgres.Driver, nil)
 			var actual string
 			if err := db.QueryRow("select current_database()").Scan(&actual); err != nil {

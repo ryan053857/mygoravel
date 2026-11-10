@@ -54,14 +54,24 @@ func Create(driver database.Driver, dir, name string) (string, error) {
 	return path, nil
 }
 
-// createStubs 是各方言的建表骨架。SQLite 没有 uuid 与时间类型，都存为 TEXT；
-// 时间由应用经 Bun 以 UTC 写入，不使用 CURRENT_TIMESTAMP 默认值，以免两种文本格式混在一起比较。
+// createStubs 是各方言的建表骨架。时间都由应用经 Bun 写入，不设数据库默认值；
+// SQLite 没有 uuid 与时间类型，都存为 TEXT；MySQL 的 UUID 存为 CHAR(36)，时间精确到微秒。
 var createStubs = map[string]string{
 	"postgres": `-- +goose Up
 CREATE TABLE %[1]s (
     id         uuid PRIMARY KEY,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+-- +goose Down
+DROP TABLE %[1]s;
+`,
+	"mysql": `-- +goose Up
+CREATE TABLE %[1]s (
+    id         CHAR(36) NOT NULL PRIMARY KEY,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL
 );
 
 -- +goose Down
