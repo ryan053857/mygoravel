@@ -132,7 +132,7 @@ func TestUploadConfirmGetOpen(t *testing.T) {
 	if string(data) != "hello" {
 		t.Fatalf("open = %q", data)
 	}
-	if _, err := e.svc.Get(ctx, uuid.New()); !errors.Is(err, filesystem.ErrNotFound) {
+	if _, err := e.svc.Get(ctx, uuid.Must(uuid.NewV7())); !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("missing get = %v", err)
 	}
 }
@@ -248,7 +248,7 @@ func TestDeleteAndCleanup(t *testing.T) {
 	if err := e.svc.Delete(ctx, ready.ID); err != nil {
 		t.Fatalf("repeat delete = %v", err)
 	}
-	if err := e.svc.Delete(ctx, uuid.New()); err != nil {
+	if err := e.svc.Delete(ctx, uuid.Must(uuid.NewV7())); err != nil {
 		t.Fatalf("delete missing = %v", err)
 	}
 	if _, err := e.svc.Get(ctx, ready.ID); !errors.Is(err, filesystem.ErrNotFound) {

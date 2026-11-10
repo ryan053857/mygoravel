@@ -36,7 +36,7 @@ go run ./cmd/api migrate make create_articles_table
 
 | 名称 | 生成的骨架 |
 | --- | --- |
-| `create_articles_table` | `CREATE TABLE articles`，带 `id`、`created_at`、`updated_at`；`Down` 中 `DROP TABLE articles` |
+| `create_articles_table` | `CREATE TABLE articles`，带 uuid 主键 `id`、`created_at`、`updated_at`；`Down` 中 `DROP TABLE articles` |
 | `add_published_at_to_articles_table`、`drop_summary_from_articles_table` | `ALTER TABLE articles`，补全后才能执行 |
 | 其他名称，例如 `backfill_article_slugs` | 只有 goose 注解 |
 
@@ -47,7 +47,7 @@ go run ./cmd/api migrate make create_articles_table
 <a id="migration-structure"></a>
 ### 迁移文件结构
 
-每个迁移文件包含两部分：`Up` 描述如何应用这次变更，`Down` 描述如何撤销它。下面是补全后的 `create_articles_table`，主键改成了 uuid：
+每个迁移文件包含两部分：`Up` 描述如何应用这次变更，`Down` 描述如何撤销它。下面是补全后的 `create_articles_table`：
 
 ```sql
 -- +goose Up

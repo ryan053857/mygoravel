@@ -177,7 +177,7 @@ func TestViews(t *testing.T) {
     t.Parallel()
     ctx := context.Background()
     views := article.NewViews(newRedis(t))
-    id := uuid.New()
+    id := uuid.Must(uuid.NewV7())
 
     if n, err := views.Count(ctx, id); err != nil || n != 0 {
         t.Fatalf("count = %d, %v", n, err)

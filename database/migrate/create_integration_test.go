@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/database/migrate"
 )
@@ -20,7 +22,7 @@ func TestCreatedStubsRun(t *testing.T) {
 		}
 	}
 	db := dbtest.Open(t, os.DirFS(dir))
-	if _, err := db.ExecContext(context.Background(), "INSERT INTO articles DEFAULT VALUES"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "INSERT INTO articles (id) VALUES (?)", uuid.Must(uuid.NewV7())); err != nil {
 		t.Fatal(err)
 	}
 }

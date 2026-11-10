@@ -4,6 +4,7 @@
 - [配置](#configuration)
 - [连接数据库](#connecting)
 - [定义模型](#defining-models)
+    - [主键](#primary-keys)
     - [自动维护时间戳](#timestamps)
     - [软删除](#soft-deletes)
 - [执行查询](#running-queries)
@@ -129,6 +130,17 @@ type Article struct {
 `Slug` 是文章在网址中的标识，例如 `/blog/hello-world` 中的 `hello-world`，它在所有文章中必须唯一。文章创建时是草稿（`draft`），发布后变为 `published`，并记录发布时间。
 
 模型声明字段映射和下面介绍的 Bun 行为，表结构本身由[迁移](migrations.md#migration-structure)管理。mygoravel 不会统一添加 `created_at`、`updated_at`、`deleted_at`，你可以按需在模型和迁移中声明它们。本文的 `Article` 示例同时使用时间戳和软删除。
+
+<a id="primary-keys"></a>
+### 主键
+
+mygoravel 约定主键使用 UUIDv7，由应用在插入前生成，迁移中声明为 `id uuid PRIMARY KEY`：
+
+```go
+item := &Article{ID: uuid.Must(uuid.NewV7()), AuthorID: subject.ID}
+```
+
+在插入之前就有 ID，同一事务中的关联记录、对象存储的键或者幂等重试都可以直接使用它。UUIDv7 以毫秒时间戳开头，新记录总是追加在索引末尾，写入性能接近自增 ID；对外暴露时也不会泄露记录数量或被逐个遍历，但它包含创建时间，也不能代替[授权](authorization.md)检查。只在内部使用、不出现在接口中的大表，可以在迁移中改用 `bigint GENERATED ALWAYS AS IDENTITY`。
 
 <a id="timestamps"></a>
 ### 自动维护时间戳
@@ -282,7 +294,7 @@ func (s *Service) Create(ctx context.Context, subject identity.Subject, c Change
         return nil, ErrForbidden.New()
     }
     item := &Article{
-        ID: uuid.New(), AuthorID: subject.ID, Status: StatusDraft,
+        ID: uuid.Must(uuid.NewV7()), AuthorID: subject.ID, Status: StatusDraft,
         Title: c.Title, Slug: c.Slug, Content: c.Content,
     }
     _, err := s.db.NewInsert().Model(item).Exec(ctx)
