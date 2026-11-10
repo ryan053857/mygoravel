@@ -6,6 +6,7 @@
     - [单元测试](#unit-tests)
     - [集成测试](#integration-tests)
     - [架构测试](#architecture-tests)
+    - [文档用法测试](#doc-tests)
 - [持续集成](#continuous-integration)
 - [编码风格](#coding-style)
 - [编写文档](#writing-documentation)
@@ -19,7 +20,7 @@
 ## 开发环境
 
 - Go，版本以仓库 [go.mod](../go.mod) 中的声明为准；
-- Docker，用于在本地启动集成测试所需的 PostgreSQL 18。
+- Docker，用于在本地启动集成测试所需的 PostgreSQL 18 和 Redis 8。
 
 <a id="running-tests"></a>
 ## 运行测试
@@ -43,12 +44,14 @@ go test -race ./...
 <a id="integration-tests"></a>
 ### 集成测试
 
-带有 `integration` 构建标签的测试需要一个真实的 PostgreSQL。先启动一个临时实例：
+带有 `integration` 构建标签的测试需要真实的 PostgreSQL 和 Redis。先启动临时实例：
 
 ```bash
 docker run --name mygoravel-test-postgres --rm -d \
   -e POSTGRES_PASSWORD=postgres \
   -p 127.0.0.1:55432:5432 postgres:18
+docker run --name mygoravel-test-redis --rm -d \
+  -p 127.0.0.1:56379:6379 redis:8
 ```
 
 确认数据库就绪：
@@ -61,10 +64,11 @@ docker exec mygoravel-test-postgres pg_isready -U postgres
 
 ```bash
 export DATABASE_TEST_DSN='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
+export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
 go test -race -count=1 -tags=integration ./...
 ```
 
-没有设置 `DATABASE_TEST_DSN` 时，集成测试会失败而不是跳过。测试完成后执行 `docker stop mygoravel-test-postgres` 清理。
+没有设置 `DATABASE_TEST_DSN` 或 `REDIS_TEST_URL` 时，集成测试会失败而不是跳过。Redis 测试给每个键加随机前缀，不会清空数据，但仍请使用专门的测试实例。测试完成后执行 `docker stop mygoravel-test-postgres mygoravel-test-redis` 清理。
 
 集成测试中包含对迁移失败场景的演练，例如非事务迁移执行到一半失败后，检查数据库状态、人工恢复并再次执行。
 
@@ -75,6 +79,11 @@ go test -race -count=1 -tags=integration ./...
 
 `internal/archtest` 检查框架各个包之间的依赖方向。例如 `errorx`、`identity` 等基础包不能依赖 HTTP 或数据库相关的包，`database` 只能依赖 `config`。如果你的修改引入了新的包依赖，请先确认它符合分层设计，再相应地更新测试中的规则。
 
+<a id="doc-tests"></a>
+### 文档用法测试
+
+有些功能框架不做封装，由文档直接教用户使用社区组件，例如用 gocache 做缓存。`internal/doctest` 在真实环境中验证文档描述的这些行为，例如缓存未命中时返回 `store.NotFound`、Redis store 的 TTL 选项是否生效。依赖升级改变了这些行为时测试会失败，提醒同步修改文档。
+
 <a id="continuous-integration"></a>
 ## 持续集成
 
@@ -84,7 +93,7 @@ CI 配置位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，每次
 2. `go vet ./...`；
 3. `go test ./...`；
 4. `go test -race ./...`；
-5. `go test -race -tags=integration ./...`（使用 PostgreSQL 18 服务容器）。
+5. `go test -race -tags=integration ./...`（使用 PostgreSQL 18 和 Redis 8 服务容器）。
 
 提交之前，请在本地至少运行前四项。
 

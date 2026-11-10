@@ -304,4 +304,4 @@ articleCache := cache.New[string](redisstore.NewRedis(rdb, store.WithExpiration(
 
 - 默认 TTL 通过 `NewRedis` 的选项设置；`store.WithExpiration(0)` 表示不过期；
 - `Clear` 执行 `FLUSHALL`，会清空整个 Redis 实例的所有数据库，不要在共享的 Redis 上调用；
-- 网络故障等行为内存缓存无法模拟，请用真实的 Redis 做集成测试。
+- 网络故障等行为内存缓存无法模拟，请用真实的 Redis 做集成测试，写法见 [Redis](redis.md#testing)。
