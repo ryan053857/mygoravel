@@ -10,8 +10,6 @@ import (
 	"net/netip"
 	"runtime/debug"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5/middleware"
@@ -29,10 +27,10 @@ import (
 // 需要不同组合时（例如流式接口不设超时），直接挑选单个中间件自行组装。
 func Defaults(cfg Config, logger *slog.Logger) []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
-		AssignRequestID(),
+		AssignRequestID(cfg.RequestID),
 		NoSniff(),
 		ClientIP(cfg.ClientIP),
-		AccessLog(logger),
+		AccessLog(cfg.AccessLog, logger),
 		Recover(logger),
 		BodyLimit(cfg.BodyLimit),
 		Timeout(cfg.Timeout),
@@ -48,15 +46,19 @@ func RequestID(ctx context.Context) string {
 }
 
 // AssignRequestID 为每个请求确定请求标识，写入 context、日志字段与 X-Request-ID 响应头。
-// 入站 X-Request-ID 合法（1–128 个字母、数字或 -_.:）时沿用，否则生成新值。
-func AssignRequestID() func(http.Handler) http.Handler {
+// 入站请求头 cfg.Header 的值合法（1–128 个可打印 ASCII 字符，不含空格）时沿用，否则生成新值。
+// 标识同时写入 chi 的 middleware.RequestIDKey，middleware.GetReqID 读到的是同一个值。cfg 不合法时 panic。
+func AssignRequestID(cfg RequestIDConfig) func(http.Handler) http.Handler {
+	mustValid("AssignRequestID", cfg.Validate())
+	header := cfg.Header
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			id := r.Header.Get("X-Request-ID")
+			id := r.Header.Get(header)
 			if !validRequestID(id) {
 				id = rand.Text()
 			}
 			ctx := context.WithValue(r.Context(), requestIDKey{}, id)
+			ctx = context.WithValue(ctx, middleware.RequestIDKey, id)
 			ctx = logging.WithAttrs(ctx, slog.String(logging.AttrRequestID, id))
 			w.Header().Set("X-Request-ID", id)
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -69,9 +71,7 @@ func validRequestID(id string) bool {
 		return false
 	}
 	for _, c := range []byte(id) {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_', c == '.', c == ':':
-		default:
+		if c <= ' ' || c > '~' {
 			return false
 		}
 	}
@@ -104,54 +104,6 @@ func ClientIP(cfg ClientIPConfig) func(http.Handler) http.Handler {
 				r.RemoteAddr = addr
 			}
 			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-type accessLogKey struct{}
-
-// accessLog 收集处理过程中追加到访问日志的字段。
-type accessLog struct {
-	mu    sync.Mutex
-	attrs []any
-}
-
-// AddAccessLogAttrs 为当前请求的访问日志追加字段，例如业务错误码；
-// 未安装 AccessLog 时忽略。
-func AddAccessLogAttrs(ctx context.Context, attrs ...slog.Attr) {
-	l, ok := ctx.Value(accessLogKey{}).(*accessLog)
-	if !ok {
-		return
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, a := range attrs {
-		l.attrs = append(l.attrs, a)
-	}
-}
-
-// AccessLog 在请求结束后记录方法、状态码、耗时、客户端地址与 AddAccessLogAttrs 追加的字段。
-// 安装在 Recover 之外，才能记录 panic 产生的 500。logger 为 nil 时使用 slog.Default()。
-func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
-	logger = logging.Or(logger)
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			access := &accessLog{}
-			ctx := context.WithValue(r.Context(), accessLogKey{}, access)
-			rw := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-			start := time.Now()
-			defer func() {
-				status := rw.Status()
-				if status == 0 {
-					status = http.StatusOK
-				}
-				args := []any{"method", r.Method, "status", status, "duration", time.Since(start), "client", r.RemoteAddr}
-				access.mu.Lock()
-				args = append(args, access.attrs...)
-				access.mu.Unlock()
-				logger.InfoContext(ctx, "http request", args...)
-			}()
-			next.ServeHTTP(rw, r.WithContext(ctx))
 		})
 	}
 }

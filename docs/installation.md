@@ -14,7 +14,7 @@
 
 mygoravel 是一个用于构建 HTTP API 的 Go 应用框架。它为配置加载、路由、请求验证、错误响应、日志、认证、数据库访问、迁移和命令行工具提供了一套统一的约定，让你把精力放在业务本身，而不是反复拼装基础设施。
 
-和很多“大而全”的框架不同，mygoravel 不会把社区组件藏在自己的抽象后面。路由使用 [chi](https://github.com/go-chi/chi) 和 [Huma](https://huma.rocks)，日志使用标准库 `log/slog`，数据库使用 [Bun](https://bun.uptrace.dev) 与 pgx，迁移使用 [goose](https://github.com/pressly/goose)，命令行使用 [Cobra](https://github.com/spf13/cobra)。mygoravel 负责把它们以一致的方式连接起来，你学到的每一项技能都是这些组件本身的技能。
+和很多“大而全”的框架不同，mygoravel 不会把社区组件藏在自己的抽象后面。路由使用 [chi](https://github.com/go-chi/chi) 和 [Huma](https://huma.rocks)，日志使用标准库 `log/slog`，并通过 [slog-multi](https://github.com/samber/slog-multi)、[slog-formatter](https://github.com/samber/slog-formatter) 和 [slog-chi](https://github.com/samber/slog-chi) 扩展，数据库使用 [Bun](https://bun.uptrace.dev) 与 pgx，迁移使用 [goose](https://github.com/pressly/goose)，命令行使用 [Cobra](https://github.com/spf13/cobra)。mygoravel 负责把它们以一致的方式连接起来，你学到的每一项技能都是这些组件本身的技能。
 
 <a id="why-mygoravel"></a>
 ### 为什么选择 mygoravel

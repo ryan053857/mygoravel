@@ -250,10 +250,10 @@ Content-Type: application/problem+json
 安装默认中间件后，每个请求都有一条访问日志。对于业务错误，访问日志中会带上错误码，这就足够了：
 
 ```json
-{"time":"…","level":"INFO","msg":"http request","method":"PUT","status":409,"duration":52417,"client":"203.0.113.7:51234","code":"article.slug_taken","request_id":"9F2K…"}
+{"time":"…","level":"WARN","msg":"http request","request":{"method":"PUT","path":"/articles/0f8c","route":"/articles/{id}","ip":"203.0.113.7:51234",…},"response":{"status":409,"latency":52417,…},"code":"article.slug_taken","request_id":"9F2K…"}
 ```
 
-对于 `500`，框架还会额外记录一条错误日志。它的 `error` 字段包含完整的错误链，以及错误发生位置的堆栈：
+对于 `500`，框架还会额外记录一条 `ERROR` 级别的错误日志。它的 `error` 字段是一个分组，`message` 是错误消息，`code` 是错误码，`stack` 是完整的错误链和错误发生位置的堆栈（见[错误日志](logging.md#error-logging)）。`stack` 的内容如下：
 
 ```text
 load article: dial tcp 10.0.0.5:5432: connect: connection refused
@@ -387,7 +387,7 @@ mygoravel 遵循“**只在边界记录一次**”的原则：业务代码只负
 | 日志 | 何时记录 | 内容 |
 | --- | --- | --- |
 | 访问日志 | 每个请求 | 方法、状态码、耗时；业务错误还包含 `code` |
-| 错误日志 | 仅 `5xx` | 错误码和完整的错误链（`%+v` 格式，含堆栈） |
+| 错误日志 | 仅 `5xx` | `error` 分组：消息、错误码和完整的错误链（`%+v` 格式，含堆栈） |
 
 需要为访问日志追加其他字段时，可以在处理过程中调用 `httpx.AddAccessLogAttrs(ctx, attrs...)`。日志的配置方式见[日志](logging.md)。
 

@@ -23,8 +23,13 @@ func TestLoadsFrameworkConfigs(t *testing.T) {
 	cfg, err := load[frameworkConfig](t, `
 http:
   addr: :9000
+  request_id:
+    header: X-Amzn-Trace-Id
   client_ip:
     trusted_proxies: [10.0.0.0/8]
+  access_log:
+    ignore_paths: [/healthz]
+    user_agent: true
   timeout:
     duration: 5s
   rate_limit:
@@ -32,6 +37,7 @@ http:
 logs:
   level: debug
   format: text
+  time_zone: UTC
 database:
   dsn: postgres://localhost/app
 `)
@@ -44,17 +50,21 @@ database:
 		cfg.HTTP.RateLimit != (httpx.RateLimitConfig{Rate: 5, Interval: time.Second, Burst: 20, MaxEntries: 10000}) {
 		t.Fatalf("http=%+v", cfg.HTTP)
 	}
-	if cfg.Logs.Level != slog.LevelDebug || cfg.Logs.Format != logging.FormatText {
+	if cfg.HTTP.RequestID.Header != "X-Amzn-Trace-Id" || !cfg.HTTP.AccessLog.UserAgent ||
+		!reflect.DeepEqual(cfg.HTTP.AccessLog.IgnorePaths, []string{"/healthz"}) {
+		t.Fatalf("http=%+v", cfg.HTTP)
+	}
+	if cfg.Logs.Level != slog.LevelDebug || cfg.Logs.Format != logging.FormatText || cfg.Logs.TimeZone != "UTC" {
 		t.Fatalf("logs=%+v", cfg.Logs)
 	}
 }
 
 func TestFrameworkConfigsValidate(t *testing.T) {
-	_, err := load[frameworkConfig](t, "http:\n  addr: ':99999'\n  body_limit:\n    max_bytes: 0\n  rate_limit:\n    burst: 0\n  client_ip:\n    trusted_proxies: [10.0.0.5/8]\nlogs:\n  format: xml\n")
+	_, err := load[frameworkConfig](t, "http:\n  addr: ':99999'\n  body_limit:\n    max_bytes: 0\n  rate_limit:\n    burst: 0\n  client_ip:\n    trusted_proxies: [10.0.0.5/8]\n  request_id:\n    header: ''\n  access_log:\n    ignore_paths: [healthz]\nlogs:\n  time_zone: Mars/Olympus\n")
 	if err == nil {
 		t.Fatal("expected validation errors")
 	}
-	for _, want := range []string{"http: addr", "http.body_limit: max_bytes", "http.rate_limit: burst", "http.client_ip: trusted_proxies[0]: 10.0.0.5/8 has host bits set", "logs: format", "database: dsn is required"} {
+	for _, want := range []string{"http: addr", "http.body_limit: max_bytes", "http.rate_limit: burst", "http.client_ip: trusted_proxies[0]: 10.0.0.5/8 has host bits set", "http.request_id: header is required", "http.access_log: ignore_paths[0]", "logs: time_zone", "database: dsn is required"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing %q in %v", want, err)
 		}

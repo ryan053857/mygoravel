@@ -1,6 +1,6 @@
 # mygoravel
 
-mygoravel 是一个用于构建 HTTP API 的 Go 应用框架。它为配置、路由、验证、错误处理、日志、认证、数据库、迁移和命令行提供一套统一的约定，同时让你直接使用社区组件的原生能力：chi 与 Huma、slog、Bun 与 pgx、goose、Cobra、go-i18n 和 cockroachdb/errors。
+mygoravel 是一个用于构建 HTTP API 的 Go 应用框架。它为配置、路由、验证、错误处理、日志、认证、数据库、迁移和命令行提供一套统一的约定，同时让你直接使用社区组件的原生能力：chi 与 Huma、slog 与 slog-multi / slog-formatter / slog-chi、Bun 与 pgx、goose、Cobra、go-i18n 和 cockroachdb/errors。
 
 - **依赖一目了然**：没有服务容器和全局状态，所有依赖都通过普通的构造函数显式传递。
 - **约定开箱即用**：请求 ID、统一的错误响应格式、强制的路由访问策略声明。

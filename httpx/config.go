@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -23,7 +24,9 @@ type Config struct {
 	// ShutdownTimeout 是停机时排空请求的上限。
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
 
+	RequestID RequestIDConfig `yaml:"request_id"`
 	ClientIP  ClientIPConfig  `yaml:"client_ip"`
+	AccessLog AccessLogConfig `yaml:"access_log"`
 	Timeout   TimeoutConfig   `yaml:"timeout"`
 	BodyLimit BodyLimitConfig `yaml:"body_limit"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
@@ -38,7 +41,9 @@ func DefaultConfig() Config {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       time.Minute,
 		ShutdownTimeout:   10 * time.Second,
+		RequestID:         DefaultRequestIDConfig(),
 		ClientIP:          DefaultClientIPConfig(),
+		AccessLog:         DefaultAccessLogConfig(),
 		Timeout:           DefaultTimeoutConfig(),
 		BodyLimit:         DefaultBodyLimitConfig(),
 		RateLimit:         DefaultRateLimitConfig(),
@@ -83,6 +88,74 @@ func (c Config) server(handler http.Handler) *http.Server {
 		WriteTimeout:      c.WriteTimeout,
 		IdleTimeout:       c.IdleTimeout,
 	}
+}
+
+// RequestIDConfig 是 AssignRequestID 的参数，对应 http.request_id 段。
+type RequestIDConfig struct {
+	// Header 是读取入站请求 ID 的请求头，例如反向代理写入的 X-Amzn-Trace-Id。
+	// 响应始终通过 X-Request-ID 回写。
+	Header string `yaml:"header"`
+}
+
+// DefaultRequestIDConfig 返回读取 X-Request-ID 的配置。
+func DefaultRequestIDConfig() RequestIDConfig { return RequestIDConfig{Header: "X-Request-ID"} }
+
+// SetDefaults 实现 config.Defaulter。
+func (c *RequestIDConfig) SetDefaults() { *c = DefaultRequestIDConfig() }
+
+// Validate 检查请求头名称是合法的 HTTP 字段名。
+func (c RequestIDConfig) Validate() error {
+	if c.Header == "" {
+		return errors.New("header is required")
+	}
+	for _, ch := range []byte(c.Header) {
+		if !isTokenChar(ch) {
+			return errors.Newf("header %q is not a valid HTTP field name", c.Header)
+		}
+	}
+	return nil
+}
+
+// isTokenChar 报告 c 是否属于 RFC 9110 的 tchar。
+func isTokenChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	}
+	return strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
+}
+
+// AccessLogConfig 是 AccessLog 的参数，对应 http.access_log 段。
+// 请求头记录中 Authorization、Cookie 等敏感头始终隐藏。
+type AccessLogConfig struct {
+	// IgnorePaths 中的路径（精确匹配）不记录访问日志，例如健康检查。
+	IgnorePaths []string `yaml:"ignore_paths"`
+	// UserAgent 记录 User-Agent。
+	UserAgent bool `yaml:"user_agent"`
+	// RequestHeader、ResponseHeader 记录请求头与响应头。
+	RequestHeader  bool `yaml:"request_header"`
+	ResponseHeader bool `yaml:"response_header"`
+	// RequestBody、ResponseBody 记录请求体与响应体，各最多 64 KiB。
+	RequestBody  bool `yaml:"request_body"`
+	ResponseBody bool `yaml:"response_body"`
+	// TraceID 记录 OpenTelemetry 的 trace_id 与 span_id。
+	TraceID bool `yaml:"trace_id"`
+}
+
+// DefaultAccessLogConfig 返回只记录基本字段的配置。
+func DefaultAccessLogConfig() AccessLogConfig { return AccessLogConfig{IgnorePaths: []string{}} }
+
+// SetDefaults 实现 config.Defaulter。
+func (c *AccessLogConfig) SetDefaults() { *c = DefaultAccessLogConfig() }
+
+// Validate 检查忽略的路径以 / 开头。
+func (c AccessLogConfig) Validate() error {
+	for i, p := range c.IgnorePaths {
+		if !strings.HasPrefix(p, "/") {
+			return errors.Newf("ignore_paths[%d]: %q must start with /", i, p)
+		}
+	}
+	return nil
 }
 
 // ClientIPConfig 是 ClientIP 的参数，对应 http.client_ip 段。

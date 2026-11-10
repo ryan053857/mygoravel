@@ -15,7 +15,7 @@ var dependencies = map[string][]string{
 	"cleanup":  {},
 	"config":   {},
 	"errorx":   {},
-	"logging":  {},
+	"logging":  {"errorx"},
 	"i18n":     {},
 	"identity": {},
 	"page":     {"errorx"},

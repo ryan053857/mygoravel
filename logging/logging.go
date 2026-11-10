@@ -7,6 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"time"
+
+	slogformatter "github.com/samber/slog-formatter"
+	slogmulti "github.com/samber/slog-multi"
 )
 
 // 输出格式。
@@ -38,7 +42,9 @@ type Config struct {
 	Service string `yaml:"service"`
 	// Version 作为 version 字段附加到每条日志；空值取构建信息中的主模块版本，取不到时省略。
 	Version string `yaml:"version"`
-	// Writer 是输出目标，nil 表示 os.Stderr；只能在代码中设置。
+	// TimeZone 是日志时间使用的时区，例如 UTC、Asia/Shanghai；空值表示本地时区。
+	TimeZone string `yaml:"time_zone"`
+	// Writer 是基础输出的目标，nil 表示 os.Stderr；只能在代码中设置。
 	Writer io.Writer `yaml:"-"`
 }
 
@@ -50,32 +56,80 @@ func DefaultConfig() Config {
 // SetDefaults 实现 config.Defaulter，使 config.Load 自动填充默认值。
 func (c *Config) SetDefaults() { *c = DefaultConfig() }
 
-// Validate 检查输出格式。
+// Validate 检查输出格式与时区。
 func (c Config) Validate() error {
 	switch c.Format {
 	case "", FormatJSON, FormatText:
-		return nil
 	default:
 		return fmt.Errorf("format must be %q or %q", FormatJSON, FormatText)
 	}
+	if _, err := c.location(); err != nil {
+		return fmt.Errorf("time_zone: %w", err)
+	}
+	return nil
 }
 
-// New 按 cfg 构造 *slog.Logger；Handler 已包装，会输出 WithAttrs 挂在 context 上的字段。
-// New 不修改 slog.Default，通常在入口处用 slog.SetDefault 安装它。
-func New(cfg Config) *slog.Logger {
-	w := cfg.Writer
-	if w == nil {
-		w = os.Stderr
+// location 返回 TimeZone 对应的时区；空值返回 nil，表示不转换。
+func (c Config) location() (*time.Location, error) {
+	if c.TimeZone == "" {
+		return nil, nil
 	}
-	hopts := &slog.HandlerOptions{
-		AddSource: cfg.AddSource,
-		Level:     cfg.Level,
+	return time.LoadLocation(c.TimeZone)
+}
+
+// Option 扩展 New 构造的处理链。
+type Option func(*options)
+
+type options struct {
+	formatters  []slogformatter.Formatter
+	middlewares []slogmulti.Middleware
+	handlers    []slog.Handler
+}
+
+// Format 追加字段格式化规则，例如 slogformatter.PIIFormatter("user")。
+// 格式化在分发之前执行，作用于所有输出。
+func Format(formatters ...slogformatter.Formatter) Option {
+	return func(o *options) { o.formatters = append(o.formatters, formatters...) }
+}
+
+// Pipe 追加 Handler 中间件，例如过滤或采样；按传入顺序由外到内执行，位于格式化之前。
+func Pipe(middlewares ...slogmulti.Middleware) Option {
+	return func(o *options) { o.middlewares = append(o.middlewares, middlewares...) }
+}
+
+// Fanout 追加输出，与基础输出并列接收日志，例如 Slack 告警或 syslog。
+// 各输出按自身的 Enabled 过滤级别；按条件分发可传入 slogmulti.Router().Handler()。
+func Fanout(handlers ...slog.Handler) Option {
+	return func(o *options) { o.handlers = append(o.handlers, handlers...) }
+}
+
+// New 按 cfg 构造 *slog.Logger，处理链由外到内为：
+//
+//	context 字段 → service / version → Pipe 中间件 → 格式化 → 基础输出 + Fanout 输出
+//
+// 格式化默认包含 ErrorFormatter；cfg.TimeZone 非空时还会把时间值转换到该时区。
+// New 不修改 slog.Default，通常在入口处用 slog.SetDefault 安装它。cfg 不合法时 panic。
+func New(cfg Config, opts ...Option) *slog.Logger {
+	if err := cfg.Validate(); err != nil {
+		panic(fmt.Errorf("logging: %w", err))
 	}
-	var h slog.Handler
-	if cfg.Format == FormatText {
-		h = slog.NewTextHandler(w, hopts)
-	} else {
-		h = slog.NewJSONHandler(w, hopts)
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	loc, _ := cfg.location()
+
+	var h slog.Handler = baseHandler(cfg, loc)
+	if len(o.handlers) > 0 {
+		h = slog.NewMultiHandler(append([]slog.Handler{h}, o.handlers...)...)
+	}
+	formatters := append([]slogformatter.Formatter{ErrorFormatter()}, o.formatters...)
+	if loc != nil {
+		formatters = append(formatters, slogformatter.TimezoneConverter(loc))
+	}
+	h = slogformatter.NewFormatterHandler(formatters...)(h)
+	if len(o.middlewares) > 0 {
+		h = slogmulti.Pipe(o.middlewares...).Handler(h)
 	}
 	var attrs []slog.Attr
 	if cfg.Service != "" {
@@ -90,13 +144,38 @@ func New(cfg Config) *slog.Logger {
 	return slog.New(NewContextHandler(h))
 }
 
-// Or 返回 l，l 为 nil 时返回当前的 slog.Default()；结果的 Handler 已用 NewContextHandler 包装。
-// 框架组件用它解析可选的 Logger 参数。
+// baseHandler 按格式写入 cfg.Writer；loc 非空时把记录时间转换到该时区。
+func baseHandler(cfg Config, loc *time.Location) slog.Handler {
+	w := cfg.Writer
+	if w == nil {
+		w = os.Stderr
+	}
+	hopts := &slog.HandlerOptions{AddSource: cfg.AddSource, Level: cfg.Level}
+	if loc != nil {
+		hopts.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
+				a.Value = slog.TimeValue(a.Value.Time().In(loc))
+			}
+			return a
+		}
+	}
+	if cfg.Format == FormatText {
+		return slog.NewTextHandler(w, hopts)
+	}
+	return slog.NewJSONHandler(w, hopts)
+}
+
+// Or 返回 l，l 为 nil 时返回当前的 slog.Default()。框架组件用它解析可选的 Logger 参数。
+// 不是 New 构造的日志器会补上 context 字段和 ErrorFormatter。
 func Or(l *slog.Logger) *slog.Logger {
 	if l == nil {
 		l = slog.Default()
 	}
-	return slog.New(NewContextHandler(l.Handler()))
+	h := l.Handler()
+	if _, ok := h.(contextHandler); ok {
+		return l
+	}
+	return slog.New(NewContextHandler(slogformatter.NewFormatterHandler(ErrorFormatter())(h)))
 }
 
 // buildVersion 返回主模块版本；本地构建的 (devel) 视为无版本。

@@ -1,7 +1,6 @@
 package rest
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -68,7 +67,7 @@ func RequireBearer(api huma.API, validate TokenValidator, scopes ...string) func
 			sub, err := validate(ctx, token)
 			if err != nil && HTTPStatus(err) >= 500 {
 				if a, ok := api.(*API); ok {
-					a.logger.ErrorContext(ctx.Context(), "authentication backend failed", "code", errorx.CodeOf(err), "error", fmt.Sprintf("%+v", err))
+					a.logger.ErrorContext(ctx.Context(), "authentication backend failed", "error", err)
 				}
 				writeError(api, ctx, huma.NewErrorWithContext(ctx, HTTPStatus(err), "authentication unavailable"))
 				return

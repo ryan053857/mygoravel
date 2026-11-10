@@ -3,7 +3,9 @@
 - [简介](#introduction)
 - [默认中间件](#default-middleware)
 - [HTTP 配置](#http-configuration)
+    - [请求 ID](#request-id)
     - [可信代理](#trusted-proxies)
+    - [访问日志](#access-log)
 - [限流](#rate-limiting)
 - [自行组装](#custom-stack)
 - [自定义中间件](#custom-middleware)
@@ -38,10 +40,10 @@ api := rest.New(rest.Options{Router: router})
 
 | 中间件 | 行为 |
 | --- | --- |
-| `AssignRequestID()` | 确定请求 ID，写入 context、日志字段和 `X-Request-ID` 响应头；入站的 `X-Request-ID` 合法时沿用 |
+| `AssignRequestID(cfg.RequestID)` | 确定请求 ID，写入 context、日志字段和 `X-Request-ID` 响应头；入站请求 ID 合法时沿用，见[请求 ID](#request-id) |
 | `NoSniff()` | 设置 `X-Content-Type-Options: nosniff` |
 | `ClientIP(cfg.ClientIP)` | 只信任显式配置的代理，从 `X-Forwarded-For` 解析客户端地址 |
-| `AccessLog(logger)` | 记录请求方法、状态码、耗时、客户端地址，以及业务错误的错误码 |
+| `AccessLog(cfg.AccessLog, logger)` | 每个请求记录一条访问日志，见[访问日志](#access-log) |
 | `Recover(logger)` | 处理器 panic 时记录堆栈；若尚未写出响应则返回通用的 500 错误，若已开始写响应则中止连接 |
 | `BodyLimit(cfg.BodyLimit)` | 限制请求体大小，超出时返回 413 |
 | `Timeout(cfg.Timeout)` | 为请求 context 设置超时 |
@@ -67,8 +69,12 @@ api := rest.New(rest.Options{Router: router})
 http:
   addr: ${HTTP_ADDR:-:8080}
   shutdown_timeout: 10s
+  request_id:
+    header: X-Request-ID
   client_ip:
     trusted_proxies: [10.20.0.0/16]
+  access_log:
+    ignore_paths: [/healthz, /readyz]
   timeout:
     duration: 15s
   body_limit:
@@ -90,7 +96,9 @@ http:
 
 | 字段 | 中间件 | 说明 | 默认值 |
 | --- | --- | --- | --- |
+| `request_id.header` | `AssignRequestID` | 读取入站请求 ID 的请求头 | `X-Request-ID` |
 | `client_ip.trusted_proxies` | `ClientIP` | 可信的反向代理网段 | 不信任任何代理 |
+| `access_log.*` | `AccessLog` | 见[访问日志](#access-log) | 只记录基本字段 |
 | `timeout.duration` | `Timeout` | 每个请求 context 的超时 | `30s` |
 | `body_limit.max_bytes` | `BodyLimit` | 请求体的最大字节数 | 1 MiB |
 | `rate_limit.*` | `RateLimit` | 见[限流](#rate-limiting) | 每秒 10 个，突发 20 个 |
@@ -106,6 +114,32 @@ return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{})
 ```
 
 不经过 `config.Load` 时（例如在测试中），请从 `httpx.DefaultConfig()` 开始修改。零值的 `httpx.Config{}` 不合法，`httpx.Defaults` 会 panic，`httpx.ListenAndServe` 会返回错误。
+
+<a id="request-id"></a>
+### 请求 ID
+
+`AssignRequestID` 为每个请求确定一个 ID：入站请求头中带有合法的 ID 时沿用它，否则生成一个随机 ID。这个 ID 会：
+
+- 写入请求的 context，用 `httpx.RequestID(ctx)` 读取；
+- 作为 `request_id` 字段出现在这个请求的所有日志中，见[请求关联](logging.md#request-correlation)；
+- 通过 `X-Request-ID` 响应头返回给客户端，用户反馈问题时可以直接提供它。
+
+它同时写入 chi 的 `middleware.RequestIDKey`，所以 `middleware.GetReqID(ctx)` 和读取它的社区中间件拿到的也是同一个值，不需要再安装 chi 的 `middleware.RequestID`。
+
+合法的 ID 是 1–128 个可打印的 ASCII 字符，不含空格。不合法时（例如超长、包含控制字符）丢弃，重新生成。
+
+部署在反向代理之后时，沿用代理生成的 ID，就能把代理日志和应用日志关联起来。默认读取 `X-Request-ID`，代理使用其他请求头时通过 `http.request_id.header` 指定：
+
+| 代理 | 配置 |
+| --- | --- |
+| Nginx（`proxy_set_header X-Request-ID $request_id`）、Envoy、Istio、Traefik | 默认即可 |
+| AWS ALB | `header: X-Amzn-Trace-Id` |
+| Google Cloud 负载均衡 | `header: X-Cloud-Trace-Context` |
+| Cloudflare | `header: CF-Ray` |
+
+无论从哪个请求头读取，响应始终通过 `X-Request-ID` 返回。
+
+客户端自己携带的 ID 能否到达应用，取决于代理的配置：上面 Nginx 的写法总是用 Nginx 生成的值覆盖客户端的值，Envoy 默认也会在入口重新生成。需要优先沿用客户端的 ID 时，请在代理中配置透传。
 
 <a id="trusted-proxies"></a>
 ### 可信代理
@@ -134,6 +168,36 @@ http:
 
 > [!WARNING]
 > 只填写你实际使用的代理网段。如果把 `0.0.0.0/0` 之类的宽泛网段设为可信，任何客户端都可以伪造自己的地址。
+
+<a id="access-log"></a>
+### 访问日志
+
+`AccessLog` 基于 [slog-chi](https://github.com/samber/slog-chi)，在每个请求结束后记录一条消息为 `http request` 的日志：
+
+```json
+{"time":"…","level":"WARN","msg":"http request","service":"blog","request":{"time":"…","method":"PUT","host":"api.example.com","path":"/articles/0f8c","query":"","params":{"id":"0f8c"},"route":"/articles/{id}","referer":"","ip":"203.0.113.7:51234","length":0},"response":{"time":"…","latency":32209,"status":409,"length":0},"code":"article.slug_taken","request_id":"9F2K…"}
+```
+
+- 消息固定为 `http request`，用 `msg = "http request"` 就能筛出所有访问日志；
+- 级别随状态码变化：`5xx` 为 `ERROR`，`4xx` 为 `WARN`，其他为 `INFO`；
+- `request.route` 是路由模板，适合按接口聚合统计；
+- `request.ip` 是 [`ClientIP`](#trusted-proxies) 解析后的客户端地址；
+- 业务错误的错误码由框架通过 `httpx.AddAccessLogAttrs` 追加为顶层的 `code` 字段。你也可以在处理过程中调用它追加自己的字段，同名字段后写的覆盖先写的。
+
+更多字段通过 `http.access_log` 开启：
+
+| 字段 | 说明 | 默认值 |
+| --- | --- | --- |
+| `ignore_paths` | 不记录访问日志的路径（精确匹配），例如健康检查 | 无 |
+| `user_agent` | 记录 `User-Agent` | `false` |
+| `request_header`、`response_header` | 记录请求头、响应头 | `false` |
+| `request_body`、`response_body` | 记录请求体、响应体，各最多 64 KiB | `false` |
+| `trace_id` | 记录 OpenTelemetry 的 `trace_id` 和 `span_id` | `false` |
+
+记录请求头时，`Authorization`、`Cookie`、`X-Auth-Token`、`X-CSRF-Token`、`X-XSRF-Token` 始终隐藏，记录响应头时 `Set-Cookie` 始终隐藏。还需要隐藏其他字段时，见[敏感信息脱敏](logging.md#redacting-sensitive-data)。
+
+> [!NOTE]
+> 处理器没有写出任何响应时，客户端收到的是 `200`。`AccessLog` 会显式写出这个 `200`，让日志中的状态码与客户端看到的一致。
 
 <a id="rate-limiting"></a>
 ## 限流
@@ -199,10 +263,10 @@ router.Use(httpx.RateLimit(cfg.HTTP.RateLimit, func(r *http.Request) string {
 
 ```go
 router.Use(
-    httpx.AssignRequestID(),
+    httpx.AssignRequestID(cfg.HTTP.RequestID),
     httpx.NoSniff(),
     httpx.ClientIP(cfg.HTTP.ClientIP),
-    httpx.AccessLog(nil),
+    httpx.AccessLog(cfg.HTTP.AccessLog, nil),
     httpx.Recover(nil),
     httpx.Timeout(cfg.HTTP.Timeout),
     func(next http.Handler) http.Handler {

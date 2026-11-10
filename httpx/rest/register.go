@@ -2,13 +2,10 @@ package rest
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
-
-	"github.com/ryan053857/mygoravel/errorx"
 )
 
 // Register 登记端点。ModeServe 调用 newHandler，ModeOpenAPI 安装文档占位处理器。
@@ -54,7 +51,7 @@ func Register[I, O any](api *API, op huma.Operation, newHandler func() func(cont
 			}
 			se := api.httpError(ctx, err)
 			if se.GetStatus() >= 500 {
-				api.logger.ErrorContext(ctx, "request failed", "code", errorx.CodeOf(err), "error", fmt.Sprintf("%+v", err))
+				api.logger.ErrorContext(ctx, "request failed", "error", err)
 			}
 			return out, se
 		}

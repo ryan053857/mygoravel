@@ -13,21 +13,27 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/ryan053857/mygoravel/httpx"
 )
 
 func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {
 	var seen string
-	handler := httpx.AssignRequestID()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := httpx.AssignRequestID(httpx.DefaultRequestIDConfig())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = httpx.RequestID(r.Context())
+		if middleware.GetReqID(r.Context()) != seen {
+			t.Fatal("chi request id differs")
+		}
 	}))
 	for inbound, reuse := range map[string]bool{
-		"gw-1234.abc:9_x":        true,
-		"":                       false,
-		"has space":              false,
-		"inject\nlog":            false,
-		strings.Repeat("a", 129): false,
+		"gw-1234.abc:9_x":           true,
+		"Root=1-6789abcd-0123;o=1/": true,
+		"":                          false,
+		"has space":                 false,
+		"inject\nlog":               false,
+		"中文":                        false,
+		strings.Repeat("a", 129):    false,
 	} {
 		req := httptest.NewRequest("GET", "/", nil)
 		req.Header.Set("X-Request-ID", inbound)
@@ -39,8 +45,25 @@ func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {
 	}
 }
 
+func TestAssignRequestIDReadsConfiguredHeader(t *testing.T) {
+	var seen string
+	handler := httpx.AssignRequestID(httpx.RequestIDConfig{Header: "X-Amzn-Trace-Id"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = httpx.RequestID(r.Context())
+	}))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-Amzn-Trace-Id", "Root=1-abc")
+	req.Header.Set("X-Request-ID", "ignored")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if seen != "Root=1-abc" || rr.Header().Get("X-Request-ID") != seen {
+		t.Fatal(seen, rr.Header())
+	}
+}
+
 func TestInvalidParametersPanicInsteadOfDisabling(t *testing.T) {
 	for name, build := range map[string]func(){
+		"RequestID": func() { httpx.AssignRequestID(httpx.RequestIDConfig{Header: "bad header"}) },
+		"AccessLog": func() { httpx.AccessLog(httpx.AccessLogConfig{IgnorePaths: []string{"healthz"}}, nil) },
 		"ClientIP":  func() { httpx.ClientIP(httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{{}}}) },
 		"BodyLimit": func() { httpx.BodyLimit(httpx.BodyLimitConfig{}) },
 		"Timeout":   func() { httpx.Timeout(httpx.TimeoutConfig{}) },
@@ -75,12 +98,17 @@ func TestDefaultsLogPanicAsServerError(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatal(logs.String())
 	}
-	var access map[string]any
+	var access struct {
+		Level     string
+		Msg       string
+		RequestID string `json:"request_id"`
+		Response  struct{ Status int }
+	}
 	if err := json.Unmarshal([]byte(lines[1]), &access); err != nil {
 		t.Fatal(err)
 	}
-	if access["msg"] != "http request" || access["status"] != float64(500) || access["request_id"] != rr.Header().Get("X-Request-ID") {
-		t.Fatal(access)
+	if access.Msg != "http request" || access.Level != "ERROR" || access.Response.Status != 500 || access.RequestID != rr.Header().Get("X-Request-ID") {
+		t.Fatal(lines[1])
 	}
 }
 

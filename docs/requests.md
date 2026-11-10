@@ -118,7 +118,7 @@ type UpdateArticleInput struct {
 <a id="request-id"></a>
 ## 请求 ID
 
-`httpx.AssignRequestID` 中间件会为每个请求确定一个 ID：如果请求头 `X-Request-ID` 已经携带合法的值（1–128 个字母、数字或 `-_.:`，通常由网关生成），就沿用它，否则生成新的 ID。在处理器或业务代码中，可以通过请求的 context 读取它：
+`httpx.AssignRequestID` 中间件会为每个请求确定一个 ID：如果请求头 `X-Request-ID` 已经携带合法的值（1–128 个可打印 ASCII 字符，不含空格，通常由网关生成），就沿用它，否则生成新的 ID。读取哪个请求头可以配置，见[请求 ID](middleware.md#request-id)。在处理器或业务代码中，可以通过请求的 context 读取它：
 
 ```go
 requestID := httpx.RequestID(ctx)

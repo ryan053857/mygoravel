@@ -146,7 +146,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `config` | 读取 YAML 配置、展开环境变量、校验 | [配置](configuration.md) |
 | `cleanup` | 按逆序关闭入口打开的资源 | [依赖装配](dependencies.md#closing-resources) |
 | `errorx` | 定义带稳定错误码和分类的业务错误 | [错误处理](errors.md) |
-| `logging` | 构造 slog 日志器，传递请求关联字段 | [日志](logging.md) |
+| `logging` | 构造 slog 日志器，传递请求关联字段；`logging/logtest` 用于测试 | [日志](logging.md) |
 | `i18n` | 组合 go-i18n 消息目录 | [本地化](localization.md) |
 | `identity` | 表示已认证的主体，并在 context 中传递 | [认证](authentication.md) |
 | `page` | 固定分页与游标分页的参数和响应结构 | [分页](responses.md#pagination) |
