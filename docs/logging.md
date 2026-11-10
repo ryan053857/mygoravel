@@ -111,7 +111,7 @@ logs:
 
 | component | 日志 |
 | --- | --- |
-| `http` | 访问日志、panic 堆栈、`5xx` 诊断、认证后端故障、缺失翻译、平滑停止 |
+| `http` | 访问日志、panic 堆栈、`5xx` 诊断、认证后端故障、平滑停止 |
 
 你自己的模块通过 `With` 或 context 设置 `component`：
 
@@ -157,7 +157,7 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 安装[默认中间件](middleware.md#default-middleware)后，`httpx.AccessLog` 会为每个请求记录一条[访问日志](middleware.md#access-log)，`rest.New` 创建的 API 会为 5xx 错误记录诊断信息：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, nil)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
 api := rest.New(rest.Options{Router: router})
 ```
 
@@ -190,7 +190,6 @@ ctx = logging.WithAttrs(ctx, slog.String("component", "article"))
 | 访问日志 | `httpx.AccessLog` | 每个请求的方法、路由、状态码、耗时、客户端地址，以及业务错误的错误码 |
 | 错误诊断 | `rest.Register` | `5xx` 错误的完整错误链 |
 | 认证后端故障 | `rest.RequireBearer` | 校验器返回 `5xx` 类错误时的完整错误链 |
-| 缺失翻译 | 错误响应转换 | 找不到错误码对应翻译时的警告 |
 
 确实需要自己记录错误时（例如后台任务失败），把错误直接作为字段值传入即可：
 
@@ -424,4 +423,4 @@ func TestPublishLogsEvent(t *testing.T) {
 捕获的日志器同样会输出 context 字段并展开 `error`，所以也可以断言 `request_id` 或 `error.code`。整数字段的值是 `int64`，例如 `got.Attr("response.status") == int64(404)`。
 
 > [!WARNING]
-> `Capture` 修改全局状态，使用它的测试不能调用 `t.Parallel()`。并行测试请改用 `logtest.New()`，再把 `rec.Logger()` 显式传给被测组件，例如 `httpx.Defaults(cfg, rec.Logger())`。
+> `Capture` 修改全局状态，使用它的测试不能调用 `t.Parallel()`。并行测试请改用 `logtest.New()`，再把 `rec.Logger()` 显式传给被测组件，例如 `httpx.Defaults(cfg, rec.Logger(), nil)`。

@@ -29,12 +29,12 @@ mygoravel 的中间件都是标准的 `func(http.Handler) http.Handler`，安装
 
 ```go
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, nil)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
 
 api := rest.New(rest.Options{Router: router})
 ```
 
-这里使用了 `github.com/go-chi/chi/v5`。`Defaults` 的第二个参数是日志器，传 `nil` 时使用全局日志器 `slog.Default()`，见[日志](logging.md#creating-a-logger)。
+这里使用了 `github.com/go-chi/chi/v5`。`Defaults` 的第二个参数是日志器，传 `nil` 时使用全局日志器 `slog.Default()`，见[日志](logging.md#creating-a-logger)；第三个参数是语言目录，传 `nil` 时只使用框架内置的中英文消息，见[本地化](localization.md#enabling-localization)。
 
 `httpx.Defaults` 按以下顺序包含这些中间件，每一个都可以单独使用：
 
@@ -43,6 +43,7 @@ api := rest.New(rest.Options{Router: router})
 | `AssignRequestID(cfg.RequestID)` | 确定请求 ID，写入 context、日志字段和 `X-Request-ID` 响应头；入站请求 ID 合法时沿用，见[请求 ID](#request-id) |
 | `NoSniff()` | 设置 `X-Content-Type-Options: nosniff` |
 | `ClientIP(cfg.ClientIP)` | 只信任显式配置的代理，从 `X-Forwarded-For` 解析客户端地址 |
+| `Locale(languages)` | 根据 `Accept-Language` 选择语言，写入 context 和 `Content-Language` 响应头，见[本地化](localization.md#determining-the-locale) |
 | `AccessLog(cfg.AccessLog, logger)` | 每个请求记录一条访问日志，见[访问日志](#access-log) |
 | `Recover(logger)` | 处理器 panic 时记录堆栈；若尚未写出响应则返回通用的 500 错误，若已开始写响应则中止连接 |
 | `BodyLimit(cfg.BodyLimit)` | 限制请求体大小，超出时返回 413 |
@@ -53,9 +54,8 @@ api := rest.New(rest.Options{Router: router})
 | 中间件 | 行为 |
 | --- | --- |
 | `RateLimit(cfg.RateLimit, key)` | 按客户端限流，超出时返回 429，见[限流](#rate-limiting) |
-| `Locale(bundle)` | 根据 `Accept-Language` 选择语言，见[本地化](localization.md#enabling-localization) |
 
-框架的其他部分不依赖这些中间件是否安装。没有 `AccessLog` 时，`httpx.AddAccessLogAttrs` 什么也不做；没有 `Locale` 时，错误消息使用默认语言；没有 `AssignRequestID` 时，`httpx.RequestID` 返回空字符串。
+框架的其他部分不依赖这些中间件是否安装。没有 `AccessLog` 时，`httpx.AddAccessLogAttrs` 什么也不做；没有 `Locale` 时，错误消息不翻译，`i18n.T` 原样返回消息 ID；没有 `AssignRequestID` 时，`httpx.RequestID` 返回空字符串。
 
 认证不在默认中间件中，因为它是按路由启用的，见[认证](authentication.md)。健康检查也由你自己注册，见[请求生命周期](lifecycle.md#health-checks)。
 
@@ -108,7 +108,7 @@ http:
 把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值并校验），再把它交给 `httpx.Defaults` 和 `httpx.ListenAndServe`：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, nil)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
 // ...
 return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{})
 ```
@@ -183,7 +183,7 @@ http:
 - 级别随状态码变化：`5xx` 为 `ERROR`，`4xx` 为 `WARN`，其他为 `INFO`；
 - `request.route` 是路由模板，适合按接口聚合统计；
 - `request.ip` 是 [`ClientIP`](#trusted-proxies) 解析后的客户端地址；
-- 业务错误的错误码由框架通过 `httpx.AddAccessLogAttrs` 追加为顶层的 `code` 字段。你也可以在处理过程中调用它追加自己的字段，同名字段后写的覆盖先写的。
+- 业务错误的错误码由框架通过 `httpx.AddAccessLogAttrs` 追加为顶层的 `code` 字段；请求语言中缺少这个错误码的翻译时，还会追加 `"untranslated":true`。你也可以在处理过程中调用它追加自己的字段，同名字段后写的覆盖先写的。
 
 更多字段通过 `http.access_log` 开启：
 
@@ -208,7 +208,7 @@ http:
 限流不在默认中间件中。需要时在 `httpx.Defaults` 之后安装：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, nil)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
 router.Use(httpx.RateLimit(cfg.HTTP.RateLimit, httpx.KeyByIP))
 ```
 
@@ -302,7 +302,7 @@ router.Use(
 var readOnly atomic.Bool // 由运维开关控制，例如收到某个信号时切换
 
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, nil)...)
+router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
 router.Use(func(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if readOnly.Load() && r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -356,5 +356,5 @@ requireArticles(&legacy)
 这些中间件不依赖 `rest` 包。如果你有一个普通的 `http.Handler`（例如标准库的 `http.ServeMux`），可以用 `chi.Chain` 为它安装：
 
 ```go
-handler := chi.Chain(httpx.Defaults(cfg.HTTP, nil)...).Handler(mux)
+handler := chi.Chain(httpx.Defaults(cfg.HTTP, nil, nil)...).Handler(mux)
 ```

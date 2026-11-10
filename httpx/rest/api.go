@@ -8,7 +8,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
-	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/logging"
@@ -27,10 +26,9 @@ const (
 // API 包装 huma.API，携带模式与实例级策略。
 type API struct {
 	huma.API
-	mode      Mode
-	router    chi.Router
-	logger    *slog.Logger
-	languages *goi18n.Bundle
+	mode   Mode
+	router chi.Router
+	logger *slog.Logger
 	// docRoutes 是 Huma 自动注册的文档端点路径，用于在路由总览中标记它们。
 	docRoutes map[string]bool
 }
@@ -40,10 +38,8 @@ type Options struct {
 	Title   string
 	Version string
 	Mode    Mode
-	// Logger 记录 5xx 错误与缺失的错误翻译；nil 表示 slog.Default()。
+	// Logger 记录 5xx 错误；nil 表示 slog.Default()。
 	Logger *slog.Logger
-	// Languages 用于错误消息本地化，语言取自 httpx.Locale 写入的 context；可空。
-	Languages *goi18n.Bundle
 	// Transformers 追加在 Huma 默认 Transformer 之后。
 	Transformers []huma.Transformer
 	// Router 可选；nil 时使用 chi.NewRouter()。
@@ -78,7 +74,7 @@ func New(opts Options) *API {
 	cfg.OpenAPI.Components.Schemas.RegisterTypeAlias(reflect.TypeOf(huma.ErrorModel{}), reflect.TypeOf(ErrorModel{}))
 	cfg.Transformers = append(cfg.Transformers, opts.Transformers...)
 	h := humachi.New(r, cfg)
-	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, languages: opts.Languages, docRoutes: docRoutes(cfg)}
+	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, docRoutes: docRoutes(cfg)}
 }
 
 // docRoutes 按 Huma 的注册规则列出文档端点路径。

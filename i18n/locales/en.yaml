@@ -1,4 +1,3 @@
-mygoravel.ok: OK
 auth.unauthenticated: Authentication required
 auth.forbidden: Permission denied
 page.invalid_cursor: Invalid pagination cursor

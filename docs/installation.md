@@ -114,7 +114,7 @@ func run() error {
     cfg.Addr = "127.0.0.1:8080"
 
     router := chi.NewRouter()
-    router.Use(httpx.Defaults(cfg, nil)...)
+    router.Use(httpx.Defaults(cfg, nil, nil)...)
     api := rest.New(rest.Options{Title: "Hello API", Version: "1.0.0", Router: router})
     registerPing(api)
 

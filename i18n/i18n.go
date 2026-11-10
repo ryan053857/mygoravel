@@ -1,11 +1,10 @@
 package i18n
 
 import (
-	"cmp"
 	"context"
+	"embed"
 	"io/fs"
 	"path"
-	"slices"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -20,146 +19,48 @@ const (
 	LocaleEn   = "en"
 )
 
-// Priority 表示消息层优先级；数值越大覆盖优先级越高。
-type Priority int
+//go:embed locales/*.yaml
+var builtin embed.FS
 
-const (
-	PriorityFramework Priority = 0
-	PriorityModule    Priority = 1
-	PriorityProduct   Priority = 2
-)
-
-// Layer 是一层消息来源。同一 Priority 内重复 ID 报错；更高 Priority 可覆盖。
-type Layer struct {
-	Priority Priority
-	FS       fs.FS
-	// Name 仅用于错误信息，可空。
-	Name string
-}
-
-// Options 控制 New。
-type Options struct {
-	// Default 默认语言；空则 LocaleZhCN。
-	Default string
-	// Layers 按任意顺序传入；加载时先按 Priority 升序，同级按切片顺序。
-	Layers []Layer
-	// RequiredIDs 若非空，则默认语言必须包含这些消息 ID。
-	RequiredIDs []string
-}
-
-// New 按优先级加载消息并校验 RequiredIDs，返回原生 Bundle。
-// 调用方在开始处理请求前完成目录修改。
-func New(opts Options) (*goi18n.Bundle, error) {
-	def := opts.Default
-	if def == "" {
-		def = LocaleZhCN
-	}
-	defTag, err := language.Parse(def)
+// New 创建以 defaultLocale 为默认语言的消息目录。先加载框架内置的中英文消息，
+// 再按顺序加载 sources 中的 YAML 翻译文件（文件名即语言标签，如 en.yaml）；
+// 后加载的同名消息覆盖先加载的。返回的 Bundle 应在处理请求前完成全部修改。
+func New(defaultLocale string, sources ...fs.FS) (*goi18n.Bundle, error) {
+	tag, err := language.Parse(defaultLocale)
 	if err != nil {
-		return nil, errors.Wrapf(err, "i18n: default locale %q", def)
+		return nil, errors.Wrapf(err, "i18n: default locale %q", defaultLocale)
 	}
-
-	layers := slices.Clone(opts.Layers)
-	slices.SortStableFunc(layers, func(a, b Layer) int { return cmp.Compare(a.Priority, b.Priority) })
-
-	b := goi18n.NewBundle(defTag)
+	b := goi18n.NewBundle(tag)
 	b.RegisterUnmarshalFunc("yaml", yaml.Unmarshal)
 	b.RegisterUnmarshalFunc("yml", yaml.Unmarshal)
-
-	// 按优先级、语言和消息 ID 记录来源。
-	seen := map[Priority]map[string]map[string]string{}
-	for _, layer := range layers {
-		if layer.FS == nil {
-			return nil, errors.Newf("i18n: layer %s requires a filesystem", layerLabel(layer))
-		}
-		if seen[layer.Priority] == nil {
-			seen[layer.Priority] = map[string]map[string]string{}
-		}
-		entries, err := loadLayer(b, layer)
-		if err != nil {
+	for _, src := range append([]fs.FS{builtin}, sources...) {
+		if err := load(b, src); err != nil {
 			return nil, err
-		}
-		for _, e := range entries {
-			byLocale := seen[layer.Priority]
-			if byLocale[e.locale] == nil {
-				byLocale[e.locale] = map[string]string{}
-			}
-			if prev, ok := byLocale[e.locale][e.id]; ok {
-				return nil, errors.Newf("i18n: duplicate message id %q for locale %s at priority %d (%s and %s)", e.id, e.locale, layer.Priority, prev, layerLabel(layer))
-			}
-			byLocale[e.locale][e.id] = layerLabel(layer)
-		}
-	}
-
-	for _, id := range opts.RequiredIDs {
-		found := false
-		for _, locales := range seen {
-			if _, ok := locales[defTag.String()][id]; ok {
-				found = true
-			}
-		}
-		if !found {
-			return nil, errors.Newf("i18n: default locale missing message %s", id)
 		}
 	}
 	return b, nil
 }
 
-func layerLabel(l Layer) string {
-	if l.Name != "" {
-		return l.Name
-	}
-	return "layer"
-}
-
-type msgRef struct {
-	locale string
-	id     string
-}
-
-func loadLayer(b *goi18n.Bundle, layer Layer) ([]msgRef, error) {
-	var out []msgRef
-	err := fs.WalkDir(layer.FS, ".", func(p string, d fs.DirEntry, err error) error {
+func load(b *goi18n.Bundle, src fs.FS) error {
+	return fs.WalkDir(src, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		ext := strings.ToLower(path.Ext(p))
-		if ext != ".yaml" && ext != ".yml" {
+		if ext := strings.ToLower(path.Ext(p)); ext != ".yaml" && ext != ".yml" {
 			return nil
 		}
-		data, err := fs.ReadFile(layer.FS, p)
+		data, err := fs.ReadFile(src, p)
 		if err != nil {
 			return err
 		}
-		mf, err := b.ParseMessageFileBytes(data, path.Base(p))
-		if err != nil {
-			return errors.Wrapf(err, "i18n: load %s from %s", p, layerLabel(layer))
-		}
-		locale := mf.Tag.String()
-		for _, m := range mf.Messages {
-			out = append(out, msgRef{locale: locale, id: m.ID})
+		if _, err := b.ParseMessageFileBytes(data, path.Base(p)); err != nil {
+			return errors.Wrapf(err, "i18n: load %s", p)
 		}
 		return nil
 	})
-	return out, err
 }
 
-type localeKey struct{}
-
-// WithLocale 将语言标记写入 context。
-func WithLocale(ctx context.Context, locale string) context.Context {
-	return context.WithValue(ctx, localeKey{}, locale)
-}
-
-// Locale 读取 context 中的语言标记；未设置时返回空字符串。
-func Locale(ctx context.Context) string {
-	if l, ok := ctx.Value(localeKey{}).(string); ok {
-		return l
-	}
-	return ""
-}
-
-// MatchAcceptLanguage 返回匹配的目录语言，匹配失败时返回默认语言。
+// MatchAcceptLanguage 返回 b 中与 Accept-Language 头最匹配的语言，匹配失败时返回默认语言。
 func MatchAcceptLanguage(b *goi18n.Bundle, header string) string {
 	supported := b.LanguageTags()
 	tags, _, err := language.ParseAcceptLanguage(header)
@@ -171,4 +72,41 @@ func MatchAcceptLanguage(b *goi18n.Bundle, header string) string {
 		return supported[0].String()
 	}
 	return supported[index].String()
+}
+
+type localeKey struct{}
+
+type localeValue struct {
+	locale    string
+	localizer *goi18n.Localizer
+}
+
+// WithLocale 返回携带 locale 及其 Localizer 的 context。
+func WithLocale(ctx context.Context, b *goi18n.Bundle, locale string) context.Context {
+	return context.WithValue(ctx, localeKey{}, localeValue{locale, goi18n.NewLocalizer(b, locale)})
+}
+
+// Locale 返回 context 中的语言；未设置时返回空字符串。
+func Locale(ctx context.Context) string {
+	v, _ := ctx.Value(localeKey{}).(localeValue)
+	return v.locale
+}
+
+// Localizer 返回 context 中的 go-i18n Localizer，用于复数等高级用法；未设置时返回 nil。
+func Localizer(ctx context.Context) *goi18n.Localizer {
+	v, _ := ctx.Value(localeKey{}).(localeValue)
+	return v.localizer
+}
+
+// T 按 context 中的语言翻译消息 id，data 为模板数据（可为 nil）。
+// 当前语言缺少该消息时使用默认语言的译文；context 未设置语言或默认语言也没有该消息时返回 id。
+func T(ctx context.Context, id string, data any) string {
+	l := Localizer(ctx)
+	if l == nil {
+		return id
+	}
+	if msg, _ := l.Localize(&goi18n.LocalizeConfig{MessageID: id, TemplateData: data}); msg != "" {
+		return msg
+	}
+	return id
 }

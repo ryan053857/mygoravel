@@ -110,7 +110,7 @@ func TestRateLimitAfterDefaultsUsesProxyResolvedClientAndLogs(t *testing.T) {
 	cfg := httpx.DefaultConfig()
 	cfg.ClientIP.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 	router := chi.NewRouter()
-	router.Use(httpx.Defaults(cfg, slog.New(slog.NewJSONHandler(&logs, nil)))...)
+	router.Use(httpx.Defaults(cfg, slog.New(slog.NewJSONHandler(&logs, nil)), nil)...)
 	router.Use(httpx.RateLimit(limit(1, time.Hour, 1, 10), httpx.KeyByIP))
 	router.Get("/", func(http.ResponseWriter, *http.Request) {})
 	viaProxy := func(client string) int {

@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/ryan053857/mygoravel/i18n"
 )
 
 func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {
@@ -67,10 +68,9 @@ func TestInvalidParametersPanicInsteadOfDisabling(t *testing.T) {
 		"ClientIP":  func() { httpx.ClientIP(httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{{}}}) },
 		"BodyLimit": func() { httpx.BodyLimit(httpx.BodyLimitConfig{}) },
 		"Timeout":   func() { httpx.Timeout(httpx.TimeoutConfig{}) },
-		"Locale":    func() { httpx.Locale(nil) },
 		"RateLimit": func() { httpx.RateLimit(httpx.RateLimitConfig{}, httpx.KeyByIP) },
 		"RateKey":   func() { httpx.RateLimit(httpx.DefaultRateLimitConfig(), nil) },
-		"Defaults":  func() { httpx.Defaults(httpx.Config{}, slog.New(slog.DiscardHandler)) },
+		"Defaults":  func() { httpx.Defaults(httpx.Config{}, slog.New(slog.DiscardHandler), nil) },
 	} {
 		func() {
 			defer func() {
@@ -87,7 +87,7 @@ func TestInvalidParametersPanicInsteadOfDisabling(t *testing.T) {
 func TestDefaultsLogPanicAsServerError(t *testing.T) {
 	var logs bytes.Buffer
 	router := chi.NewRouter()
-	router.Use(httpx.Defaults(httpx.DefaultConfig(), slog.New(slog.NewJSONHandler(&logs, nil)))...)
+	router.Use(httpx.Defaults(httpx.DefaultConfig(), slog.New(slog.NewJSONHandler(&logs, nil)), nil)...)
 	router.Get("/", func(http.ResponseWriter, *http.Request) { panic("boom") })
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
@@ -134,12 +134,30 @@ func TestNilLoggerFallsBackToSlogDefault(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	router := chi.NewRouter()
-	router.Use(httpx.Defaults(httpx.DefaultConfig(), nil)...)
+	router.Use(httpx.Defaults(httpx.DefaultConfig(), nil, nil)...)
 	router.Get("/", func(http.ResponseWriter, *http.Request) { panic("boom") })
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
 	id := rr.Header().Get("X-Request-ID")
 	if !strings.Contains(logs.String(), `"msg":"request panic"`) || !strings.Contains(logs.String(), `"msg":"http request"`) || strings.Count(logs.String(), id) != 2 {
 		t.Fatalf("logs=%q", logs.String())
+	}
+}
+
+func TestDefaultsNegotiateBuiltinLocale(t *testing.T) {
+	var got string
+	router := chi.NewRouter()
+	router.Use(httpx.Defaults(httpx.DefaultConfig(), slog.New(slog.DiscardHandler), nil)...)
+	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		got = i18n.T(r.Context(), "auth.forbidden", nil)
+	})
+	for header, want := range map[string]string{"en-US": "Permission denied", "fr": "没有访问权限"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Accept-Language", header)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if got != want || rr.Header().Get("Content-Language") == "" {
+			t.Fatalf("%s: got %q, Content-Language=%q", header, got, rr.Header().Get("Content-Language"))
+		}
 	}
 }

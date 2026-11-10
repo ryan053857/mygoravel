@@ -1,4 +1,3 @@
-mygoravel.ok: 正常
 auth.unauthenticated: 请先认证
 auth.forbidden: 没有访问权限
 page.invalid_cursor: 分页游标无效

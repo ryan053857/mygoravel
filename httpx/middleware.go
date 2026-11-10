@@ -20,16 +20,18 @@ import (
 )
 
 // Defaults 返回每个应用都应安装的基础中间件，按执行顺序排列：
-// AssignRequestID、NoSniff、ClientIP、AccessLog、Recover、BodyLimit、Timeout。
-// 参数取自 cfg 的对应子段，cfg 不合法时 panic；logger 为 nil 时使用 slog.Default()。
+// AssignRequestID、NoSniff、ClientIP、Locale、AccessLog、Recover、BodyLimit、Timeout。
+// 参数取自 cfg 的对应子段，cfg 不合法时 panic；logger 为 nil 时使用 slog.Default()；
+// languages 为 nil 时只使用框架内置的中英文消息，默认语言为 zh-CN。
 //
-// RateLimit、Locale 等可选中间件需要时在其后另行安装；
+// RateLimit 等可选中间件需要时在其后另行安装；
 // 需要不同组合时（例如流式接口不设超时），直接挑选单个中间件自行组装。
-func Defaults(cfg Config, logger *slog.Logger) []func(http.Handler) http.Handler {
+func Defaults(cfg Config, logger *slog.Logger, languages *goi18n.Bundle) []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
 		AssignRequestID(cfg.RequestID),
 		NoSniff(),
 		ClientIP(cfg.ClientIP),
+		Locale(languages),
 		AccessLog(cfg.AccessLog, logger),
 		Recover(logger),
 		BodyLimit(cfg.BodyLimit),
@@ -164,17 +166,20 @@ func Timeout(cfg TimeoutConfig) func(http.Handler) http.Handler {
 	}
 }
 
-// Locale 按 Accept-Language 在 languages 中协商语言，写入 context 与 Content-Language 响应头。
-// languages 为 nil 时 panic。
+// Locale 按 Accept-Language 在 languages 中协商语言，把语言与 Localizer 写入 context
+// （见 i18n.T），并设置 Content-Language 响应头。languages 为 nil 时只使用框架内置消息，默认语言为 zh-CN。
 func Locale(languages *goi18n.Bundle) func(http.Handler) http.Handler {
 	if languages == nil {
-		panic("httpx: Locale: nil languages")
+		var err error
+		if languages, err = i18n.New(i18n.LocaleZhCN); err != nil {
+			panic(err) // 内置消息总能加载
+		}
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			locale := i18n.MatchAcceptLanguage(languages, r.Header.Get("Accept-Language"))
 			w.Header().Set("Content-Language", locale)
-			next.ServeHTTP(w, r.WithContext(i18n.WithLocale(r.Context(), locale)))
+			next.ServeHTTP(w, r.WithContext(i18n.WithLocale(r.Context(), languages, locale)))
 		})
 	}
 }

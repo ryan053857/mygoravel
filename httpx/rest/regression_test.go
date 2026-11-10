@@ -15,6 +15,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
+	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
@@ -103,18 +104,19 @@ func TestErrorResponsesMatchDocumentedSchema(t *testing.T) {
 
 func TestLocalizedBusinessErrorUsesPublicParams(t *testing.T) {
 	app := fstest.MapFS{
-		"en.yaml":    {Data: []byte("demo.busy: \"Busy, retry in {{.retry}}s\"\n")},
+		"en.yaml":    {Data: []byte("demo.busy: \"Busy, retry in {{.retry}}s\"\ndemo.en_only: English only\n")},
 		"zh-CN.yaml": {Data: []byte("demo.busy: \"繁忙，请 {{.retry}} 秒后重试\"\n")},
 	}
-	bundle, err := i18n.New(i18n.Options{Default: "en", Layers: []i18n.Layer{i18n.FrameworkLayer(), {Priority: i18n.PriorityProduct, FS: app}}})
+	bundle, err := i18n.New("en", app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	api := withDefaults(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Languages: bundle})
+	api := withLanguages(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil))}, bundle)
 	busy := errorx.Define(errorx.Unavailable, "demo.busy")
 	untranslated := errorx.Define(errorx.Conflict, "demo.untranslated")
-	for path, err := range map[string]error{"/busy": busy.New(errorx.Public("retry", 3)), "/untranslated": untranslated.New()} {
+	enOnly := errorx.Define(errorx.Conflict, "demo.en_only")
+	for path, err := range map[string]error{"/busy": busy.New(errorx.Public("retry", 3)), "/untranslated": untranslated.New(), "/en-only": enOnly.New()} {
 		op := huma.Operation{OperationID: strings.TrimPrefix(path, "/"), Method: "GET", Path: path}
 		rest.Public()(&op)
 		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
@@ -130,10 +132,18 @@ func TestLocalizedBusinessErrorUsesPublicParams(t *testing.T) {
 			t.Fatal(rr.Body.String())
 		}
 	}
-	rr := httptest.NewRecorder()
-	api.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/untranslated", nil))
-	if rr.Code != 409 || !strings.Contains(rr.Body.String(), `"detail":"Conflict"`) || !strings.Contains(logs.String(), "missing error translation") {
-		t.Fatal(rr.Body.String(), logs.String())
+	if strings.Contains(logs.String(), "untranslated") {
+		t.Fatal("translated errors must not be marked untranslated:", logs.String())
+	}
+	for path, want := range map[string]string{"/untranslated": "Conflict", "/en-only": "English only"} {
+		logs.Reset()
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Accept-Language", "zh-CN")
+		rr := httptest.NewRecorder()
+		api.Handler().ServeHTTP(rr, req)
+		if rr.Code != 409 || !strings.Contains(rr.Body.String(), `"detail":"`+want+`"`) || !strings.Contains(logs.String(), `"untranslated":true`) {
+			t.Fatal(path, rr.Body.String(), logs.String())
+		}
 	}
 }
 
@@ -189,11 +199,11 @@ func TestLanguageAndLoggerAreInstanceLocal(t *testing.T) {
 		buf      *bytes.Buffer
 		expected string
 	}{{"en", &aLog, "Authentication required"}, {"zh-CN", &bLog, "请先认证"}} {
-		bundle, err := i18n.New(i18n.Options{Default: tc.lang, Layers: []i18n.Layer{i18n.FrameworkLayer()}})
+		bundle, err := i18n.New(tc.lang)
 		if err != nil {
 			t.Fatal(err)
 		}
-		api := withDefaults(rest.Options{Logger: slog.New(slog.NewJSONHandler(tc.buf, nil)), Languages: bundle})
+		api := withLanguages(rest.Options{Logger: slog.New(slog.NewJSONHandler(tc.buf, nil))}, bundle)
 		op := huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"}
 		rest.Public()(&op)
 		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
@@ -265,13 +275,13 @@ func TestAccessLogCarriesBusinessCode(t *testing.T) {
 	}
 }
 
-// withDefaults 按应用的常规写法安装 httpx.Defaults（及启用本地化时的 httpx.Locale）后创建 API。
-func withDefaults(opts rest.Options) *rest.API {
+// withDefaults 按应用的常规写法安装 httpx.Defaults（内置消息）后创建 API。
+func withDefaults(opts rest.Options) *rest.API { return withLanguages(opts, nil) }
+
+// withLanguages 与 withDefaults 相同，但使用 languages 作为语言目录。
+func withLanguages(opts rest.Options, languages *goi18n.Bundle) *rest.API {
 	router := chi.NewRouter()
-	router.Use(httpx.Defaults(httpx.DefaultConfig(), opts.Logger)...)
-	if opts.Languages != nil {
-		router.Use(httpx.Locale(opts.Languages))
-	}
+	router.Use(httpx.Defaults(httpx.DefaultConfig(), opts.Logger, languages)...)
 	opts.Router = router
 	return rest.New(opts)
 }

@@ -174,7 +174,7 @@ func TestRequestTimeoutReachesHandler(t *testing.T) {
 }
 
 func defaults(cfg httpx.Config) func(http.Handler) http.Handler {
-	return chi.Chain(httpx.Defaults(cfg, slog.New(slog.DiscardHandler))...).Handler
+	return chi.Chain(httpx.Defaults(cfg, slog.New(slog.DiscardHandler), nil)...).Handler
 }
 
 func shutdownIn(d time.Duration) httpx.Config {

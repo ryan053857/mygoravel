@@ -1,6 +1,6 @@
-// Package i18n 组合 go-i18n 消息目录并校验默认语言中的必需消息。
+// Package i18n 组合 go-i18n 消息目录，并在 context 中携带请求的语言。
 //
-// New 返回原生 Bundle，翻译使用 go-i18n Localizer。
-// 消息按框架、模块、产品的优先级覆盖；同一语言、同一优先级的重复 ID 返回错误。
-// 请求通过 Accept-Language 选择目录语言，context 携带选择结果。
+// New 加载框架内置消息与应用的翻译文件，返回原生 Bundle；后加载的同名消息覆盖先加载的。
+// httpx.Locale 中间件按 Accept-Language 协商语言并调用 WithLocale，
+// 之后通过 T、Localizer 与 Locale 在请求范围内翻译。
 package i18n

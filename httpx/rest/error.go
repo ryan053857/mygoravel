@@ -67,8 +67,10 @@ func FromError(err error) huma.StatusError {
 	}
 }
 
-// httpError 转换处理器错误。业务错误的错误码写入访问日志；启用本地化时以错误码为
-// 消息 ID 翻译 detail，errorx.Public 参数作为模板数据。
+// httpError 转换处理器错误。业务错误的错误码写入访问日志；context 带有 httpx.Locale
+// 协商的语言时，以错误码为消息 ID 翻译 detail，errorx.Public 参数作为模板数据。
+// 当前语言缺少翻译时使用默认语言的译文，都没有时保留 HTTP 状态描述；
+// 两种情况都在访问日志中标记 untranslated。
 func (a *API) httpError(ctx context.Context, err error) huma.StatusError {
 	se := FromError(err)
 	code := errorx.CodeOf(err)
@@ -76,19 +78,18 @@ func (a *API) httpError(ctx context.Context, err error) huma.StatusError {
 		return se
 	}
 	httpx.AddAccessLogAttrs(ctx, slog.String("code", code))
-	if a.languages == nil {
+	l := i18n.Localizer(ctx)
+	if l == nil {
 		return se
 	}
 	m := se.(*ErrorModel)
-	msg, lerr := goi18n.NewLocalizer(a.languages, i18n.Locale(ctx)).Localize(&goi18n.LocalizeConfig{
-		MessageID:    m.Code,
-		TemplateData: errorx.PublicOf(err),
-	})
+	msg, lerr := l.Localize(&goi18n.LocalizeConfig{MessageID: code, TemplateData: errorx.PublicOf(err)})
 	if lerr != nil {
-		a.logger.WarnContext(ctx, "missing error translation", "code", m.Code)
-		return se
+		httpx.AddAccessLogAttrs(ctx, slog.Bool("untranslated", true))
 	}
-	m.Detail = msg
+	if msg != "" {
+		m.Detail = msg
+	}
 	return se
 }
 

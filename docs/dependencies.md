@@ -111,7 +111,7 @@ func Serve(ctx context.Context, cfg settings.Config) (err error) {
 
     // 4. 安装中间件，创建 API 并注册路由
     router := chi.NewRouter()
-    router.Use(httpx.Defaults(cfg.HTTP, nil)...)
+    router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
     opts := API
     opts.Router = router
     api := rest.New(opts)
