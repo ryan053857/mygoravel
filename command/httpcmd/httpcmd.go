@@ -1,15 +1,17 @@
-// Package restcmd 提供查看 HTTP API 的命令：openapi 输出 OpenAPI 文档，routes 输出路由表。
-// 两个命令都以文档模式注册路由，不读取配置，不调用处理器工厂。
-package restcmd
+// Package httpcmd 提供查看 HTTP 路由的命令：openapi 输出 JSON API 的 OpenAPI 文档，
+// routes 输出 JSON API 和页面的路由表。两个命令都以文档模式注册路由，不读取配置，不调用处理器。
+package httpcmd
 
 import (
 	"fmt"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/spf13/cobra"
 
 	"github.com/ryan053857/mygoravel/command"
+	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 )
 
@@ -26,18 +28,19 @@ func OpenAPI(opts rest.Options, register func(api *rest.API)) *cobra.Command {
 	})
 }
 
-// Routes 构造 routes 命令：以文档模式创建 API、调用 register 注册路由，输出路由表。
+// Routes 构造 routes 命令：调用 router 构造应用的完整路由，用 httpx.Routes 输出路由表。
+// router 应当以文档模式注册 JSON API（rest.ModeOpenAPI）和页面（web.ModeRoutes），不打开运行时资源。
 // 支持 --method、--path 过滤；Huma 的文档端点默认隐藏，--all 时以 docs 显示。
-func Routes(opts rest.Options, register func(api *rest.API)) *cobra.Command {
+func Routes(router func() chi.Routes) *cobra.Command {
 	var method, path string
 	var all bool
 	cmd := leaf("routes", "查看应用的全部路由", func(cmd *cobra.Command) error {
 		out := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintln(out, "METHOD\tPATH\tOPERATION ID\tACCESS\tSUMMARY")
-		for _, route := range docAPI(opts, register).Routes() {
+		for _, route := range httpx.Routes(router()) {
 			if method != "" && !strings.EqualFold(route.Method, method) ||
 				!strings.Contains(route.Path, path) ||
-				route.Access == rest.AccessDocs && !all {
+				route.Access == httpx.AccessDocs && !all {
 				continue
 			}
 			fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", route.Method, cell(route.Path),
@@ -59,7 +62,7 @@ func docAPI(opts rest.Options, register func(api *rest.API)) *rest.API {
 	return api
 }
 
-func access(route rest.Route) string {
+func access(route httpx.Route) string {
 	if len(route.Scopes) == 0 {
 		return route.Access
 	}

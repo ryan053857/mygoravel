@@ -11,6 +11,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/alexedwards/scs/v2/memstore"
+	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/i18n"
 	"github.com/ryan053857/mygoravel/session"
@@ -44,6 +45,16 @@ func options() web.Options {
 }
 
 func pages() *web.Pages { return web.New(options()) }
+
+// handle 把 fn 注册为公开页面路由，匹配任意路径的 GET、POST、PUT。
+func handle(p *web.Pages, fn web.HandlerFunc) http.Handler {
+	r := chi.NewRouter()
+	routes := p.Routes(r, web.Public)
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut} {
+		routes.Method(method, "/*", fn)
+	}
+	return r
+}
 
 func htmx(r *http.Request, partial bool) *http.Request {
 	r.Header.Set("HX-Request", "true")

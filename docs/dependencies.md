@@ -148,6 +148,15 @@ func DocRoutes(api *rest.API) {
     Routes(api, auth.Validator(auth.Config{}), nil)
 }
 
+// DocRouter 在文档模式下构造全部路由，routes 命令用它列出路由表。
+func DocRouter() chi.Routes {
+    router := chi.NewRouter()
+    opts := API
+    opts.Mode, opts.Router = rest.ModeOpenAPI, router
+    DocRoutes(rest.New(opts))
+    return router
+}
+
 // HTTP 安装中间件、注册路由并开始监听，直到 ctx 被取消。
 func (a *App) HTTP(ctx context.Context) error {
     router := chi.NewRouter()
@@ -161,7 +170,7 @@ func (a *App) HTTP(ctx context.Context) error {
 }
 ```
 
-其中 `settings.Config` 是应用的[配置结构](configuration.md#loading-configuration)，`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)），`article` 和 `articlehttp` 是应用自己的业务包（见[路由](routing.md#organizing-routes)）。路由声明保留在各模块的 `routes.go`，`bootstrap.Routes` 统一调用各模块的 `Register`，让 `serve`、`openapi` 和 [routes](commands.md#routes-command) 命令复用同一份声明。后两个命令通过 `DocRoutes` 在文档模式下注册，不打开运行时资源；action 在处理器工厂内部构造，只有 `serve` 会调用它们。
+其中 `settings.Config` 是应用的[配置结构](configuration.md#loading-configuration)，`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)），`article` 和 `articlehttp` 是应用自己的业务包（见[路由](routing.md#organizing-routes)）。路由声明保留在各模块的 `routes.go`，`bootstrap.Routes` 统一调用各模块的 `Register`，让 `serve`、`openapi` 和 [routes](commands.md#routes-command) 命令复用同一份声明。后两个命令分别通过 `DocRoutes`、`DocRouter` 在文档模式下注册，不打开运行时资源；action 在处理器工厂内部构造，只有 `serve` 会调用它们。
 
 整个过程就是普通的函数调用：先创建被依赖的对象，再创建依赖它们的对象。数据库、缓存、锁这类多个运行部分都用到的资源放进 `open`；只有某个部分用到的，例如 HTTP 中间件，在它自己的方法里创建。`run` 返回之前，`defer` 中的 `stack.CloseWith` 不会执行，因此正在处理的请求不会因为数据库提前关闭而失败。请求处理与停机的完整顺序见[请求生命周期](lifecycle.md)。
 

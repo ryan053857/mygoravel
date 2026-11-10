@@ -1,98 +1,95 @@
 package rest
 
 import (
-	"cmp"
+	"context"
 	"net/http"
 	"slices"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/ryan053857/mygoravel/httpx"
 )
 
-// Route 描述一条已注册的 HTTP 路由。
-type Route struct {
-	Method      string
-	Path        string
-	OperationID string
-	Summary     string
-	// Access 是路由声明的访问策略：Access* 常量之一，或 RequireAuth 声明的方案名（例如 bearer）。
-	// 它不推断 chi 中间件的行为；没有可识别声明的路由一律为 AccessUnknown。
-	Access string
-	// Scopes 是需要认证的路由要求调用者具备的全部 scope。
-	Scopes []string
+// AccessBearer 是 RequireBearer 路由在路由表中的访问策略；RequireAuth 声明的其他方案取其方案名。
+const AccessBearer = "bearer"
+
+// adapter 是 Huma 的 chi 适配器：每个操作注册为一个实现 httpx.RouteDescriber 的处理器，
+// 让 httpx.Routes 能从任意上层 Router 读出访问策略。其余行为委托给 humachi。
+type adapter struct {
+	router chi.Router
+	chi    huma.Adapter
+	docs   map[string]bool
 }
 
-// Route.Access 的取值。
-const (
-	AccessPublic  = "public"  // 通过 Public 显式公开
-	AccessBearer  = "bearer"  // 通过 RequireBearer 要求认证；其他认证方案的取值为其方案名
-	AccessDocs    = "docs"    // Huma 自动注册的文档端点，例如 /docs、/openapi.json
-	AccessUnknown = "unknown" // 无法从声明确定策略，不表示允许匿名访问
-)
-
-// Routes 返回按路径、方法排序的路由快照，不调用处理器或处理器工厂。
-// 结果包含原生 chi 路由和 Access 为 AccessDocs 的文档端点；隐藏或未进入 OpenAPI 的路由
-// 没有 OperationID 和 Summary，Access 为 AccessUnknown。请在应用完成路由注册后调用。
-func (a *API) Routes() []Route {
-	var routes []Route
-	// Walk 只会返回回调产生的错误；这里的回调始终成功。
-	_ = chi.Walk(a.router, func(method, path string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		route := Route{Method: method, Path: path, Access: AccessUnknown}
-		if op := routeOperation(a.OpenAPI().Paths[path], method); op != nil {
-			route.OperationID = op.OperationID
-			route.Summary = op.Summary
-			route.Access, route.Scopes = routeAccess(op)
-		} else if a.docRoutes[path] {
-			route.Access = AccessDocs
-		}
-		routes = append(routes, route)
-		return nil
-	})
-	slices.SortFunc(routes, func(a, b Route) int {
-		if order := cmp.Compare(a.Path, b.Path); order != 0 {
-			return order
-		}
-		return cmp.Compare(a.Method, b.Method)
-	})
-	return routes
+func newAdapter(r chi.Router, docs map[string]bool) *adapter {
+	return &adapter{router: r, chi: humachi.NewAdapter(r), docs: docs}
 }
 
-func routeOperation(item *huma.PathItem, method string) *huma.Operation {
-	if item == nil {
-		return nil
+func (a *adapter) Handle(op *huma.Operation, handler func(huma.Context)) {
+	a.router.Method(op.Method, op.Path, &route{op: op, handler: handler, docs: a.docs[op.Path]})
+}
+
+func (a *adapter) ServeHTTP(w http.ResponseWriter, r *http.Request) { a.router.ServeHTTP(w, r) }
+
+// SanitizeInternalContext 委托给 humachi，供 Huma 的 autopatch 重新分发内部请求。
+func (a *adapter) SanitizeInternalContext(ctx context.Context) context.Context {
+	if s, ok := a.chi.(interface {
+		SanitizeInternalContext(context.Context) context.Context
+	}); ok {
+		return s.SanitizeInternalContext(ctx)
 	}
-	switch method {
-	case http.MethodGet:
-		return item.Get
-	case http.MethodPost:
-		return item.Post
-	case http.MethodPut:
-		return item.Put
-	case http.MethodPatch:
-		return item.Patch
-	case http.MethodDelete:
-		return item.Delete
-	case http.MethodHead:
-		return item.Head
-	case http.MethodOptions:
-		return item.Options
-	case http.MethodTrace:
-		return item.Trace
-	default:
-		return nil
+	return ctx
+}
+
+// route 是一个 Huma 操作的处理器。
+type route struct {
+	op      *huma.Operation
+	handler func(huma.Context)
+	docs    bool
+}
+
+func (rt *route) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rt.handler(humachi.NewContext(rt.op, r, w))
+}
+
+// DescribeRoute 实现 httpx.RouteDescriber。文档端点为 docs；隐藏或未声明安全要求的操作为 unknown。
+func (rt *route) DescribeRoute() httpx.Route {
+	if rt.docs && rt.op.OperationID == "" {
+		return httpx.Route{Access: httpx.AccessDocs}
 	}
+	access, scopes := routeAccess(rt.op)
+	return httpx.Route{Access: access, Scopes: scopes, OperationID: rt.op.OperationID, Summary: rt.op.Summary}
 }
 
 func routeAccess(op *huma.Operation) (string, []string) {
 	if op.Security == nil {
-		return AccessUnknown, nil
+		return httpx.AccessUnknown, nil
 	}
 	if len(op.Security) == 0 {
-		return AccessPublic, nil
+		return httpx.AccessPublic, nil
 	}
 	if name := authScheme(op); name != "" {
 		scopes, _ := op.Extensions["x-required-scopes"].([]string)
 		return name, slices.Clone(scopes)
 	}
-	return AccessUnknown, nil
+	return httpx.AccessUnknown, nil
+}
+
+// docRoutes 按 Huma 的注册规则列出文档端点路径。
+func docRoutes(cfg huma.Config) map[string]bool {
+	paths := map[string]bool{}
+	if cfg.OpenAPIPath != "" {
+		for _, suffix := range []string{".json", ".yaml", "-3.0.json", "-3.0.yaml"} {
+			paths[cfg.OpenAPIPath+suffix] = true
+		}
+	}
+	if cfg.DocsPath != "" {
+		paths[cfg.DocsPath] = true
+	}
+	if cfg.SchemasPath != "" {
+		paths[cfg.SchemasPath+"/{schema}"] = true
+	}
+	return paths
 }

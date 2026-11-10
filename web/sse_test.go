@@ -155,7 +155,7 @@ func TestSSESendAfterReturnFails(t *testing.T) {
 }
 
 func TestSSEInsidePagesHandle(t *testing.T) {
-	h := pages().Handle(func(w http.ResponseWriter, r *http.Request) error {
+	h := handle(pages(), func(w http.ResponseWriter, r *http.Request) error {
 		return web.SSE(w, r, func(s *web.Stream) error { return s.Send(text("hi")) })
 	})
 	url, _ := startServer(t, httpx.DefaultConfig(), h)

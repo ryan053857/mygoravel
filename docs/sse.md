@@ -69,7 +69,7 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-每条消息按 `hx-target` 和 `hx-swap` 放进 `#progress`，`fn` 返回后响应结束。开始写事件之前，错误照常返回给 `pages` 呈现；开始之后，返回的错误只会记录日志。
+每条消息按 `hx-target` 和 `hx-swap` 放进 `#progress`，`fn` 返回后响应结束。开始写事件之前，错误照常由 `pages` 呈现；开始之后，返回的错误只会记录日志。
 
 `s.Context()` 在浏览器断开或服务器开始停机时取消，传给业务服务，让它们随之停止。
 
@@ -139,23 +139,33 @@ for _, n := range h.notifier.Since(s.LastEventID()) {
 <a id="routes-and-timeouts"></a>
 ## 路由与超时
 
-长连接会一直保持，所以 SSE 路由不能安装 [`httpx.Timeout`](middleware.md#request-timeout)，否则到期就会被切断。把[装配页面](views.md#assembling-pages)中的页面路由组拆成两组，只给普通页面安装 Timeout：
+长连接会一直保持，所以 SSE 路由不能安装 [`httpx.Timeout`](middleware.md#request-timeout)，否则到期就会被切断。把它们注册在[装配页面](views.md#assembling-pages)中 Timeout 路由组的外面：
 
 ```go
 router.Group(func(r chi.Router) {
-    r.Use(pages.Middleware)
-    r.Group(func(r chi.Router) {
-        r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
-        authweb.Register(r, pages, sessions, a.users)
-        articleweb.Register(r, pages, a.articles)
-    })
-    r.Group(func(r chi.Router) {
-        r.Use(pages.Require("articles"))
-        r.Get("/admin/events", pages.Handle(h.Events))
-        r.Post("/admin/articles/publish", pages.Handle(h.Publish))
-    })
+    r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
+    PageRoutes(r, pages, a.users, a.articles)
 })
+StreamRoutes(router, pages, a.articles) // 不设超时
+
+// StreamRoutes 注册 SSE 路由，HTTP 方法和 DocRouter 共用它。
+func StreamRoutes(r chi.Router, pages *web.Pages, articles *article.Service) {
+    articleweb.RegisterStreams(r, pages, articles)
+}
 ```
+
+`articleweb.RegisterStreams` 与[注册页面路由](views.md#page-routes)的写法相同：
+
+```go
+func RegisterStreams(r chi.Router, pages *web.Pages, articles *article.Service) {
+    h := &Handlers{articles: articles}
+    editor := pages.Routes(r, web.Require("articles"))
+    editor.Get("/admin/events", h.Events)
+    editor.Post("/admin/articles/publish", h.Publish)
+}
+```
+
+记得在 `DocRouter` 中也调用 `StreamRoutes`，让 [routes 命令](commands.md#routes-command)列出它们。
 
 服务器配置中的 `http.write_timeout` 同样会切断长连接，`web.SSE` 会为当前请求取消它，不需要修改配置。
 

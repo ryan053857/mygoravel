@@ -174,6 +174,6 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `filesystem/local`、`filesystem/s3` | 本地与 S3 磁盘 | [文件存储与上传](filesystem.md#disks) |
 | `command` | 根命令、`Run`、`config` 命令、退出码 | [命令行](commands.md) |
 | `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
-| `command/restcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
+| `command/httpcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
 
 缓存不在框架包中，你可以直接使用 [eko/gocache](https://github.com/eko/gocache)，详见[缓存](cache.md)；数据库查询和事务也直接使用 Bun 的原生 API。

@@ -43,7 +43,7 @@ import (
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/command/migratecmd"
-    "github.com/ryan053857/mygoravel/command/restcmd"
+    "github.com/ryan053857/mygoravel/command/httpcmd"
     "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/database/postgres"
 )
@@ -56,8 +56,8 @@ func New() *cobra.Command {
         command.Run("work", "处理队列任务", bootstrap.Work),
         command.Run("start", "在一个进程中运行 HTTP 服务和队列", bootstrap.Start),
         migratecmd.New(migrations.FS, postgres.Driver, dbConfig),
-        restcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
-        restcmd.Routes(bootstrap.API, bootstrap.DocRoutes),
+        httpcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
+        httpcmd.Routes(bootstrap.DocRouter),
         command.Config[settings.Config](),
         seed(),
     )
@@ -92,10 +92,10 @@ func main() {
 | `command.Config[C]()` | `config check`、`config show` | 是 |
 | `migratecmd.New(fsys, driver, dbConfig)` | `migrate up`、`migrate status`、`migrate down`、`migrate make` | 是 |
 | `migratecmd.Publish(driver, sources...)` | 显式挂载的 `migrate publish` | 否 |
-| `restcmd.OpenAPI(opts, register)` | `openapi` | 否 |
-| `restcmd.Routes(opts, register)` | `routes` | 否 |
+| `httpcmd.OpenAPI(opts, register)` | `openapi` | 否 |
+| `httpcmd.Routes(router)` | `routes` | 否 |
 
-迁移命令和 HTTP API 命令分别放在 `command/migratecmd` 和 `command/restcmd` 两个子包中。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
+迁移命令和 HTTP 命令分别放在 `command/migratecmd` 和 `command/httpcmd` 两个子包中。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
 
 不提供 HTTP API 的应用，例如一个只消费消息队列的常驻进程，只装配它需要的命令即可：
 
@@ -161,7 +161,7 @@ func Start(ctx context.Context, cfg settings.Config) error {
 <a id="openapi-command"></a>
 ### openapi 命令
 
-`restcmd.OpenAPI(opts, register)` 以[文档模式](routing.md#exporting-openapi)和 `opts` 创建 API，调用 `register` 注册路由，然后把 OpenAPI 文档输出到标准输出：
+`httpcmd.OpenAPI(opts, register)` 以[文档模式](routing.md#exporting-openapi)和 `opts` 创建 API，调用 `register` 注册路由，然后把 OpenAPI 文档输出到标准输出：
 
 ```bash
 ./bin/api openapi > openapi.json
@@ -172,7 +172,7 @@ func Start(ctx context.Context, cfg settings.Config) error {
 <a id="routes-command"></a>
 ### routes 命令
 
-当业务模块变多时，你可以用 `routes` 查看整个应用的路由，不必逐个打开模块中的 `routes.go`。`restcmd.Routes` 的参数与 `restcmd.OpenAPI` 相同，同样在文档模式下注册路由，不需要配置文件：
+当业务模块变多时，你可以用 `routes` 查看整个应用的路由，包括 JSON API 和[页面](views.md#page-routes)，不必逐个打开模块中的 `routes.go`。`httpcmd.Routes` 的参数是构造完整路由的函数，博客应用的 `bootstrap.DocRouter` 见[依赖装配](dependencies.md#assembling-the-application)。它在文档模式下注册路由，不需要配置文件：
 
 ```bash
 ./bin/api routes
@@ -191,8 +191,8 @@ POST    /articles/{id}/publish  article-publish  bearer: articles  发布文章
 
 各列的含义：
 
-- **ACCESS** 展示路由声明的访问策略：`public` 表示显式公开，`bearer`、`session` 表示要求对应方式的认证，`bearer: articles` 同时列出所需的 scope，`docs` 表示 Huma 的文档端点。`unknown` 表示无法从声明确定策略，**不**表示允许匿名访问；
-- **OPERATION ID**、**SUMMARY** 来自 `huma.Operation`，没有时显示为 `-`。摘要中的换行会合并为空格。
+- **ACCESS** 展示路由声明的访问策略：`public` 表示显式公开，`bearer` 表示 JSON API 要求 Bearer token，`session` 表示页面要求登录，`bearer: articles` 同时列出所需的 scope，`docs` 表示 Huma 的文档端点。`unknown` 表示无法从声明确定策略（例如直接注册在 chi 上的健康检查），**不**表示允许匿名访问；
+- **OPERATION ID**、**SUMMARY** 来自 `huma.Operation`，页面路由没有，显示为 `-`。摘要中的换行会合并为空格。
 
 Huma 自动注册的 `/docs`、`/openapi.json`、`/schemas/{schema}` 等文档端点默认不显示，加上 `--all` 才会列出。列表也包含直接注册在 chi 上的原生路由和挂载的子路由；挂载的不透明 `http.Handler`（例如 `Mount("/files", handler)`）显示为 `/files/*`，无法展开其内部路由。
 

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"log/slog"
 	"math"
 	"net/http"
@@ -24,19 +25,30 @@ var (
 	ErrNotFound = errorx.Define(errorx.NotFound, "web.not_found")
 	// ErrForbidden 表示已登录但缺少所需的 scope，与 rest.RequireBearer 使用同一个错误码。
 	ErrForbidden = errorx.Define(errorx.PermissionDenied, "auth.forbidden")
-	// ErrCrossOrigin 表示跨站请求被 Pages.Middleware 拒绝。
+	// ErrCrossOrigin 表示跨站的非安全请求被拒绝。
 	ErrCrossOrigin = errorx.Define(errorx.PermissionDenied, "web.cross_origin")
 )
 
 // HandlerFunc 是返回错误的页面处理器。
 type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
 
-// Options 创建 Pages。除 Logger 外都必须设置。
+// Mode 控制 Pages 的用途。
+type Mode int
+
+const (
+	// ModeServe 为运行模式：注册真正的处理器。
+	ModeServe Mode = iota
+	// ModeRoutes 为路由表模式：只登记路由，供 routes 命令列出；不需要会话和错误组件，处理器不会被调用。
+	ModeRoutes
+)
+
+// Options 创建 Pages。运行模式下，除 TrustedOrigins、Logger 外都必须设置。
 type Options struct {
+	Mode Mode
 	// Sessions 是页面使用的会话，由 session.New 创建。Pages 接管它的错误处理：
 	// 会话存储出错时记录日志并呈现 500 错误页。
 	Sessions *scs.SessionManager
-	// Login 是登录页地址。Require 把未登录的请求带到这里，并在 next 参数中附上原地址。
+	// Login 是登录页地址。Require 的路由把未登录的请求带到这里，并在 next 参数中附上原地址。
 	Login string
 	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求。
 	// message 来自 httpx.ErrorDetail：业务错误的译文，或状态描述。
@@ -51,15 +63,18 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-// Pages 把页面处理器适配为 http.HandlerFunc，加载会话、检查登录，并统一呈现错误。可以并发使用。
+// Pages 注册页面路由：为每条路由加载会话、防御跨站请求伪造、检查登录，并统一呈现错误。可以并发使用。
 type Pages struct {
 	opts   Options
 	logger *slog.Logger
 	cop    *http.CrossOriginProtection
 }
 
-// New 创建 Pages。缺少必填字段或 TrustedOrigins 格式不正确时 panic。
+// New 创建 Pages。运行模式下缺少必填字段，或 TrustedOrigins 格式不正确时 panic。
 func New(opts Options) *Pages {
+	if opts.Mode == ModeRoutes {
+		return &Pages{opts: opts, logger: logging.Or(opts.Logger)}
+	}
 	if opts.Sessions == nil || opts.Login == "" {
 		panic("web: Sessions and Login are required")
 	}
@@ -82,34 +97,35 @@ func New(opts Options) *Pages {
 	return p
 }
 
-// Middleware 是每个页面路由都需要的中间件：先拒绝跨站的非安全请求（http.CrossOriginProtection，
-// 不需要 CSRF token），再加载和保存会话。用法：router.Use(pages.Middleware)。
-func (p *Pages) Middleware(next http.Handler) http.Handler {
-	return p.cop.Handler(p.opts.Sessions.LoadAndSave(next))
-}
-
-// Require 要求请求属于已登录的会话，并具备 scopes 中的全部权限。它依赖 Middleware。
-//
-// 未登录时跳转到 Options.Login，并在 next 查询参数中带上原地址（htmx 请求的原地址取自 HX-Current-URL），
-// 登录处理器应当用 LocalPath 校验 next。权限不足时呈现 403。
-// 通过后把主体写入 identity.WithSubject，处理器用 identity.FromContext 读取。
-func (p *Pages) Require(scopes ...string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			sub, ok := session.Subject(r.Context(), p.opts.Sessions)
-			if !ok {
-				Redirect(w, r, p.opts.Login+"?next="+url.QueryEscape(returnTo(r)))
+// authorize 按 access 检查登录和 scope，通过后把主体写入 identity.WithSubject。
+func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
+	if !access.login {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sub, ok := session.Subject(r.Context(), p.opts.Sessions)
+		if !ok {
+			Redirect(w, r, p.opts.Login+"?next="+url.QueryEscape(returnTo(r)))
+			return
+		}
+		for _, scope := range access.scopes {
+			if !slices.Contains(sub.Scopes, scope) {
+				p.Error(w, r, ErrForbidden.New())
 				return
 			}
-			for _, scope := range scopes {
-				if !slices.Contains(sub.Scopes, scope) {
-					p.Error(w, r, ErrForbidden.New())
-					return
-				}
-			}
-			next.ServeHTTP(w, r.WithContext(identity.WithSubject(r.Context(), sub)))
-		})
-	}
+		}
+		next.ServeHTTP(w, r.WithContext(identity.WithSubject(r.Context(), sub)))
+	})
+}
+
+// Login 把 sub 记为当前会话的主体，见 session.Login。
+func (p *Pages) Login(ctx context.Context, sub identity.Subject) error {
+	return session.Login(ctx, p.opts.Sessions, sub)
+}
+
+// Logout 销毁当前会话，见 session.Logout。
+func (p *Pages) Logout(ctx context.Context) error {
+	return session.Logout(ctx, p.opts.Sessions)
 }
 
 // returnTo 返回登录后应回到的本站地址：htmx 请求取发起请求的页面，其余取请求本身。
@@ -122,12 +138,12 @@ func returnTo(r *http.Request) string {
 	return r.URL.RequestURI()
 }
 
-// Handle 把 fn 适配为 http.HandlerFunc。
+// handle 把 fn 适配为 http.Handler。
 //
 // fn 返回的错误交给 Error 呈现；响应已经开始写出时（例如 SSE 中途出错）只记录日志。
 // htmx 请求收到 3xx 跳转时（例如 fn 调用了 http.Redirect），改写为 HX-Redirect：
 // fetch 会自动跟随 3xx，跳转后的整页会被当作片段放进目标元素。
-func (p *Pages) Handle(fn HandlerFunc) http.HandlerFunc {
+func (p *Pages) handle(fn HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rw := &responseWriter{ResponseWriter: w, htmx: IsHTMX(r)}
 		err := fn(rw, r)
@@ -144,7 +160,7 @@ func (p *Pages) Handle(fn HandlerFunc) http.HandlerFunc {
 
 // Error 呈现 err：按 errorx 分类确定状态码，5xx 记录日志，带 errorx.RetryAfter 时设置 Retry-After。局部 htmx 请求渲染 ErrorFragment，
 // 并通过 HX-Retarget、HX-Reswap 放进 ErrorTarget；其余请求渲染 ErrorPage。
-// 用于中间件等 Handle 之外的场景。
+// 用于中间件等页面处理器之外的场景。
 func (p *Pages) Error(w http.ResponseWriter, r *http.Request, err error) {
 	status := httpx.StatusOf(err)
 	if status >= http.StatusInternalServerError {

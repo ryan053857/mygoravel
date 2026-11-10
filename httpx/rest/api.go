@@ -6,7 +6,6 @@ import (
 	"reflect"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/httpx"
@@ -29,8 +28,6 @@ type API struct {
 	mode   Mode
 	router chi.Router
 	logger *slog.Logger
-	// docRoutes 是 Huma 自动注册的文档端点路径，用于在路由总览中标记它们。
-	docRoutes map[string]bool
 }
 
 // Options 创建 API。
@@ -42,6 +39,9 @@ type Options struct {
 	Logger *slog.Logger
 	// Transformers 追加在 Huma 默认 Transformer 之后。
 	Transformers []huma.Transformer
+	// BasePath 是 API 挂载的路径前缀，例如挂在 router.Route("/api", ...) 中时为 /api。
+	// 它写入 OpenAPI 的 servers，文档页和客户端据此拼出完整地址；路由本身仍按 Router 注册。
+	BasePath string
 	// Router 可选；nil 时使用 chi.NewRouter()。
 	// New 不安装任何中间件：在传入前用 Router.Use 安装，例如 httpx.Defaults。
 	Router chi.Router
@@ -73,25 +73,11 @@ func New(opts Options) *API {
 	// 不覆盖全局 huma.NewError，避免影响同一进程中的其他 Huma API。
 	cfg.OpenAPI.Components.Schemas.RegisterTypeAlias(reflect.TypeOf(huma.ErrorModel{}), reflect.TypeOf(ErrorModel{}))
 	cfg.Transformers = append(cfg.Transformers, opts.Transformers...)
-	h := humachi.New(r, cfg)
-	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, docRoutes: docRoutes(cfg)}
-}
-
-// docRoutes 按 Huma 的注册规则列出文档端点路径。
-func docRoutes(cfg huma.Config) map[string]bool {
-	paths := map[string]bool{}
-	if cfg.OpenAPIPath != "" {
-		for _, suffix := range []string{".json", ".yaml", "-3.0.json", "-3.0.yaml"} {
-			paths[cfg.OpenAPIPath+suffix] = true
-		}
+	if opts.BasePath != "" {
+		cfg.OpenAPI.Servers = []*huma.Server{{URL: opts.BasePath}}
 	}
-	if cfg.DocsPath != "" {
-		paths[cfg.DocsPath] = true
-	}
-	if cfg.SchemasPath != "" {
-		paths[cfg.SchemasPath+"/{schema}"] = true
-	}
-	return paths
+	h := huma.NewAPI(cfg, newAdapter(r, docRoutes(cfg)))
+	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger}
 }
 
 // Mode 返回当前模式。
