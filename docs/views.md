@@ -99,10 +99,10 @@ func (a *App) HTTP(ctx context.Context) error {
     router.Handle(web.AssetsPath+"*", web.Assets())
     router.NotFound(pages.NotFound)
 
-    router.Route("/api", func(r chi.Router) {
+    router.Route("/api/v1", func(r chi.Router) {
         r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
         opts := API
-        opts.Router, opts.BasePath = r, "/api"
+        opts.Router, opts.BasePath = r, "/api/v1"
         Routes(rest.New(opts), auth.Validator(a.cfg.Auth), a.articles)
     })
     router.Group(func(r chi.Router) {
@@ -121,7 +121,7 @@ func PageRoutes(r chi.Router, pages *web.Pages, users *user.Service, articles *a
 
 几点说明：
 
-- 页面和 JSON API 共用一个 Router。API 挂在 `/api` 下，不经过会话；`BasePath` 让 OpenAPI 文档中的地址带上 `/api` 前缀。`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
+- 页面和 JSON API 共用一个 Router。API 挂在 `/api/v1` 下，不经过会话；`BasePath` 让 OpenAPI 文档中的地址带上这个前缀，见 [API 版本](routing.md#api-versioning)。`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
 - `a.users` 是应用自己的用户服务，和 `a.articles` 一样在 `open` 中构造，见[依赖装配](dependencies.md#assembling-the-application)。
 - `web.New` 接管会话的错误处理：会话存储出错时记录日志，并用 `ErrorPage` 呈现 `500`。
 - [请求超时](middleware.md#request-timeout)按路由组安装，[服务端推送](sse.md)的路由不能有超时。
@@ -145,7 +145,7 @@ func Register(r chi.Router, pages *web.Pages, articles *article.Service) {
 
 页面处理器的签名是 `func(w http.ResponseWriter, r *http.Request) error`。注册的每条路由会依次：拒绝跨站的非安全请求（Go 标准库的 `http.CrossOriginProtection`，htmx 发出的是同源请求，表单不需要 CSRF token，见[跨站请求伪造](session.md#csrf)）、加载和保存会话、检查访问策略，最后调用处理器，并呈现它返回的错误。
 
-与 JSON API 的 [`rest.Public`、`rest.RequireBearer`](routing.md#organizing-routes) 一样，每条页面路由都必须显式声明访问策略：不经过 `pages.Routes` 就无法注册页面处理器，`web.Access` 的零值也会让注册 panic。因此不会因为漏写而意外公开一个后台页面。
+与 JSON API 的 [`rest.Public`、`rest.RequireBearer`](routing.md#access-policies) 一样，每条页面路由都必须显式声明访问策略：不经过 `pages.Routes` 就无法注册页面处理器，`web.Access` 的零值也会让注册 panic。因此不会因为漏写而意外公开一个后台页面。
 
 [routes 命令](commands.md#routes-command)同时列出 JSON API 和页面，页面的访问策略显示为 `public` 或 `session: articles`。命令使用的 `DocRouter` 以文档模式注册全部路由，不打开数据库，页面使用 `web.ModeRoutes`，不需要会话：
 
@@ -153,9 +153,9 @@ func Register(r chi.Router, pages *web.Pages, articles *article.Service) {
 // DocRouter 在文档模式下构造全部路由，routes 命令用它。
 func DocRouter() chi.Routes {
     router := chi.NewRouter()
-    router.Route("/api", func(r chi.Router) {
+    router.Route("/api/v1", func(r chi.Router) {
         opts := API
-        opts.Mode, opts.Router, opts.BasePath = rest.ModeOpenAPI, r, "/api"
+        opts.Mode, opts.Router, opts.BasePath = rest.ModeOpenAPI, r, "/api/v1"
         DocRoutes(rest.New(opts))
     })
     PageRoutes(router, web.New(web.Options{Mode: web.ModeRoutes}), nil, nil)

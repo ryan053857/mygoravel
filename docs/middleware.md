@@ -72,9 +72,9 @@ api := rest.New(rest.Options{Router: router})
 ```go
 router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
 
-router.Route("/api", func(r chi.Router) {
+router.Route("/api/v1", func(r chi.Router) {
     r.Use(httpx.Timeout(cfg.HTTP.Timeout))
-    api := rest.New(rest.Options{Router: r})
+    api := rest.New(rest.Options{Router: r, BasePath: "/api/v1"})
     // 注册 API 路由
 })
 

@@ -161,8 +161,8 @@ func TestRoutesMarksOnlyHumaDocumentationEndpoints(t *testing.T) {
 func TestRoutesUnderMountedAPI(t *testing.T) {
 	router := chi.NewRouter()
 	var api *rest.API
-	router.Route("/api", func(r chi.Router) {
-		api = rest.New(rest.Options{Mode: rest.ModeOpenAPI, Router: r, BasePath: "/api"})
+	router.Route("/api/v1", func(r chi.Router) {
+		api = rest.New(rest.Options{Mode: rest.ModeOpenAPI, Router: r, BasePath: "/api/v1"})
 		op := huma.Operation{OperationID: "ping", Method: http.MethodGet, Path: "/ping"}
 		rest.Public()(&op)
 		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) { return nil })
@@ -170,32 +170,32 @@ func TestRoutesUnderMountedAPI(t *testing.T) {
 	router.Get("/health", func(http.ResponseWriter, *http.Request) {})
 	routes := httpx.Routes(router)
 	if !slices.ContainsFunc(routes, func(r httpx.Route) bool {
-		return r.Path == "/api/ping" && r.OperationID == "ping" && r.Access == httpx.AccessPublic
+		return r.Path == "/api/v1/ping" && r.OperationID == "ping" && r.Access == httpx.AccessPublic
 	}) || !slices.ContainsFunc(routes, func(r httpx.Route) bool {
-		return r.Path == "/api/openapi.json" && r.Access == httpx.AccessDocs
+		return r.Path == "/api/v1/openapi.json" && r.Access == httpx.AccessDocs
 	}) || !slices.ContainsFunc(routes, func(r httpx.Route) bool {
 		return r.Path == "/health" && r.Access == httpx.AccessUnknown
 	}) {
 		t.Fatalf("routes = %#v", routes)
 	}
-	if servers := api.OpenAPI().Servers; len(servers) != 1 || servers[0].URL != "/api" {
+	if servers := api.OpenAPI().Servers; len(servers) != 1 || servers[0].URL != "/api/v1" {
 		t.Fatalf("servers = %#v", servers)
 	}
 }
 
 func TestDocsPageUsesBasePath(t *testing.T) {
 	router := chi.NewRouter()
-	router.Route("/api", func(r chi.Router) {
-		rest.New(rest.Options{Router: r, BasePath: "/api"})
+	router.Route("/api/v1", func(r chi.Router) {
+		rest.New(rest.Options{Router: r, BasePath: "/api/v1"})
 	})
 	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/docs", nil))
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "/api/openapi") {
+	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/docs", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "/api/v1/openapi") {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 	rr = httptest.NewRecorder()
-	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/openapi.json", nil))
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"url":"/api"`) {
+	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"url":"/api/v1"`) {
 		t.Fatalf("openapi status=%d", rr.Code)
 	}
 }
