@@ -51,7 +51,7 @@ session:
 <a id="assembling-sessions"></a>
 ## 装配会话
 
-在[入口](dependencies.md#assembling-the-application)的 `Serve` 中创建会话管理器，把它的 `LoadAndSave` 中间件安装在 `httpx.Defaults` 之后：
+在[入口](dependencies.md#assembling-the-application)的 `HTTP` 方法中创建会话管理器，把它的 `LoadAndSave` 中间件安装在 `httpx.Defaults` 之后：
 
 ```go
 import (
@@ -59,10 +59,10 @@ import (
     "github.com/ryan053857/mygoravel/session"
 )
 
-sessions := session.New(cfg.Session, memstore.New(), nil)
+sessions := session.New(a.cfg.Session, memstore.New(), nil)
 
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 router.Use(http.NewCrossOriginProtection().Handler)
 router.Use(sessions.LoadAndSave)
 
@@ -92,8 +92,8 @@ lastID := sessions.GetString(ctx, "admin.last_article")
 生产环境把会话保存在数据库中，多个实例共享，重启后也不丢失。`session.NewStore` 接收应用的 `*bun.DB`：
 
 ```go
-store := session.NewStore(db)
-sessions := session.New(cfg.Session, store, nil)
+store := session.NewStore(a.db)
+sessions := session.New(a.cfg.Session, store, nil)
 ```
 
 使用前先发布 `sessions` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
@@ -150,10 +150,10 @@ n, err := store.Cleanup(ctx, 1000)
 go get github.com/alexedwards/scs/goredisstore@latest
 ```
 
-然后传入[入口中创建的客户端](redis.md#connecting) `rdb`：
+然后传入[入口中创建的客户端](redis.md#connecting) `a.rdb`：
 
 ```go
-sessions := session.New(cfg.Session, goredisstore.New(rdb), nil)
+sessions := session.New(a.cfg.Session, goredisstore.New(a.rdb), nil)
 ```
 
 其他代码不变。会话借助 Redis 的键过期自动清除，不需要迁移，也不需要定期清理。`RevokeOthers` 和 `RevokeSubject` 只由数据库存储提供。

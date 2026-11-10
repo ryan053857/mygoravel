@@ -72,7 +72,7 @@ cache:
   default_ttl: 10m
 ```
 
-然后在[入口](dependencies.md#assembling-the-application)的 `Serve` 中，打开数据库之后创建缓存，并传给文章服务：
+然后在[入口](dependencies.md#assembling-the-application)的 `open` 中，打开数据库之后创建缓存，并传给文章服务：
 
 ```go
 memoryClient := memory.New(cfg.Cache.DefaultTTL, 10*time.Minute)

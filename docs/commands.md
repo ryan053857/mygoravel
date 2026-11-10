@@ -53,6 +53,8 @@ func New() *cobra.Command {
     root := command.Root("api", "Blog API")
     root.AddCommand(
         command.Run("serve", "启动 HTTP 服务", bootstrap.Serve),
+        command.Run("work", "处理队列任务", bootstrap.Work),
+        command.Run("start", "在一个进程中运行 HTTP 服务和队列", bootstrap.Start),
         migratecmd.New(migrations.FS, postgres.Driver, dbConfig),
         restcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
         restcmd.Routes(bootstrap.API, bootstrap.DocRoutes),
@@ -111,7 +113,7 @@ root.AddCommand(
 <a id="run-command"></a>
 ### Run：serve 与常驻进程
 
-`command.Run` 创建一个先加载配置、再调用 `run(ctx, cfg)` 的命令。`ctx` 会在进程收到停止信号时被取消，常驻进程据此退出。博客应用的 `bootstrap.Serve` 负责安装日志器、打开数据库并启动 HTTP 服务，见[依赖装配](dependencies.md#assembling-the-application)，HTTP 服务会据此[平滑停止](lifecycle.md)：
+`command.Run` 创建一个先加载配置、再调用 `run(ctx, cfg)` 的命令。`ctx` 会在进程收到停止信号时被取消，常驻进程据此退出。博客应用的 `bootstrap.Serve` 装配应用并启动 HTTP 服务，见[依赖装配](dependencies.md#assembling-the-application)，HTTP 服务会据此[平滑停止](lifecycle.md)：
 
 ```bash
 ./bin/api serve                                                 # 使用 config/app.yaml
@@ -119,6 +121,42 @@ root.AddCommand(
 ```
 
 `Run` 不限于常驻进程，任何“读取配置然后做一件事”的命令都可以用它创建，例如数据回填、发送一次报表。
+
+<a id="running-together"></a>
+### 在一个进程中运行多个部分
+
+博客应用有两个常驻部分：HTTP 服务和[队列 worker](queue.md#running-workers)，分别是 `App` 的 `HTTP` 和 `Worker` 方法（见[依赖装配](dependencies.md#assembling-the-application)）。每个命令只是选择运行哪些部分：
+
+```go
+// internal/bootstrap/app.go
+func Serve(ctx context.Context, cfg settings.Config) error {
+    return run(ctx, cfg, (*App).HTTP)
+}
+
+func Work(ctx context.Context, cfg settings.Config) error {
+    return run(ctx, cfg, (*App).Worker)
+}
+
+func Start(ctx context.Context, cfg settings.Config) error {
+    return run(ctx, cfg, (*App).HTTP, (*App).Worker)
+}
+```
+
+| 命令 | 运行的部分 |
+| --- | --- |
+| `serve` | HTTP 服务 |
+| `work` | 队列 worker |
+| `start` | 两者，在同一个进程中 |
+
+小型部署只运行 `start`：一个进程、一份配置、一套资源。业务量增长后改为分别部署 `serve` 和 `work`，各自按负载增减实例，代码不用改。
+
+`run` 用 `command.Concurrently` 同时运行这些部分：
+
+- 收到停止信号时，各部分同时平滑停止：HTTP 服务排空请求，worker 停止领取并等待处理中的任务。全部返回之后才关闭数据库。
+- 一个部分启动失败（例如端口被占用）或出错退出时，其余部分随之停止，进程以非 0 状态退出。
+- 一个部分在收到停止信号之前就正常返回，同样视为异常，错误中包含 `command.ErrStoppedEarly`，交给 systemd、Kubernetes 等重启。
+
+各部分共用 `open` 中创建的数据库连接池，HTTP 请求和 worker 的并发任务都会占用连接，设置 [`max_open_conns`](database.md#configuration) 时要按两者之和估算。
 
 <a id="openapi-command"></a>
 ### openapi 命令
