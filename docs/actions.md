@@ -174,7 +174,7 @@ rest.Register(api, publish, NewPublish(db).HTTP)
 var PublishAt = queue.Topic[uuid.UUID]("articles.publish")
 
 // system 是队列任务的调用者，canEdit 允许它发布任何文章。
-var system = identity.Subject{ID: "system", Type: identity.SubjectService, Scopes: []string{"articles:admin"}}
+var system = identity.Subject{ID: "system", Type: identity.SubjectService, Permissions: []string{"articles:admin"}}
 
 // Job 处理定时发布的任务。文章已经发布时任务视为完成，所以重复执行是安全的。
 func (a *Publish) Job(ctx context.Context, id uuid.UUID) error {
