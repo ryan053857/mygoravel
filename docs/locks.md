@@ -7,6 +7,7 @@
 - [锁的有效期](#lock-ttl)
 - [使用数据库存储](#database-store)
     - [过期清理](#cleanup)
+- [使用 Redis 存储](#redis-store)
 - [其他存储](#other-stores)
 
 <a id="introduction"></a>
@@ -32,7 +33,7 @@ locker := lock.New(lock.NewMemoryStore())
 articles := article.NewService(db, locker)
 ```
 
-`lock.New` 接收锁存储。`MemoryStore` 只在同一进程内互斥，适合开发、测试和单实例部署；多实例部署请使用[数据库存储](#database-store)。
+`lock.New` 接收锁存储。`MemoryStore` 只在同一进程内互斥，适合开发、测试和单实例部署；多实例部署请使用[数据库存储](#database-store)或 [Redis 存储](#redis-store)。
 
 <a id="running-once"></a>
 ## 只让一个实例执行
@@ -137,6 +138,21 @@ n, err := store.Cleanup(ctx, 1000)
 > [!NOTE]
 > 异步队列功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每天一次。
 
+<a id="redis-store"></a>
+## 使用 Redis 存储
+
+应用已经使用 [Redis](redis.md) 时，也可以把锁放进 Redis。`redislock.New` 接收[入口中创建的客户端](redis.md#connecting) `rdb`：
+
+```go
+import "github.com/ryan053857/mygoravel/lock/redislock"
+
+locker := lock.New(redislock.New(rdb))
+```
+
+每把锁是一个 Redis 键：键名就是锁名，值是持有者标识，键的过期时间就是锁的有效期。过期由 Redis 计算，不依赖各实例的时钟；过期的键由 Redis 自动删除，不需要迁移，也不需要定期清理。多个应用共用一个 Redis 时，在锁名前加上应用的命名空间，例如 `blog:articles:publish-scheduled`。
+
+锁只写在一个 Redis 主节点上。使用哨兵或集群时，主节点故障切换可能丢失刚写入的锁，短时间内出现两个持有者；对互斥要求严格的任务请使用数据库存储。
+
 <a id="other-stores"></a>
 ## 其他存储
 
@@ -150,4 +166,4 @@ type Store interface {
 }
 ```
 
-使用 Redis 时，`Acquire` 对应 `SET name owner NX PX ttl`；`Refresh` 和 `Release` 需要先比较 `owner` 再修改，用 Lua 脚本保证原子性，可以参考 [bsm/redislock](https://github.com/bsm/redislock) 的实现。
+实现时可以参考 [`lock/redislock`](../lock/redislock/redislock.go)：`Refresh` 和 `Release` 需要先比较 `owner` 再修改，两步必须在一个原子操作中完成。

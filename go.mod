@@ -20,6 +20,7 @@ require (
 	github.com/lmittmann/tint v1.2.1
 	github.com/nicksnyder/go-i18n/v2 v2.7.0
 	github.com/pressly/goose/v3 v3.29.0
+	github.com/redis/go-redis/v9 v9.23.0
 	github.com/resend/resend-go/v3 v3.17.0
 	github.com/samber/slog-chi v1.19.1
 	github.com/samber/slog-formatter v1.3.0
@@ -74,6 +75,7 @@ require (
 	go.opentelemetry.io/otel v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.shabbyrobe.org/gocovmerge v0.0.0-20230507111327-fa4f82cfbf4d // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect

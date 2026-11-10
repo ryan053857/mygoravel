@@ -134,7 +134,7 @@ Pipeline、事务、Lua 脚本、发布订阅等用法见 [go-redis 文档](http
 
 - **缓存**：`redisstore.NewRedis(rdb)`，见[缓存](cache.md#redis)；
 - **会话**：scs 的 `goredisstore.New(rdb)`，见[会话](session.md#redis-store)；
-- **原子锁**：实现 `lock.Store` 接口，见[原子锁](locks.md#other-stores)。
+- **原子锁**：`redislock.New(rdb)`，见[原子锁](locks.md#redis-store)。
 
 scs 的 `goredisstore.New` 要求传入 `*redis.Client`，不接受集群客户端。
 

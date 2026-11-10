@@ -38,7 +38,7 @@ var foundation = []string{"cleanup", "config", "errorx", "i18n", "identity"}
 var infrastructure = []string{
 	"net/http", "database/sql", "github.com/danielgtaylor/huma",
 	"github.com/go-chi/chi", "github.com/uptrace/bun", "github.com/jackc/pgx",
-	"github.com/pressly/goose", "github.com/spf13/cobra",
+	"github.com/pressly/goose", "github.com/spf13/cobra", "github.com/redis/go-redis",
 }
 
 // 后期应用形态使用的组件，当前 module 保持 HTTP API 依赖范围。
@@ -185,6 +185,19 @@ func TestDependencyScope(t *testing.T) {
 			if under(path, prefix) {
 				t.Errorf("HTTP API module imports later-form component %s", path)
 			}
+		}
+	}
+}
+
+// TestLockCoreDoesNotLinkRedis 确保只用 lock 核心包不会链接 go-redis，Redis 存储在 lock/redislock 中。
+func TestLockCoreDoesNotLinkRedis(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", module+"/lock").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list: %v\n%s", err, out)
+	}
+	for _, dep := range strings.Fields(string(out)) {
+		if under(dep, "github.com/redis/go-redis") {
+			t.Errorf("lock depends on %s", dep)
 		}
 	}
 }
