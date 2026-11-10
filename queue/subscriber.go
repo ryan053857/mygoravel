@@ -9,7 +9,9 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
 
 	"github.com/ryan053857/mygoravel/logging"
 )
@@ -276,22 +278,67 @@ func (s *Subscriber) track(ctx context.Context, j job, msg *message.Message, o *
 	}
 }
 
+// claim 领取 topic 中最多 n 个到期的任务：attempts 加一，available_at 推到租约到期时间。
 func (s *Subscriber) claim(topic string, n int) ([]job, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	now := time.Now().UTC()
-	ready := s.db.NewSelect().Model((*job)(nil)).Column("j.id").
-		Where("j.topic = ?", topic).Where("j.available_at <= ?", now).
-		OrderExpr("j.available_at, j.id").Limit(int64(n)).For("UPDATE SKIP LOCKED")
+	ready := func(q *bun.SelectQuery) *bun.SelectQuery {
+		return q.Where("j.topic = ?", topic).Where("j.available_at <= ?", now).
+			OrderExpr("j.available_at, j.id").Limit(int64(n))
+	}
+
+	if s.db.Dialect().Name() == dialect.MySQL {
+		jobs, err := s.claimMySQL(ctx, ready, now)
+		return jobs, errors.Wrapf(err, "queue: claim %q", topic)
+	}
+	ids := ready(s.db.NewSelect().Model((*job)(nil)).Column("j.id"))
+	// PostgreSQL 用 SKIP LOCKED 跳过其他实例正在领取的行；SQLite 同一时刻只有一个写者，整条 UPDATE 本身就是互斥的。
+	if s.db.Dialect().Name() == dialect.PG {
+		ids = ids.For("UPDATE SKIP LOCKED")
+	}
 	var jobs []job
 	err := s.db.NewUpdate().Model((*job)(nil)).
 		Set("available_at = ?", now.Add(s.cfg.Lease)).
 		Set("reserved_at = ?", now).
 		Set("attempts = j.attempts + 1").
-		Where("j.id IN (?)", ready).
-		Returning("j.*").
+		Where("j.id IN (?)", ids).
+		Returning("*").
 		Scan(ctx, &jobs)
 	return jobs, errors.Wrapf(err, "queue: claim %q", topic)
+}
+
+// claimMySQL 在一个事务中先锁住到期的行再更新：MySQL 没有 UPDATE … RETURNING，
+// 也不允许在 IN 子查询中使用 LIMIT。读已提交隔离级别下 FOR UPDATE 只锁返回的行，不加间隙锁，
+// 不会挡住同时发布的任务。
+func (s *Subscriber) claimMySQL(ctx context.Context, ready func(*bun.SelectQuery) *bun.SelectQuery, now time.Time) ([]job, error) {
+	var jobs []job
+	err := s.db.RunInTx(ctx, txOptions(s.db), func(ctx context.Context, tx bun.Tx) error {
+		if err := ready(tx.NewSelect().Model(&jobs)).For("UPDATE SKIP LOCKED").Scan(ctx); err != nil {
+			return err
+		}
+		if len(jobs) == 0 {
+			return nil
+		}
+		ids := make([]uuid.UUID, len(jobs))
+		for i := range jobs {
+			ids[i] = jobs[i].ID
+		}
+		lease := now.Add(s.cfg.Lease)
+		_, err := tx.NewUpdate().Model((*job)(nil)).
+			Set("available_at = ?", lease).
+			Set("reserved_at = ?", now).
+			Set("attempts = j.attempts + 1").
+			Where("j.id IN (?)", bun.In(ids)).
+			Exec(ctx)
+		for i := range jobs {
+			jobs[i].Attempts++
+			jobs[i].AvailableAt = lease
+			jobs[i].ReservedAt = now
+		}
+		return err
+	})
+	return jobs, err
 }
 
 func (s *Subscriber) ack(ctx context.Context, j job) {
@@ -329,7 +376,7 @@ func (s *Subscriber) nack(ctx context.Context, j job, cause error) {
 func (s *Subscriber) fail(j job, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	return s.db.RunInTx(ctx, txOptions(s.db), func(ctx context.Context, tx bun.Tx) error {
 		res, err := tx.NewDelete().Model((*job)(nil)).
 			Where("id = ?", j.ID).Where("attempts = ?", j.Attempts).Exec(ctx)
 		if err != nil {
@@ -342,11 +389,11 @@ func (s *Subscriber) fail(j job, cause error) error {
 			ID: j.ID, Driver: driverDatabase, Topic: j.Topic, Payload: j.Payload, Metadata: j.Metadata,
 			Attempts: j.Attempts, Error: fmt.Sprintf("%+v", cause), FailedAt: time.Now().UTC(),
 		}
-		_, err = tx.NewInsert().Model(row).
-			On("CONFLICT (id) DO UPDATE").
-			Set("driver = EXCLUDED.driver, topic = EXCLUDED.topic, payload = EXCLUDED.payload, metadata = EXCLUDED.metadata").
-			Set("attempts = EXCLUDED.attempts, error = EXCLUDED.error, failed_at = EXCLUDED.failed_at").
-			Exec(ctx)
+		// 同一个任务之前失败过、重新入队后又失败时，替换旧的失败记录。
+		if _, err := tx.NewDelete().Model((*failedJob)(nil)).Where("id = ?", j.ID).Exec(ctx); err != nil {
+			return err
+		}
+		_, err = tx.NewInsert().Model(row).Exec(ctx)
 		return err
 	})
 }

@@ -29,14 +29,22 @@ func NewFailedJobs(db bun.IDB) *FailedJobs {
 // Retry 把失败任务放回原 topic，立即可被处理，处理次数从 0 开始计算。
 // 任务不存在时返回 ErrFailedJobNotFound。
 func (f *FailedJobs) Retry(ctx context.Context, id uuid.UUID) error {
-	err := f.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	err := f.db.RunInTx(ctx, txOptions(f.db), func(ctx context.Context, tx bun.Tx) error {
 		row := new(failedJob)
-		err := tx.NewDelete().Model(row).Where("id = ?", id).Returning("*").Scan(ctx)
+		err := tx.NewSelect().Model(row).Where("id = ?", id).Scan(ctx)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrFailedJobNotFound
 		}
 		if err != nil {
 			return err
+		}
+		// 删除成功才重新入队：同一个任务被并发 Retry 时只有一方生效。
+		res, err := tx.NewDelete().Model((*failedJob)(nil)).Where("id = ?", id).Exec(ctx)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return errors.Join(err, ErrFailedJobNotFound)
 		}
 		if row.Driver != driverDatabase {
 			return errors.Newf("queue: unsupported driver %q", row.Driver)

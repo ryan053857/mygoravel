@@ -39,6 +39,9 @@ func IsUniqueViolation(err error, constraints ...string) bool {
 		(len(constraints) == 0 || slices.Contains(constraints, pgErr.ConstraintName))
 }
 
+// IsDeadlock 报告事务是否因死锁被数据库中止（SQLSTATE 40P01）。整个事务可以重试。
+func IsDeadlock(err error) bool { return hasCode(err, "40P01") }
+
 // IsForeignKeyViolation 报告是否为外键冲突（SQLSTATE 23503）。
 func IsForeignKeyViolation(err error) bool { return hasCode(err, "23503") }
 

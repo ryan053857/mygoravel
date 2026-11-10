@@ -75,9 +75,11 @@ go test -race -count=1 -tags=integration ./...
 
 没有设置 `POSTGRES_TEST_URL`、`MYSQL_TEST_URL` 或 `REDIS_TEST_URL` 时，集成测试会失败而不是跳过。Redis 测试给每个键加随机前缀，不会清空数据，但仍请使用专门的测试实例。测试完成后执行 `docker stop mygoravel-test-postgres mygoravel-test-mysql mygoravel-test-redis` 清理。
 
-集成测试中包含对迁移失败场景的演练，例如非事务迁移执行到一半失败后，检查数据库状态、人工恢复并再次执行。
+依赖数据库的测试用 `internal/dbtesting` 的 `ForEach` 和 `Open` 在每种数据库上运行：普通的 `go test` 只运行 SQLite，带 `integration` 标签时追加 PostgreSQL 和 MySQL。新增一种数据库时只需修改这个包。
 
-文件服务集成测试同时使用真实 PostgreSQL 和本地存储或 gofakes3，验证单张 `files` 表的状态变化、预签名直传、分片上传、确认、删除和清理。只运行文件相关测试可以执行 `go test -race -tags=integration ./filesystem/...`，仍需设置上述 `POSTGRES_TEST_URL`。
+集成测试中包含对迁移失败场景的演练，例如迁移执行到一半失败后（PostgreSQL 的非事务迁移，以及 MySQL 上隐式提交的 DDL），检查数据库状态、人工恢复并再次执行。
+
+文件服务的测试在每种数据库上使用本地存储或 gofakes3，验证单张 `files` 表的状态变化、预签名直传、分片上传、确认、删除和清理。只运行文件相关测试可以执行 `go test -race -tags=integration ./filesystem/...`，仍需设置上述环境变量。
 
 <a id="architecture-tests"></a>
 ### 架构测试

@@ -18,6 +18,7 @@ import (
 	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
 // 以下输入、输出和处理器与 docs/filesystem.md 中 REST 一节的示例保持一致。
@@ -200,7 +201,7 @@ func registerFileRoutes(api *rest.API, auth func(*huma.Operation), files *filesy
 }
 
 func TestRESTUploadAndConfirm(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		e := newEnv(t, driver)
 		api := rest.New(rest.Options{Title: "test"})
 		users := map[string]identity.Subject{"alice": alice, "bob": bob}

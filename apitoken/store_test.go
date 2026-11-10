@@ -14,8 +14,10 @@ import (
 
 	"github.com/ryan053857/mygoravel/apitoken"
 	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/sqlite"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
 // clock 是可以拨动的测试时钟。
@@ -37,7 +39,7 @@ var (
 
 func newStore(t *testing.T, driver database.Driver) (*apitoken.Store, *clock) {
 	t.Helper()
-	s := apitoken.NewStore(openDB(t, driver), testConfig)
+	s := apitoken.NewStore(dbtesting.Open(t, driver, apitoken.Migrations()), testConfig)
 	c := &clock{t: time.Now().UTC().Truncate(time.Second)}
 	apitoken.SetClock(s, c.now)
 	return s, c
@@ -91,7 +93,7 @@ func TestConfig(t *testing.T) {
 	}
 	for name, build := range map[string]func(){
 		"nil db":         func() { apitoken.NewStore(nil, testConfig) },
-		"invalid config": func() { apitoken.NewStore(openDB(t, testDrivers[0]), apitoken.Config{}) },
+		"invalid config": func() { apitoken.NewStore(dbtesting.Open(t, sqlite.Driver, apitoken.Migrations()), apitoken.Config{}) },
 	} {
 		func() {
 			defer func() {
@@ -105,7 +107,7 @@ func TestConfig(t *testing.T) {
 }
 
 func TestLoginAndValidate(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		s, c := newStore(t, driver)
 		ua := strings.Repeat("浏", 300)
@@ -141,7 +143,7 @@ func TestLoginAndValidate(t *testing.T) {
 }
 
 func TestLoginSlidingExpiry(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		s, c := newStore(t, driver)
 
 		// 一直在用：每次使用都延长一小时，越过最初的截止时间仍然有效。
@@ -187,7 +189,7 @@ func TestLoginSlidingExpiry(t *testing.T) {
 }
 
 func TestCreatePersonal(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		s, c := newStore(t, driver)
 		for name, call := range map[string]func() error{
@@ -226,7 +228,7 @@ func TestCreatePersonal(t *testing.T) {
 }
 
 func TestRevoke(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		s, _ := newStore(t, driver)
 		laptop := login(t, s, alice, apitoken.Device{})
@@ -289,7 +291,7 @@ func TestRevoke(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		s, c := newStore(t, driver)
 		for range 3 {
@@ -318,7 +320,7 @@ func TestCleanup(t *testing.T) {
 
 // TestRequireBearer 确认 Validate 可以直接作为 rest.RequireBearer 的校验器。
 func TestRequireBearer(t *testing.T) {
-	s, _ := newStore(t, testDrivers[0])
+	s, _ := newStore(t, sqlite.Driver)
 	api := rest.New(rest.Options{})
 	op := huma.Operation{OperationID: "me", Method: http.MethodGet, Path: "/me"}
 	rest.RequireBearer(api, s.Validate, "articles")(&op)

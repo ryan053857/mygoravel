@@ -12,6 +12,7 @@ import (
 
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/session"
 )
 
@@ -45,9 +46,9 @@ func note(t *testing.T, b []byte) string {
 }
 
 func TestStore(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		store := session.NewStore(openDB(t, driver))
+		store := session.NewStore(dbtesting.Open(t, driver, session.Migrations()))
 		now := time.Now()
 
 		if _, found, err := store.FindCtx(ctx, "missing"); found || err != nil {
@@ -113,9 +114,9 @@ func TestStore(t *testing.T) {
 }
 
 func TestStoreRevokeSubject(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		db := openDB(t, driver)
+		db := dbtesting.Open(t, driver, session.Migrations())
 		store := session.NewStore(db)
 		live := time.Now().Add(time.Hour)
 		for token, subject := range map[string]string{"a1": "alice", "a2": "alice", "b1": "bob", "anon": ""} {
@@ -161,8 +162,8 @@ func TestStoreRevokeSubject(t *testing.T) {
 }
 
 func TestStoreRevokeOthers(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
-		store := session.NewStore(openDB(t, driver))
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		store := session.NewStore(dbtesting.Open(t, driver, session.Migrations()))
 		srv := newApp(t, store)
 		laptop, phone, bob := newClient(t), newClient(t), newClient(t)
 		for c, user := range map[*http.Client]string{laptop: "alice", phone: "alice", bob: "bob"} {
@@ -195,9 +196,9 @@ func TestStoreRevokeOthers(t *testing.T) {
 }
 
 func TestStoreCleanup(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		db := openDB(t, driver)
+		db := dbtesting.Open(t, driver, session.Migrations())
 		store := session.NewStore(db)
 		past := time.Now().Add(-time.Minute)
 		for _, token := range []string{"x1", "x2", "x3"} {
@@ -233,8 +234,8 @@ func TestStoreCleanup(t *testing.T) {
 }
 
 func TestStoreWithSessionManager(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
-		db := openDB(t, driver)
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := dbtesting.Open(t, driver, session.Migrations())
 		srv := newApp(t, session.NewStore(db))
 		c := newClient(t)
 		if resp := do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"root"}`); resp.StatusCode != http.StatusNoContent {

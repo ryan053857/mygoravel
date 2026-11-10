@@ -19,7 +19,7 @@
 
 有些工作不需要让用户等它完成，例如发送邮件、生成缩略图、通知第三方。`queue` 包把这些工作作为任务保存在数据库中，由单独的 worker 进程取出执行；执行失败的任务按退避时间自动重试，次数用完后转入失败任务表，等待人工处理。
 
-队列基于 [Watermill](https://watermill.io) 的消息模型：任务就是一条 `message.Message`，worker 用 Watermill 的 `Router` 把任务分发给处理函数，`queue` 提供的发布者和订阅者负责把任务存进 PostgreSQL、领取、重试和记录失败。
+队列基于 [Watermill](https://watermill.io) 的消息模型：任务就是一条 `message.Message`，worker 用 Watermill 的 `Router` 把任务分发给处理函数，`queue` 提供的发布者和订阅者负责把任务存进数据库、领取、重试和记录失败。
 
 每个任务**至少执行一次**：worker 崩溃或停止超时时，正在处理的任务会交给其他 worker 重新执行，处理函数需要能安全地重复执行。任务之间不保证执行顺序。
 
@@ -36,7 +36,13 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-队列目前只支持 PostgreSQL，发布 SQLite 或 MySQL 的迁移会报错。
+队列支持 PostgreSQL、MySQL 和 SQLite，发布时按应用的数据库选择对应的迁移。PostgreSQL 和 MySQL 上，多个 worker 用 `SKIP LOCKED` 跳过彼此正在领取的任务，可以部署在多台机器上。
+
+使用 SQLite 时，同一时刻只有一个连接可以写入，领取、确认任务和业务写入排队进行：
+
+- 一个长时间不提交的写事务会让领取任务等待，最长等到 SQLite 的 `busy_timeout`（5 秒）后报错重试。事务中不要做耗时的外部调用。
+- 多个 worker 进程可以打开同一个数据库文件，每个任务只会被其中一个领取；但它们必须在同一台机器上，见[使用 SQLite 部署](deployment.md#sqlite)。
+- 写入量由单个写者的吞吐决定，任务量大时请改用 PostgreSQL。
 
 <a id="publishing-jobs"></a>
 ## 发布任务

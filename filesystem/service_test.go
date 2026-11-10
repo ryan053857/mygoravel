@@ -26,6 +26,7 @@ import (
 	"github.com/ryan053857/mygoravel/filesystem/local"
 	s3disk "github.com/ryan053857/mygoravel/filesystem/s3"
 	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
 var (
@@ -42,7 +43,7 @@ type env struct {
 
 func newEnv(t *testing.T, driver database.Driver) env {
 	t.Helper()
-	db := openDB(t, driver)
+	db := dbtesting.Open(t, driver, filesystem.Migrations())
 	localDisk, err := local.Open(filesystem.LocalConfig{Root: filepath.Join(t.TempDir(), "files"), PublicURL: "/storage"})
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +99,7 @@ func upload(t *testing.T, svc *filesystem.Service, owner identity.Subject, body 
 }
 
 func TestUploadConfirmGetOpen(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		r := upload(t, e.svc, alice, "hello")
@@ -138,7 +139,7 @@ func TestUploadConfirmGetOpen(t *testing.T) {
 }
 
 func TestUploadValidation(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		cases := map[string]struct {
@@ -168,7 +169,7 @@ func TestUploadValidation(t *testing.T) {
 }
 
 func TestConfirmRequiresUploadedObject(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		r, err := e.svc.Prepare(ctx, alice, filesystem.FileInput{Filename: "a.txt", Size: 3})
@@ -195,7 +196,7 @@ func TestConfirmRequiresUploadedObject(t *testing.T) {
 }
 
 func TestConcurrentConfirm(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		r := upload(t, e.svc, alice, "data")
@@ -221,7 +222,7 @@ func TestConcurrentConfirm(t *testing.T) {
 }
 
 func TestDeleteAndCleanup(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 
@@ -277,7 +278,7 @@ func TestDeleteAndCleanup(t *testing.T) {
 }
 
 func TestDeleteInTransaction(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		kept := upload(t, e.svc, alice, "kept")
@@ -342,7 +343,7 @@ func sendSigned(t *testing.T, req filesystem.SignedRequest, body []byte) string 
 }
 
 func TestS3DirectPut(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		r, err := e.svc.Prepare(ctx, alice, filesystem.FileInput{Disk: "s3", Filename: "a.txt", ContentType: "text/plain", Size: 5})
@@ -370,7 +371,7 @@ func TestS3DirectPut(t *testing.T) {
 }
 
 func TestS3Multipart(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		data := bytes.Repeat([]byte("x"), 16<<20+100)
@@ -416,7 +417,7 @@ func TestS3Multipart(t *testing.T) {
 }
 
 func TestS3CleanupAbortsMultipart(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		r, err := e.svc.Prepare(ctx, alice, filesystem.FileInput{Disk: "s3", Filename: "big.bin", Size: 20 << 20})

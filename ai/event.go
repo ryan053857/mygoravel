@@ -15,20 +15,9 @@ const (
 	EventDone       = "done"        // 运行结束，总是最后一个事件，Data 为 Done
 )
 
-// Events 列出各事件的数据类型，传给 rest.RegisterSSE 生成 OpenAPI 文档。
-var Events = map[string]any{
-	EventText:       Text{},
-	EventReasoning:  Text{},
-	EventUser:       Text{},
-	EventToolCall:   ToolCall{},
-	EventToolResult: ToolResult{},
-	EventError:      Error{},
-	EventDone:       Done{},
-}
-
 // Event 是一次运行产生的一个事件。
 type Event struct {
-	// ID 在一次运行中唯一且递增，作为 SSE 事件 ID，客户端重连时用它接上。
+	// ID 在一次运行中唯一且递增，可以作为 SSE 事件 ID，让页面重连时用它接上，见 Run.Events。
 	ID string
 	// Name 是事件名，见 EventText 等常量。
 	Name string
@@ -55,6 +44,8 @@ type ToolResult struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Content string `json:"content"`
+	// Denied 表示调用被 Runs.Reject 拒绝，Content 中是拒绝的理由。
+	Denied bool `json:"denied,omitempty"`
 }
 
 // Error 是运行中的错误。
