@@ -10,6 +10,7 @@
 - [审批](#approval)
 - [在页面中使用](#pages)
 - [部署](#deployment)
+    - [多个实例](#multiple-instances)
 - [测试](#testing)
 
 <a id="introduction"></a>
@@ -147,14 +148,17 @@ func (h *Handlers) Chat(ctx context.Context, in *ChatInput) (*huma.StreamRespons
 // GET /assistant/chat/{id}/stream：断线后接上进行中的回答。
 func (h *Handlers) Resume(ctx context.Context, in *ConversationInput) (*huma.StreamResponse, error) {
     sub, _ := identity.FromContext(ctx)
-    run, _ := h.runs.Get(sub.ID, in.ID)
+    run, err := h.runs.Get(ctx, sub.ID, in.ID)
+    if err != nil {
+        return nil, err
+    }
     return ai.UIResume(run), nil
 }
 
 // POST /assistant/chat/{id}/steer：回答进行中插话。
 func (h *Handlers) Steer(ctx context.Context, in *SteerInput) (*struct{}, error) {
     sub, _ := identity.FromContext(ctx)
-    return nil, h.runs.Steer(sub.ID, in.ID, model.NewUserMessage(in.Body.Text))
+    return nil, h.runs.Steer(ctx, sub.ID, in.ID, model.NewUserMessage(in.Body.Text))
 }
 
 // GET /assistant/chat/{id}/messages：打开页面时加载对话历史。
@@ -266,9 +270,29 @@ return web.SSE(w, r, func(s *web.Stream) error {
 <a id="deployment"></a>
 ## 部署
 
-- **单实例**：运行和它的事件只保存在启动它的进程中。部署多个实例时，同一个对话的请求要落在同一个实例上，例如在负载均衡上按对话 ID 做粘性路由。审批不受这个限制。
 - **停机**：进程停止时，进行中的运行被取消，已经生成的消息保留在对话中，用户可以继续对话。
 - **后台任务**：不需要实时显示的 AI 工作（例如生成摘要、给文章打标签）交给[队列](queue.md)执行，在处理函数中直接调用 trpc-agent-go 的 `runner.Run`。队列任务[至少执行一次](queue.md#introduction)，这些工具需要能安全地重复执行。
+
+<a id="multiple-instances"></a>
+### 多个实例
+
+一次运行在启动它的实例上执行。部署多个实例时，用 `ai.Cluster` 把各实例的 `Runs` 连起来，同一个对话的请求就可以落在任何一个实例上：
+
+```go
+runs := ai.NewRuns("blog", agent, sessions,
+    ai.RequireApproval(publish),
+    ai.Cluster(hub, locker),
+)
+```
+
+`hub` 是[广播](broadcasting.md#creating-the-hub)的 Hub，`locker` 是[原子锁](locks.md)，都在 `open` 中创建，所有实例必须使用相同的后端，例如数据库或 Redis。
+
+- 对话正在运行时，运行所在的实例持有这个对话的锁。其他实例上的 `Submit`、`Start` 因此返回 `ai.ErrBusy`，不会同时运行两次。
+- 运行的事件每 50 毫秒批量广播一次。其他实例上的 `Runs.Get` 先向运行所在的实例要一份目前为止的快照，再接收之后的事件，返回的 `Run` 用法与本地的相同；`Steer` 和 `Cancel` 转发给运行所在的实例，`Steer` 等待它的回执。
+- 运行所在的实例意外退出时，锁在 30 秒内过期；镜像 15 秒收不到消息就以一个 `error` 事件结束，浏览器重新续传时得到最新的状态。
+- 广播使用数据库后端时，事件多一个轮询间隔（100 毫秒）的延迟。
+
+审批读写的是对话存储，本来就不依赖实例。
 
 <a id="testing"></a>
 ## 测试
