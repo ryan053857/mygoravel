@@ -15,17 +15,17 @@ type Route struct {
 	Path        string
 	OperationID string
 	Summary     string
-	// Access 是路由声明的访问策略，取值见 Access* 常量。
+	// Access 是路由声明的访问策略：Access* 常量之一，或 RequireAuth 声明的方案名（例如 bearer、session）。
 	// 它不推断 chi 中间件的行为；没有可识别声明的路由一律为 AccessUnknown。
 	Access string
-	// Scopes 是 AccessBearer 路由要求调用者具备的全部 scope。
+	// Scopes 是需要认证的路由要求调用者具备的全部 scope。
 	Scopes []string
 }
 
 // Route.Access 的取值。
 const (
 	AccessPublic  = "public"  // 通过 Public 显式公开
-	AccessBearer  = "bearer"  // 通过 RequireBearer 要求认证
+	AccessBearer  = "bearer"  // 通过 RequireBearer 要求认证；其他认证方案的取值为其方案名
 	AccessDocs    = "docs"    // Huma 自动注册的文档端点，例如 /docs、/openapi.json
 	AccessUnknown = "unknown" // 无法从声明确定策略，不表示允许匿名访问
 )
@@ -90,11 +90,9 @@ func routeAccess(op *huma.Operation) (string, []string) {
 	if len(op.Security) == 0 {
 		return AccessPublic, nil
 	}
-	if len(op.Security) == 1 && len(op.Security[0]) == 1 && op.Metadata["mygoravel.bearer"] == true {
-		if _, ok := op.Security[0]["bearer"]; ok {
-			scopes, _ := op.Extensions["x-required-scopes"].([]string)
-			return AccessBearer, slices.Clone(scopes)
-		}
+	if name := authScheme(op); name != "" {
+		scopes, _ := op.Extensions["x-required-scopes"].([]string)
+		return name, slices.Clone(scopes)
 	}
 	return AccessUnknown, nil
 }

@@ -15,10 +15,10 @@ func Register[I, O any](api *API, op huma.Operation, newHandler func() func(cont
 		panic("rest: nil API")
 	}
 	if op.Security == nil {
-		panic("rest: endpoint must explicitly declare Public or RequireBearer")
+		panic("rest: endpoint must explicitly declare Public, RequireBearer or another RequireAuth scheme")
 	}
-	if len(op.Security) > 0 && op.Metadata["mygoravel.bearer"] != true {
-		panic("rest: bearer security must bind runtime validation")
+	if len(op.Security) > 0 && authScheme(&op) == "" {
+		panic("rest: security must be declared through RequireAuth so it binds runtime validation")
 	}
 	// 从 OpenAPI 路径表检查操作 ID 和路由冲突。
 	for path, item := range api.OpenAPI().Paths {
