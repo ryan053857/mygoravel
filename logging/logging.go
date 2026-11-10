@@ -34,6 +34,9 @@ const (
 type Config struct {
 	// Level 支持 debug、info、warn、error，以及 info+2 这类偏移写法。
 	Level slog.Level `yaml:"level"`
+	// Levels 按 component 字段覆盖 Level，例如 {http: warn, billing: debug}；
+	// 框架组件的 component 见 docs/logging.md。
+	Levels map[string]slog.Level `yaml:"levels"`
 	// Format 为 json 或 text，空值视为 json。
 	Format string `yaml:"format"`
 	// AddSource 在日志中附加源码位置。
@@ -65,6 +68,9 @@ func (c Config) Validate() error {
 	}
 	if _, err := c.location(); err != nil {
 		return fmt.Errorf("time_zone: %w", err)
+	}
+	if _, ok := c.Levels[""]; ok {
+		return fmt.Errorf("levels: component name must not be empty")
 	}
 	return nil
 }
@@ -105,7 +111,7 @@ func Fanout(handlers ...slog.Handler) Option {
 
 // New 按 cfg 构造 *slog.Logger，处理链由外到内为：
 //
-//	context 字段 → service / version → Pipe 中间件 → 格式化 → 基础输出 + Fanout 输出
+//	context 字段 → 组件级别 → service / version → Pipe 中间件 → 格式化 → 基础输出 + Fanout 输出
 //
 // 格式化默认包含 ErrorFormatter；cfg.TimeZone 非空时还会把时间值转换到该时区。
 // New 不修改 slog.Default，通常在入口处用 slog.SetDefault 安装它。cfg 不合法时 panic。
@@ -141,6 +147,9 @@ func New(cfg Config, opts ...Option) *slog.Logger {
 	if len(attrs) > 0 {
 		h = h.WithAttrs(attrs)
 	}
+	if len(cfg.Levels) > 0 {
+		h = &componentHandler{inner: h, root: cfg.Level, levels: cfg.Levels}
+	}
 	return slog.New(NewContextHandler(h))
 }
 
@@ -150,7 +159,12 @@ func baseHandler(cfg Config, loc *time.Location) slog.Handler {
 	if w == nil {
 		w = os.Stderr
 	}
-	hopts := &slog.HandlerOptions{AddSource: cfg.AddSource, Level: cfg.Level}
+	// 组件级别可能低于 Level，基础输出放行到最低的那个，由 componentHandler 负责过滤。
+	level := cfg.Level
+	for _, lv := range cfg.Levels {
+		level = min(level, lv)
+	}
+	hopts := &slog.HandlerOptions{AddSource: cfg.AddSource, Level: level}
 	if loc != nil {
 		hopts.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
 			if len(groups) == 0 && a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {

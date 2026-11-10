@@ -53,7 +53,7 @@ type Options struct {
 
 // New 创建 chi + Huma API，并让未匹配的路由与方法返回 Problem Details。
 func New(opts Options) *API {
-	opts.Logger = logging.Or(opts.Logger)
+	opts.Logger = logging.Or(opts.Logger).With(logging.AttrComponent, "http")
 	if opts.Title == "" {
 		opts.Title = "API"
 	}

@@ -2,6 +2,7 @@
 
 - [简介](#introduction)
 - [创建日志器](#creating-a-logger)
+    - [按组件设置级别](#component-levels)
 - [写入日志](#writing-log-messages)
 - [上下文信息](#contextual-information)
     - [请求关联](#request-correlation)
@@ -49,6 +50,7 @@ logs:
 | `service` | 附加到每条日志的 `service` 字段，为空时省略 | 空 |
 | `version` | 附加到每条日志的 `version` 字段 | 构建信息中的模块版本，取不到时省略 |
 | `time_zone` | 日志时间使用的时区，例如 `UTC`、`Asia/Shanghai`；同时作用于字段中的时间值 | 本地时区 |
+| `levels` | 按组件覆盖 `level`，见[按组件设置级别](#component-levels) | 无 |
 
 把 `logging.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值并校验），然后在入口处构造并安装：
 
@@ -70,6 +72,40 @@ cfg.Logs.Writer = cmd.ErrOrStderr()
 
 > [!NOTE]
 > `logging.New` 本身不修改全局状态，是否安装为全局日志器由入口决定。框架组件的日志器参数为 `nil` 时使用 `slog.Default()`，因此也可以只给某个组件传入单独的日志器，例如 `rest.Options{Logger: auditLogger}`；需要关闭某个组件的日志时，传入 `slog.New(slog.DiscardHandler)`。
+
+<a id="component-levels"></a>
+### 按组件设置级别
+
+有时只想调整一部分日志的级别：排查业务问题时打开 `debug`，又不想被访问日志刷屏；或者全局只看 `warn`，但保留某个模块的 `info`。`levels` 按日志的 `component` 字段覆盖全局的 `level`：
+
+```yaml
+logs:
+  level: debug
+  levels:
+    http: warn       # 访问日志只保留 4xx、5xx
+    billing: info
+```
+
+没有 `component` 字段，或者 `component` 不在 `levels` 中的日志，使用全局的 `level`。覆盖的级别可以比全局级别更高，也可以更低。
+
+框架组件记录的日志都带有 `component` 字段：
+
+| component | 日志 |
+| --- | --- |
+| `http` | 访问日志、panic 堆栈、`5xx` 诊断、认证后端故障、缺失翻译、平滑停止 |
+
+你自己的模块通过 `With` 或 context 设置 `component`：
+
+```go
+// 服务持有的日志器
+logger := slog.Default().With(logging.AttrComponent, "billing")
+
+// 或者放进 context，之后用这个 ctx 记录的日志都属于该组件
+ctx = logging.WithAttrs(ctx, slog.String(logging.AttrComponent, "billing"))
+```
+
+> [!NOTE]
+> 只写在单条日志里的 `component`（例如 `slog.Debug("…", "component", "billing")`）只能让级别**更严格**：比全局级别更低的日志在 slog 判断是否记录时就已经被丢弃了。需要放宽级别的组件，请用上面两种方式设置。
 
 <a id="writing-log-messages"></a>
 ## 写入日志
@@ -164,12 +200,13 @@ slog.ErrorContext(ctx, "sync feed failed", "feed_id", id, "error", err)
 
 ```text
 slog.Logger
- └─ context 字段           request_id 等（框架，始终在最外层）
-     └─ service / version  固定字段（框架）
-         └─ Pipe           Handler 中间件：过滤、采样（logging.Pipe）
-             └─ 格式化      ErrorFormatter + 你的 Formatter（logging.Format）
-                 └─ 分发 ─┬─ 基础输出：Writer，json / text
-                          └─ 追加输出（logging.Fanout）
+ └─ context 字段             request_id 等（框架，始终在最外层）
+     └─ 组件级别              按 component 应用 levels
+         └─ service / version 固定字段（框架）
+             └─ Pipe          Handler 中间件：过滤、采样（logging.Pipe）
+                 └─ 格式化     ErrorFormatter + 你的 Formatter（logging.Format）
+                     └─ 分发 ─┬─ 基础输出：Writer，json / text
+                              └─ 追加输出（logging.Fanout）
 ```
 
 context 字段和格式化都在分发之前完成，所以**每个输出拿到的内容完全一致**：都带有 `request_id`，`error` 的格式相同，脱敏规则也同样生效。

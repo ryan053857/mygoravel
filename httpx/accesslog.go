@@ -20,7 +20,7 @@ import (
 // context 字段提供。cfg 不合法时 panic；logger 为 nil 时使用 slog.Default()。
 func AccessLog(cfg AccessLogConfig, logger *slog.Logger) func(http.Handler) http.Handler {
 	mustValid("AccessLog", cfg.Validate())
-	logged := slogchi.NewWithConfig(logging.Or(logger), slogchi.Config{
+	logged := slogchi.NewWithConfig(componentLogger(logger), slogchi.Config{
 		DefaultLevel:       slog.LevelInfo,
 		ClientErrorLevel:   slog.LevelWarn,
 		ServerErrorLevel:   slog.LevelError,
@@ -47,6 +47,11 @@ func AccessLog(cfg AccessLogConfig, logger *slog.Logger) func(http.Handler) http
 			h.ServeHTTP(w, r)
 		})
 	}
+}
+
+// componentLogger 解析可选的 logger，并标记 component=http，可用 logs.levels.http 单独调整级别。
+func componentLogger(logger *slog.Logger) *slog.Logger {
+	return logging.Or(logger).With(logging.AttrComponent, "http")
 }
 
 // implicitOK 在处理器未写出任何响应时显式写出 200，使访问日志记录的状态码与客户端收到的一致。

@@ -38,6 +38,8 @@ logs:
   level: debug
   format: text
   time_zone: UTC
+  levels:
+    http: warn
 database:
   dsn: postgres://localhost/app
 `)
@@ -54,7 +56,7 @@ database:
 		!reflect.DeepEqual(cfg.HTTP.AccessLog.IgnorePaths, []string{"/healthz"}) {
 		t.Fatalf("http=%+v", cfg.HTTP)
 	}
-	if cfg.Logs.Level != slog.LevelDebug || cfg.Logs.Format != logging.FormatText || cfg.Logs.TimeZone != "UTC" {
+	if cfg.Logs.Level != slog.LevelDebug || cfg.Logs.Format != logging.FormatText || cfg.Logs.TimeZone != "UTC" || cfg.Logs.Levels["http"] != slog.LevelWarn {
 		t.Fatalf("logs=%+v", cfg.Logs)
 	}
 }

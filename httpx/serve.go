@@ -8,8 +8,6 @@ import (
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/ryan053857/mygoravel/logging"
 )
 
 // ServeOptions 是 Serve 的运行时依赖。
@@ -58,7 +56,7 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 		_ = ln.Close()
 		return errors.Wrap(err, "httpx: config")
 	}
-	logger := logging.Or(opts.Logger)
+	logger := componentLogger(opts.Logger)
 	srv := cfg.server(handler)
 
 	// 所有请求 context 派生自 requestRoot，排空超时或结束后统一取消。

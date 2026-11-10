@@ -153,3 +153,34 @@ func TestRecorder(t *testing.T) {
 		t.Fatal("Reset kept records")
 	}
 }
+
+func TestLevelsOverrideByComponent(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logging.New(logging.Config{Writer: &buf, Level: slog.LevelInfo, Levels: map[string]slog.Level{
+		"http":    slog.LevelWarn,
+		"billing": slog.LevelDebug,
+	}})
+	httpLog := logger.With(logging.AttrComponent, "http")
+	httpLog.Info("http info")  // 低于 http 的 warn，丢弃
+	httpLog.Warn("http warn")  // 保留
+	logger.Debug("root debug") // 低于全局 info，丢弃
+	logger.Info("root info")   // 保留
+	billing := logging.WithAttrs(context.Background(), slog.String(logging.AttrComponent, "billing"))
+	logger.DebugContext(billing, "billing debug")                             // context 中的 component 放宽到 debug
+	logger.Info("inline http info", logging.AttrComponent, "http")            // 记录自身的 component 只能收紧
+	logger.WithGroup("g").With(logging.AttrComponent, "http").Info("grouped") // 分组内的同名字段不算 component
+
+	for _, want := range []string{"http warn", "root info", "billing debug", "grouped"} {
+		if !strings.Contains(buf.String(), `"msg":"`+want+`"`) {
+			t.Fatalf("missing %q:\n%s", want, buf.String())
+		}
+	}
+	for _, unwanted := range []string{"http info", "root debug", "inline http info"} {
+		if strings.Contains(buf.String(), `"msg":"`+unwanted+`"`) {
+			t.Fatalf("unexpected %q:\n%s", unwanted, buf.String())
+		}
+	}
+	if (logging.Config{Levels: map[string]slog.Level{"": slog.LevelDebug}}).Validate() == nil {
+		t.Fatal("accepted empty component")
+	}
+}

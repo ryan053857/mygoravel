@@ -175,10 +175,11 @@ http:
 `AccessLog` 基于 [slog-chi](https://github.com/samber/slog-chi)，在每个请求结束后记录一条消息为 `http request` 的日志：
 
 ```json
-{"time":"…","level":"WARN","msg":"http request","service":"blog","request":{"time":"…","method":"PUT","host":"api.example.com","path":"/articles/0f8c","query":"","params":{"id":"0f8c"},"route":"/articles/{id}","referer":"","ip":"203.0.113.7:51234","length":0},"response":{"time":"…","latency":32209,"status":409,"length":0},"code":"article.slug_taken","request_id":"9F2K…"}
+{"time":"…","level":"WARN","msg":"http request","service":"blog","component":"http","request":{"time":"…","method":"PUT","host":"api.example.com","path":"/articles/0f8c","query":"","params":{"id":"0f8c"},"route":"/articles/{id}","referer":"","ip":"203.0.113.7:51234","length":0},"response":{"time":"…","latency":32209,"status":409,"length":0},"code":"article.slug_taken","request_id":"9F2K…"}
 ```
 
 - 消息固定为 `http request`，用 `msg = "http request"` 就能筛出所有访问日志；
+- 带有 `component: http` 字段，可以用 `logs.levels.http` 单独调整级别，见[按组件设置级别](logging.md#component-levels)；
 - 级别随状态码变化：`5xx` 为 `ERROR`，`4xx` 为 `WARN`，其他为 `INFO`；
 - `request.route` 是路由模板，适合按接口聚合统计；
 - `request.ip` 是 [`ClientIP`](#trusted-proxies) 解析后的客户端地址；

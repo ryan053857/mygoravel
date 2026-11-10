@@ -91,3 +91,17 @@ func TestAccessLogHeadersCanBeRedactedByKey(t *testing.T) {
 		t.Fatal(buf.String())
 	}
 }
+
+func TestHTTPComponentLevel(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logging.New(logging.Config{Writer: &buf, Levels: map[string]slog.Level{"http": slog.LevelWarn}})
+	router := chi.NewRouter()
+	router.Use(httpx.Defaults(httpx.DefaultConfig(), logger)...)
+	router.Get("/ok", func(http.ResponseWriter, *http.Request) {})
+	router.Get("/missing", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) })
+	serve(router, "GET", "/ok")
+	serve(router, "GET", "/missing")
+	if strings.Count(buf.String(), "\n") != 1 || !strings.Contains(buf.String(), `"component":"http"`) || !strings.Contains(buf.String(), `"status":404`) {
+		t.Fatal(buf.String())
+	}
+}

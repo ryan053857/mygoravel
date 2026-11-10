@@ -111,7 +111,7 @@ func ClientIP(cfg ClientIPConfig) func(http.Handler) http.Handler {
 // Recover 恢复处理器 panic 并记录堆栈：尚未写出响应时返回通用 500，否则中止连接。
 // logger 为 nil 时使用 slog.Default()。
 func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
-	logger = logging.Or(logger)
+	logger = componentLogger(logger)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rw := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
