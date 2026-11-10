@@ -214,7 +214,7 @@ Bearer token 适合服务端调用方和移动端。浏览器中的前端更常�
 <a id="login-and-logout"></a>
 ### 登录与登出
 
-登录接口校验密码，然后调用 `session.Login` 把主体记入会话。下面是 `adminhttp` 包中的登录和登出处理器，`users` 是应用自己的用户服务，`sessions` 由入口传入：
+登录接口先校验密码（见[哈希](hashing.md#hashing-passwords)），然后调用 `session.Login` 把主体记入会话。下面是 `adminhttp` 包中的登录和登出处理器，`users` 是应用自己的用户服务，`sessions` 由入口传入：
 
 ```go
 type LoginInput struct {

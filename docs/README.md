@@ -45,6 +45,7 @@
 
 - [认证](authentication.md)
 - [授权](authorization.md)
+- [哈希](hashing.md)
 
 ## 数据库
 

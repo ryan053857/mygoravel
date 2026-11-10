@@ -29,6 +29,7 @@ require (
 	github.com/uptrace/bun/dialect/pgdialect v1.3.0
 	github.com/wneessen/go-mail v0.8.2
 	go.yaml.in/yaml/v4 v4.0.0
+	golang.org/x/crypto v0.58.0
 	golang.org/x/term v0.48.0
 	golang.org/x/text v0.43.0
 )
@@ -74,7 +75,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.shabbyrobe.org/gocovmerge v0.0.0-20230507111327-fa4f82cfbf4d // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/tools v0.51.0 // indirect
