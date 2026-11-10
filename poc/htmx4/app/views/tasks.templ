@@ -1,0 +1,12 @@
+package views
+
+templ Tasks(timeout int) {
+	@Layout("任务", timeout) {
+		<button id="run" hx-post="/tasks" hx-target="#progress" hx-swap="beforeend">运行</button>
+		<ol id="progress"></ol>
+	}
+}
+
+templ Step(text string) {
+	<li class="step">{ text }</li>
+}

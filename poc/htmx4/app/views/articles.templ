@@ -1,0 +1,61 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/ryan053857/mygoravel/poc/htmx4/web"
+)
+
+type Article struct {
+	ID        string
+	Title     string
+	Slug      string
+	Priority  int
+	Published bool
+}
+
+type ArticleForm struct {
+	Title     string `json:"title" minLength:"1" maxLength:"50"`
+	Slug      string `json:"slug" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" patternDescription:"小写字母、数字和连字符"`
+	Priority  int    `json:"priority" minimum:"0" maximum:"10"`
+	Published bool   `json:"published"`
+}
+
+templ ArticleList(items []Article) {
+	@Layout("文章", 0) {
+		<ul id="articles">
+			for _, a := range items {
+				<li><a href={ templ.SafeURL("/admin/articles/" + a.ID + "/edit") }>{ a.Title }</a> <span>{ a.Slug }</span></li>
+			}
+		</ul>
+	}
+}
+
+templ ArticleEdit(id string, in ArticleForm, errs web.FieldErrors) {
+	@Layout("编辑文章", 0) {
+		@ArticleFormView(id, in, errs)
+	}
+}
+
+templ fieldError(errs web.FieldErrors, field string) {
+	if msg, ok := errs[field]; ok {
+		<p class="error" id={ "error-" + field }>{ msg }</p>
+	}
+}
+
+templ ArticleFormView(id string, in ArticleForm, errs web.FieldErrors) {
+	<form id="article-form" hx-put={ "/admin/articles/" + id } hx-swap="outerMorph" x-data="{ advanced: false, count: 0 }" x-init="count = $refs.title.value.length">
+		<label>标题 <input name="title" id="title" value={ in.Title } x-ref="title" @input="count = $event.target.value.length"/></label>
+		<span id="title-count" x-text="count"></span>
+		@fieldError(errs, "title")
+		<label>Slug <input name="slug" id="slug" value={ in.Slug }/></label>
+		@fieldError(errs, "slug")
+		<button type="button" id="toggle-advanced" @click="advanced = !advanced">高级选项</button>
+		<div id="advanced" x-show="advanced">
+			<label>优先级 <input name="priority" id="priority" value={ strconv.Itoa(in.Priority) }/></label>
+			@fieldError(errs, "priority")
+		</div>
+		<label><input type="checkbox" name="published" id="published" checked?={ in.Published }/> 发布</label>
+		<button id="save">保存</button>
+	</form>
+}

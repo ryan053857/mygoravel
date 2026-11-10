@@ -1,0 +1,41 @@
+package views
+
+type Message struct {
+	ID     string
+	Author string
+	Body   string
+}
+
+templ Room(room string, msgs []Message, timeout int) {
+	@Layout("聊天室", timeout) {
+		<div id="messages">
+			for _, m := range msgs {
+				@MessageItem(m)
+			}
+		</div>
+		<div id="typing"></div>
+		<div id="stream" hx-sse:connect={ "/rooms/" + room + "/events" }></div>
+		<form id="chat-form" hx-post={ "/rooms/" + room + "/messages" } hx-swap="none" x-data x-on:htmx:after:request.self="$el.reset()">
+			<input name="body" id="chat-input" autocomplete="off" hx-post={ "/rooms/" + room + "/typing" } hx-trigger="input throttle:1s" hx-swap="none"/>
+			<button id="send">发送</button>
+		</form>
+	}
+}
+
+templ MessageItem(m Message) {
+	<p class="message" id={ "msg-" + m.ID }><b>{ m.Author }</b>: { m.Body }</p>
+}
+
+templ NewMessage(m Message) {
+	<hx-partial hx-target="#messages" hx-swap="beforeend">
+		@MessageItem(m)
+	</hx-partial>
+}
+
+templ Typing(names string) {
+	<hx-partial hx-target="#typing">
+		if names != "" {
+			<span id="typing-text">{ names } 正在输入…</span>
+		}
+	</hx-partial>
+}

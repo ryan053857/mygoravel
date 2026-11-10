@@ -1,0 +1,61 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/ryan053857/mygoravel/poc/htmx4/web"
+)
+
+templ Layout(title string, timeout int) {
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+		<head>
+			<meta charset="utf-8"/>
+			if timeout > 0 {
+				<meta name="htmx-config" content={ `{"defaultTimeout":` + strconv.Itoa(timeout) + `}` }/>
+			}
+			<title>{ title }</title>
+			@web.Scripts()
+		</head>
+		<body>
+			<nav><a href="/">首页</a> <a href="/admin/articles">文章</a> <a href="/rooms/lobby">聊天室</a> <a href="/tasks">任务</a></nav>
+			<div id="flash"></div>
+			<main id="main">
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+templ ErrorPage(status int, msg string) {
+	@Layout("出错了", 0) {
+		<h1 id="error-status">{ strconv.Itoa(status) }</h1>
+		<p id="error-message">{ msg }</p>
+	}
+}
+
+templ ErrorFragment(status int, msg string) {
+	<p id="error-fragment" data-status={ strconv.Itoa(status) }>{ msg }</p>
+}
+
+templ Home(user string) {
+	@Layout("首页", 0) {
+		<h1 id="home">你好，{ user }</h1>
+		<button id="admin-only" hx-get="/admin/only" hx-target="#main">仅管理员</button>
+		<button id="redirect-303" hx-post="/redirect-test" hx-target="#main">303 跳转</button>
+		<form method="post" action="/logout"><button id="logout">退出</button></form>
+	}
+}
+
+templ Login(next, email string, failed bool) {
+	@Layout("登录", 0) {
+		<form id="login-form" method="post" action={ templ.SafeURL("/login?next=" + next) }>
+			<input name="email" id="email" value={ email }/>
+			<input name="password" id="password" type="password"/>
+			if failed {
+				<p id="login-error">邮箱或密码错误</p>
+			}
+			<button id="login">登录</button>
+		</form>
+	}
+}
