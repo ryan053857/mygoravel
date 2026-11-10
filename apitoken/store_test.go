@@ -192,6 +192,7 @@ func TestCreatePersonal(t *testing.T) {
 		s, c := newStore(t, driver)
 		for name, call := range map[string]func() error{
 			"empty name":    func() error { _, err := s.Create(ctx, alice, " ", nil, time.Time{}); return err },
+			"long name":     func() error { _, err := s.Create(ctx, alice, strings.Repeat("名", 256), nil, time.Time{}); return err },
 			"past expiry":   func() error { _, err := s.Create(ctx, alice, "CI", nil, c.now()); return err },
 			"spaced scope":  func() error { _, err := s.Create(ctx, alice, "CI", []string{"a b"}, time.Time{}); return err },
 			"empty scope":   func() error { _, err := s.Create(ctx, alice, "CI", []string{""}, time.Time{}); return err },

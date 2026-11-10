@@ -64,10 +64,13 @@ type Token struct {
 // 空闲过期的精度相应为一分钟。
 const touchInterval = time.Minute
 
-const maxUserAgent = 255
+const (
+	maxName      = 255
+	maxUserAgent = 255
+)
 
 // Store 是基于 Bun 的 token 存储，查询兼容 PostgreSQL、MySQL 与 SQLite，
-// Migrations 提供 PostgreSQL 与 SQLite 的表结构。可以并发使用。
+// Migrations 提供三种数据库的表结构。可以并发使用。
 //
 // Store 不在后台清理过期 token：过期 token 校验不通过，由应用定时调用 Cleanup 删除。
 type Store struct {
@@ -120,13 +123,13 @@ func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (stri
 }
 
 // Create 为 sub 创建个人访问令牌，返回 token 明文，明文只在这里返回一次。
-// name 用于在令牌列表中辨认，不能为空；expiresAt 为零值表示不过期，否则必须晚于当前时间。
+// name 用于在令牌列表中辨认，长度为 1 到 255 个字符；expiresAt 为零值表示不过期，否则必须晚于当前时间。
 // scopes 由调用方决定，通常应当是 sub 已有 scope 的子集。
 func (s *Store) Create(ctx context.Context, sub identity.Subject, name string, scopes []string, expiresAt time.Time) (string, error) {
 	now := s.now().UTC()
 	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", errors.New("apitoken: name is required")
+	if name == "" || len([]rune(name)) > maxName {
+		return "", errors.Newf("apitoken: name must be 1 to %d characters", maxName)
 	}
 	if !expiresAt.IsZero() && !expiresAt.After(now) {
 		return "", errors.New("apitoken: expiresAt must be in the future")
