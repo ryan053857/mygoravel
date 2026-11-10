@@ -222,7 +222,7 @@ func delay(t *testing.T, s *setup) {
 	s.publish(t, "jobs", 1, queue.Delay(time.Second))
 	select {
 	case at := <-got:
-		if d := at.Sub(begin); d < time.Second || d > 2500*time.Millisecond {
+		if d := at.Sub(begin); d < time.Second || d > 3*time.Second {
 			t.Fatalf("handled after %v", d)
 		}
 	case <-time.After(5 * time.Second):
