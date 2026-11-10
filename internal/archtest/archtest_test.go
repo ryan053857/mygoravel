@@ -24,9 +24,13 @@ var dependencies = map[string][]string{
 	"mail":       {"i18n"},
 	"httpx":      {"errorx", "identity", "i18n", "logging"},
 	"session":    {"identity", "httpx", "logging"},
+	"lock":       {},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "session"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "session", "lock"},
 }
+
+// 基础包不引用传输、数据库和命令组件。
+var foundation = []string{"cleanup", "config", "errorx", "i18n", "identity"}
 
 // 传输、数据库和命令组件的包前缀。
 var infrastructure = []string{
@@ -70,7 +74,7 @@ func importViolation(from, to string) string {
 			return "import reverses the framework dependency direction"
 		}
 	}
-	if len(allowed) == 0 {
+	if slices.Contains(foundation, fromRoot) {
 		for _, prefix := range infrastructure {
 			if under(to, prefix) {
 				return "foundation package imports an infrastructure component"
@@ -123,6 +127,8 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/session", module + "/httpx/rest", true},
 		{module + "/httpx", module + "/session", false},
 		{module + "/session", module + "/database", false},
+		{module + "/lock", "github.com/uptrace/bun", true},
+		{module + "/lock", module + "/database", false},
 		{module + "/cleanup", "github.com/jackc/pgx/v5", false},
 		{module + "/config", "net/http", false},
 		{module + "/i18n", "github.com/spf13/cobra", false},
