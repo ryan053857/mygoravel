@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +47,7 @@ type Runs struct {
 	logger   *slog.Logger
 
 	runnerOpts []runner.Option
+	cluster    *cluster // 多实例协作，见 Cluster；nil 表示单实例
 
 	mu     sync.Mutex
 	runs   map[session.Key]*Run
@@ -97,15 +96,26 @@ func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Optio
 	return rs
 }
 
-// Close 取消所有运行并等待它们结束，然后关闭 runner。会话存储由调用方关闭。
+// Close 取消本实例上的所有运行并等待它们结束，然后关闭 runner。会话存储由调用方关闭。
 func (rs *Runs) Close() error {
 	rs.mu.Lock()
 	rs.closed = true
 	for _, r := range rs.runs {
-		r.cancel()
+		if r.remote != nil {
+			r.remote.close()
+		} else {
+			r.cancel()
+		}
 	}
 	rs.mu.Unlock()
 	rs.wg.Wait()
+	rs.mu.Lock()
+	for _, r := range rs.runs {
+		if r.own != nil {
+			r.own.close()
+		}
+	}
+	rs.mu.Unlock()
 	return rs.runner.Close()
 }
 
@@ -121,8 +131,12 @@ func (rs *Runs) Send(ctx context.Context, userID, sessionID string, msg model.Me
 		if !errors.Is(err, ErrBusy) {
 			return r, err
 		}
-		if r, ok := rs.Get(userID, sessionID); ok {
-			err := r.Steer(msg)
+		r, err = rs.Get(ctx, userID, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if r != nil {
+			err := r.Steer(ctx, msg)
 			if err == nil {
 				return r, nil
 			}
@@ -140,7 +154,7 @@ func (rs *Runs) Send(ctx context.Context, userID, sessionID string, msg model.Me
 // 等待审批时返回 ErrAwaitingApproval。
 func (rs *Runs) Start(ctx context.Context, userID, sessionID string, msg model.Message, opts ...agent.RunOption) (*Run, error) {
 	key := rs.key(userID, sessionID)
-	if r, ok := rs.Get(userID, sessionID); ok && !r.isFinished() {
+	if rs.localBusy(key) {
 		return nil, ErrBusy.New()
 	}
 	if len(rs.approval) > 0 {
@@ -157,15 +171,35 @@ func (rs *Runs) Start(ctx context.Context, userID, sessionID string, msg model.M
 
 // start 开始运行。results 非空表示审批之后继续：运行先发出这些调用结果，
 // 上一次运行停下时还没送达的插话消息随之送达。
-func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, opts []agent.RunOption, results []Event) (*Run, error) {
+func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, opts []agent.RunOption, results []Event) (_ *Run, err error) {
+	if rs.localBusy(key) {
+		return nil, ErrBusy.New()
+	}
+	// 多实例时先取得对话的锁：其他实例上正在运行时返回 ErrBusy。
+	var own *owner
+	if rs.cluster != nil {
+		if own, err = rs.cluster.acquire(ctx, key); err != nil {
+			return nil, err
+		}
+		defer func() {
+			if err != nil {
+				own.release()
+			}
+		}()
+	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	if rs.closed {
 		return nil, errors.New("ai: runs closed")
 	}
 	prev, ok := rs.runs[key]
-	if ok && !prev.isFinished() {
+	if ok && prev.remote == nil && !prev.isFinished() {
 		return nil, ErrBusy.New()
+	}
+	if ok && prev.remote != nil {
+		// 取得了锁，说明镜像的那次运行已经结束。
+		prev.remote.close()
+		prev = nil
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r := &Run{
@@ -193,38 +227,69 @@ func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, o
 		opts = append(opts, agent.WithToolExecutionFilter(tool.NewExcludeToolNamesFilter(names...)))
 	}
 	rs.runs[key] = r
+	if own != nil {
+		own.serve(r)
+	}
 	rs.wg.Add(1)
 	go func() {
 		defer rs.wg.Done()
 		r.loop(runCtx, msg, opts)
 		cancel()
+		if own != nil {
+			own.finish()
+		}
 		time.AfterFunc(rs.keep, func() {
 			rs.mu.Lock()
 			// 停下等待审批时还没送达的插话消息保存在运行中，审批之后送达，所以这样的运行不删除。
-			if rs.runs[key] == r && !r.hasSteered() {
+			removed := rs.runs[key] == r && !r.hasSteered()
+			if removed {
 				delete(rs.runs, key)
 			}
 			rs.mu.Unlock()
+			if removed && own != nil {
+				own.close()
+			}
 		})
 	}()
 	return r, nil
 }
 
-// Get 返回对话当前的运行，或者刚结束、仍在保留期内的运行。
-func (rs *Runs) Get(userID, sessionID string) (*Run, bool) {
+// localBusy 报告本实例上是否有这个对话正在进行的运行。
+func (rs *Runs) localBusy(key session.Key) bool {
 	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	r, ok := rs.runs[rs.key(userID, sessionID)]
-	return r, ok
+	r, ok := rs.runs[key]
+	rs.mu.Unlock()
+	return ok && r.remote == nil && !r.isFinished()
+}
+
+// Get 返回对话当前的运行，或者刚结束、仍在保留期内的运行；没有时返回 nil。
+//
+// 配置了 Cluster 时，运行在其他实例上也能取得：返回的 Run 是它的镜像，事件经由广播送达，
+// Steer 和 Cancel 转发给运行所在的实例。
+func (rs *Runs) Get(ctx context.Context, userID, sessionID string) (*Run, error) {
+	key := rs.key(userID, sessionID)
+	rs.mu.Lock()
+	r, ok := rs.runs[key]
+	rs.mu.Unlock()
+	if ok && (r.remote == nil || !r.isFinished()) {
+		return r, nil
+	}
+	if rs.cluster == nil {
+		return r, nil
+	}
+	return rs.cluster.mirror(ctx, rs, key)
 }
 
 // Steer 把消息插入对话正在进行的运行，见 Run.Steer。对话没有在运行时返回 ErrFinished。
-func (rs *Runs) Steer(userID, sessionID string, msg model.Message) error {
-	r, ok := rs.Get(userID, sessionID)
-	if !ok {
+func (rs *Runs) Steer(ctx context.Context, userID, sessionID string, msg model.Message) error {
+	r, err := rs.Get(ctx, userID, sessionID)
+	if err != nil {
+		return err
+	}
+	if r == nil {
 		return ErrFinished
 	}
-	return r.Steer(msg)
+	return r.Steer(ctx, msg)
 }
 
 // Pending 从会话存储读出对话中等待审批的工具调用，不依赖运行所在的进程。
@@ -267,7 +332,7 @@ func (rs *Runs) Reject(ctx context.Context, userID, sessionID, callID, reason st
 }
 
 func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opts []agent.RunOption, result func(ToolCall) string) (*Run, error) {
-	if r, ok := rs.Get(key.UserID, key.SessionID); ok && !r.isFinished() {
+	if rs.localBusy(key) {
 		return nil, ErrBusy.New()
 	}
 	sess, pending, err := rs.pending(ctx, key)
@@ -400,6 +465,8 @@ type Run struct {
 	key    session.Key
 	rs     *Runs
 	cancel context.CancelFunc
+	remote *mirror // 非 nil 表示这是其他实例上的运行的镜像
+	own    *owner  // 配置了 Cluster 时，本实例上的运行在集群中的一面
 
 	mu       sync.Mutex
 	events   []Event
@@ -412,7 +479,10 @@ type Run struct {
 
 // Steer 在运行中途插入一条用户消息。它在当前这批工具调用结束后、下一次请求模型之前进入对话；
 // 如果模型已经在给出最终回答，回答结束后运行会带着这条消息继续。运行已经结束时返回 ErrFinished。
-func (r *Run) Steer(msg model.Message) error {
+func (r *Run) Steer(ctx context.Context, msg model.Message) error {
+	if r.remote != nil {
+		return r.remote.steer(ctx, msg)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.finished {
@@ -445,13 +515,18 @@ func (r *Run) isFinished() bool {
 }
 
 // Events 依次返回 lastEventID 之后的事件，然后等待新的事件，直到运行结束或 ctx 取消。
-// lastEventID 为空或者属于其他运行时，从第一个事件开始。
+// lastEventID 为空或者不属于这次运行时，从第一个事件开始。
 func (r *Run) Events(ctx context.Context, lastEventID string) func(yield func(Event) bool) {
 	next := 0
-	if run, seq, ok := strings.Cut(lastEventID, "."); ok && run == r.ID {
-		if n, err := strconv.Atoi(seq); err == nil {
-			next = n + 1
+	if lastEventID != "" {
+		r.mu.Lock()
+		for i := len(r.events) - 1; i >= 0; i-- {
+			if r.events[i].ID == lastEventID {
+				next = i + 1
+				break
+			}
 		}
+		r.mu.Unlock()
 	}
 	return func(yield func(Event) bool) {
 		for {

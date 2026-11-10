@@ -44,7 +44,7 @@ go test -race ./...
 <a id="integration-tests"></a>
 ### 集成测试
 
-带有 `integration` 构建标签的测试需要真实的 PostgreSQL、MySQL 和 Redis（SQLite 的测试不需要外部服务，普通的 `go test` 就会运行）。先启动临时实例：
+带有 `integration` 构建标签的测试需要真实的 PostgreSQL、MySQL、Redis 和开启 JetStream 的 NATS（SQLite 的测试不需要外部服务，普通的 `go test` 就会运行）。先启动临时实例：
 
 ```bash
 docker run --name mygoravel-test-postgres --rm -d \
@@ -55,6 +55,8 @@ docker run --name mygoravel-test-mysql --rm -d \
   -p 127.0.0.1:53306:3306 mysql:8.4
 docker run --name mygoravel-test-redis --rm -d \
   -p 127.0.0.1:56379:6379 redis:8
+docker run --name mygoravel-test-nats --rm -d \
+  -p 127.0.0.1:54222:4222 nats:2-alpine -js
 ```
 
 确认数据库就绪：
@@ -70,10 +72,13 @@ docker exec mygoravel-test-mysql mysqladmin ping -h 127.0.0.1 -pmysql --silent
 export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
 export MYSQL_TEST_URL='mysql://root:mysql@127.0.0.1:53306/'
 export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
+export NATS_TEST_URL='nats://127.0.0.1:54222'
 go test -race -count=1 -tags=integration ./...
 ```
 
-没有设置 `POSTGRES_TEST_URL`、`MYSQL_TEST_URL` 或 `REDIS_TEST_URL` 时，集成测试会失败而不是跳过。Redis 测试给每个键加随机前缀，不会清空数据，但仍请使用专门的测试实例。测试完成后执行 `docker stop mygoravel-test-postgres mygoravel-test-mysql mygoravel-test-redis` 清理。
+没有设置 `POSTGRES_TEST_URL`、`MYSQL_TEST_URL`、`REDIS_TEST_URL` 或 `NATS_TEST_URL` 时，集成测试会失败而不是跳过。Redis 测试给每个键加随机前缀，NATS 队列测试为每个场景建一个随机命名的流，不会清空数据，但仍请使用专门的测试实例。测试完成后执行 `docker stop mygoravel-test-postgres mygoravel-test-mysql mygoravel-test-redis mygoravel-test-nats` 清理。
+
+队列驱动共用 `internal/queuetesting` 中的一致性测试：数据库、Redis、NATS 驱动运行同一组场景。新增驱动时让它运行 `queuetesting.Run`。
 
 依赖数据库的测试用 `internal/dbtesting` 的 `ForEach` 和 `Open` 在每种数据库上运行：普通的 `go test` 只运行 SQLite，带 `integration` 标签时追加 PostgreSQL 和 MySQL。新增一种数据库时只需修改这个包。
 
