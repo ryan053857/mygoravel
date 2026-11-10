@@ -10,6 +10,7 @@
     - [失效：提交后删除](#invalidation)
 - [缓存键与序列化](#keys-and-serialization)
 - [测试](#testing)
+- [使用 Redis](#redis)
 
 <a id="introduction"></a>
 ## 简介
@@ -19,27 +20,36 @@
 mygoravel 没有自己的缓存抽象，推荐直接使用 [eko/gocache](https://github.com/eko/gocache)。和数据库一样，缓存在入口创建，通过构造函数传给业务服务。一个 gocache 缓存由三层对象组成：
 
 ```go
-client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"}) // 连接池
-redisStore := redisstore.NewRedis(client)                          // 后端适配
-c := cache.New[string](redisStore)                                 // 带类型的 Get / Set / Delete
+client := memory.New(10*time.Minute, 10*time.Minute) // 存储客户端
+memoryStore := gocachestore.NewGoCache(client)        // 后端适配
+c := cache.New[string](memoryStore)                   // 带类型的 Get / Set / Delete
 ```
 
-业务代码只接触最后一层。换成内存后端时，只需替换前两层。
+业务代码只接触最后一层，换成 Redis 等其他后端时只需替换前两层，见[使用 Redis](#redis)。
 
-本章以博客应用为例，为文章详情加上缓存：在入口装配 Redis 缓存，让文章服务先读缓存、再查数据库，并在文章发布后删除旧缓存。
+本章以进程内的内存缓存为例，为博客应用的文章详情加上缓存：在入口装配缓存，让文章服务先读缓存、再查数据库，并在文章发布后删除旧缓存。
 
 <a id="installation"></a>
 ## 安装
 
-缓存依赖由应用按需安装。以 Redis 为例：
+缓存依赖由应用按需安装：
 
 ```bash
 go get github.com/eko/gocache/lib/v4@v4.2.0
-go get github.com/eko/gocache/store/redis/v4@v4.2.2
-go get github.com/redis/go-redis/v9@v9.23.0
+go get github.com/eko/gocache/store/go_cache/v4@v4.2.2
+go get github.com/patrickmn/go-cache@v2.1.0+incompatible
 ```
 
-gocache 的核心库和各个 store 分别发布版本，本章示例以这组版本为准。
+gocache 的核心库和各个 store 分别发布版本，本章示例以这组版本为准。代码中用以下别名导入：
+
+```go
+import (
+    "github.com/eko/gocache/lib/v4/cache"
+    "github.com/eko/gocache/lib/v4/store"
+    gocachestore "github.com/eko/gocache/store/go_cache/v4"
+    memory "github.com/patrickmn/go-cache"
+)
+```
 
 <a id="assembling-cache"></a>
 ## 装配缓存
@@ -48,8 +58,6 @@ gocache 的核心库和各个 store 分别发布版本，本章示例以这组�
 
 ```go
 type CacheConfig struct {
-    Addr       string        `yaml:"addr"`
-    Password   string        `yaml:"password"`
     DefaultTTL time.Duration `yaml:"default_ttl"`
 }
 
@@ -61,34 +69,25 @@ type Config struct {
 
 ```yaml
 cache:
-  addr: ${REDIS_ADDR:-127.0.0.1:6379}
-  password: ${REDIS_PASSWORD:-}
   default_ttl: 10m
 ```
 
 然后在[入口](dependencies.md#assembling-the-application)的 `Serve` 中，打开数据库之后创建缓存，并传给文章服务：
 
 ```go
-client := redis.NewClient(&redis.Options{
-    Addr:                  cfg.Cache.Addr,
-    Password:              cfg.Cache.Password,
-    ContextTimeoutEnabled: true,
-})
-stack.MustAdd("redis", func(context.Context) error {
-    return client.Close()
-})
-
-articleCache := cache.New[string](redisstore.NewRedis(client,
-    store.WithExpiration(cfg.Cache.DefaultTTL),
-))
+memoryClient := memory.New(cfg.Cache.DefaultTTL, 10*time.Minute)
+articleCache := cache.New[string](gocachestore.NewGoCache(memoryClient))
 articles := article.NewService(db, articleCache)
 ```
 
-- `store.WithExpiration` 设置默认 TTL，单次 `Set` 可以覆盖它；
-- `ContextTimeoutEnabled` 让 Redis 命令遵守请求 context 的截止时间；
-- 客户端登记到 `cleanup.Stack`，在 HTTP 服务停止后关闭，见[关闭资源](dependencies.md#closing-resources)。多个缓存可以共享同一个客户端，服务本身不关闭它。
+`memory.New` 的第一个参数是默认 TTL，第二个参数是清理过期数据的间隔。过期的键在读取时立即视为未命中，后台任务按间隔回收它们占用的内存。
 
-`redis.NewClient` 不会立即连接 Redis。查询缓存故障时可以回退到数据库，所以这里不要求启动时 Redis 可用；如果你的业务离不开 Redis，可以在启动时调用 `client.Ping(ctx)` 并返回错误。
+> [!NOTE]
+> 默认 TTL 要设置在 `memory.New` 上。go_cache store v4.2.2 会忽略 `NewGoCache(client, store.WithExpiration(...))` 中传入的选项。
+
+内存缓存没有需要关闭的连接，也就不需要登记到 `cleanup.Stack`。
+
+内存缓存只在当前进程内有效，重启后清空。如果应用部署了多个副本，每个副本各有一份缓存，一个副本删除缓存不会影响其他副本；这种情况请改用 [Redis](#redis)。
 
 <a id="basic-operations"></a>
 ## 基本操作
@@ -101,27 +100,26 @@ switch {
 case errors.Is(err, store.NotFound{}):
     // 未命中
 case err != nil:
-    return err // Redis 故障等
+    return err
 }
 ```
 
 不要用 `value == ""` 判断未命中，空字符串也可能是有效的缓存内容。
 
-`Set` 写入或覆盖一个键。不传选项时使用 store 的默认 TTL：
+`Set` 写入或覆盖一个键。不传选项时使用 `memory.New` 设置的默认 TTL：
 
 ```go
 err := c.Set(ctx, "blog:greeting:v1", "hello")
 err = c.Set(ctx, "blog:greeting:v1", "hello", store.WithExpiration(30*time.Second))
+err = c.Set(ctx, "blog:greeting:v1", "hello", store.WithExpiration(memory.NoExpiration))
 ```
 
-`Delete` 删除一个键，键不存在时也返回 `nil`，因此修改数据后可以直接删除，不必先读取：
+`Delete` 删除一个键，键不存在时也返回 `nil`，因此修改数据后可以直接删除，不必先读取。`Clear` 清空整个缓存：
 
 ```go
 err := c.Delete(ctx, "blog:greeting:v1")
+err = c.Clear(ctx)
 ```
-
-> [!WARNING]
-> 不要在共享的 Redis 上调用 `Clear`。Redis store v4.2.2 的 `Clear` 执行 `FLUSHALL`，会清空整个 Redis 实例的所有数据库，不受键前缀限制。
 
 `Loadable`、`Chain`（多级缓存）、按标签失效、Prometheus 指标等组合能力，请参阅 [gocache 文档](https://github.com/eko/gocache)。
 
@@ -144,7 +142,7 @@ func NewService(db *bun.DB, c cache.CacheInterface[string]) *Service {
 }
 ```
 
-服务依赖的是接口，测试时可以传入内存缓存，见[测试](#testing)。
+服务依赖的是接口，不关心背后是内存还是 Redis。
 
 <a id="cache-aside"></a>
 ### 读取：先缓存后数据库
@@ -256,20 +254,15 @@ return item, nil
 
 缓存键建议由命名空间、资源类型、格式版本和资源 ID 组成，例如 `blog:article:v1:<id>`：
 
-- 命名空间区分应用和部署环境，多个环境共用一个 Redis 时不会互相覆盖；
+- 命名空间区分不同的应用和部署环境，多个环境共用一个 Redis 时不会互相覆盖；
 - 修改缓存内容的结构时，把 `v1` 升为 `v2`，新代码不再读取旧格式，旧键等 TTL 到期后自然消失。
 
-上面的例子把文章编码为 JSON 字符串存入 `cache.New[string]`。泛型参数只是声明类型，**不负责序列化**：Redis store 读出的总是字符串，如果声明为 `cache.New[Article]`，`Get` 会返回零值和 `nil` 错误，而不是报错。因此请自己编码为字符串，或使用 gocache 的 `marshaler` 包。
+上面的例子把文章编码为 JSON 字符串存入 `cache.New[string]`。内存缓存其实可以直接保存结构体，但这样切换到 Redis 时业务代码就要改：Redis store 读出的总是字符串，如果声明为 `cache.New[Article]`，`Get` 会返回零值和 `nil` 错误，而不是报错。统一存 JSON 字符串，两种后端可以无缝替换。
 
 <a id="testing"></a>
 ## 测试
 
-业务测试可以用进程内的内存缓存代替 Redis：
-
-```bash
-go get github.com/eko/gocache/store/go_cache/v4@v4.2.2
-go get github.com/patrickmn/go-cache@v2.1.0+incompatible
-```
+内存缓存不依赖外部服务，测试中直接为每个测试创建一份即可：
 
 ```go
 func newTestCache() cache.CacheInterface[string] {
@@ -279,12 +272,34 @@ func newTestCache() cache.CacheInterface[string] {
 svc := article.NewService(db, newTestCache())
 ```
 
-`memory.New` 的第一个参数是默认 TTL，第二个是后台清理间隔，传 `0` 表示不启动后台清理，适合测试。数据库仍使用 [dbtest](testing.md#database-tests)。值得覆盖的行为：
+清理间隔传 `0` 表示不启动后台清理任务。数据库仍使用 [dbtest](testing.md#database-tests)。值得覆盖的行为：
 
 - 第一次读取查询数据库并写入缓存，第二次命中缓存；
 - 缓存中是无法解码的内容时，回退到数据库并覆盖它；
 - 发布文章后缓存被删除，再次读取得到新状态；
 - 缓存中有别人的草稿时，读取仍返回 `404`。
 
-> [!NOTE]
-> 内存后端与 Redis 对 TTL 的处理不同：`store.WithExpiration(0)` 在 Redis 中表示不过期，在内存后端中表示使用 `memory.New` 的默认 TTL；内存后端也会忽略 `NewGoCache` 上传入的默认 TTL 选项。网络故障、TTL 等与 Redis 相关的行为，请用真实的 Redis 做集成测试。
+<a id="redis"></a>
+## 使用 Redis
+
+应用有多个副本、需要共享缓存时，改用 Redis。安装 Redis store 和客户端：
+
+```bash
+go get github.com/eko/gocache/store/redis/v4@v4.2.2
+go get github.com/redis/go-redis/v9@v9.23.0
+```
+
+在入口中替换前两层，并把客户端登记到 [`cleanup.Stack`](dependencies.md#closing-resources)：
+
+```go
+client := redis.NewClient(&redis.Options{Addr: cfg.Cache.Addr, ContextTimeoutEnabled: true})
+stack.MustAdd("redis", func(context.Context) error { return client.Close() })
+
+articleCache := cache.New[string](redisstore.NewRedis(client, store.WithExpiration(cfg.Cache.DefaultTTL)))
+```
+
+文章服务和其余代码无需修改。与内存缓存的区别：
+
+- 默认 TTL 通过 `NewRedis` 的选项设置；`store.WithExpiration(0)` 表示不过期；
+- `Clear` 执行 `FLUSHALL`，会清空整个 Redis 实例的所有数据库，不要在共享的 Redis 上调用；
+- 网络故障等行为内存缓存无法模拟，请用真实的 Redis 做集成测试。
