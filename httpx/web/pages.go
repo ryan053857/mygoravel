@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/a-h/templ"
+
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/logging"
@@ -19,9 +21,9 @@ type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
 type Options struct {
 	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求。
 	// message 来自 httpx.ErrorDetail：业务错误的译文，或状态描述。
-	ErrorPage func(status int, message string) Component
+	ErrorPage func(status int, message string) templ.Component
 	// ErrorFragment 渲染局部 htmx 请求的错误，替换到 ErrorTarget。
-	ErrorFragment func(status int, message string) Component
+	ErrorFragment func(status int, message string) templ.Component
 	// ErrorTarget 是错误片段的替换位置（CSS 选择器），例如 #flash。它应当存在于每个页面的布局中。
 	ErrorTarget string
 	// Logger 记录 5xx 错误；nil 表示 slog.Default()。

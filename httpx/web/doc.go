@@ -1,4 +1,4 @@
-// Package web 渲染 HTML 页面（组件通常由 templ 生成），配合内嵌的 htmx 4 与 Alpine.js。
+// Package web 用 templ 组件渲染 HTML 页面，配合内嵌的 htmx 4 与 Alpine.js。
 //
 // New 按错误页组件创建 Pages，Pages.Handle 把返回 error 的处理器适配为 http.HandlerFunc：
 // 错误按 errorx 分类映射状态码，局部 htmx 请求渲染错误片段，其余请求渲染整页错误；

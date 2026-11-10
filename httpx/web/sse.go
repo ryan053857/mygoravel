@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/a-h/templ"
+
 	"github.com/ryan053857/mygoravel/httpx"
 )
 
@@ -109,10 +111,10 @@ func (s *Stream) Done() <-chan struct{} { return s.ctx.Done() }
 func (s *Stream) LastEventID() string { return s.lastEventID }
 
 // Send 渲染组件并作为一条普通消息发出。组件可以包含多个 <hx-partial hx-target="...">，一次更新多处。
-func (s *Stream) Send(c Component) error { return s.SendEvent(Event{}, c) }
+func (s *Stream) Send(c templ.Component) error { return s.SendEvent(Event{}, c) }
 
 // SendEvent 渲染组件并带上 ev 中的字段发出。
-func (s *Stream) SendEvent(ev Event, c Component) error {
+func (s *Stream) SendEvent(ev Event, c templ.Component) error {
 	var buf bytes.Buffer
 	if err := c.Render(s.ctx, &buf); err != nil {
 		return err

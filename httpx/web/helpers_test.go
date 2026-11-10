@@ -9,26 +9,28 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/a-h/templ"
+
 	"github.com/ryan053857/mygoravel/httpx/web"
 	"github.com/ryan053857/mygoravel/i18n"
 )
 
 // text 是一个输出转义文本的组件。
-func text(format string, args ...any) web.Component {
-	return web.ComponentFunc(func(_ context.Context, w io.Writer) error {
+func text(format string, args ...any) templ.Component {
+	return templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
 		_, err := io.WriteString(w, html.EscapeString(fmt.Sprintf(format, args...)))
 		return err
 	})
 }
 
-func failing() web.Component {
-	return web.ComponentFunc(func(context.Context, io.Writer) error { return fmt.Errorf("boom") })
+func failing() templ.Component {
+	return templ.ComponentFunc(func(context.Context, io.Writer) error { return fmt.Errorf("boom") })
 }
 
 func pages() *web.Pages {
 	return web.New(web.Options{
-		ErrorPage:     func(status int, msg string) web.Component { return text("page %d %s", status, msg) },
-		ErrorFragment: func(status int, msg string) web.Component { return text("fragment %d %s", status, msg) },
+		ErrorPage:     func(status int, msg string) templ.Component { return text("page %d %s", status, msg) },
+		ErrorFragment: func(status int, msg string) templ.Component { return text("fragment %d %s", status, msg) },
 		ErrorTarget:   "#flash",
 	})
 }

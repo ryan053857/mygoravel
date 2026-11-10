@@ -19,18 +19,17 @@
 - [htmx 4](https://four.htmx.org) 用 HTML 属性声明「点这里就请求某个地址，把返回的片段放到某个位置」，服务端只管返回 HTML；
 - [Alpine.js](https://alpinejs.dev) 处理下拉、弹窗这类纯前端的小交互。
 
-`httpx/web` 包负责把它们接到框架上：渲染组件、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。框架本身不依赖 templ，任何有 `Render(ctx, w)` 方法的组件都可以使用。
+`httpx/web` 包负责把它们接到框架上：渲染 templ 组件、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。
 
 本章把博客的编辑后台做成服务端渲染的页面：编辑登录后打开文章的编辑页，预览并保存修改。表单见[表单](forms.md)，实时推送见[服务端推送](sse.md)。
 
 <a id="installing-templ"></a>
 ## 安装 templ
 
-把 templ 的命令行工具加入 go.mod，再加入运行时库：
+templ 的运行时库随 `httpx/web` 引入，只需要把它的命令行工具加入 go.mod：
 
 ```bash
 go get -tool github.com/a-h/templ/cmd/templ
-go get github.com/a-h/templ
 ```
 
 修改 `.templ` 文件后运行 `go tool templ generate`，它会在旁边生成同名的 `_templ.go` 文件。生成的文件请一起提交，这样构建和 CI 不需要安装 templ。开发时可以用 `go tool templ generate --watch` 自动重新生成，编辑器插件见 [templ 文档](https://templ.guide/quick-start/installation)。

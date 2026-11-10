@@ -5,6 +5,8 @@ import (
 	"embed"
 	"io"
 	"net/http"
+
+	"github.com/a-h/templ"
 )
 
 //go:embed assets
@@ -37,8 +39,8 @@ var scripts = `<script src="` + AssetsPath + `htmx-` + HTMXVersion + `.min.js"><
 `
 
 // Scripts 输出加载内嵌脚本的 script 标签，放在布局的 head 中：htmx 与扩展先加载，Alpine 最后以 defer 加载。
-func Scripts() Component {
-	return ComponentFunc(func(_ context.Context, w io.Writer) error {
+func Scripts() templ.Component {
+	return templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
 		_, err := io.WriteString(w, scripts)
 		return err
 	})

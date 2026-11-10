@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/a-h/templ"
+
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx/web"
 )
@@ -20,14 +22,14 @@ func TestNewRequiresErrorComponents(t *testing.T) {
 			t.Fatal("expected panic")
 		}
 	}()
-	web.New(web.Options{ErrorPage: func(int, string) web.Component { return text("") }})
+	web.New(web.Options{ErrorPage: func(int, string) templ.Component { return text("") }})
 }
 
 func TestHandleErrors(t *testing.T) {
 	var logs bytes.Buffer
 	p := web.New(web.Options{
-		ErrorPage:     func(status int, msg string) web.Component { return text("page %d %s", status, msg) },
-		ErrorFragment: func(status int, msg string) web.Component { return text("fragment %d %s", status, msg) },
+		ErrorPage:     func(status int, msg string) templ.Component { return text("page %d %s", status, msg) },
+		ErrorFragment: func(status int, msg string) templ.Component { return text("fragment %d %s", status, msg) },
 		ErrorTarget:   "#flash",
 		Logger:        slog.New(slog.NewTextHandler(&logs, nil)),
 	})
@@ -58,8 +60,8 @@ func TestHandleErrors(t *testing.T) {
 func TestHandleErrorAfterResponseStarted(t *testing.T) {
 	var logs bytes.Buffer
 	p := web.New(web.Options{
-		ErrorPage:     func(int, string) web.Component { return text("error page") },
-		ErrorFragment: func(int, string) web.Component { return text("error fragment") },
+		ErrorPage:     func(int, string) templ.Component { return text("error page") },
+		ErrorFragment: func(int, string) templ.Component { return text("error fragment") },
 		ErrorTarget:   "#flash",
 		Logger:        slog.New(slog.NewTextHandler(&logs, nil)),
 	})

@@ -2,23 +2,11 @@ package web
 
 import (
 	"bytes"
-	"context"
-	"io"
 	"net/http"
 	"strings"
+
+	"github.com/a-h/templ"
 )
-
-// Component 是可以渲染为 HTML 的组件。templ 生成的组件（templ.Component）满足这个接口，
-// 框架因此不需要依赖 templ。
-type Component interface {
-	Render(ctx context.Context, w io.Writer) error
-}
-
-// ComponentFunc 把函数适配为 Component。
-type ComponentFunc func(ctx context.Context, w io.Writer) error
-
-// Render 实现 Component。
-func (f ComponentFunc) Render(ctx context.Context, w io.Writer) error { return f(ctx, w) }
 
 // IsHTMX 报告请求是否由 htmx 发出（带 HX-Request: true）。
 func IsHTMX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
@@ -31,7 +19,7 @@ func IsPartial(r *http.Request) bool {
 
 // Render 渲染组件并以 status 写出 HTML。组件先渲染到缓冲区，渲染失败时不写出任何内容。
 // 组件使用 r.Context() 渲染，因此可以在组件中用 i18n.T 翻译、用 identity.FromContext 读取主体。
-func Render(w http.ResponseWriter, r *http.Request, status int, c Component) error {
+func Render(w http.ResponseWriter, r *http.Request, status int, c templ.Component) error {
 	var buf bytes.Buffer
 	if err := c.Render(r.Context(), &buf); err != nil {
 		return err

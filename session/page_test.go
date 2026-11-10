@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/a-h/templ"
 	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/go-chi/chi/v5"
 
@@ -17,8 +18,8 @@ import (
 	"github.com/ryan053857/mygoravel/session"
 )
 
-func component(format string, args ...any) web.Component {
-	return web.ComponentFunc(func(_ context.Context, w io.Writer) error {
+func component(format string, args ...any) templ.Component {
+	return templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
 		_, err := fmt.Fprintf(w, format, args...)
 		return err
 	})
@@ -30,8 +31,8 @@ func pageServer(t *testing.T) *httptest.Server {
 	cfg.Cookie.Secure = false
 	sm := session.New(cfg, memstore.New(), nil)
 	pages := web.New(web.Options{
-		ErrorPage:     func(status int, _ string) web.Component { return component("page %d", status) },
-		ErrorFragment: func(status int, _ string) web.Component { return component("fragment %d", status) },
+		ErrorPage:     func(status int, _ string) templ.Component { return component("page %d", status) },
+		ErrorFragment: func(status int, _ string) templ.Component { return component("fragment %d", status) },
 		ErrorTarget:   "#flash",
 	})
 	router := chi.NewRouter()

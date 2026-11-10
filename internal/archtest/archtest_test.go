@@ -188,6 +188,22 @@ func TestDependencyScope(t *testing.T) {
 	}
 }
 
+// TestAPIDoesNotLinkTempl 确保只用 httpx 与 httpx/rest 的 JSON API 不会链接 templ，
+// templ 只由 httpx/web（以及依赖它的 session）引入。
+func TestAPIDoesNotLinkTempl(t *testing.T) {
+	for _, pkg := range []string{module + "/httpx", module + "/httpx/rest"} {
+		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			if under(dep, "github.com/a-h/templ") {
+				t.Errorf("%s depends on %s", pkg, dep)
+			}
+		}
+	}
+}
+
 // TestCoreDoesNotLinkRedis 确保不用 Redis 的应用不会链接 go-redis，
 // Redis 实现分别在 lock/redislock 和 ratelimit/redislimit 中。
 func TestCoreDoesNotLinkRedis(t *testing.T) {
