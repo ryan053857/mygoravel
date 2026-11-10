@@ -16,21 +16,23 @@
 
 中间件提供了一种方便的机制，用来检查和处理进入应用的 HTTP 请求。例如，为每个请求生成请求 ID、记录访问日志、限制请求体大小等。
 
-mygoravel 的中间件都是标准的 `func(http.Handler) http.Handler`，安装在 chi Router 上。`rest.New` 不会替你安装任何中间件：安装哪些、按什么顺序执行，都写在你的入口代码里。对大多数应用，一行 `httpx.Defaults` 就够了。
+mygoravel 的中间件都是标准的 `func(http.Handler) http.Handler`，安装在 chi Router 上。`rest.New` 不会替你安装任何中间件。
+
+**一个中间件是否生效，只取决于代码里有没有安装它。** 配置文件只提供参数，任何配置值都不会开启或关闭中间件。反过来，安装中间件时参数不合法（例如超时为 0、日志器为 `nil`），构造时就会 panic，而不是静默跳过。
 
 <a id="default-middleware"></a>
 ## 默认中间件
 
-`httpx.Defaults` 返回一组推荐的中间件。先把它们安装到 Router 上，再把 Router 交给 `rest.New`：
+`httpx.Defaults` 返回每个应用都应该安装的基础中间件。先把它们安装到 Router 上，再把 Router 交给 `rest.New`：
 
 ```go
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger, Languages: bundle})...)
+router.Use(httpx.Defaults(cfg.HTTP, logger)...)
 
-api := rest.New(rest.Options{Router: router, Logger: logger, Languages: bundle})
+api := rest.New(rest.Options{Router: router, Logger: logger})
 ```
 
-这里使用了 `github.com/go-chi/chi/v5`。`Logger` 和 `Languages` 都可以不传，不传时相应的中间件不会生效。
+这里使用了 `github.com/go-chi/chi/v5`。日志器的构造见[日志](logging.md)。
 
 `httpx.Defaults` 按以下顺序包含这些中间件，每一个都可以单独使用：
 
@@ -38,15 +40,18 @@ api := rest.New(rest.Options{Router: router, Logger: logger, Languages: bundle})
 | --- | --- |
 | `AssignRequestID()` | 确定请求 ID，写入 context、日志字段和 `X-Request-ID` 响应头；入站的 `X-Request-ID` 合法时沿用 |
 | `NoSniff()` | 设置 `X-Content-Type-Options: nosniff` |
-| `ClientIP(proxies)` | 只信任显式配置的代理，从 `X-Forwarded-For` 解析客户端地址 |
+| `ClientIP(cfg.ClientIP)` | 只信任显式配置的代理，从 `X-Forwarded-For` 解析客户端地址 |
 | `AccessLog(logger)` | 记录请求方法、状态码、耗时、客户端地址，以及业务错误的错误码 |
-| `Recover(logger)` | 处理器 panic 时，若尚未写出响应则返回通用的 500 错误；若已开始写响应则中止连接 |
-| `RateLimit(cfg, key)` | 按客户端限流，超出时返回 429；默认不启用，见[限流](#rate-limiting) |
-| `BodyLimit(n)` | 限制请求体大小，默认 1 MiB，超出时返回 413 |
-| `Timeout(d)` | 为请求 context 设置超时，默认 30 秒 |
-| `Locale(bundle)` | 根据 `Accept-Language` 选择语言 |
+| `Recover(logger)` | 处理器 panic 时记录堆栈；若尚未写出响应则返回通用的 500 错误，若已开始写响应则中止连接 |
+| `BodyLimit(cfg.BodyLimit)` | 限制请求体大小，超出时返回 413 |
+| `Timeout(cfg.Timeout)` | 为请求 context 设置超时 |
 
-参数为零值或 `nil` 的中间件会直接放行请求，不做任何处理。例如 `httpx.Timeout(0)` 不设置超时，`httpx.AccessLog(nil)` 不记录日志。
+以下中间件是可选的，需要时在 `httpx.Defaults` 之后另行安装：
+
+| 中间件 | 行为 |
+| --- | --- |
+| `RateLimit(cfg.RateLimit, key)` | 按客户端限流，超出时返回 429，见[限流](#rate-limiting) |
+| `Locale(bundle)` | 根据 `Accept-Language` 选择语言，见[本地化](localization.md#enabling-localization) |
 
 框架的其他部分不依赖这些中间件是否安装。没有 `AccessLog` 时，`httpx.AddAccessLogAttrs` 什么也不做；没有 `Locale` 时，错误消息使用默认语言；没有 `AssignRequestID` 时，`httpx.RequestID` 返回空字符串。
 
@@ -56,52 +61,76 @@ api := rest.New(rest.Options{Router: router, Logger: logger, Languages: bundle})
 <a id="http-configuration"></a>
 ## HTTP 配置
 
-请求超时、请求体上限、可信代理以及服务器超时都来自 `httpx.Config`，通常放在配置文件的 `http` 段：
+`httpx.Config` 对应配置文件的 `http` 段：顶层是服务器参数，每个有参数的中间件对应一个同名子段。
 
 ```yaml
 http:
   addr: ${HTTP_ADDR:-:8080}
-  request_timeout: 15s
-  max_body_bytes: 2097152
-  trusted_proxies: [10.20.0.0/16]
+  shutdown_timeout: 10s
+  client_ip:
+    trusted_proxies: [10.20.0.0/16]
+  timeout:
+    duration: 15s
+  body_limit:
+    max_bytes: 2097152
 ```
+
+服务器参数：
 
 | 字段 | 说明 | 默认值 |
 | --- | --- | --- |
-| `addr` | 监听地址 | `:8080` |
+| `addr` | 监听地址，格式为 `host:port`，端口必须是 0–65535 的数字 | `:8080` |
 | `read_header_timeout` | 读取请求头的超时 | `5s` |
 | `read_timeout` | 读取整个请求的超时 | `30s` |
 | `write_timeout` | 写响应的超时 | `30s` |
 | `idle_timeout` | keep-alive 连接的空闲超时 | `1m` |
-| `request_timeout` | 每个请求 context 的超时（`Timeout`） | `30s` |
 | `shutdown_timeout` | 停机时排空请求的上限 | `10s` |
-| `max_body_bytes` | 请求体的最大字节数（`BodyLimit`） | 1 MiB |
-| `trusted_proxies` | 可信的反向代理网段（`ClientIP`） | 不信任任何代理 |
-| `rate_limit` | 按客户端限流（`RateLimit`），见[限流](#rate-limiting) | 不限流 |
 
-把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充上表中的默认值），再把它交给 `httpx.Defaults` 和 `httpx.ListenAndServe`：
+中间件参数：
+
+| 字段 | 中间件 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `client_ip.trusted_proxies` | `ClientIP` | 可信的反向代理网段 | 不信任任何代理 |
+| `timeout.duration` | `Timeout` | 每个请求 context 的超时 | `30s` |
+| `body_limit.max_bytes` | `BodyLimit` | 请求体的最大字节数 | 1 MiB |
+| `rate_limit.*` | `RateLimit` | 见[限流](#rate-limiting) | 每秒 10 个，突发 20 个 |
+
+没有写出的字段使用默认值。所有超时和数值都必须为正数，写 `0` 或负数会在加载配置时报错；不需要某个中间件时，不安装它即可。
+
+把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值并校验），再把它交给 `httpx.Defaults` 和 `httpx.ListenAndServe`：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...)
+router.Use(httpx.Defaults(cfg.HTTP, logger)...)
 // ...
 return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{Logger: logger})
 ```
 
-`httpx.Defaults` 会把 `httpx.Config` 中没有设置（零值）的字段替换为默认值。日志器的构造见[日志](logging.md)，语言目录的构造见[本地化](localization.md)。
+不经过 `config.Load` 时（例如在测试中），请从 `httpx.DefaultConfig()` 开始修改。零值的 `httpx.Config{}` 不合法，`httpx.Defaults` 会 panic，`httpx.ListenAndServe` 会返回错误。
 
 <a id="trusted-proxies"></a>
 ### 可信代理
 
 当应用部署在 Nginx、负载均衡器等反向代理之后时，请求的直接来源是代理的地址，而真实的客户端地址在 `X-Forwarded-For` 头中。但这个头可以被客户端随意伪造，所以只有来自**可信代理**的请求，才应该使用它。
 
-你可以通过 `http.trusted_proxies` 声明代理所在的网段：
+你可以通过 `http.client_ip.trusted_proxies` 声明代理所在的网段：
 
 ```yaml
 http:
-  trusted_proxies: [10.20.0.0/16]
+  client_ip:
+    trusted_proxies: [10.20.0.0/16, fd00::/64]
 ```
 
-对于来自可信代理的请求，`ClientIP` 会从右向左读取 `X-Forwarded-For`，跳过所有可信代理的地址，把遇到的第一个不可信地址作为客户端地址。没有配置 `trusted_proxies` 时，始终使用直接连接的地址。
+每一项都必须是网络地址，即主机位全为零。只信任单台机器时写成 `/32`（IPv6 为 `/128`）：
+
+| 写法 | 结果 |
+| --- | --- |
+| `10.20.0.0/16` | 合法 |
+| `10.20.0.5/32` | 合法，只信任这一台 |
+| `10.20.0.5/16` | 报错：`10.20.0.5/16 has host bits set; use 10.20.0.0/16 or 10.20.0.5/32` |
+| `10.20.0.5` | 报错：缺少前缀长度 |
+| `""`、`300.0.0.0/8`、`10.0.0.0/33` | 报错：不是有效的网段 |
+
+对于来自可信代理的请求，`ClientIP` 会从右向左读取 `X-Forwarded-For`，跳过所有可信代理的地址，把遇到的第一个不可信地址作为客户端地址。没有配置可信代理时，始终使用直接连接的地址。
 
 > [!WARNING]
 > 只填写你实际使用的代理网段。如果把 `0.0.0.0/0` 之类的宽泛网段设为可信，任何客户端都可以伪造自己的地址。
@@ -109,9 +138,16 @@ http:
 <a id="rate-limiting"></a>
 ## 限流
 
-`httpx.RateLimit` 为每个客户端维护一个令牌桶：桶里有令牌时请求照常处理，没有令牌时直接返回 `429 Too Many Requests`，并通过 `Retry-After` 响应头告诉客户端多少秒后重试。
+`httpx.RateLimit` 为每个客户端维护一个令牌桶：桶里有令牌时请求照常处理，没有令牌时直接返回 `429 Too Many Requests`，并通过 `Retry-After` 响应头告诉客户端多少秒后重试。被拒绝的请求不消耗令牌。
 
-限流默认不启用。在配置文件中写上 `rate_limit` 段，`httpx.Defaults` 中的限流中间件就会生效；删掉这一段，限流就会关闭：
+限流不在默认中间件中。需要时在 `httpx.Defaults` 之后安装：
+
+```go
+router.Use(httpx.Defaults(cfg.HTTP, logger)...)
+router.Use(httpx.RateLimit(cfg.HTTP.RateLimit, httpx.KeyByIP))
+```
+
+参数来自 `http.rate_limit` 段：
 
 ```yaml
 http:
@@ -124,30 +160,27 @@ http:
 
 | 字段 | 说明 | 默认值 |
 | --- | --- | --- |
-| `rate` | 每个 `interval` 补充的令牌数，为 0 时不限流 | `0` |
+| `rate` | 每个 `interval` 补充的令牌数 | `10` |
 | `interval` | 补充 `rate` 个令牌的周期 | `1s` |
-| `burst` | 桶容量，即允许的瞬时突发 | 等于 `rate` |
+| `burst` | 桶容量，即允许的瞬时突发 | `20` |
 | `max_entries` | 同时跟踪的客户端数，超出时淘汰最久没有请求的客户端 | `10000` |
 
-上面的配置表示：每个客户端平均每秒最多 10 个请求，短时间内最多连续 20 个。被拒绝的请求不消耗令牌。
+上面的配置表示：每个客户端平均每秒最多 10 个请求，短时间内最多连续 20 个。
 
 <a id="rate-limit-key"></a>
 ### 限流的 key
 
-默认按客户端地址限流。它使用 `ClientIP` 解析后的地址，所以部署在反向代理之后时，请同时配置[可信代理](#trusted-proxies)，否则所有请求都会被算到代理头上。
+`RateLimit` 的第二个参数决定按什么维度计数。`httpx.KeyByIP` 按客户端地址计数，它使用 `ClientIP` 解析后的地址，所以部署在反向代理之后时，请同时配置[可信代理](#trusted-proxies)，否则所有请求都会被算到代理头上。
 
-如果需要按别的维度限流，可以通过 `DefaultsOptions.RateLimitKey` 传入一个函数。例如，博客的开放 API 按 token 限流，没有 token 的请求仍然按地址限流：
+你也可以传入自己的函数。例如，博客的开放 API 按 token 限流，没有 token 的请求仍然按地址限流：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{
-    Logger: logger,
-    RateLimitKey: func(r *http.Request) string {
-        if token := r.Header.Get("Authorization"); token != "" {
-            return token
-        }
-        return httpx.KeyByIP(r)
-    },
-})...)
+router.Use(httpx.RateLimit(cfg.HTTP.RateLimit, func(r *http.Request) string {
+    if token := r.Header.Get("Authorization"); token != "" {
+        return token
+    }
+    return httpx.KeyByIP(r)
+}))
 ```
 
 函数返回空字符串时，这个请求不受限流。
@@ -162,21 +195,19 @@ router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{
 
 `httpx.Defaults` 只是一个返回切片的普通函数。当默认组合不合适时，可以直接挑选需要的中间件，自己决定顺序和参数。
 
-例如，博客允许作者在 `/uploads/` 下上传最大 20 MiB 的图片，其他接口仍然限制在 1 MiB。`BodyLimit` 一旦安装就无法在内层放宽，所以要在安装时按路径选择上限：
+例如，博客允许作者在 `/uploads/` 下上传最大 20 MiB 的图片，其他接口仍然使用配置的上限。`BodyLimit` 一旦安装就无法在内层放宽，所以要在安装时按路径选择上限：
 
 ```go
 router.Use(
     httpx.AssignRequestID(),
     httpx.NoSniff(),
-    httpx.ClientIP(cfg.HTTP.TrustedProxies),
+    httpx.ClientIP(cfg.HTTP.ClientIP),
     httpx.AccessLog(logger),
     httpx.Recover(logger),
-    httpx.RateLimit(cfg.HTTP.RateLimit, nil),
-    httpx.Timeout(cfg.HTTP.RequestTimeout),
-    httpx.Locale(bundle),
+    httpx.Timeout(cfg.HTTP.Timeout),
     func(next http.Handler) http.Handler {
-        small := httpx.BodyLimit(cfg.HTTP.MaxBodyBytes)(next)
-        large := httpx.BodyLimit(20 << 20)(next)
+        small := httpx.BodyLimit(cfg.HTTP.BodyLimit)(next)
+        large := httpx.BodyLimit(httpx.BodyLimitConfig{MaxBytes: 20 << 20})(next)
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             if strings.HasPrefix(r.URL.Path, "/uploads/") {
                 large.ServeHTTP(w, r)
@@ -206,7 +237,7 @@ router.Use(
 var readOnly atomic.Bool // 由运维开关控制，例如收到某个信号时切换
 
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...)
+router.Use(httpx.Defaults(cfg.HTTP, logger)...)
 router.Use(func(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if readOnly.Load() && r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -260,5 +291,5 @@ requireArticles(&legacy)
 这些中间件不依赖 `rest` 包。如果你有一个普通的 `http.Handler`（例如标准库的 `http.ServeMux`），可以用 `chi.Chain` 为它安装：
 
 ```go
-handler := chi.Chain(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...).Handler(mux)
+handler := chi.Chain(httpx.Defaults(cfg.HTTP, logger)...).Handler(mux)
 ```

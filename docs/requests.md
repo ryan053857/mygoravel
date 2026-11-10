@@ -136,7 +136,8 @@ requestID := httpx.RequestID(ctx)
 
 ```yaml
 http:
-  max_body_bytes: 8388608 # 8 MiB
+  body_limit:
+    max_bytes: 8388608 # 8 MiB
 ```
 
 > [!NOTE]
@@ -149,7 +150,8 @@ http:
 
 ```yaml
 http:
-  request_timeout: 10s
+  timeout:
+    duration: 10s
 ```
 
 超时后，请求的 context 会被取消。为了让超时真正生效，请把处理器收到的 `ctx` 一路传给数据库查询和外部 HTTP 调用。

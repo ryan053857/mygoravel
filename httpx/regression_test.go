@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -32,7 +33,7 @@ func TestUnexpectedListenerExitDrainsRequests(t *testing.T) {
 	})
 	done := make(chan error, 1)
 	go func() {
-		done <- httpx.Serve(context.Background(), httpx.Config{ShutdownTimeout: time.Second}, ln, handler, httpx.ServeOptions{OnDraining: func() { close(draining) }})
+		done <- httpx.Serve(context.Background(), shutdownIn(time.Second), ln, handler, httpx.ServeOptions{OnDraining: func() { close(draining) }})
 	}()
 	requestDone := make(chan struct{})
 	go func() {
@@ -80,7 +81,7 @@ func TestShutdownBudgetCancelsActiveRequest(t *testing.T) {
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done(); close(canceled) })
 			done := make(chan error, 1)
 			go func() {
-				done <- httpx.Serve(ctx, httpx.Config{ShutdownTimeout: budget}, ln, handler, httpx.ServeOptions{})
+				done <- httpx.Serve(ctx, shutdownIn(budget), ln, handler, httpx.ServeOptions{})
 			}()
 			go func() {
 				resp, err := http.Get("http://" + ln.Addr().String())
@@ -112,9 +113,10 @@ func TestShutdownBudgetCancelsActiveRequest(t *testing.T) {
 }
 func TestBoundaryRecoveryLimitsAndProxyTrust(t *testing.T) {
 	for _, trusted := range []bool{false, true} {
-		cfg := httpx.Config{MaxBodyBytes: 3}
+		cfg := httpx.DefaultConfig()
+		cfg.BodyLimit.MaxBytes = 3
 		if trusted {
-			cfg.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+			cfg.ClientIP.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 		}
 		handler := defaults(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if trusted && r.RemoteAddr != "192.0.2.1" {
@@ -142,7 +144,7 @@ func TestBoundaryRecoveryLimitsAndProxyTrust(t *testing.T) {
 }
 
 func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
-	handler := defaults(httpx.Config{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := defaults(httpx.DefaultConfig())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		_, _ = io.WriteString(w, "partial")
 		panic("failure")
@@ -155,7 +157,9 @@ func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 }
 func TestRequestTimeoutReachesHandler(t *testing.T) {
-	handler := defaults(httpx.Config{RequestTimeout: 10 * time.Millisecond})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	cfg := httpx.DefaultConfig()
+	cfg.Timeout.Duration = 10 * time.Millisecond
+	handler := defaults(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 		if !errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 			t.Fatal(r.Context().Err())
@@ -170,5 +174,11 @@ func TestRequestTimeoutReachesHandler(t *testing.T) {
 }
 
 func defaults(cfg httpx.Config) func(http.Handler) http.Handler {
-	return chi.Chain(httpx.Defaults(cfg, httpx.DefaultsOptions{})...).Handler
+	return chi.Chain(httpx.Defaults(cfg, slog.New(slog.DiscardHandler))...).Handler
+}
+
+func shutdownIn(d time.Duration) httpx.Config {
+	cfg := httpx.DefaultConfig()
+	cfg.ShutdownTimeout = d
+	return cfg
 }

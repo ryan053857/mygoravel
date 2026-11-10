@@ -144,7 +144,7 @@ func TestPingServeAndErrorMapping(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- httpx.Serve(ctx, httpx.Config{ShutdownTimeout: time.Second}, ln, api.Handler(), httpx.ServeOptions{})
+		errCh <- httpx.Serve(ctx, httpx.DefaultConfig(), ln, api.Handler(), httpx.ServeOptions{})
 	}()
 	base := "http://" + ln.Addr().String()
 

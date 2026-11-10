@@ -23,19 +23,21 @@ mygoravel 的本地化基于 [go-i18n](https://github.com/nicksnyder/go-i18n)。
 <a id="enabling-localization"></a>
 ## 启用本地化
 
-下面是一个完整的函数，它创建包含内置消息的语言目录，并把它传给 API：
+下面是一个完整的函数，它创建包含内置消息的语言目录，安装语言协商中间件，并把目录传给 API：
 
 ```go
 package api
 
 import (
+    "log/slog"
+
     "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/i18n"
 )
 
-func NewAPI(cfg httpx.Config) (*rest.API, error) {
+func NewAPI(cfg httpx.Config, logger *slog.Logger) (*rest.API, error) {
     bundle, err := i18n.New(i18n.Options{
         Default: "zh-CN",
         Layers:  []i18n.Layer{i18n.FrameworkLayer()},
@@ -44,12 +46,13 @@ func NewAPI(cfg httpx.Config) (*rest.API, error) {
         return nil, err
     }
     router := chi.NewRouter()
-    router.Use(httpx.Defaults(cfg, httpx.DefaultsOptions{Languages: bundle})...)
-    return rest.New(rest.Options{Router: router, Languages: bundle}), nil
+    router.Use(httpx.Defaults(cfg, logger)...)
+    router.Use(httpx.Locale(bundle))
+    return rest.New(rest.Options{Router: router, Logger: logger, Languages: bundle}), nil
 }
 ```
 
-语言目录要同时交给两处：`httpx.Defaults` 用它协商请求语言，`rest.New` 用它翻译错误消息。
+`httpx.Locale` 不在默认中间件中，使用本地化的应用要自己安装它。语言目录要同时交给两处：`httpx.Locale` 用它协商请求语言，`rest.New` 用它翻译错误消息。
 
 `Default` 是默认语言，当请求的语言不受支持时使用它。省略时默认为 `zh-CN`，你也可以设置为 `en`。
 

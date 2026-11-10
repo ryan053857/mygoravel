@@ -26,7 +26,7 @@ func send(h http.Handler, remote string) *httptest.ResponseRecorder {
 }
 
 func TestRateLimitBurstThenRejectsPerKey(t *testing.T) {
-	h := httpx.RateLimit(httpx.RateLimitConfig{Rate: 1, Interval: time.Hour, Burst: 2}, nil)(&marker{})
+	h := httpx.RateLimit(limit(1, time.Hour, 2, 10), httpx.KeyByIP)(&marker{})
 	for i, want := range []int{200, 200, 429} {
 		if rr := send(h, "192.0.2.1:1000"); rr.Code != want {
 			t.Fatalf("request %d: %d", i, rr.Code)
@@ -43,13 +43,13 @@ func TestRateLimitBurstThenRejectsPerKey(t *testing.T) {
 }
 
 func TestRateLimitRefillsAndRejectedRequestsDoNotConsume(t *testing.T) {
-	h := httpx.RateLimit(httpx.RateLimitConfig{Rate: 1, Interval: 50 * time.Millisecond}, nil)(&marker{})
+	h := httpx.RateLimit(limit(1, 50*time.Millisecond, 1, 10), httpx.KeyByIP)(&marker{})
 	if send(h, "192.0.2.1:1").Code != 200 {
 		t.Fatal("first request rejected")
 	}
 	for range 5 {
 		if send(h, "192.0.2.1:1").Code != 429 {
-			t.Fatal("burst defaults to rate")
+			t.Fatal("burst exceeded")
 		}
 	}
 	time.Sleep(60 * time.Millisecond)
@@ -59,7 +59,7 @@ func TestRateLimitRefillsAndRejectedRequestsDoNotConsume(t *testing.T) {
 }
 
 func TestRateLimitEvictsLeastRecentKey(t *testing.T) {
-	h := httpx.RateLimit(httpx.RateLimitConfig{Rate: 1, Interval: time.Hour, MaxEntries: 2}, nil)(&marker{})
+	h := httpx.RateLimit(limit(1, time.Hour, 1, 2), httpx.KeyByIP)(&marker{})
 	send(h, "192.0.2.1:1")
 	send(h, "192.0.2.2:1")
 	send(h, "192.0.2.1:1") // .1 最近访问，.2 最久
@@ -74,7 +74,7 @@ func TestRateLimitEvictsLeastRecentKey(t *testing.T) {
 
 func TestRateLimitCustomKey(t *testing.T) {
 	byToken := func(r *http.Request) string { return r.Header.Get("Authorization") }
-	h := httpx.RateLimit(httpx.RateLimitConfig{Rate: 1, Interval: time.Hour}, byToken)(&marker{})
+	h := httpx.RateLimit(limit(1, time.Hour, 1, 10), byToken)(&marker{})
 	req := func(token string) int {
 		r := httptest.NewRequest("GET", "/", nil)
 		if token != "" {
@@ -92,15 +92,8 @@ func TestRateLimitCustomKey(t *testing.T) {
 	}
 }
 
-func TestRateLimitDisabledByZeroConfig(t *testing.T) {
-	next := http.Handler(&marker{})
-	if httpx.RateLimit(httpx.RateLimitConfig{}, nil)(next) != next {
-		t.Fatal("zero config installed a limiter")
-	}
-}
-
 func TestRateLimitConcurrentSafe(t *testing.T) {
-	h := httpx.RateLimit(httpx.RateLimitConfig{Rate: 50, Interval: time.Hour, MaxEntries: 8}, nil)(&marker{})
+	h := httpx.RateLimit(limit(50, time.Hour, 50, 8), httpx.KeyByIP)(&marker{})
 	var wg sync.WaitGroup
 	for i := range 32 {
 		wg.Go(func() {
@@ -112,14 +105,13 @@ func TestRateLimitConcurrentSafe(t *testing.T) {
 	wg.Wait()
 }
 
-func TestDefaultsRateLimitUsesProxyResolvedClientAndLogs(t *testing.T) {
+func TestRateLimitAfterDefaultsUsesProxyResolvedClientAndLogs(t *testing.T) {
 	var logs bytes.Buffer
-	cfg := httpx.Config{
-		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
-		RateLimit:      httpx.RateLimitConfig{Rate: 1, Interval: time.Hour},
-	}
+	cfg := httpx.DefaultConfig()
+	cfg.ClientIP.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 	router := chi.NewRouter()
-	router.Use(httpx.Defaults(cfg, httpx.DefaultsOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})...)
+	router.Use(httpx.Defaults(cfg, slog.New(slog.NewJSONHandler(&logs, nil)))...)
+	router.Use(httpx.RateLimit(limit(1, time.Hour, 1, 10), httpx.KeyByIP))
 	router.Get("/", func(http.ResponseWriter, *http.Request) {})
 	viaProxy := func(client string) int {
 		req := httptest.NewRequest("GET", "/", nil)
@@ -135,4 +127,8 @@ func TestDefaultsRateLimitUsesProxyResolvedClientAndLogs(t *testing.T) {
 	if !strings.Contains(logs.String(), `"status":429`) {
 		t.Fatal("rejection missing from access log", logs.String())
 	}
+}
+
+func limit(rate int, interval time.Duration, burst, maxEntries int) httpx.RateLimitConfig {
+	return httpx.RateLimitConfig{Rate: rate, Interval: interval, Burst: burst, MaxEntries: maxEntries}
 }

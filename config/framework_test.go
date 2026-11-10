@@ -23,12 +23,12 @@ func TestLoadsFrameworkConfigs(t *testing.T) {
 	cfg, err := load[frameworkConfig](t, `
 http:
   addr: :9000
-  request_timeout: 5s
-  trusted_proxies: [10.0.0.0/8]
+  client_ip:
+    trusted_proxies: [10.0.0.0/8]
+  timeout:
+    duration: 5s
   rate_limit:
-    rate: 10
-    interval: 1s
-    burst: 20
+    rate: 5
 logs:
   level: debug
   format: text
@@ -38,9 +38,10 @@ database:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTP.Addr != ":9000" || cfg.HTTP.RequestTimeout != 5*time.Second || cfg.HTTP.ShutdownTimeout != 10*time.Second ||
-		!reflect.DeepEqual(cfg.HTTP.TrustedProxies, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) ||
-		cfg.HTTP.RateLimit != (httpx.RateLimitConfig{Rate: 10, Interval: time.Second, Burst: 20}) {
+	if cfg.HTTP.Addr != ":9000" || cfg.HTTP.Timeout.Duration != 5*time.Second || cfg.HTTP.ShutdownTimeout != 10*time.Second ||
+		!reflect.DeepEqual(cfg.HTTP.ClientIP.TrustedProxies, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) ||
+		cfg.HTTP.BodyLimit != httpx.DefaultBodyLimitConfig() ||
+		cfg.HTTP.RateLimit != (httpx.RateLimitConfig{Rate: 5, Interval: time.Second, Burst: 20, MaxEntries: 10000}) {
 		t.Fatalf("http=%+v", cfg.HTTP)
 	}
 	if cfg.Logs.Level != slog.LevelDebug || cfg.Logs.Format != logging.FormatText {
@@ -49,11 +50,11 @@ database:
 }
 
 func TestFrameworkConfigsValidate(t *testing.T) {
-	_, err := load[frameworkConfig](t, "http:\n  max_body_bytes: 0\n  rate_limit:\n    burst: -1\nlogs:\n  format: xml\n")
+	_, err := load[frameworkConfig](t, "http:\n  addr: ':99999'\n  body_limit:\n    max_bytes: 0\n  rate_limit:\n    burst: 0\n  client_ip:\n    trusted_proxies: [10.0.0.5/8]\nlogs:\n  format: xml\n")
 	if err == nil {
 		t.Fatal("expected validation errors")
 	}
-	for _, want := range []string{"http: max_body_bytes", "http.rate_limit: burst", "logs: format", "database: dsn is required"} {
+	for _, want := range []string{"http: addr", "http.body_limit: max_bytes", "http.rate_limit: burst", "http.client_ip: trusted_proxies[0]: 10.0.0.5/8 has host bits set", "logs: format", "database: dsn is required"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing %q in %v", want, err)
 		}

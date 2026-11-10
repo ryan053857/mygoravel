@@ -23,7 +23,9 @@ func ListenAndServe(ctx context.Context, cfg Config, handler http.Handler, opts 
 	if ctx == nil {
 		return errors.New("httpx: nil context")
 	}
-	cfg = cfg.withDefaults()
+	if err := cfg.Validate(); err != nil {
+		return errors.Wrap(err, "httpx: config")
+	}
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", cfg.Addr)
 	if err != nil {
@@ -32,21 +34,28 @@ func ListenAndServe(ctx context.Context, cfg Config, handler http.Handler, opts 
 	return Serve(ctx, cfg, ln, handler, opts)
 }
 
-// Serve 在 ln 上按 cfg 运行 handler（忽略 cfg.Addr），直到 ctx 取消或监听异常。
+// Serve 在 ln 上按 cfg 运行 handler（不使用 cfg.Addr 监听，但 cfg 仍需合法），直到 ctx 取消或监听异常。
+//
+// Serve 返回时 ln 已关闭，包括因参数错误提前返回的情况。
 //
 // 停止时：先调用 OnDraining，再在 cfg.ShutdownTimeout 内排空请求；
 // 超时则取消请求 context 并强制关闭。调用方在 Serve 返回后关闭数据库等请求依赖。
 func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handler, opts ServeOptions) error {
-	if ctx == nil {
-		return errors.New("httpx: nil context")
-	}
 	if ln == nil {
 		return errors.New("httpx: nil listener")
 	}
+	if ctx == nil {
+		_ = ln.Close()
+		return errors.New("httpx: nil context")
+	}
 	if handler == nil {
+		_ = ln.Close()
 		return errors.New("httpx: nil handler")
 	}
-	cfg = cfg.withDefaults()
+	if err := cfg.Validate(); err != nil {
+		_ = ln.Close()
+		return errors.Wrap(err, "httpx: config")
+	}
 	srv := cfg.server(handler)
 
 	// 所有请求 context 派生自 requestRoot，排空超时或结束后统一取消。

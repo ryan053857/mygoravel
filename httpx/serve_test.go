@@ -38,7 +38,7 @@ func TestServeDrainsBeforeCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		err := httpx.Serve(ctx, httpx.Config{ShutdownTimeout: time.Second}, ln, mux, httpx.ServeOptions{})
+		err := httpx.Serve(ctx, shutdownIn(time.Second), ln, mux, httpx.ServeOptions{})
 		errCh <- stack.CloseWith(context.Background(), err)
 	}()
 

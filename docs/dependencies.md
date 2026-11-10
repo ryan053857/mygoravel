@@ -98,7 +98,7 @@ func Serve(ctx context.Context, cfg settings.Config, logger *slog.Logger) (err e
 
     // 3. 安装中间件，创建 API 并注册路由
     router := chi.NewRouter()
-    router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...)
+    router.Use(httpx.Defaults(cfg.HTTP, logger)...)
     api := rest.New(rest.Options{
         Title: "Blog API", Version: "1.0.0",
         Router: router, Logger: logger,

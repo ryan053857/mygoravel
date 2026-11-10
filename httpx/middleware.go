@@ -21,34 +21,21 @@ import (
 	"github.com/ryan053857/mygoravel/logging"
 )
 
-// DefaultsOptions 是 Defaults 的运行时依赖，均可为空。
-type DefaultsOptions struct {
-	// Logger 记录访问日志与 panic；nil 表示不记录。
-	Logger *slog.Logger
-	// Languages 用于 Accept-Language 协商；nil 表示不协商。
-	Languages *goi18n.Bundle
-	// RateLimitKey 是限流 key；nil 表示按客户端地址。仅在配置了 rate_limit 时生效。
-	RateLimitKey KeyFunc
-}
-
-// Defaults 返回推荐的中间件栈，按执行顺序排列：
-// AssignRequestID、NoSniff、ClientIP、AccessLog、Recover、RateLimit、BodyLimit、Timeout、Locale。
-// 超时、请求体上限与可信代理取自 cfg，零值字段使用 DefaultConfig；
-// cfg.RateLimit 为零值时不限流。
+// Defaults 返回每个应用都应安装的基础中间件，按执行顺序排列：
+// AssignRequestID、NoSniff、ClientIP、AccessLog、Recover、BodyLimit、Timeout。
+// 参数取自 cfg 的对应子段；cfg 不合法或 logger 为 nil 时 panic。
 //
+// RateLimit、Locale 等可选中间件需要时在其后另行安装；
 // 需要不同组合时（例如流式接口不设超时），直接挑选单个中间件自行组装。
-func Defaults(cfg Config, opts DefaultsOptions) []func(http.Handler) http.Handler {
-	cfg = cfg.withDefaults()
+func Defaults(cfg Config, logger *slog.Logger) []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
 		AssignRequestID(),
 		NoSniff(),
-		ClientIP(cfg.TrustedProxies),
-		AccessLog(opts.Logger),
-		Recover(opts.Logger),
-		RateLimit(cfg.RateLimit, opts.RateLimitKey),
-		BodyLimit(cfg.MaxBodyBytes),
-		Timeout(cfg.RequestTimeout),
-		Locale(opts.Languages),
+		ClientIP(cfg.ClientIP),
+		AccessLog(logger),
+		Recover(logger),
+		BodyLimit(cfg.BodyLimit),
+		Timeout(cfg.Timeout),
 	}
 }
 
@@ -102,13 +89,14 @@ func NoSniff() func(http.Handler) http.Handler {
 }
 
 // ClientIP 把 r.RemoteAddr 改写为客户端地址。
-// 只有直连地址属于 proxies 时才读取 X-Forwarded-For，并从右向左跳过可信代理；
-// proxies 为空时不改写。
-func ClientIP(proxies []netip.Prefix) func(http.Handler) http.Handler {
+// 只有直连地址属于可信代理时才读取 X-Forwarded-For，并从右向左跳过可信代理；
+// 没有可信代理时始终使用直连地址。cfg 不合法时 panic。
+func ClientIP(cfg ClientIPConfig) func(http.Handler) http.Handler {
+	mustValid("ClientIP", cfg.Validate())
+	proxies := append([]netip.Prefix(nil), cfg.TrustedProxies...)
 	if len(proxies) == 0 {
 		return passthrough
 	}
-	proxies = append([]netip.Prefix(nil), proxies...)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if addr := clientAddress(r, proxies); addr != r.RemoteAddr {
@@ -142,11 +130,11 @@ func AddAccessLogAttrs(ctx context.Context, attrs ...slog.Attr) {
 	}
 }
 
-// AccessLog 在请求结束后记录方法、状态码、耗时、客户端地址与 AddAccessLogAttrs 追加的字段；
-// logger 为 nil 时不安装。安装在 Recover 之外，才能记录 panic 产生的 500。
+// AccessLog 在请求结束后记录方法、状态码、耗时、客户端地址与 AddAccessLogAttrs 追加的字段。
+// 安装在 Recover 之外，才能记录 panic 产生的 500。logger 为 nil 时 panic。
 func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
-		return passthrough
+		panic("httpx: AccessLog: nil logger")
 	}
 	logger = slog.New(logging.NewContextHandler(logger.Handler()))
 	return func(next http.Handler) http.Handler {
@@ -171,12 +159,13 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// Recover 恢复处理器 panic：尚未写出响应时返回通用 500，否则中止连接。
-// logger 非空时记录堆栈。
+// Recover 恢复处理器 panic 并记录堆栈：尚未写出响应时返回通用 500，否则中止连接。
+// logger 为 nil 时 panic。
 func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
-	if logger != nil {
-		logger = slog.New(logging.NewContextHandler(logger.Handler()))
+	if logger == nil {
+		panic("httpx: Recover: nil logger")
 	}
+	logger = slog.New(logging.NewContextHandler(logger.Handler()))
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rw := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
@@ -188,9 +177,7 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 				if recovered == http.ErrAbortHandler {
 					panic(recovered)
 				}
-				if logger != nil {
-					logger.ErrorContext(r.Context(), "request panic", "stack", string(debug.Stack()))
-				}
+				logger.ErrorContext(r.Context(), "request panic", "stack", string(debug.Stack()))
 				if rw.Status() != 0 {
 					panic(http.ErrAbortHandler)
 				}
@@ -201,11 +188,10 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// BodyLimit 限制请求体最多 n 字节，声明长度超限时直接返回 413；n <= 0 时不限制。
-func BodyLimit(n int64) func(http.Handler) http.Handler {
-	if n <= 0 {
-		return passthrough
-	}
+// BodyLimit 限制请求体最多 cfg.MaxBytes 字节，声明长度超限时直接返回 413。cfg 不合法时 panic。
+func BodyLimit(cfg BodyLimitConfig) func(http.Handler) http.Handler {
+	mustValid("BodyLimit", cfg.Validate())
+	n := cfg.MaxBytes
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.ContentLength > n {
@@ -218,12 +204,11 @@ func BodyLimit(n int64) func(http.Handler) http.Handler {
 	}
 }
 
-// Timeout 为请求 context 设置超时；d <= 0 时不设置。
-// 它只取消 context，由处理器决定如何响应。
-func Timeout(d time.Duration) func(http.Handler) http.Handler {
-	if d <= 0 {
-		return passthrough
-	}
+// Timeout 为请求 context 设置 cfg.Duration 的超时。
+// 它只取消 context，由处理器决定如何响应。cfg 不合法时 panic。
+func Timeout(cfg TimeoutConfig) func(http.Handler) http.Handler {
+	mustValid("Timeout", cfg.Validate())
+	d := cfg.Duration
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), d)
@@ -233,11 +218,11 @@ func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	}
 }
 
-// Locale 按 Accept-Language 在 languages 中协商语言，写入 context 与 Content-Language 响应头；
-// languages 为 nil 时不安装。
+// Locale 按 Accept-Language 在 languages 中协商语言，写入 context 与 Content-Language 响应头。
+// languages 为 nil 时 panic。
 func Locale(languages *goi18n.Bundle) func(http.Handler) http.Handler {
 	if languages == nil {
-		return passthrough
+		panic("httpx: Locale: nil languages")
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -265,10 +265,13 @@ func TestAccessLogCarriesBusinessCode(t *testing.T) {
 	}
 }
 
-// withDefaults 按应用的常规写法安装 httpx.Defaults 后创建 API。
+// withDefaults 按应用的常规写法安装 httpx.Defaults（及启用本地化时的 httpx.Locale）后创建 API。
 func withDefaults(opts rest.Options) *rest.API {
 	router := chi.NewRouter()
-	router.Use(httpx.Defaults(httpx.Config{}, httpx.DefaultsOptions{Logger: opts.Logger, Languages: opts.Languages})...)
+	router.Use(httpx.Defaults(httpx.DefaultConfig(), opts.Logger)...)
+	if opts.Languages != nil {
+		router.Use(httpx.Locale(opts.Languages))
+	}
 	opts.Router = router
 	return rest.New(opts)
 }

@@ -81,10 +81,10 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 <a id="request-correlation"></a>
 ### 请求关联
 
-把日志器传给[默认中间件](middleware.md#default-middleware)后，`httpx.AccessLog` 会为每个请求记录一条访问日志：
+[默认中间件](middleware.md#default-middleware)中的 `httpx.AccessLog` 会用传入的日志器为每个请求记录一条访问日志：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, httpx.DefaultsOptions{Logger: logger})...)
+router.Use(httpx.Defaults(cfg.HTTP, logger)...)
 api := rest.New(rest.Options{Router: router, Logger: logger})
 ```
 

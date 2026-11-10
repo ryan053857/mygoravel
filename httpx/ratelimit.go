@@ -13,30 +13,37 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// RateLimitConfig 是按 key 的令牌桶限流配置，对应配置文件的 http.rate_limit 段。
-// Rate 为 0 表示不限流。
+// RateLimitConfig 是 RateLimit 的参数，对应 http.rate_limit 段。
 type RateLimitConfig struct {
 	// Rate 是每个 Interval 补充的令牌数。
 	Rate int `yaml:"rate"`
-	// Interval 是补充 Rate 个令牌的周期；为 0 时取 1 秒。
+	// Interval 是补充 Rate 个令牌的周期。
 	Interval time.Duration `yaml:"interval"`
-	// Burst 是桶容量，即允许的瞬时突发；为 0 时等于 Rate。
+	// Burst 是桶容量，即允许的瞬时突发。
 	Burst int `yaml:"burst"`
-	// MaxEntries 是同时跟踪的 key 数上限，超出时淘汰最久未访问的 key；为 0 时取 10000。
+	// MaxEntries 是同时跟踪的 key 数上限，超出时淘汰最久未访问的 key。
 	MaxEntries int `yaml:"max_entries"`
 }
 
-// Validate 检查各字段不为负数。
+// DefaultRateLimitConfig 返回每秒 10 个、突发 20 个、最多跟踪 10000 个 key 的配置。
+func DefaultRateLimitConfig() RateLimitConfig {
+	return RateLimitConfig{Rate: 10, Interval: time.Second, Burst: 20, MaxEntries: 10000}
+}
+
+// SetDefaults 实现 config.Defaulter。
+func (c *RateLimitConfig) SetDefaults() { *c = DefaultRateLimitConfig() }
+
+// Validate 检查各字段为正数。
 func (c RateLimitConfig) Validate() error {
 	switch {
-	case c.Rate < 0:
-		return errors.New("rate must not be negative")
-	case c.Interval < 0:
-		return errors.New("interval must not be negative")
-	case c.Burst < 0:
-		return errors.New("burst must not be negative")
-	case c.MaxEntries < 0:
-		return errors.New("max_entries must not be negative")
+	case c.Rate <= 0:
+		return errors.New("rate must be positive")
+	case c.Interval <= 0:
+		return errors.New("interval must be positive")
+	case c.Burst <= 0:
+		return errors.New("burst must be positive")
+	case c.MaxEntries <= 0:
+		return errors.New("max_entries must be positive")
 	}
 	return nil
 }
@@ -53,25 +60,14 @@ func KeyByIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-// RateLimit 按 key 限流，超出时返回 429 并设置 Retry-After；
-// cfg.Rate 为 0 时不安装。key 为 nil 时使用 KeyByIP。
+// RateLimit 按 key 返回的值限流，超出时返回 429 并设置 Retry-After。
+// cfg 不合法或 key 为 nil 时 panic。
 //
 // 计数保存在进程内存中，多实例部署时每个实例分别计数。
 func RateLimit(cfg RateLimitConfig, key KeyFunc) func(http.Handler) http.Handler {
-	if cfg.Rate <= 0 {
-		return passthrough
-	}
-	if cfg.Interval <= 0 {
-		cfg.Interval = time.Second
-	}
-	if cfg.Burst <= 0 {
-		cfg.Burst = cfg.Rate
-	}
-	if cfg.MaxEntries <= 0 {
-		cfg.MaxEntries = 10000
-	}
+	mustValid("RateLimit", cfg.Validate())
 	if key == nil {
-		key = KeyByIP
+		panic("httpx: RateLimit: nil key function")
 	}
 	limiters := &limiterCache{
 		limit: rate.Limit(float64(cfg.Rate) / cfg.Interval.Seconds()),

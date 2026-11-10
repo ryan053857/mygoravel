@@ -3,10 +3,12 @@ package httpx_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -37,25 +39,34 @@ func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {
 	}
 }
 
-func TestZeroValuedMiddlewaresPassThrough(t *testing.T) {
-	next := http.Handler(&marker{})
-	for name, mw := range map[string]func(http.Handler) http.Handler{
-		"ClientIP":  httpx.ClientIP(nil),
-		"AccessLog": httpx.AccessLog(nil),
-		"BodyLimit": httpx.BodyLimit(0),
-		"Timeout":   httpx.Timeout(0),
-		"Locale":    httpx.Locale(nil),
+func TestInvalidParametersPanicInsteadOfDisabling(t *testing.T) {
+	for name, build := range map[string]func(){
+		"ClientIP":  func() { httpx.ClientIP(httpx.ClientIPConfig{TrustedProxies: []netip.Prefix{{}}}) },
+		"AccessLog": func() { httpx.AccessLog(nil) },
+		"Recover":   func() { httpx.Recover(nil) },
+		"BodyLimit": func() { httpx.BodyLimit(httpx.BodyLimitConfig{}) },
+		"Timeout":   func() { httpx.Timeout(httpx.TimeoutConfig{}) },
+		"Locale":    func() { httpx.Locale(nil) },
+		"RateLimit": func() { httpx.RateLimit(httpx.RateLimitConfig{}, httpx.KeyByIP) },
+		"RateKey":   func() { httpx.RateLimit(httpx.DefaultRateLimitConfig(), nil) },
+		"Defaults":  func() { httpx.Defaults(httpx.Config{}, slog.New(slog.DiscardHandler)) },
 	} {
-		if got := mw(next); got != next {
-			t.Fatalf("%s wrapped the handler", name)
-		}
+		func() {
+			defer func() {
+				r := recover()
+				if r == nil || !strings.Contains(fmt.Sprint(r), "httpx: ") {
+					t.Fatalf("%s: expected panic, got %v", name, r)
+				}
+			}()
+			build()
+		}()
 	}
 }
 
 func TestDefaultsLogPanicAsServerError(t *testing.T) {
 	var logs bytes.Buffer
 	router := chi.NewRouter()
-	router.Use(httpx.Defaults(httpx.Config{}, httpx.DefaultsOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})...)
+	router.Use(httpx.Defaults(httpx.DefaultConfig(), slog.New(slog.NewJSONHandler(&logs, nil)))...)
 	router.Get("/", func(http.ResponseWriter, *http.Request) { panic("boom") })
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
@@ -76,7 +87,7 @@ func TestDefaultsLogPanicAsServerError(t *testing.T) {
 }
 
 func TestBodyLimitRejectsStreamedOverflow(t *testing.T) {
-	handler := httpx.BodyLimit(3)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := httpx.BodyLimit(httpx.BodyLimitConfig{MaxBytes: 3})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.ReadAll(r.Body); err == nil {
 			t.Fatal("overflow accepted")
 		}

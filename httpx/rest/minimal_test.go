@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -42,7 +41,7 @@ func TestMinimalHTTPWithoutDatabaseOrCache(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- httpx.Serve(ctx, httpx.Config{ShutdownTimeout: time.Second}, ln, api.Handler(), httpx.ServeOptions{})
+		errCh <- httpx.Serve(ctx, httpx.DefaultConfig(), ln, api.Handler(), httpx.ServeOptions{})
 	}()
 
 	resp, err := http.Get("http://" + ln.Addr().String() + "/ping")
