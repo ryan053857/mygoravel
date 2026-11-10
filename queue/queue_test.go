@@ -10,7 +10,6 @@ import (
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/queue"
@@ -35,21 +34,21 @@ func TestConfig(t *testing.T) {
 	}
 }
 
-// nilDB 满足 bun.IDB，用于在访问数据库之前就返回的校验。
-type nilDB struct{ bun.IDB }
-
+// recorder 是记录入队任务的驱动。
 type recorder struct {
-	topic string
-	msgs  []*message.Message
+	ctx  context.Context
+	jobs []queue.Job
 }
 
-func (r *recorder) Publish(topic string, msgs ...*message.Message) error {
-	r.topic = topic
-	r.msgs = append(r.msgs, msgs...)
+func (r *recorder) Name() string { return "recorder" }
+
+func (r *recorder) Enqueue(ctx context.Context, jobs ...queue.Job) error {
+	r.ctx = ctx
+	r.jobs = append(r.jobs, jobs...)
 	return nil
 }
 
-func (r *recorder) Close() error { return nil }
+func (r *recorder) Claim(context.Context, queue.ClaimRequest) ([]queue.Claim, error) { return nil, nil }
 
 func TestPublish(t *testing.T) {
 	type welcome struct {
@@ -59,33 +58,51 @@ func TestPublish(t *testing.T) {
 		slog.String(logging.AttrRequestID, "req-1"), slog.String("other", "x"))
 	at := time.Date(2030, 1, 2, 3, 4, 5, 6000, time.FixedZone("CST", 8*3600))
 
-	var pub recorder
-	if err := queue.Publish(ctx, &pub, "mail.send", welcome{Email: "a@example.com"}, queue.At(at)); err != nil {
+	var d recorder
+	if err := queue.Publish(ctx, &d, "mail.send", welcome{Email: "a@example.com"}, queue.At(at)); err != nil {
 		t.Fatal(err)
 	}
-	if pub.topic != "mail.send" || len(pub.msgs) != 1 {
-		t.Fatalf("published %q %d", pub.topic, len(pub.msgs))
+	if len(d.jobs) != 1 || d.ctx != ctx {
+		t.Fatalf("enqueued %d", len(d.jobs))
 	}
-	msg := pub.msgs[0]
-	id, err := uuid.Parse(msg.UUID)
-	if err != nil || id.Version() != 7 {
-		t.Fatalf("uuid %q version %v err %v", msg.UUID, id.Version(), err)
+	j := d.jobs[0]
+	if j.Topic != "mail.send" || j.ID.Version() != 7 || !j.AvailableAt.Equal(at) {
+		t.Fatalf("job %+v", j)
 	}
-	if string(msg.Payload) != `{"email":"a@example.com"}` {
-		t.Fatalf("payload %s", msg.Payload)
+	if string(j.Payload) != `{"email":"a@example.com"}` {
+		t.Fatalf("payload %s", j.Payload)
 	}
-	if msg.Metadata.Get(logging.AttrRequestID) != "req-1" || msg.Metadata.Get("other") != "" {
-		t.Fatalf("metadata %v", msg.Metadata)
-	}
-	if msg.Context() != ctx {
-		t.Fatal("message context not set")
-	}
-	if got := msg.Metadata.Get("_queue_available_at"); got != "2030-01-01T19:04:05.000006Z" {
-		t.Fatalf("available at %q", got)
+	if len(j.Metadata) != 1 || j.Metadata[logging.AttrRequestID] != "req-1" {
+		t.Fatalf("metadata %v", j.Metadata)
 	}
 
-	if err := queue.Publish(ctx, &pub, "x", func() {}); err == nil {
+	if err := queue.Publish(ctx, &d, "x", func() {}); err == nil {
 		t.Fatal("expected encode error")
+	}
+	if err := queue.Publish(ctx, &d, "", 1); err == nil {
+		t.Fatal("expected empty topic error")
+	}
+}
+
+func TestPublisher(t *testing.T) {
+	var d recorder
+	pub := queue.NewPublisher(&d)
+	msg := message.NewMessage(uuid.NewString(), []byte("x"))
+	msg.Metadata.Set("k", "v")
+	msg.Metadata.Set("_queue_available_at", "2030-01-01T19:04:05.000006Z")
+	if err := pub.Publish("t", msg); err != nil {
+		t.Fatal(err)
+	}
+	j := d.jobs[0]
+	if j.ID.String() != msg.UUID || j.Topic != "t" || j.Metadata["k"] != "v" || len(j.Metadata) != 1 ||
+		!j.AvailableAt.Equal(time.Date(2030, 1, 1, 19, 4, 5, 6000, time.UTC)) {
+		t.Fatalf("job %+v", j)
+	}
+	if err := pub.Publish("", message.NewMessage(uuid.NewString(), nil)); err == nil {
+		t.Fatal("expected empty topic error")
+	}
+	if err := pub.Publish("t", message.NewMessage("not-a-uuid", nil)); err == nil {
+		t.Fatal("expected invalid UUID error")
 	}
 }
 
@@ -100,15 +117,5 @@ func TestPermanent(t *testing.T) {
 	}
 	if queue.IsPermanent(base) {
 		t.Fatal("plain error reported permanent")
-	}
-}
-
-func TestPublisherRejectsInvalidMessages(t *testing.T) {
-	pub := queue.NewPublisher(nilDB{})
-	if err := pub.Publish("", message.NewMessage(uuid.NewString(), nil)); err == nil {
-		t.Fatal("expected empty topic error")
-	}
-	if err := pub.Publish("t", message.NewMessage("not-a-uuid", nil)); err == nil {
-		t.Fatal("expected invalid UUID error")
 	}
 }

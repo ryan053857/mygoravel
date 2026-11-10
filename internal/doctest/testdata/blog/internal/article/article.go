@@ -1,38 +1,87 @@
-// Package article 只声明 bootstrap 和 cli 用到的部分，完整代码见数据库、错误处理和授权章节。
+// Package article 声明文档中只以片段给出的部分：模型、业务错误、共享函数，以及 Create、PublishScheduled。
+// publish.go、get.go、routes.go 和 dto.go 从文档中提取。
 package article
 
 import (
 	"context"
-	"errors"
+	"database/sql"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
+	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/identity"
 )
 
-var ErrSlugTaken = errors.New("article: slug taken")
+const (
+	StatusDraft     = "draft"
+	StatusPublished = "published"
+)
 
 type Article struct {
-	ID uuid.UUID
+	ID          uuid.UUID  `bun:"id,pk"`
+	AuthorID    string     `bun:"author_id,notnull"`
+	Title       string     `bun:"title,notnull"`
+	Slug        string     `bun:"slug,notnull"`
+	Content     string     `bun:"content,notnull"`
+	Status      string     `bun:"status,notnull"`
+	PublishedAt *time.Time `bun:"published_at"`
 }
+
+var (
+	ErrNotFound         = errorx.Define(errorx.NotFound, "article.not_found")
+	ErrForbidden        = errorx.Define(errorx.PermissionDenied, "article.forbidden")
+	ErrSlugTaken        = errorx.Define(errorx.Conflict, "article.slug_taken")
+	ErrAlreadyPublished = errorx.Define(errorx.Conflict, "article.already_published")
+)
 
 type Changes struct {
-	Title, Slug, Content string
+	Title   string `json:"title" minLength:"1" maxLength:"200"`
+	Slug    string `json:"slug" maxLength:"100" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$"`
+	Content string `json:"content"`
 }
 
-type Service struct {
-	db *bun.DB
+func find(ctx context.Context, db bun.IDB, id uuid.UUID) (*Article, error) {
+	item := new(Article)
+	err := db.NewSelect().Model(item).Where("id = ?", id).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound.New()
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "load article")
+	}
+	return item, nil
 }
 
-func NewService(db *bun.DB) *Service { return &Service{db: db} }
+func canEdit(subject identity.Subject, item *Article) bool {
+	return subject.HasScope("articles:admin") || item.AuthorID == subject.ID
+}
 
-func (s *Service) Create(ctx context.Context, subject identity.Subject, c Changes) (*Article, error) {
+type Create struct{ db *bun.DB }
+
+func NewCreate(db *bun.DB) *Create { return &Create{db: db} }
+
+func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes) (*Article, error) {
 	return &Article{}, nil
 }
 
-func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
-	return &Article{ID: id}, nil
+type CreateInput struct {
+	Body Changes
 }
 
-func (s *Service) PublishScheduled(ctx context.Context) error { return nil }
+func (a *Create) HTTP(ctx context.Context, in *CreateInput) (*ArticleOutput, error) {
+	subject, _ := identity.FromContext(ctx)
+	item, err := a.Handle(ctx, subject, in.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &ArticleOutput{Body: toDTO(item)}, nil
+}
+
+type PublishScheduled struct{ db *bun.DB }
+
+func NewPublishScheduled(db *bun.DB) *PublishScheduled { return &PublishScheduled{db: db} }
+
+func (a *PublishScheduled) Handle(ctx context.Context) error { return nil }

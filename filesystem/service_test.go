@@ -109,14 +109,14 @@ func TestUploadConfirmGetOpen(t *testing.T) {
 		if r.URL != "/storage/"+r.Key {
 			t.Fatalf("URL = %s", r.URL)
 		}
-		if _, err := e.svc.Confirm(ctx, bob, r.ID); !errors.Is(err, filesystem.ErrNotFound) {
+		if _, err := e.svc.Confirm(ctx, bob, r.ID, filesystem.Accept{}); !errors.Is(err, filesystem.ErrNotFound) {
 			t.Fatalf("other owner confirmed: %v", err)
 		}
-		confirmed, err := e.svc.Confirm(ctx, alice, r.ID)
+		confirmed, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{})
 		if err != nil || confirmed.Status != filesystem.StatusReady || confirmed.ExpiresAt != nil || confirmed.URL != r.URL {
 			t.Fatalf("confirm = %+v %v", confirmed, err)
 		}
-		if again, err := e.svc.Confirm(ctx, alice, r.ID); err != nil || again.Status != filesystem.StatusReady {
+		if again, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{}); err != nil || again.Status != filesystem.StatusReady {
 			t.Fatalf("repeat confirm = %+v %v", again, err)
 		}
 		got, err := e.svc.Get(ctx, r.ID)
@@ -162,7 +162,7 @@ func TestUploadValidation(t *testing.T) {
 			t.Fatalf("failed uploads left %d rows", n)
 		}
 		empty := upload(t, e.svc, alice, "")
-		if _, err := e.svc.Confirm(ctx, alice, empty.ID); err != nil {
+		if _, err := e.svc.Confirm(ctx, alice, empty.ID, filesystem.Accept{}); err != nil {
 			t.Fatalf("empty file: %v", err)
 		}
 	})
@@ -176,20 +176,20 @@ func TestConfirmRequiresUploadedObject(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.svc.Confirm(ctx, alice, r.ID); !errors.Is(err, filesystem.ErrNotUploaded) {
+		if _, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{}); !errors.Is(err, filesystem.ErrNotUploaded) {
 			t.Fatalf("confirm without object = %v", err)
 		}
 		if err := e.local.Put(ctx, r.Key, "", strings.NewReader("ab"), 2); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.svc.Confirm(ctx, alice, r.ID); !errors.Is(err, filesystem.ErrNotUploaded) {
+		if _, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{}); !errors.Is(err, filesystem.ErrNotUploaded) {
 			t.Fatalf("confirm with wrong size = %v", err)
 		}
 		if _, err := e.svc.SignPut(ctx, alice, r.ID); !errors.Is(err, filesystem.ErrUnsupported) {
 			t.Fatalf("local SignPut = %v", err)
 		}
 		e.expire(t, r.ID)
-		if _, err := e.svc.Confirm(ctx, alice, r.ID); !errors.Is(err, filesystem.ErrNotFound) {
+		if _, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{}); !errors.Is(err, filesystem.ErrNotFound) {
 			t.Fatalf("expired confirm = %v", err)
 		}
 	})
@@ -204,7 +204,7 @@ func TestConcurrentConfirm(t *testing.T) {
 		errs := make(chan error, 8)
 		for range 8 {
 			wg.Go(func() {
-				got, err := e.svc.Confirm(ctx, alice, r.ID)
+				got, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{})
 				if err == nil && got.Status != filesystem.StatusReady {
 					err = errors.New("not ready")
 				}
@@ -227,7 +227,7 @@ func TestDeleteAndCleanup(t *testing.T) {
 		e := newEnv(t, driver)
 
 		ready := upload(t, e.svc, alice, "keep")
-		if _, err := e.svc.Confirm(ctx, alice, ready.ID); err != nil {
+		if _, err := e.svc.Confirm(ctx, alice, ready.ID, filesystem.Accept{}); err != nil {
 			t.Fatal(err)
 		}
 		stale := upload(t, e.svc, alice, "stale")
@@ -361,7 +361,7 @@ func TestS3DirectPut(t *testing.T) {
 			t.Fatal(err)
 		}
 		sendSigned(t, req, []byte("hello"))
-		if _, err := e.svc.Confirm(ctx, alice, r.ID); err != nil {
+		if _, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := e.svc.SignPut(ctx, alice, r.ID); !errors.Is(err, filesystem.ErrInvalid) {
@@ -398,7 +398,7 @@ func TestS3Multipart(t *testing.T) {
 		if _, err := e.svc.CompleteMultipart(ctx, alice, r.ID, up.UploadID, parts[:1]); !errors.Is(err, filesystem.ErrInvalid) {
 			t.Fatalf("missing part = %v", err)
 		}
-		if _, err := e.svc.Confirm(ctx, alice, r.ID); !errors.Is(err, filesystem.ErrNotUploaded) {
+		if _, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{}); !errors.Is(err, filesystem.ErrNotUploaded) {
 			t.Fatalf("confirm before complete = %v", err)
 		}
 		for range 2 { // 第二次模拟响应丢失后的重试
@@ -406,7 +406,7 @@ func TestS3Multipart(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := e.svc.Confirm(ctx, alice, r.ID); err != nil {
+		if _, err := e.svc.Confirm(ctx, alice, r.ID, filesystem.Accept{}); err != nil {
 			t.Fatal(err)
 		}
 		info, err := e.s3.Stat(ctx, r.Key)
@@ -437,6 +437,62 @@ func TestS3CleanupAbortsMultipart(t *testing.T) {
 		}
 		if n := e.rows(t); n != 0 {
 			t.Fatalf("rows = %d", n)
+		}
+	})
+}
+
+// Accept 按文件内容识别真实类型：它必须被允许，并与声明的类型和扩展名一致；大小不超过 MaxSize。
+// 不符合时文件保持 temporary；已确认的文件再次确认时同样检查。
+func TestConfirmAccept(t *testing.T) {
+	const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+	const html = "<!DOCTYPE html><script>alert(1)</script>"
+	images := filesystem.Accept{Types: []string{"image/*"}, MaxSize: 1 << 20}
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		e := newEnv(t, driver)
+		put := func(filename, contentType, body string) filesystem.File {
+			t.Helper()
+			r, err := e.svc.Upload(ctx, alice, filesystem.FileInput{Filename: filename, ContentType: contentType, Size: int64(len(body))}, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}
+		for name, tc := range map[string]struct {
+			file   filesystem.File
+			accept filesystem.Accept
+			ok     bool
+		}{
+			"png":                   {put("cover.png", "image/png", png), images, true},
+			"exact type":            {put("cover.png", "image/png", png), filesystem.Accept{Types: []string{"IMAGE/PNG"}}, true},
+			"no extension":          {put("cover", "image/png", png), images, true},
+			"zero accept":           {put("page.html", "text/html", html), filesystem.Accept{}, true},
+			"html disguised as png": {put("cover.png", "image/png", html), images, false},
+			"png named html":        {put("cover.html", "image/png", png), images, false},
+			"declared jpeg":         {put("cover.png", "image/jpeg", png), images, false},
+			"type not allowed":      {put("cover.png", "image/png", png), filesystem.Accept{Types: []string{"application/pdf"}}, false},
+			"too large":             {put("cover.png", "image/png", png), filesystem.Accept{MaxSize: 4}, false},
+		} {
+			got, err := e.svc.Confirm(ctx, alice, tc.file.ID, tc.accept)
+			if tc.ok != (err == nil) || (!tc.ok && !errors.Is(err, filesystem.ErrNotAccepted)) {
+				t.Errorf("%s: err=%v", name, err)
+				continue
+			}
+			want := filesystem.StatusTemporary
+			if tc.ok {
+				want = filesystem.StatusReady
+			}
+			if r, _ := e.svc.Get(ctx, tc.file.ID); r.Status != want || (tc.ok && got.Status != want) {
+				t.Errorf("%s: status=%s want %s", name, r.Status, want)
+			}
+		}
+
+		ready := put("page.html", "text/html", html)
+		if _, err := e.svc.Confirm(ctx, alice, ready.ID, filesystem.Accept{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.svc.Confirm(ctx, alice, ready.ID, images); !errors.Is(err, filesystem.ErrNotAccepted) {
+			t.Fatalf("reconfirm ready file with images: %v", err)
 		}
 	})
 }

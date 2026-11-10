@@ -5,7 +5,7 @@
 - [装配缓存](#assembling-cache)
 - [基本操作](#basic-operations)
 - [为文章详情加缓存](#caching-articles)
-    - [服务接收缓存](#using-in-services)
+    - [action 接收缓存](#using-in-services)
     - [读取：先缓存后数据库](#cache-aside)
     - [失效：提交后删除](#invalidation)
 - [缓存键与序列化](#keys-and-serialization)
@@ -17,7 +17,7 @@
 
 对于查询代价高、读多写少的数据，可以把查询结果放进缓存，让后续请求不再访问数据库。
 
-mygoravel 没有自己的缓存抽象，推荐直接使用 [eko/gocache](https://github.com/eko/gocache)。和数据库一样，缓存在入口创建，通过构造函数传给业务服务。一个 gocache 缓存由三层对象组成：
+mygoravel 没有自己的缓存抽象，推荐直接使用 [eko/gocache](https://github.com/eko/gocache)。和数据库一样，缓存在入口创建，通过构造函数传给 [action](actions.md)。一个 gocache 缓存由三层对象组成：
 
 ```go
 client := memory.New(10*time.Minute, 10*time.Minute) // 存储客户端
@@ -27,7 +27,7 @@ c := cache.New[string](memoryStore)                   // 带类型的 Get / Set 
 
 业务代码只接触最后一层，换成 Redis 等其他后端时只需替换前两层，见[使用 Redis](#redis)。
 
-本章以进程内的内存缓存为例，为博客应用的文章详情加上缓存：在入口装配缓存，让文章服务先读缓存、再查数据库，并在文章发布后删除旧缓存。
+本章以进程内的内存缓存为例，为博客应用的文章详情加上缓存：在入口装配缓存，让“获取文章”先读缓存、再查数据库，并在文章发布后删除旧缓存。
 
 <a id="installation"></a>
 ## 安装
@@ -72,12 +72,11 @@ cache:
   default_ttl: 10m
 ```
 
-然后在[入口](dependencies.md#assembling-the-application)的 `open` 中，打开数据库之后创建缓存，并传给文章服务：
+然后在[入口](dependencies.md#assembling-the-application)的 `open` 中，打开数据库之后创建缓存，保存在 `App` 中，和数据库一起传给 `article.Register`：
 
 ```go
 memoryClient := memory.New(cfg.Cache.DefaultTTL, 10*time.Minute)
 articleCache := cache.New[string](gocachestore.NewGoCache(memoryClient))
-articles := article.NewService(db, articleCache)
 ```
 
 `memory.New` 的第一个参数是默认 TTL，第二个参数是清理过期数据的间隔。过期的键在读取时立即视为未命中，后台任务按间隔回收它们占用的内存。
@@ -127,22 +126,22 @@ err = c.Clear(ctx)
 ## 为文章详情加缓存
 
 <a id="using-in-services"></a>
-### 服务接收缓存
+### action 接收缓存
 
-文章服务通过构造函数接收 `cache.CacheInterface`，与接收数据库连接的方式相同：
+`Get` 和 `Publish` 通过构造函数接收 `cache.CacheInterface`，与接收数据库连接的方式相同。`Register` 也多了一个参数，把它传给这两个 action：
 
 ```go
-type Service struct {
+type Get struct {
     db    *bun.DB
     cache cache.CacheInterface[string]
 }
 
-func NewService(db *bun.DB, c cache.CacheInterface[string]) *Service {
-    return &Service{db: db, cache: c}
+func NewGet(db *bun.DB, c cache.CacheInterface[string]) *Get {
+    return &Get{db: db, cache: c}
 }
 ```
 
-服务依赖的是接口，不关心背后是内存还是 Redis。
+action 依赖的是接口，不关心背后是内存还是 Redis。
 
 <a id="cache-aside"></a>
 ### 读取：先缓存后数据库
@@ -159,7 +158,7 @@ func NewService(db *bun.DB, c cache.CacheInterface[string]) *Service {
 | 数据库未找到或出错 | 返回错误，不写缓存 |
 | 写回失败 | 记录日志，照常返回数据库结果 |
 
-把这套逻辑放在 `internal/article/cache.go` 中。`find` 是直接查询数据库的方法，写法见[处理“未找到”](database.md#handling-not-found)：
+把这套逻辑放在 `internal/article/cache.go` 中，作为包内的函数供各个 action 使用。`find` 是直接查询数据库的函数，见[模块内共享的代码](actions.md#shared-code)：
 
 ```go
 package article
@@ -168,9 +167,9 @@ func cacheKey(id uuid.UUID) string {
     return "blog:article:v1:" + id.String()
 }
 
-func (s *Service) load(ctx context.Context, id uuid.UUID) (*Article, error) {
+func load(ctx context.Context, db bun.IDB, c cache.CacheInterface[string], id uuid.UUID) (*Article, error) {
     key := cacheKey(id)
-    raw, err := s.cache.Get(ctx, key)
+    raw, err := c.Get(ctx, key)
     switch {
     case err == nil:
         var item Article
@@ -183,12 +182,12 @@ func (s *Service) load(ctx context.Context, id uuid.UUID) (*Article, error) {
         slog.WarnContext(ctx, "read article cache", "key", key, "error", err)
     }
 
-    item, err := s.find(ctx, id)
+    item, err := find(ctx, db, id)
     if err != nil {
         return nil, err
     }
     if data, err := json.Marshal(item); err == nil {
-        if err := s.cache.Set(ctx, key, string(data)); err != nil {
+        if err := c.Set(ctx, key, string(data)); err != nil {
             slog.WarnContext(ctx, "write article cache", "key", key, "error", err)
         }
     }
@@ -196,14 +195,14 @@ func (s *Service) load(ctx context.Context, id uuid.UUID) (*Article, error) {
 }
 ```
 
-然后把[授权章节](authorization.md#ownership)中 `Get` 的 `s.find` 换成 `s.load`，权限检查保持不变：
+然后把[授权章节](authorization.md#ownership)中 `Get` 的 `find` 换成 `load`，权限检查保持不变：
 
 ```go
-func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     if subject.ID == "" {
         return nil, ErrForbidden.New()
     }
-    item, err := s.load(ctx, id)
+    item, err := load(ctx, a.db, a.cache, id)
     if err != nil {
         return nil, err
     }
@@ -225,23 +224,23 @@ func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUI
 文章修改后，删除对应的缓存键，下次读取时重新加载。删除失败只记录日志，数据库的修改仍然成功：
 
 ```go
-func (s *Service) invalidate(ctx context.Context, id uuid.UUID) {
-    if err := s.cache.Delete(ctx, cacheKey(id)); err != nil {
+func invalidate(ctx context.Context, c cache.CacheInterface[string], id uuid.UUID) {
+    if err := c.Delete(ctx, cacheKey(id)); err != nil {
         slog.WarnContext(ctx, "invalidate article cache", "article_id", id, "error", err)
     }
 }
 ```
 
-删除要放在**事务提交成功之后**，事务回滚时缓存保持不变。以[发布文章](authorization.md#checking-in-transactions)为例，在 `RunInTx` 返回后调用：
+删除要放在**事务提交成功之后**，事务回滚时缓存保持不变。以[发布文章](actions.md#writing-actions)为例，在 `Publish.Handle` 的 `RunInTx` 返回后调用：
 
 ```go
-err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
     // 加锁读取、检查权限、更新状态……
 })
 if err != nil {
     return nil, err
 }
-s.invalidate(ctx, id)
+invalidate(ctx, a.cache, id)
 return item, nil
 ```
 
@@ -269,7 +268,7 @@ func newTestCache() cache.CacheInterface[string] {
     return cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0)))
 }
 
-svc := article.NewService(db, newTestCache())
+get := article.NewGet(db, newTestCache())
 ```
 
 清理间隔传 `0` 表示不启动后台清理任务。数据库仍使用 [dbtest](testing.md#database-tests)。值得覆盖的行为：
@@ -300,7 +299,7 @@ redisstore "github.com/eko/gocache/store/redis/v4"
 articleCache := cache.New[string](redisstore.NewRedis(rdb, store.WithExpiration(cfg.Cache.DefaultTTL)))
 ```
 
-文章服务和其余代码无需修改。与内存缓存的区别：
+action 和其余代码无需修改。与内存缓存的区别：
 
 - 默认 TTL 通过 `NewRedis` 的选项设置；`store.WithExpiration(0)` 表示不过期；
 - `Clear` 执行 `FLUSHALL`，会清空整个 Redis 实例的所有数据库，不要在共享的 Redis 上调用；

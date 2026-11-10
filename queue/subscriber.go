@@ -9,41 +9,40 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
-	"github.com/google/uuid"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 
 	"github.com/ryan053857/mygoravel/logging"
 )
 
 var (
-	// ErrLeaseLost 是处理函数 context 的取消原因：任务的租约已过期并可能被其他实例领取，应停止处理。
+	// ErrLeaseLost 表示任务的租约已过期，任务可能已被其他实例领取。
+	// 它也是处理函数 context 的取消原因：收到它时应停止处理。
 	ErrLeaseLost = errors.New("queue: lease lost")
 	// ErrShuttingDown 是处理函数 context 的取消原因：停止等待超时，任务已释放给其他实例。
 	ErrShuttingDown = errors.New("queue: shutting down")
 )
 
-// dbTimeout 是领取、确认和释放任务时单条语句的超时。这些语句不使用 Router 的 context，
+// dbTimeout 是领取、确认和释放任务时单次操作的超时。这些操作不使用 Router 的 context，
 // 停止过程中仍能写回处理结果。
 const dbTimeout = 30 * time.Second
 
-// Subscriber 从 queue_jobs 表领取到期的任务，实现 message.Subscriber。
+// Subscriber 从驱动领取到期的任务，实现 message.Subscriber。
 //
 // 每次 Subscribe 为一个 topic 启动一个领取循环，同时处理的任务不超过 Config.Concurrency。
-// 处理函数 ack 后删除任务；nack 后按退避时间重试，次数用完或错误被 Permanent 标记时转入 queue_failed_jobs。
-// 处理期间自动续租，租约丢失时取消处理函数的 context，原因是 ErrLeaseLost。
+// 处理函数 ack 后确认任务；nack 后按退避时间重试，次数用完或错误被 Permanent 标记时转入失败任务表。
+// 处理期间每 Lease/3 续租一次，租约丢失时取消处理函数的 context，原因是 ErrLeaseLost。
 //
 // Subscribe 的 ctx 取消（Router 停止）或调用 Close 后，先停止领取，再等待处理中的任务完成，
 // 最多等待 Config.ShutdownTimeout；超时仍未完成的任务立即释放给其他实例，处理函数的 context 以 ErrShuttingDown 取消。
 // Router 停止时取消的 context 不会传给处理函数。
 //
-// Router 的 Run 在处理函数返回后就会返回，此时处理结果可能还没有写回数据库。
-// 在 Run 返回之后、关闭数据库之前调用 Close，等待写回完成：
+// Router 的 Run 在处理函数返回后就会返回，此时处理结果可能还没有写回。
+// 在 Run 返回之后、关闭数据库等连接之前调用 Close，等待写回完成：
 //
-//	sub := queue.NewSubscriber(db, cfg, logger)
+//	sub := queue.NewSubscriber(queue.Database(db), cfg, logger)
 //	defer sub.Close()
 type Subscriber struct {
-	db     *bun.DB
+	driver Driver
+	failed *FailedJobs
 	cfg    Config
 	logger *slog.Logger
 
@@ -58,22 +57,41 @@ type Subscriber struct {
 
 var _ message.Subscriber = (*Subscriber)(nil)
 
-// NewSubscriber 创建订阅者。db 必须已执行 Migrations 中的迁移；logger 记录任务失败和数据库错误，
-// nil 时使用 slog.Default()。cfg 不合法时 panic。
-func NewSubscriber(db *bun.DB, cfg Config, logger *slog.Logger) *Subscriber {
-	if db == nil {
-		panic("queue: nil database")
+// SubscriberOption 调整 NewSubscriber 创建的订阅者。
+type SubscriberOption func(*Subscriber)
+
+// WithFailedJobs 指定失败任务写到哪里。数据库驱动默认写入自己的数据库，并且与删除任务在同一个事务中完成；
+// 其他驱动必须指定，失败任务先写入 failed，再从驱动中确认删除。
+func WithFailedJobs(failed *FailedJobs) SubscriberOption {
+	return func(s *Subscriber) { s.failed = failed }
+}
+
+// NewSubscriber 创建从驱动 d 领取任务的订阅者。logger 记录任务失败和驱动错误，nil 时使用 slog.Default()。
+// cfg 不合法，或者非数据库驱动没有使用 WithFailedJobs 时 panic。
+func NewSubscriber(d Driver, cfg Config, logger *slog.Logger, opts ...SubscriberOption) *Subscriber {
+	if d == nil {
+		panic("queue: nil driver")
 	}
 	if err := cfg.Validate(); err != nil {
 		panic(errors.Wrap(err, "queue"))
 	}
-	return &Subscriber{
-		db:      db,
+	s := &Subscriber{
+		driver:  d,
 		cfg:     cfg,
 		logger:  logging.Or(logger).With(logging.AttrComponent, "queue"),
 		closing: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if db, ok := d.(*dbDriver); ok && s.failed == nil {
+		s.failed = NewFailedJobs(db.db)
+	}
+	if s.failed == nil {
+		panic(fmt.Sprintf("queue: driver %q needs WithFailedJobs", d.Name()))
+	}
+	return s
 }
 
 // Subscribe 实现 message.Subscriber：开始领取 topic 的任务。ctx 取消或 Close 后停止领取并关闭返回的通道。
@@ -118,6 +136,17 @@ func (s *Subscriber) consume(ctx context.Context, topic string, out chan<- *mess
 	defer s.loops.Done()
 	defer s.drain(l)
 	defer close(out)
+
+	// 领取在 ctx 取消或 Close 时停止。
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-s.closing:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	s.claimLoop(ctx, topic, out, l)
 }
 
@@ -139,78 +168,64 @@ func (s *Subscriber) drain(l *loop) {
 }
 
 func (s *Subscriber) claimLoop(ctx context.Context, topic string, out chan<- *message.Message, l *loop) {
-	slots := l.slots
-	stop := func() bool {
-		select {
-		case <-ctx.Done():
-			return true
-		case <-s.closing:
-			return true
-		default:
-			return false
-		}
-	}
-	wait := func(d time.Duration) {
-		t := time.NewTimer(d)
-		defer t.Stop()
-		select {
-		case <-t.C:
-		case <-ctx.Done():
-		case <-s.closing:
-		}
-	}
-
 	for {
 		// 至少等到一个空位，再把其余空位一起用于这次领取。
 		select {
-		case slots <- struct{}{}:
+		case l.slots <- struct{}{}:
 		case <-ctx.Done():
-			return
-		case <-s.closing:
 			return
 		}
 		n := 1
 	fill:
 		for n < s.cfg.Concurrency {
 			select {
-			case slots <- struct{}{}:
+			case l.slots <- struct{}{}:
 				n++
 			default:
 				break fill
 			}
 		}
 
-		jobs, err := s.claim(topic, n)
-		for range n - len(jobs) {
-			<-slots
+		claims, err := s.driver.Claim(ctx, ClaimRequest{Topic: topic, Max: n, Lease: s.cfg.Lease, PollInterval: s.cfg.PollInterval})
+		for range n - len(claims) {
+			<-l.slots
 		}
-		if err != nil {
+		if err != nil && ctx.Err() == nil {
 			s.logger.Error("claim jobs failed", "topic", topic, "error", err)
-			wait(s.cfg.PollInterval)
-			continue
+			wait(ctx, s.cfg.PollInterval)
 		}
-		for i := range jobs {
-			if !s.deliver(ctx, out, jobs[i], l) {
-				for _, rest := range jobs[i:] {
+		for i, c := range claims {
+			if !s.deliver(ctx, out, c, l) {
+				for _, rest := range claims[i:] {
 					s.release(rest)
-					<-slots
+					<-l.slots
 				}
 				return
 			}
 		}
-		if len(jobs) < n && !stop() {
-			wait(s.cfg.PollInterval)
+		if ctx.Err() != nil {
+			return
 		}
 	}
 }
 
+func wait(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
+}
+
 // deliver 把任务交给 Router 并开始跟踪它的处理结果；停止领取时返回 false，任务由调用方释放。
-func (s *Subscriber) deliver(ctx context.Context, out chan<- *message.Message, j job, l *loop) bool {
+func (s *Subscriber) deliver(ctx context.Context, out chan<- *message.Message, c Claim, l *loop) bool {
+	j := c.Job()
 	msg := message.NewMessage(j.ID.String(), j.Payload)
 	for k, v := range j.Metadata {
 		msg.Metadata.Set(k, v)
 	}
-	attrs := []slog.Attr{slog.String(logging.AttrMessageID, msg.UUID), slog.Int(logging.AttrAttempt, j.Attempts)}
+	attrs := []slog.Attr{slog.String(logging.AttrMessageID, msg.UUID), slog.Int(logging.AttrAttempt, j.Attempt)}
 	for _, key := range propagated {
 		if v := j.Metadata[key]; v != "" {
 			attrs = append(attrs, slog.String(key, v))
@@ -225,22 +240,20 @@ func (s *Subscriber) deliver(ctx context.Context, out chan<- *message.Message, j
 	case <-ctx.Done():
 		cancel(nil)
 		return false
-	case <-s.closing:
-		cancel(nil)
-		return false
 	}
 	l.inflight.Add(1)
-	go s.track(msgCtx, j, msg, o, cancel, l)
+	go s.track(msgCtx, c, msg, o, cancel, l)
 	return true
 }
 
-// track 等待处理结果并写回数据库，期间按 Lease/3 续租。
+// track 等待处理结果并写回驱动，期间按 Lease/3 续租。
 // ctx 是交付时的消息 context；Router 交付后会替换消息的 context，这里不能再读取 msg.Context()。
-func (s *Subscriber) track(ctx context.Context, j job, msg *message.Message, o *outcome, cancel context.CancelCauseFunc, l *loop) {
+func (s *Subscriber) track(ctx context.Context, c Claim, msg *message.Message, o *outcome, cancel context.CancelCauseFunc, l *loop) {
 	defer l.inflight.Done()
 	defer func() { <-l.slots }()
 	defer cancel(nil)
 
+	topic := c.Job().Topic
 	ticker := time.NewTicker(max(s.cfg.Lease/3, time.Millisecond))
 	defer ticker.Stop()
 	held := true
@@ -248,29 +261,30 @@ func (s *Subscriber) track(ctx context.Context, j job, msg *message.Message, o *
 		select {
 		case <-msg.Acked():
 			if held {
-				s.ack(ctx, j)
+				s.ack(ctx, c)
 			}
 			return
 		case <-msg.Nacked():
 			if held {
-				s.nack(ctx, j, o.err)
+				s.nack(ctx, c, o.err)
 			}
 			return
 		case <-ticker.C:
 			if !held {
 				continue
 			}
-			ok, err := s.update(j, map[string]any{"available_at": time.Now().UTC().Add(s.cfg.Lease)})
-			if err != nil {
-				s.logger.ErrorContext(ctx, "extend lease failed", "topic", j.Topic, "error", err)
-			} else if !ok {
+			err := withTimeout(func(ctx context.Context) error { return c.Extend(ctx, s.cfg.Lease) })
+			switch {
+			case errors.Is(err, ErrLeaseLost):
 				held = false
-				s.logger.WarnContext(ctx, "job lease lost", "topic", j.Topic)
+				s.logger.WarnContext(ctx, "job lease lost", "topic", topic)
 				cancel(ErrLeaseLost)
+			case err != nil:
+				s.logger.ErrorContext(ctx, "extend lease failed", "topic", topic, "error", err)
 			}
 		case <-l.abandon:
 			if held {
-				s.release(j)
+				s.release(c)
 			}
 			cancel(ErrShuttingDown)
 			return
@@ -278,86 +292,27 @@ func (s *Subscriber) track(ctx context.Context, j job, msg *message.Message, o *
 	}
 }
 
-// claim 领取 topic 中最多 n 个到期的任务：attempts 加一，available_at 推到租约到期时间。
-func (s *Subscriber) claim(topic string, n int) ([]job, error) {
+// withTimeout 以 dbTimeout 调用 fn，不受 Router 和处理函数的 context 影响。
+func withTimeout(fn func(ctx context.Context) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
-	now := time.Now().UTC()
-	ready := func(q *bun.SelectQuery) *bun.SelectQuery {
-		return q.Where("j.topic = ?", topic).Where("j.available_at <= ?", now).
-			OrderExpr("j.available_at, j.id").Limit(int64(n))
-	}
-
-	if s.db.Dialect().Name() == dialect.MySQL {
-		jobs, err := s.claimMySQL(ctx, ready, now)
-		return jobs, errors.Wrapf(err, "queue: claim %q", topic)
-	}
-	ids := ready(s.db.NewSelect().Model((*job)(nil)).Column("j.id"))
-	// PostgreSQL 用 SKIP LOCKED 跳过其他实例正在领取的行；SQLite 同一时刻只有一个写者，整条 UPDATE 本身就是互斥的。
-	if s.db.Dialect().Name() == dialect.PG {
-		ids = ids.For("UPDATE SKIP LOCKED")
-	}
-	var jobs []job
-	err := s.db.NewUpdate().Model((*job)(nil)).
-		Set("available_at = ?", now.Add(s.cfg.Lease)).
-		Set("reserved_at = ?", now).
-		Set("attempts = j.attempts + 1").
-		Where("j.id IN (?)", ids).
-		Returning("*").
-		Scan(ctx, &jobs)
-	return jobs, errors.Wrapf(err, "queue: claim %q", topic)
+	return fn(ctx)
 }
 
-// claimMySQL 在一个事务中先锁住到期的行再更新：MySQL 没有 UPDATE … RETURNING，
-// 也不允许在 IN 子查询中使用 LIMIT。读已提交隔离级别下 FOR UPDATE 只锁返回的行，不加间隙锁，
-// 不会挡住同时发布的任务。
-func (s *Subscriber) claimMySQL(ctx context.Context, ready func(*bun.SelectQuery) *bun.SelectQuery, now time.Time) ([]job, error) {
-	var jobs []job
-	err := s.db.RunInTx(ctx, txOptions(s.db), func(ctx context.Context, tx bun.Tx) error {
-		if err := ready(tx.NewSelect().Model(&jobs)).For("UPDATE SKIP LOCKED").Scan(ctx); err != nil {
-			return err
-		}
-		if len(jobs) == 0 {
-			return nil
-		}
-		ids := make([]uuid.UUID, len(jobs))
-		for i := range jobs {
-			ids[i] = jobs[i].ID
-		}
-		lease := now.Add(s.cfg.Lease)
-		_, err := tx.NewUpdate().Model((*job)(nil)).
-			Set("available_at = ?", lease).
-			Set("reserved_at = ?", now).
-			Set("attempts = j.attempts + 1").
-			Where("j.id IN (?)", bun.In(ids)).
-			Exec(ctx)
-		for i := range jobs {
-			jobs[i].Attempts++
-			jobs[i].AvailableAt = lease
-			jobs[i].ReservedAt = now
-		}
-		return err
-	})
-	return jobs, err
-}
-
-func (s *Subscriber) ack(ctx context.Context, j job) {
-	dbCtx, cancel := context.WithTimeout(context.Background(), dbTimeout)
-	defer cancel()
-	_, err := s.db.NewDelete().Model((*job)(nil)).
-		Where("id = ?", j.ID).Where("attempts = ?", j.Attempts).Exec(dbCtx)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "delete finished job failed", "topic", j.Topic, "error", err)
+func (s *Subscriber) ack(ctx context.Context, c Claim) {
+	if err := withTimeout(c.Ack); err != nil {
+		s.logger.ErrorContext(ctx, "acknowledge finished job failed", "topic", c.Job().Topic, "error", err)
 	}
 }
 
-func (s *Subscriber) nack(ctx context.Context, j job, cause error) {
+func (s *Subscriber) nack(ctx context.Context, c Claim, cause error) {
+	j := c.Job()
 	if cause == nil {
 		cause = errors.New("queue: message nacked")
 	}
-	if !IsPermanent(cause) && j.Attempts < s.cfg.MaxAttempts {
-		delay := backoff(j.Attempts)
-		_, err := s.update(j, map[string]any{"available_at": time.Now().UTC().Add(delay), "reserved_at": nil})
+	if !IsPermanent(cause) && j.Attempt < s.cfg.MaxAttempts {
+		delay := backoff(j.Attempt)
+		err := withTimeout(func(ctx context.Context) error { return c.Retry(ctx, time.Now().Add(delay)) })
 		if err != nil {
 			s.logger.ErrorContext(ctx, "schedule retry failed", "topic", j.Topic, "error", err)
 			return
@@ -365,59 +320,38 @@ func (s *Subscriber) nack(ctx context.Context, j job, cause error) {
 		s.logger.WarnContext(ctx, "job failed, will retry", "topic", j.Topic, "retry_in", delay, "error", cause)
 		return
 	}
-	if err := s.fail(j, cause); err != nil {
+	if err := withTimeout(func(ctx context.Context) error { return s.fail(ctx, c, cause) }); err != nil {
 		s.logger.ErrorContext(ctx, "move job to failed jobs failed", "topic", j.Topic, "error", err)
 		return
 	}
 	s.logger.ErrorContext(ctx, "job failed", "topic", j.Topic, "error", cause)
 }
 
-// fail 在一个事务中把仍由本实例持有的任务移入 queue_failed_jobs。
-func (s *Subscriber) fail(j job, cause error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
-	defer cancel()
-	return s.db.RunInTx(ctx, txOptions(s.db), func(ctx context.Context, tx bun.Tx) error {
-		res, err := tx.NewDelete().Model((*job)(nil)).
-			Where("id = ?", j.ID).Where("attempts = ?", j.Attempts).Exec(ctx)
-		if err != nil {
-			return err
-		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			return err // 租约已丢失，任务由其他实例处理
-		}
-		row := &failedJob{
-			ID: j.ID, Driver: driverDatabase, Topic: j.Topic, Payload: j.Payload, Metadata: j.Metadata,
-			Attempts: j.Attempts, Error: fmt.Sprintf("%+v", cause), FailedAt: time.Now().UTC(),
-		}
-		// 同一个任务之前失败过、重新入队后又失败时，替换旧的失败记录。
-		if _, err := tx.NewDelete().Model((*failedJob)(nil)).Where("id = ?", j.ID).Exec(ctx); err != nil {
-			return err
-		}
-		_, err = tx.NewInsert().Model(row).Exec(ctx)
+// failer 由能在一个事务中删除任务并写入失败记录的领取实现（数据库驱动）。
+type failer interface {
+	fail(ctx context.Context, record failedJob) error
+}
+
+// fail 把任务转入失败任务表。数据库驱动在一个事务中完成；其他驱动先写失败记录再确认任务，
+// 两步之间进程崩溃时任务会被重新执行，再次失败时替换这条记录。
+func (s *Subscriber) fail(ctx context.Context, c Claim, cause error) error {
+	j := c.Job()
+	record := failedJob{
+		ID: j.ID, Driver: s.driver.Name(), Topic: j.Topic, Payload: j.Payload, Metadata: j.Metadata,
+		Attempts: j.Attempt, Error: fmt.Sprintf("%+v", cause), FailedAt: time.Now().UTC(),
+	}
+	if f, ok := c.(failer); ok {
+		return f.fail(ctx, record)
+	}
+	if err := s.failed.record(ctx, record); err != nil {
 		return err
-	})
+	}
+	return c.Ack(ctx)
 }
 
 // release 把领取的任务还回队列，立即可被领取，本次领取不计入处理次数。
-func (s *Subscriber) release(j job) {
-	_, err := s.update(j, map[string]any{"available_at": time.Now().UTC(), "reserved_at": nil, "attempts": j.Attempts - 1})
-	if err != nil {
-		s.logger.Error("release job failed", "topic", j.Topic, logging.AttrMessageID, j.ID.String(), "error", err)
+func (s *Subscriber) release(c Claim) {
+	if err := withTimeout(c.Release); err != nil && !errors.Is(err, ErrLeaseLost) {
+		s.logger.Error("release job failed", "topic", c.Job().Topic, logging.AttrMessageID, c.Job().ID.String(), "error", err)
 	}
-}
-
-// update 在任务仍由本次领取持有时（attempts 未变）更新 set 中的列，返回是否更新成功。
-func (s *Subscriber) update(j job, set map[string]any) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
-	defer cancel()
-	q := s.db.NewUpdate().Model((*job)(nil)).Where("id = ?", j.ID).Where("attempts = ?", j.Attempts)
-	for col, v := range set {
-		q = q.Set("? = ?", bun.Ident(col), v)
-	}
-	res, err := q.Exec(ctx)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	return n == 1, err
 }

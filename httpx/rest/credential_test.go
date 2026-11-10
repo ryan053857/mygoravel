@@ -39,11 +39,9 @@ func TestRequireBearerInstallsCredentialCheck(t *testing.T) {
 	captured := make(chan context.Context, 1)
 	op := huma.Operation{OperationID: "events", Method: http.MethodGet, Path: "/events"}
 	rest.RequireBearer(api, validate, "events")(&op)
-	rest.Register(api, op, func() func(context.Context, *struct{}) (*struct{}, error) {
-		return func(ctx context.Context, _ *struct{}) (*struct{}, error) {
-			captured <- ctx
-			return nil, nil
-		}
+	rest.Register(api, op, func(ctx context.Context, _ *struct{}) (*struct{}, error) {
+		captured <- ctx
+		return nil, nil
 	})
 	req := httptest.NewRequest(http.MethodGet, "/events", nil)
 	req.Header.Set("Authorization", "Bearer t")

@@ -16,7 +16,7 @@ import (
 type Mode int
 
 const (
-	// ModeServe 为运行模式：调用 newHandler 并挂载处理器。
+	// ModeServe 为运行模式：挂载处理器。
 	ModeServe Mode = iota
 	// ModeOpenAPI 为文档模式：生成 schema，使用内部占位处理器。
 	ModeOpenAPI

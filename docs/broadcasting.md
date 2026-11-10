@@ -34,7 +34,7 @@ stack.MustAdd("broadcast", func(context.Context) error { return hub.Close() })
 <a id="publishing-events"></a>
 ## 发布事件
 
-文章发布成功后，业务服务发布一个事件：
+文章发布成功后，[Publish](actions.md#writing-actions) action 发布一个事件，`hub` 由它的构造函数传入：
 
 ```go
 type ArticlePublished struct {
@@ -43,9 +43,9 @@ type ArticlePublished struct {
     Author string    `json:"author"`
 }
 
-// 在 Publish 方法中，事务提交之后：
-if err := s.hub.PublishJSON(ctx, "articles", ArticlePublished{ID: item.ID, Title: item.Title, Author: subject.ID}); err != nil {
-    s.logger.WarnContext(ctx, "broadcast article published", "error", err)
+// 在 Publish.Handle 中，事务提交之后：
+if err := a.hub.PublishJSON(ctx, "articles", ArticlePublished{ID: item.ID, Title: item.Title, Author: subject.ID}); err != nil {
+    slog.WarnContext(ctx, "broadcast article published", "error", err)
 }
 ```
 
@@ -95,14 +95,14 @@ func (h *Handlers) Events(w http.ResponseWriter, r *http.Request) error {
 <a id="replaying-missed-events"></a>
 ### 断线补发
 
-连接断开期间的事件不会再投递。上面的处理器为每个事件带上了 ID，浏览器重连时通过 `Last-Event-ID` 发回最后收到的 ID。文章的 ID 是 UUIDv7，按时间排序，所以补发就是查询这个 ID 之后发布的文章：
+连接断开期间的事件不会再投递。上面的处理器为每个事件带上了 ID，浏览器重连时通过 `Last-Event-ID` 发回最后收到的 ID。文章的 ID 是 UUIDv7，按时间排序，所以补发就是查询这个 ID 之后发布的文章。`h.publishedAfter` 是处理器持有的 `article.PublishedAfter` action：
 
 ```go
 sub := h.hub.Subscribe("articles") // 先订阅，再查询，中间发布的文章不会漏掉
 defer sub.Close()
 return web.SSE(w, r, func(s *web.Stream) error {
     if last, err := uuid.Parse(s.LastEventID()); err == nil {
-        missed, err := h.articles.PublishedAfter(s.Context(), last)
+        missed, err := h.publishedAfter.Handle(s.Context(), last)
         if err != nil {
             return err
         }

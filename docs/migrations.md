@@ -244,20 +244,20 @@ func seed() *cobra.Command {
             }
             defer db.Close()
 
-            svc := article.NewService(db)
+            create, publish := article.NewCreate(db), article.NewPublish(db)
             alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
             for _, c := range []article.Changes{
                 {Title: "Hello World", Slug: "hello-world", Content: "……"},
                 {Title: "Second Post", Slug: "second-post", Content: "……"},
             } {
-                item, err := svc.Create(cmd.Context(), alice, c)
+                item, err := create.Handle(cmd.Context(), alice, c)
                 if errors.Is(err, article.ErrSlugTaken) {
                     continue // 之前已经写入过
                 }
                 if err != nil {
                     return err
                 }
-                if _, err := svc.Publish(cmd.Context(), alice, item.ID); err != nil {
+                if _, err := publish.Handle(cmd.Context(), alice, item.ID); err != nil {
                     return err
                 }
             }
@@ -267,7 +267,7 @@ func seed() *cobra.Command {
 }
 ```
 
-示例数据通过业务服务写入，而不是直接插入表中，这样它们和真实请求创建的数据经过相同的验证与规则，表结构变化时也不需要单独维护。slug 的唯一约束让命令可以重复执行：已经存在的文章会被跳过。
+示例数据通过 [action](actions.md) 写入，而不是直接插入表中，这样它们和真实请求创建的数据经过相同的验证与规则，表结构变化时也不需要单独维护。slug 的唯一约束让命令可以重复执行：已经存在的文章会被跳过。
 
 把 `seed()` 加入[命令行装配](commands.md#declaring-the-cli)后，在本地准备数据库：
 
@@ -276,7 +276,7 @@ go run ./cmd/api migrate up
 go run ./cmd/api seed
 ```
 
-`seed` 只用于开发环境，不要把它加入部署流程。需要大量随机数据时，可以用 [gofakeit](https://github.com/brianvoe/gofakeit) 生成 `article.Changes`。测试不依赖这些数据，每个测试在自己的数据库中准备数据，见[测试业务服务](testing.md#testing-services)。
+`seed` 只用于开发环境，不要把它加入部署流程。需要大量随机数据时，可以用 [gofakeit](https://github.com/brianvoe/gofakeit) 生成 `article.Changes`。测试不依赖这些数据，每个测试在自己的数据库中准备数据，见[测试 action](testing.md#testing-actions)。
 
 <a id="published-migrations"></a>
 ## 修改已发布的迁移

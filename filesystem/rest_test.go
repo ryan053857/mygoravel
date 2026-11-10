@@ -91,112 +91,96 @@ type ArticleOutput struct {
 func registerFileRoutes(api *rest.API, auth func(*huma.Operation), files *filesystem.Service) {
 	upload := huma.Operation{OperationID: "file-upload", Method: http.MethodPost, Path: "/files", DefaultStatus: http.StatusCreated}
 	auth(&upload)
-	rest.Register(api, upload, func() func(context.Context, *UploadFileInput) (*FileOutput, error) {
-		return func(ctx context.Context, in *UploadFileInput) (*FileOutput, error) {
-			owner, _ := identity.FromContext(ctx)
-			f := in.RawBody.Data().File
-			file, err := files.Upload(ctx, owner, filesystem.FileInput{
-				Filename: f.Filename, ContentType: f.ContentType, Size: f.Size,
-			}, f.File)
-			if err != nil {
-				return nil, err
-			}
-			return &FileOutput{Body: file}, nil
+	rest.Register(api, upload, func(ctx context.Context, in *UploadFileInput) (*FileOutput, error) {
+		owner, _ := identity.FromContext(ctx)
+		f := in.RawBody.Data().File
+		file, err := files.Upload(ctx, owner, filesystem.FileInput{
+			Filename: f.Filename, ContentType: f.ContentType, Size: f.Size,
+		}, f.File)
+		if err != nil {
+			return nil, err
 		}
+		return &FileOutput{Body: file}, nil
 	})
 
 	prepare := huma.Operation{OperationID: "file-prepare", Method: http.MethodPost, Path: "/files/prepare", DefaultStatus: http.StatusCreated}
 	auth(&prepare)
-	rest.Register(api, prepare, func() func(context.Context, *PrepareFileInput) (*FileOutput, error) {
-		return func(ctx context.Context, in *PrepareFileInput) (*FileOutput, error) {
-			owner, _ := identity.FromContext(ctx)
-			file, err := files.Prepare(ctx, owner, filesystem.FileInput{
-				Disk: "s3", Filename: in.Body.Filename, ContentType: in.Body.ContentType, Size: in.Body.Size,
-			})
-			if err != nil {
-				return nil, err
-			}
-			return &FileOutput{Body: file}, nil
+	rest.Register(api, prepare, func(ctx context.Context, in *PrepareFileInput) (*FileOutput, error) {
+		owner, _ := identity.FromContext(ctx)
+		file, err := files.Prepare(ctx, owner, filesystem.FileInput{
+			Disk: "s3", Filename: in.Body.Filename, ContentType: in.Body.ContentType, Size: in.Body.Size,
+		})
+		if err != nil {
+			return nil, err
 		}
+		return &FileOutput{Body: file}, nil
 	})
 
 	sign := huma.Operation{OperationID: "file-sign-put", Method: http.MethodPost, Path: "/files/{id}/sign"}
 	auth(&sign)
-	rest.Register(api, sign, func() func(context.Context, *FileIDInput) (*SignedOutput, error) {
-		return func(ctx context.Context, in *FileIDInput) (*SignedOutput, error) {
-			owner, _ := identity.FromContext(ctx)
-			signed, err := files.SignPut(ctx, owner, in.ID)
-			if err != nil {
-				return nil, err
-			}
-			return &SignedOutput{Body: signed}, nil
+	rest.Register(api, sign, func(ctx context.Context, in *FileIDInput) (*SignedOutput, error) {
+		owner, _ := identity.FromContext(ctx)
+		signed, err := files.SignPut(ctx, owner, in.ID)
+		if err != nil {
+			return nil, err
 		}
+		return &SignedOutput{Body: signed}, nil
 	})
 
 	createMultipart := huma.Operation{OperationID: "file-multipart-create", Method: http.MethodPost, Path: "/files/{id}/multipart", DefaultStatus: http.StatusCreated}
 	auth(&createMultipart)
-	rest.Register(api, createMultipart, func() func(context.Context, *FileIDInput) (*MultipartOutput, error) {
-		return func(ctx context.Context, in *FileIDInput) (*MultipartOutput, error) {
-			owner, _ := identity.FromContext(ctx)
-			upload, err := files.CreateMultipart(ctx, owner, in.ID)
-			if err != nil {
-				return nil, err
-			}
-			return &MultipartOutput{Body: upload}, nil
+	rest.Register(api, createMultipart, func(ctx context.Context, in *FileIDInput) (*MultipartOutput, error) {
+		owner, _ := identity.FromContext(ctx)
+		upload, err := files.CreateMultipart(ctx, owner, in.ID)
+		if err != nil {
+			return nil, err
 		}
+		return &MultipartOutput{Body: upload}, nil
 	})
 
 	signPart := huma.Operation{OperationID: "file-multipart-sign-part", Method: http.MethodPost, Path: "/files/{id}/multipart/{uploadID}/parts/{number}/sign"}
 	auth(&signPart)
-	rest.Register(api, signPart, func() func(context.Context, *SignPartInput) (*SignedOutput, error) {
-		return func(ctx context.Context, in *SignPartInput) (*SignedOutput, error) {
-			owner, _ := identity.FromContext(ctx)
-			signed, err := files.SignPart(ctx, owner, in.ID, in.UploadID, in.Number)
-			if err != nil {
-				return nil, err
-			}
-			return &SignedOutput{Body: signed}, nil
+	rest.Register(api, signPart, func(ctx context.Context, in *SignPartInput) (*SignedOutput, error) {
+		owner, _ := identity.FromContext(ctx)
+		signed, err := files.SignPart(ctx, owner, in.ID, in.UploadID, in.Number)
+		if err != nil {
+			return nil, err
 		}
+		return &SignedOutput{Body: signed}, nil
 	})
 
 	complete := huma.Operation{OperationID: "file-multipart-complete", Method: http.MethodPost, Path: "/files/{id}/multipart/{uploadID}/complete"}
 	auth(&complete)
-	rest.Register(api, complete, func() func(context.Context, *CompleteMultipartInput) (*FileOutput, error) {
-		return func(ctx context.Context, in *CompleteMultipartInput) (*FileOutput, error) {
-			owner, _ := identity.FromContext(ctx)
-			file, err := files.CompleteMultipart(ctx, owner, in.ID, in.UploadID, in.Body.Parts)
-			if err != nil {
-				return nil, err
-			}
-			return &FileOutput{Body: file}, nil
+	rest.Register(api, complete, func(ctx context.Context, in *CompleteMultipartInput) (*FileOutput, error) {
+		owner, _ := identity.FromContext(ctx)
+		file, err := files.CompleteMultipart(ctx, owner, in.ID, in.UploadID, in.Body.Parts)
+		if err != nil {
+			return nil, err
 		}
+		return &FileOutput{Body: file}, nil
 	})
 
 	abort := huma.Operation{OperationID: "file-multipart-abort", Method: http.MethodDelete, Path: "/files/{id}/multipart/{uploadID}", DefaultStatus: http.StatusNoContent}
 	auth(&abort)
-	rest.Register(api, abort, func() func(context.Context, *UploadIDInput) (*NoContentOutput, error) {
-		return func(ctx context.Context, in *UploadIDInput) (*NoContentOutput, error) {
-			owner, _ := identity.FromContext(ctx)
-			if err := files.AbortMultipart(ctx, owner, in.ID, in.UploadID); err != nil {
-				return nil, err
-			}
-			return &NoContentOutput{}, nil
+	rest.Register(api, abort, func(ctx context.Context, in *UploadIDInput) (*NoContentOutput, error) {
+		owner, _ := identity.FromContext(ctx)
+		if err := files.AbortMultipart(ctx, owner, in.ID, in.UploadID); err != nil {
+			return nil, err
 		}
+		return &NoContentOutput{}, nil
 	})
 
 	create := huma.Operation{OperationID: "article-create", Method: http.MethodPost, Path: "/articles", DefaultStatus: http.StatusCreated}
 	auth(&create)
-	rest.Register(api, create, func() func(context.Context, *CreateArticleInput) (*ArticleOutput, error) {
-		return func(ctx context.Context, in *CreateArticleInput) (*ArticleOutput, error) {
-			owner, _ := identity.FromContext(ctx)
-			cover, err := files.Confirm(ctx, owner, in.Body.CoverID)
-			if err != nil {
-				return nil, err
-			}
-			out := &ArticleOutput{}
-			out.Body.Title, out.Body.CoverURL = in.Body.Title, cover.URL
-			return out, nil
+	rest.Register(api, create, func(ctx context.Context, in *CreateArticleInput) (*ArticleOutput, error) {
+		owner, _ := identity.FromContext(ctx)
+		cover, err := files.Confirm(ctx, owner, in.Body.CoverID, filesystem.Accept{})
+		if err != nil {
+			return nil, err
 		}
+		out := &ArticleOutput{}
+		out.Body.Title, out.Body.CoverURL = in.Body.Title, cover.URL
+		return out, nil
 	})
 }
 

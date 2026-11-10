@@ -1,14 +1,15 @@
 // Package queue 提供持久化的异步任务队列，基于 Watermill 的消息模型。
 //
-// 任务保存在 PostgreSQL、MySQL 或 SQLite 的 queue_jobs 表中，表结构由 Migrations 提供。Publisher 把任务写入表中，
-// 传入 bun.Tx 时与业务写入在同一个事务里提交；Subscriber 领取到期的任务交给 Watermill 的 Router 处理，
-// 多个实例竞争领取（PostgreSQL 与 MySQL 使用 SKIP LOCKED，SQLite 依靠单写者），处理失败的任务按退避时间重试，次数用完后转入 queue_failed_jobs。
+// 任务由 Driver 保存。Database 驱动把任务保存在 PostgreSQL、MySQL 或 SQLite 的 queue_jobs 表中，
+// 表结构由 Migrations 提供，传入 bun.Tx 时任务与业务写入在同一个事务里提交。
+// Subscriber 从驱动领取到期的任务交给 Watermill 的 Router 处理，多个实例竞争领取；
+// 处理失败的任务按退避时间重试，次数用完后转入 queue_failed_jobs。重试、失败任务、并发和平滑停止与驱动无关。
 //
-//	// 发布
-//	err := queue.Publish(ctx, queue.NewPublisher(tx), "mail.send", msg)
+//	// 发布（也可以用 Topic 把 topic 名称和 payload 类型声明在一起）
+//	err := queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
 //
 //	// 处理
-//	sub := queue.NewSubscriber(db, cfg, logger)
+//	sub := queue.NewSubscriber(queue.Database(db), cfg, logger)
 //	defer sub.Close()
 //	router := queue.NewRouter(logger)
 //	queue.Handle(router, sub, "mail.send", mailer.Send)

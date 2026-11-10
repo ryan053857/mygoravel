@@ -13,7 +13,7 @@
 
 很多框架使用“服务容器”来管理依赖：你把服务注册到容器中，框架在需要时自动创建并注入。mygoravel 选择了另一种方式——**显式装配**。
 
-在 mygoravel 中，没有容器、没有全局注册表，也没有基于反射的自动注入。每个服务通过构造函数参数声明它需要什么，应用的入口负责按顺序创建这些依赖并把它们传进去。这种方式的好处是：
+在 mygoravel 中，没有容器、没有全局注册表，也没有基于反射的自动注入。每个 [action](actions.md) 和服务通过构造函数参数声明它需要什么，应用的入口负责按顺序创建这些依赖并把它们传进去。这种方式的好处是：
 
 - 阅读入口代码就能看清应用由哪些部分组成、它们是如何连接的；
 - 编译器会检查每一个依赖，缺少依赖的代码无法通过编译；
@@ -22,38 +22,40 @@
 <a id="constructor-injection"></a>
 ## 构造函数注入
 
-服务在构造函数中接收它需要的依赖，并保存在结构体字段中。例如，一个需要访问数据库的服务：
+action 在构造函数中接收它需要的依赖，并保存在结构体字段中。例如，需要访问数据库的“获取文章”：
 
 ```go
 package article
 
 import "github.com/uptrace/bun"
 
-type Service struct {
+type Get struct {
     db *bun.DB
 }
 
-func NewService(db *bun.DB) *Service {
-    return &Service{db: db}
+func NewGet(db *bun.DB) *Get {
+    return &Get{db: db}
 }
 ```
 
 注意这里直接接收的是 Bun 的 `*bun.DB`，而不是框架包装过的类型。在 mygoravel 中，你使用的始终是社区组件的原生对象。
 
-服务的方法通过第一个参数 `ctx context.Context` 接收请求的取消信号和截止时间，并把它继续传给数据库查询等下游调用：
+它的方法通过第一个参数 `ctx context.Context` 接收请求的取消信号和截止时间，并把它继续传给数据库查询等下游调用：
 
 ```go
-func (s *Service) Find(ctx context.Context, id uuid.UUID) (*Article, error) {
+func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     var item Article
-    err := s.db.NewSelect().Model(&item).Where("id = ?", id).Scan(ctx)
+    err := a.db.NewSelect().Model(&item).Where("id = ?", id).Scan(ctx)
     // ...
 }
 ```
 
+构造函数只保存依赖，不使用它们。这样生成 OpenAPI 文档时，路由可以用 `nil` 依赖照常注册，见[处理器](routing.md#handlers)。
+
 <a id="assembling-the-application"></a>
 ## 在入口中组装应用
 
-应用的入口（通常是 `internal/bootstrap` 包）负责创建所有依赖，并按正确的顺序把它们连接起来。博客应用把入口分成两部分：`App` 装配各个运行部分共用的资源和服务，每个运行部分（HTTP 服务、[队列 worker](queue.md#running-workers) 等）是 `App` 的一个方法。下面是完整的 `internal/bootstrap/app.go`：
+应用的入口（通常是 `internal/bootstrap` 包）负责创建所有依赖，并按正确的顺序把它们连接起来。博客应用把入口分成两部分：`App` 装配各个运行部分共用的资源，每个运行部分（HTTP 服务、[队列 worker](queue.md#running-workers) 等）是 `App` 的一个方法。下面是完整的 `internal/bootstrap/app.go`：
 
 ```go
 package bootstrap
@@ -62,7 +64,6 @@ import (
     "context"
     "log/slog"
 
-    "example.com/blog/internal/article"
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/cleanup"
     "github.com/ryan053857/mygoravel/command"
@@ -73,15 +74,14 @@ import (
     "github.com/uptrace/bun"
 )
 
-// App 是各个运行部分共用的资源和服务，每个进程只装配一次。
+// App 是各个运行部分共用的资源，每个进程只装配一次。
 type App struct {
-    cfg      settings.Config
-    db       *bun.DB
-    locker   *lock.Locker
-    articles *article.Service
+    cfg    settings.Config
+    db     *bun.DB
+    locker *lock.Locker
 }
 
-// open 安装全局日志器，打开数据库并构造业务服务，把关闭操作登记到 stack。
+// open 安装全局日志器，打开数据库，把关闭操作登记到 stack。
 func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App, error) {
     slog.SetDefault(logging.New(cfg.Logs))
 
@@ -94,10 +94,9 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
     })
 
     return &App{
-        cfg:      cfg,
-        db:       db,
-        locker:   lock.New(lock.NewDBStore(db)),
-        articles: article.NewService(db),
+        cfg:    cfg,
+        db:     db,
+        locker: lock.New(lock.NewDBStore(db)),
     }, nil
 }
 
@@ -141,23 +140,23 @@ import (
     "context"
 
     "example.com/blog/internal/article"
-    "example.com/blog/internal/article/articlehttp"
     "example.com/blog/internal/auth"
     "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
+    "github.com/uptrace/bun"
 )
 
 // API 是应用的 API 选项，serve、openapi 和 routes 命令共用它。
 var API = rest.Options{Title: "Blog API", Version: "1.0.0"}
 
 // Routes 注册应用的全部路由，serve、openapi 和 routes 命令共用它。
-func Routes(api *rest.API, validate rest.TokenValidator, articles *article.Service) {
-    articlehttp.Register(api, rest.RequireBearer(api, validate, "articles"), articles)
+func Routes(api *rest.API, validate rest.TokenValidator, db *bun.DB) {
+    article.Register(api, rest.RequireBearer(api, validate, "articles"), db)
 }
 
-// DocRoutes 在文档模式下注册路由。文档模式不调用处理器工厂和 token 校验器，
-// 所以不需要配置和服务。
+// DocRoutes 在文档模式下注册路由。文档模式不调用处理器和 token 校验器，
+// 所以不需要配置和数据库。
 func DocRoutes(api *rest.API) {
     Routes(api, auth.Validator(auth.Config{}), nil)
 }
@@ -179,12 +178,12 @@ func (a *App) HTTP(ctx context.Context) error {
     opts := API
     opts.Router = router
     api := rest.New(opts)
-    Routes(api, auth.Validator(a.cfg.Auth), a.articles)
+    Routes(api, auth.Validator(a.cfg.Auth), a.db)
     return httpx.ListenAndServe(ctx, a.cfg.HTTP, api.Handler(), httpx.ServeOptions{})
 }
 ```
 
-其中 `settings.Config` 是应用的[配置结构](configuration.md#loading-configuration)，`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)），`article` 和 `articlehttp` 是应用自己的业务包（见[路由](routing.md#organizing-routes)）。路由声明保留在各模块的 `routes.go`，`bootstrap.Routes` 统一调用各模块的 `Register`，让 `serve`、`openapi` 和 [routes](commands.md#routes-command) 命令复用同一份声明。后两个命令分别通过 `DocRoutes`、`DocRouter` 在文档模式下注册，不打开运行时资源；action 在处理器工厂内部构造，只有 `serve` 会调用它们。
+其中 `settings.Config` 是应用的[配置结构](configuration.md#loading-configuration)，`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)），`article` 是应用自己的业务包（见[路由](routing.md#organizing-routes)）。路由声明保留在各模块的 `routes.go`，`bootstrap.Routes` 统一调用各模块的 `Register`，让 `serve`、`openapi` 和 [routes](commands.md#routes-command) 命令复用同一份声明。后两个命令分别通过 `DocRoutes`、`DocRouter` 在文档模式下注册，传入的 `db` 为 `nil`，不打开运行时资源。
 
 整个过程就是普通的函数调用：先创建被依赖的对象，再创建依赖它们的对象。数据库、缓存、锁这类多个运行部分都用到的资源放进 `open`；只有某个部分用到的，例如 HTTP 中间件，在它自己的方法里创建。`run` 返回之前，`defer` 中的 `stack.CloseWith` 不会执行，因此正在处理的请求不会因为数据库提前关闭而失败。请求处理与停机的完整顺序见[请求生命周期](lifecycle.md)。
 
@@ -252,7 +251,7 @@ func WithDatabase(ctx context.Context, driver database.Driver, cfg database.Conf
 
 在 mygoravel 中，大多数测试可以直接使用真实的依赖，例如用 `dbtest` 创建一个真实的测试数据库（见[测试](testing.md#database-tests)）。
 
-当你确实需要替换某个依赖时（例如把文章配图上传到对象存储），遵循 Go 的惯例：**由使用方定义接口**。在业务包中声明一个只包含所需方法的小接口，构造函数接收这个接口：
+当你确实需要替换某个依赖时（例如把文章配图上传到对象存储），遵循 Go 的惯例：**由使用方定义接口**。在业务包中声明一个只包含所需方法的小接口，action 的构造函数接收这个接口：
 
 ```go
 package article
@@ -261,8 +260,8 @@ type ImageStore interface {
     Put(ctx context.Context, key string, data []byte) error
 }
 
-func NewService(db *bun.DB, images ImageStore) *Service {
-    return &Service{db: db, images: images}
+func NewSetCover(db *bun.DB, images ImageStore) *SetCover {
+    return &SetCover{db: db, images: images}
 }
 ```
 
@@ -276,7 +275,7 @@ func (m memoryImages) Put(_ context.Context, key string, data []byte) error {
     return nil
 }
 
-svc := article.NewService(db, memoryImages{})
+setCover := article.NewSetCover(db, memoryImages{})
 ```
 
-不需要为每个服务预先定义接口，只在真正需要替换实现时再引入。
+不需要为每个依赖预先定义接口，只在真正需要替换实现时再引入。

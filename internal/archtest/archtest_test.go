@@ -215,9 +215,9 @@ func TestAPIDoesNotLinkTempl(t *testing.T) {
 }
 
 // TestCoreDoesNotLinkRedis 确保不用 Redis 的应用不会链接 go-redis，
-// Redis 实现分别在 lock/redislock 和 ratelimit/redislimit 中。
+// Redis 实现分别在 lock/redislock、ratelimit/redislimit、broadcast/redisbroadcast 和 queue/redisqueue 中。
 func TestCoreDoesNotLinkRedis(t *testing.T) {
-	for _, pkg := range []string{module + "/lock", module + "/ratelimit", module + "/httpx", module + "/broadcast"} {
+	for _, pkg := range []string{module + "/lock", module + "/ratelimit", module + "/httpx", module + "/broadcast", module + "/queue"} {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)

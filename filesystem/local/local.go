@@ -60,7 +60,51 @@ func (d *Disk) Close() error { return d.root.Close() }
 func (d *Disk) URL(key string) string { return d.baseURL + "/" + escapeKey(key) }
 
 // ServeHTTP 提供文件下载，不列目录，也不暴露写入中的临时文件。
-func (d *Disk) ServeHTTP(w http.ResponseWriter, r *http.Request) { d.handler.ServeHTTP(w, r) }
+//
+// 文件和应用同源，类型由扩展名决定，而扩展名来自上传者提交的文件名。为了不让上传的文件在应用的源下执行脚本，
+// 所有响应都带 X-Content-Type-Options: nosniff；HTML、SVG、XML 这类浏览器会执行脚本的类型，
+// 还会加上 Content-Security-Policy: sandbox 并作为附件下载。<img> 中引用的 SVG 不受影响。
+func (d *Disk) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	d.handler.ServeHTTP(&safeWriter{ResponseWriter: w}, r)
+}
+
+// activeTypes 是浏览器直接打开时可能执行脚本的类型。
+var activeTypes = map[string]bool{
+	"text/html": true, "application/xhtml+xml": true, "image/svg+xml": true,
+	"text/xml": true, "application/xml": true,
+}
+
+// safeWriter 在写出响应头之前，按文件服务器确定的 Content-Type 补上安全响应头。
+type safeWriter struct {
+	http.ResponseWriter
+	done bool
+}
+
+func (s *safeWriter) secure() {
+	if s.done {
+		return
+	}
+	s.done = true
+	h := s.Header()
+	h.Set("X-Content-Type-Options", "nosniff")
+	t, _, _ := strings.Cut(h.Get("Content-Type"), ";")
+	if activeTypes[strings.ToLower(strings.TrimSpace(t))] {
+		h.Set("Content-Security-Policy", "sandbox")
+		h.Set("Content-Disposition", "attachment")
+	}
+}
+
+func (s *safeWriter) WriteHeader(code int) {
+	s.secure()
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *safeWriter) Write(b []byte) (int, error) {
+	s.secure()
+	return s.ResponseWriter.Write(b)
+}
+
+func (s *safeWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // Put 写入同目录临时文件后原子重命名，失败时不发布部分内容。
 func (d *Disk) Put(ctx context.Context, key, _ string, body io.Reader, _ int64) (err error) {

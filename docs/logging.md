@@ -134,7 +134,7 @@ ctx = logging.WithAttrs(ctx, slog.String(logging.AttrComponent, "billing"))
 业务代码直接使用 slog 的包级函数记录日志，以键值对的形式附加结构化字段。例如在文章发布成功后记录一条日志：
 
 ```go
-func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     // ……在事务中检查并更新文章状态
     slog.InfoContext(ctx, "article published",
         "article_id", item.ID,
@@ -146,7 +146,7 @@ func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid
 
 请尽量使用带 `Context` 后缀的方法（`InfoContext`、`ErrorContext` 等）并传入当前的 `ctx`，这样日志才能自动带上请求 ID，见下一节。
 
-如果某个服务需要单独的日志器（例如写入审计日志），像接收数据库一样通过构造函数接收 `*slog.Logger` 即可，见[依赖装配](dependencies.md#constructor-injection)。
+如果某个 action 需要单独的日志器（例如写入审计日志），像接收数据库一样通过构造函数接收 `*slog.Logger` 即可，见[依赖装配](dependencies.md#constructor-injection)。
 
 字段名应当保持稳定，例如始终使用 `article_id` 而不是有时写 `articleId`，这样才方便在日志系统中检索和聚合。
 
@@ -202,7 +202,7 @@ slog.ErrorContext(ctx, "sync feed failed", "feed_id", id, "error", err)
 `logging.New` 默认启用 `logging.ErrorFormatter`，它会把 `error` 类型的字段展开为一个分组：
 
 ```json
-{"level":"ERROR","msg":"sync feed failed","feed_id":"…","error":{"message":"article.slug_taken: pq: duplicate key","code":"article.slug_taken","stack":"article.slug_taken: pq: duplicate key\n(1) article.slug_taken\nWraps: (2) attached stack trace\n  -- stack trace:\n  | example.com/blog/article.(*Service).Update\n …"}}
+{"level":"ERROR","msg":"sync feed failed","feed_id":"…","error":{"message":"article.slug_taken: pq: duplicate key","code":"article.slug_taken","stack":"article.slug_taken: pq: duplicate key\n(1) article.slug_taken\nWraps: (2) attached stack trace\n  -- stack trace:\n  | example.com/blog/internal/article.(*Update).Handle\n …"}}
 ```
 
 | 字段 | 内容 |

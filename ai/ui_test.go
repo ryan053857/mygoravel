@@ -34,25 +34,21 @@ func chatServer(t *testing.T, rs *ai.Runs) string {
 	api := rest.New(rest.Options{})
 	post := huma.Operation{OperationID: "chat", Method: http.MethodPost, Path: "/chat"}
 	rest.Public()(&post)
-	rest.RegisterSSE(api, post, ai.UIEvents, func() func(context.Context, *chatInput) (*huma.StreamResponse, error) {
-		return func(ctx context.Context, in *chatInput) (*huma.StreamResponse, error) {
-			run, err := rs.Submit(ctx, "u1", in.Body)
-			if err != nil {
-				return nil, err
-			}
-			return ai.UIStream(run), nil
+	rest.RegisterSSE(api, post, ai.UIEvents, func(ctx context.Context, in *chatInput) (*huma.StreamResponse, error) {
+		run, err := rs.Submit(ctx, "u1", in.Body)
+		if err != nil {
+			return nil, err
 		}
+		return ai.UIStream(run), nil
 	})
 	get := huma.Operation{OperationID: "chat-resume", Method: http.MethodGet, Path: "/chat/{id}/stream"}
 	rest.Public()(&get)
-	rest.RegisterSSE(api, get, ai.UIEvents, func() func(context.Context, *resumeInput) (*huma.StreamResponse, error) {
-		return func(ctx context.Context, in *resumeInput) (*huma.StreamResponse, error) {
-			run, err := rs.Get(ctx, "u1", in.ID)
-			if err != nil {
-				return nil, err
-			}
-			return ai.UIResume(run), nil
+	rest.RegisterSSE(api, get, ai.UIEvents, func(ctx context.Context, in *resumeInput) (*huma.StreamResponse, error) {
+		run, err := rs.Get(ctx, "u1", in.ID)
+		if err != nil {
+			return nil, err
 		}
+		return ai.UIResume(run), nil
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)

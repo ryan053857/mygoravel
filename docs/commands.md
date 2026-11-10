@@ -173,7 +173,7 @@ func Start(ctx context.Context, cfg settings.Config) error {
 ./bin/api openapi > openapi.json
 ```
 
-博客应用的 `bootstrap.API` 和 `bootstrap.DocRoutes` 定义在 `internal/bootstrap` 中，与 `serve` 共用同一份 API 选项和路由注册（见[依赖装配](dependencies.md#assembling-the-application)），因此导出的文档与实际运行的接口始终一致。文档模式不会调用处理器工厂，也不会调用 token 校验器，所以这个命令不读取配置文件，也不连接数据库。
+博客应用的 `bootstrap.API` 和 `bootstrap.DocRoutes` 定义在 `internal/bootstrap` 中，与 `serve` 共用同一份 API 选项和路由注册（见[依赖装配](dependencies.md#assembling-the-application)），因此导出的文档与实际运行的接口始终一致。文档模式不会调用处理器，也不会调用 token 校验器，所以这个命令不读取配置文件，也不连接数据库。
 
 <a id="routes-command"></a>
 ### routes 命令
@@ -302,7 +302,7 @@ root.AddCommand(&cobra.Command{
 | `errorx.Internal` 及非业务错误 | `ExitInternal`（5） |
 | 其余分类 | `ExitFailure`（1） |
 
-因此，命令直接返回业务服务的错误即可。需要覆盖默认结果时，用 `command.AsExitError` 为错误标记退出码，`command.ExitCode` 则从错误中取出退出码：
+因此，命令直接返回 action 的错误即可。需要覆盖默认结果时，用 `command.AsExitError` 为错误标记退出码，`command.ExitCode` 则从错误中取出退出码：
 
 ```go
 return command.AsExitError(command.ExitUnavailable, err)

@@ -135,7 +135,8 @@ Pipeline、事务、Lua 脚本、发布订阅等用法见 [go-redis 文档](http
 - **缓存**：`redisstore.NewRedis(rdb)`，见[缓存](cache.md#redis)；
 - **会话**：scs 的 `goredisstore.New(rdb)`，见[会话](session.md#redis-store)；
 - **原子锁**：`redislock.New(rdb)`，见[原子锁](locks.md#redis-store)；
-- **限流**：`redislimit.New(rdb, name, cfg)`，见[限流](rate-limiting.md#redis-limiter)。
+- **限流**：`redislimit.New(rdb, name, cfg)`，见[限流](rate-limiting.md#redis-limiter)；
+- **队列**：`redisqueue.New(rdb, prefix)`，见[队列](queue.md#redis-driver)。
 
 scs 的 `goredisstore.New` 要求传入 `*redis.Client`，不接受集群客户端。
 

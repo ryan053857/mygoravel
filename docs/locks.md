@@ -24,13 +24,13 @@
 <a id="assembling-locks"></a>
 ## 装配锁
 
-在[入口](dependencies.md#assembling-the-application)的 `open` 中创建 `Locker`，传给需要它的服务：
+在[入口](dependencies.md#assembling-the-application)的 `open` 中创建 `Locker`，传给需要它的 action：
 
 ```go
 import "github.com/ryan053857/mygoravel/lock"
 
 locker := lock.New(lock.NewMemoryStore())
-articles := article.NewService(db, locker)
+publishScheduled := article.NewPublishScheduled(db, locker)
 ```
 
 `lock.New` 接收锁存储。`MemoryStore` 只在同一进程内互斥，适合开发、测试和单实例部署；多实例部署请使用[数据库存储](#database-store)或 [Redis 存储](#redis-store)。
@@ -38,12 +38,12 @@ articles := article.NewService(db, locker)
 <a id="running-once"></a>
 ## 只让一个实例执行
 
-`Do` 取得锁后执行函数，结束后释放锁。锁已被其他持有者占用时不执行函数，返回 `lock.ErrNotAcquired`：
+`Do` 取得锁后执行函数，结束后释放锁。锁已被其他持有者占用时不执行函数，返回 `lock.ErrNotAcquired`。下面是发布到期文章的 `PublishScheduled` action 的 `Handle`：
 
 ```go
-func (s *Service) PublishScheduled(ctx context.Context) error {
-    err := s.locker.Do(ctx, "articles:publish-scheduled", time.Minute, func(ctx context.Context) error {
-        _, err := s.db.NewUpdate().Model((*Article)(nil)).
+func (a *PublishScheduled) Handle(ctx context.Context) error {
+    err := a.locker.Do(ctx, "articles:publish-scheduled", time.Minute, func(ctx context.Context) error {
+        _, err := a.db.NewUpdate().Model((*Article)(nil)).
             Set("status = ?", StatusPublished).
             Where("status = ?", StatusScheduled).
             Where("publish_at <= ?", time.Now()).
@@ -69,24 +69,24 @@ func (s *Service) PublishScheduled(ctx context.Context) error {
 
 `Acquire` 尝试取得锁，失败时立即返回 `lock.ErrNotAcquired`；`Wait` 在锁被占用时最多等待一段时间。两者都返回 `*lock.Lock`，用完后调用 `Release`。
 
-例如[缓存](cache.md#cache-aside)一章的文章详情在缓存失效时，多个请求会同时查询数据库。用锁让一个请求查询数据库并写回缓存，其他请求等它完成后重读缓存。下面是改写后的 `load`，`cached` 是从原来的 `load` 中拆出的读缓存和解码部分：
+例如[缓存](cache.md#cache-aside)一章的文章详情在缓存失效时，多个请求会同时查询数据库。用锁让一个请求查询数据库并写回缓存，其他请求等它完成后重读缓存。下面是改写后的 `load`，多了一个 `locker` 参数，`Get` 通过构造函数接收它再传进来；`cached` 是从原来的 `load` 中拆出的读缓存和解码部分：
 
 ```go
-func (s *Service) load(ctx context.Context, id uuid.UUID) (*Article, error) {
+func load(ctx context.Context, db bun.IDB, c cache.CacheInterface[string], locker *lock.Locker, id uuid.UUID) (*Article, error) {
     key := cacheKey(id)
-    if item, ok := s.cached(ctx, key); ok {
+    if item, ok := cached(ctx, c, key); ok {
         return item, nil
     }
 
     // 未命中：只让一个请求重建缓存，其他请求最多等待 3 秒
-    if lk, err := s.locker.Wait(ctx, key+":rebuild", 10*time.Second, 3*time.Second); err == nil {
+    if lk, err := locker.Wait(ctx, key+":rebuild", 10*time.Second, 3*time.Second); err == nil {
         defer lk.Release(ctx)
-        if item, ok := s.cached(ctx, key); ok {
+        if item, ok := cached(ctx, c, key); ok {
             return item, nil // 等待期间已由其他请求重建
         }
     }
 
-    item, err := s.find(ctx, id)
+    item, err := find(ctx, db, id)
     // 写回缓存，与原来相同……
 }
 ```

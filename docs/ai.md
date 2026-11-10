@@ -53,12 +53,12 @@ if err != nil {
     return nil, err
 }
 
-publish := assistant.PublishTool(articles)
+publish := assistant.PublishTool(article.NewPublish(db))
 agent := llmagent.New("writer",
     llmagent.WithModel(ai.NewModel(cfg.AI)),
     llmagent.WithInstruction("你是博客的写作助手，帮编辑查找文章和发布草稿。回答简洁。"),
     llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}),
-    llmagent.WithTools([]tool.Tool{assistant.SearchTool(articles), publish}),
+    llmagent.WithTools([]tool.Tool{assistant.SearchTool(article.NewSearch(db)), publish}),
 )
 runs := ai.NewRuns("blog", agent, sessions, ai.RequireApproval(publish))
 stack.MustAdd("ai", func(context.Context) error {
@@ -78,9 +78,9 @@ type SearchArgs struct {
     Query string `json:"query" jsonschema:"description=搜索关键词"`
 }
 
-func SearchTool(articles *article.Service) tool.CallableTool {
+func SearchTool(search *article.Search) tool.CallableTool {
     return function.NewFunctionTool(func(ctx context.Context, args SearchArgs) ([]article.Summary, error) {
-        return articles.Search(ctx, args.Query, 10)
+        return search.Handle(ctx, args.Query, 10)
     }, function.WithName("search_articles"), function.WithDescription("按关键词搜索已发布的文章"))
 }
 ```
@@ -172,9 +172,7 @@ func (h *Handlers) History(ctx context.Context, in *ConversationInput) (*History
 两个流式接口用 `rest.RegisterSSE` 注册，`ai.UIEvents` 描述消息流，用于生成 OpenAPI 文档：
 
 ```go
-rest.RegisterSSE(api, op, ai.UIEvents, func() func(context.Context, *ChatInput) (*huma.StreamResponse, error) {
-    return h.Chat
-})
+rest.RegisterSSE(api, op, ai.UIEvents, h.Chat)
 ```
 
 前端按这四个接口配置 `useChat`：
