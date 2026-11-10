@@ -25,6 +25,7 @@ var dependencies = map[string][]string{
 	"ratelimit":  {"errorx"},
 	"httpx":      {"errorx", "identity", "i18n", "logging", "ratelimit"},
 	"session":    {"identity"},
+	"apitoken":   {"errorx", "identity"},
 	"web":        {"errorx", "httpx", "i18n", "identity", "logging", "session"},
 	"lock":       {},
 	"hashing":    {},
@@ -32,7 +33,7 @@ var dependencies = map[string][]string{
 	"schedule":   {"lock", "logging"},
 	"ai":         {"errorx", "httpx", "logging"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
@@ -135,6 +136,8 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/httpx", module + "/web", false},
 		{module + "/httpx", module + "/session", false},
 		{module + "/session", module + "/database", false},
+		{module + "/apitoken", module + "/httpx/rest", false},
+		{module + "/apitoken", module + "/database", false},
 		{module + "/lock", "github.com/uptrace/bun", true},
 		{module + "/lock", module + "/database", false},
 		{module + "/cleanup", "github.com/jackc/pgx/v5", false},
@@ -197,7 +200,7 @@ func TestDependencyScope(t *testing.T) {
 
 // TestAPIDoesNotLinkTempl 确保 JSON API 与会话存储不会链接 templ，templ 只由 web 引入。
 func TestAPIDoesNotLinkTempl(t *testing.T) {
-	for _, pkg := range []string{module + "/httpx", module + "/httpx/rest", module + "/session"} {
+	for _, pkg := range []string{module + "/httpx", module + "/httpx/rest", module + "/session", module + "/apitoken"} {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)

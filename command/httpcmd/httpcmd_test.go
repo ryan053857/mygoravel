@@ -49,7 +49,7 @@ func registerRoutes(t *testing.T) func(*rest.API) {
 			return nil
 		}
 		create := huma.Operation{OperationID: "article-create", Method: http.MethodPost, Path: "/articles", Summary: "创建文章"}
-		rest.RequireBearer(api, func(huma.Context, string) (identity.Subject, error) {
+		rest.RequireBearer(api, func(context.Context, string) (identity.Subject, error) {
 			t.Fatal("token validator must not run")
 			return identity.Subject{}, nil
 		}, "articles")(&create)

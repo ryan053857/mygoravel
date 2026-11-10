@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -10,8 +11,8 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 )
 
-// TokenValidator 校验 bearer token 并返回主体。
-type TokenValidator func(ctx huma.Context, token string) (identity.Subject, error)
+// TokenValidator 校验 bearer token 并返回主体。ctx 是请求的 context。
+type TokenValidator func(ctx context.Context, token string) (identity.Subject, error)
 
 // Authenticator 从请求中识别调用者，供 RequireAuth 使用。
 // 请求没有携带凭据时返回 ID 为空的主体或 errorx.Unauthenticated 错误；后端故障时返回 5xx 类错误。
@@ -36,7 +37,7 @@ func RequireBearer(api huma.API, validate TokenValidator, scopes ...string) func
 		if token == "" {
 			return identity.Subject{}, nil
 		}
-		return validate(ctx, token)
+		return validate(ctx.Context(), token)
 	}, scopes...)
 }
 

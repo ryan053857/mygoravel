@@ -27,10 +27,11 @@ mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API K
 
 ```go
 type Subject struct {
-    ID     string
-    Type   SubjectType
-    Method string
-    Scopes []string
+    ID         string
+    Type       SubjectType
+    Method     string
+    Scopes     []string
+    Credential string
 }
 ```
 
@@ -40,11 +41,12 @@ type Subject struct {
 | `Type` | 调用者类别：`identity.SubjectUser`（用户）或 `identity.SubjectService`（服务） |
 | `Method` | 认证方式，例如 `bearer` 或 `session` |
 | `Scopes` | 调用者被授予的访问范围，例如 `articles` |
+| `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)的 ID；用于登出当前设备，可以为空 |
 
 **校验器（TokenValidator）** 是你提供的函数，负责把 token 转换为主体：
 
 ```go
-type TokenValidator func(ctx huma.Context, token string) (identity.Subject, error)
+type TokenValidator func(ctx context.Context, token string) (identity.Subject, error)
 ```
 
 <a id="token-validators"></a>
@@ -56,9 +58,8 @@ type TokenValidator func(ctx huma.Context, token string) (identity.Subject, erro
 package auth
 
 import (
+    "context"
     "errors"
-
-    "github.com/danielgtaylor/huma/v2"
 
     "github.com/ryan053857/mygoravel/errorx"
     "github.com/ryan053857/mygoravel/httpx/rest"
@@ -98,7 +99,7 @@ func Validator(cfg Config) rest.TokenValidator {
     for _, cred := range cfg.Credentials {
         byToken[cred.Token] = cred
     }
-    return func(_ huma.Context, token string) (identity.Subject, error) {
+    return func(_ context.Context, token string) (identity.Subject, error) {
         cred, ok := byToken[token]
         if !ok {
             return identity.Subject{}, ErrUnauthenticated.New()
@@ -231,6 +232,6 @@ func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleO
 <a id="managing-credentials"></a>
 ## 管理凭据
 
-凭据存放在哪里、如何签发和吊销，完全由应用决定。上面把 token 写在配置文件中的做法适合内部服务或少量固定的调用方；对外开放的 API 通常会把 API Key 存在数据库中，或者使用 JWT，此时只需替换校验器的实现，路由和业务代码都不需要改变。
+上面把 token 写在配置文件中的做法适合内部服务或少量固定的调用方。面向用户的 API 使用 [API 令牌](api-tokens.md)：单页应用和 App 登录后得到一个滑动过期的 token，用户也可以为脚本创建个人访问令牌，`Store.Validate` 直接作为校验器使用。
 
-前后端分离的单页应用同样使用 Bearer token。用户注册、刷新 token 等功能不在 mygoravel 的范围内。你可以选择合适的认证服务或库来实现它们，最终在校验器中把验证结果转换为 `identity.Subject` 即可。
+使用外部认证服务签发的 JWT 时，在校验器中用成熟的库验证签名、签发者和有效期，再把结果转换为 `identity.Subject`。无论采用哪种凭据，路由和业务代码都不需要改变。用户注册、找回密码等功能由应用自己实现。
