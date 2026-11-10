@@ -17,24 +17,6 @@ import (
 	"github.com/ryan053857/mygoravel/filesystem"
 )
 
-// Config 是本地磁盘配置。
-type Config struct {
-	Root      string `yaml:"root"`       // 存储目录，由应用独占
-	PublicURL string `yaml:"public_url"` // 公开访问基址，绝对 URL 或以 / 开头的路径
-}
-
-// Validate 检查目录和公开基址。
-func (c Config) Validate() error {
-	var errs []error
-	if strings.TrimSpace(c.Root) == "" {
-		errs = append(errs, errors.New("root is required"))
-	}
-	if _, err := parsePublicURL(c.PublicURL); err != nil {
-		errs = append(errs, err)
-	}
-	return errors.Join(errs...)
-}
-
 // Disk 是本地磁盘，实现 filesystem.Disk 和 http.Handler。
 // 把它挂在 public_url 的路径上即可公开访问：mux.Handle("/storage/", disk)。
 type Disk struct {
@@ -46,12 +28,18 @@ type Disk struct {
 
 var _ filesystem.Disk = (*Disk)(nil)
 
-// Open 创建并打开存储目录。
-func Open(cfg Config) (*Disk, error) {
+// Open 按 filesystem.disks.local 配置创建并打开存储目录。
+func Open(cfg filesystem.LocalConfig) (*Disk, error) {
+	if cfg.IsZero() {
+		return nil, errors.New("local: disk is not configured")
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, errors.Wrap(err, "local")
 	}
-	u, _ := parsePublicURL(cfg.PublicURL)
+	u, err := url.Parse(strings.TrimSpace(cfg.PublicURL))
+	if err != nil {
+		return nil, errors.Wrap(err, "local")
+	}
 	if err := os.MkdirAll(cfg.Root, 0o750); err != nil {
 		return nil, errors.Wrap(err, "local")
 	}
@@ -145,16 +133,6 @@ func validKey(key string) error {
 		return errors.Wrapf(filesystem.ErrInvalid, "invalid key %q", key)
 	}
 	return nil
-}
-
-func parsePublicURL(raw string) (*url.URL, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || raw == "" || u.RawQuery != "" || u.Fragment != "" ||
-		(u.Scheme == "" && (u.Host != "" || !strings.HasPrefix(u.Path, "/"))) ||
-		(u.Scheme != "" && ((u.Scheme != "http" && u.Scheme != "https") || u.Host == "")) {
-		return nil, errors.New("public_url must be an http(s) URL or a path starting with /")
-	}
-	return u, nil
 }
 
 func escapeKey(key string) string {

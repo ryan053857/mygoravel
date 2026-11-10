@@ -69,38 +69,28 @@ filesystem:
       public_url: https://cdn.example.com
 ```
 
-在应用中定义对应的配置结构体：内联 `filesystem.Config`，再在 `disks` 下列出你使用的磁盘：
+把 `filesystem.Config` 放进应用的根配置结构体即可：
 
 ```go
-import (
-    "github.com/ryan053857/mygoravel/filesystem"
-    "github.com/ryan053857/mygoravel/filesystem/local"
-    "github.com/ryan053857/mygoravel/filesystem/s3"
-)
-
-type FilesystemConfig struct {
-    filesystem.Config `yaml:",inline"`
-    Disks             struct {
-        Local local.Config `yaml:"local"`
-        S3    s3.Config    `yaml:"s3"`
-    } `yaml:"disks"`
-}
+import "github.com/ryan053857/mygoravel/filesystem"
 
 type Config struct {
-    Database   database.Config  `yaml:"database"`
-    Filesystem FilesystemConfig `yaml:"filesystem"`
+    Database   database.Config   `yaml:"database"`
+    Filesystem filesystem.Config `yaml:"filesystem"`
 }
 ```
 
-磁盘由应用自己列出，所以只用一种磁盘时只写一个字段；需要第二个桶时，再加一个 `Backup s3.Config` 即可。每个配置类型都有自己的默认值和校验，`config.Load` 会逐一检查，错误会指出具体位置，例如 `filesystem.disks.s3: bucket is required`。
+`disks` 下只需要填写用到的磁盘，没有填写的磁盘保持零值，表示不使用，也不会被校验。`default_disk` 必须是已经配置的磁盘。加载时 `config.Load` 会检查每个磁盘的配置，错误会指出具体位置，例如 `filesystem.disks.s3: bucket is required`。
 
 `filesystem` 段本身的字段：
 
 | 配置 | 默认值 | 含义 |
 | --- | --- | --- |
-| `default_disk` | `local` | 未指定磁盘时使用的磁盘名 |
+| `default_disk` | `local` | 未指定磁盘时使用的磁盘，`local` 或 `s3` |
 | `max_upload_size` | `1GiB` | 单个文件的最大大小，可写 `512MiB`、`2GiB` 或字节数 |
 | `temp_ttl` | `24h` | 上传后多久未确认就被回收，至少 `1m` |
+| `disks.local` | 无 | [本地磁盘](#local-disk)的配置 |
+| `disks.s3` | 无 | [S3 磁盘](#s3-disk)的配置 |
 
 <a id="disks"></a>
 ## 磁盘
@@ -156,7 +146,7 @@ disk, err := s3.Open(ctx, cfg.Filesystem.Disks.S3)
 <a id="assembling-files"></a>
 ## 装配文件服务
 
-`filesystem.New` 接收数据库、配置和磁盘。磁盘 map 的键是磁盘名，会写入 `files.disk` 字段，之后读取文件时按这个名字找到磁盘，所以名字一旦使用就要保持稳定：
+`filesystem.New` 接收数据库、配置和打开好的磁盘。磁盘 map 的键是磁盘名，与配置中的 `local`、`s3` 对应，会写入 `files.disk` 字段，之后读取文件时按这个名字找到磁盘：
 
 ```go
 localDisk, err := local.Open(cfg.Filesystem.Disks.Local)
@@ -167,7 +157,7 @@ s3Disk, err := s3.Open(ctx, cfg.Filesystem.Disks.S3)
 if err != nil {
     return err
 }
-fileService, err := filesystem.New(db, cfg.Filesystem.Config, map[string]filesystem.Disk{
+fileService, err := filesystem.New(db, cfg.Filesystem, map[string]filesystem.Disk{
     "local": localDisk,
     "s3":    s3Disk,
 })
@@ -176,7 +166,7 @@ if err != nil {
 }
 ```
 
-把 `fileService` 传给需要文件的业务服务和处理器。文件服务不注册路由，也不启动后台任务：上传接口和权限检查由应用决定，清理由[清理任务](#cleanup)执行。
+只使用一种磁盘时，只打开并传入那一个。把 `fileService` 传给需要文件的业务服务和处理器。文件服务不注册路由，也不启动后台任务：上传接口和权限检查由应用决定，清理由[清理任务](#cleanup)执行。
 
 <a id="server-upload"></a>
 ## 通过应用服务器上传

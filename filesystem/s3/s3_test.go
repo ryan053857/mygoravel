@@ -34,7 +34,7 @@ func newFakeDisk(t *testing.T) *s3disk.Disk {
 	if _, err := client.CreateBucket(context.Background(), &awss3.CreateBucketInput{Bucket: aws.String("test")}); err != nil {
 		t.Fatal(err)
 	}
-	disk, err := s3disk.Open(context.Background(), s3disk.Config{
+	disk, err := s3disk.Open(context.Background(), filesystem.S3Config{
 		Bucket: "test", Region: "us-east-1", Endpoint: server.URL, PathStyle: true,
 		AccessKey: "k", SecretKey: "s", PublicURL: "https://cdn.example.com/",
 	})
@@ -56,24 +56,6 @@ func read(t *testing.T, disk *s3disk.Disk, key string) []byte {
 		t.Fatal(err)
 	}
 	return data
-}
-
-func TestConfigValidate(t *testing.T) {
-	ok := s3disk.Config{Bucket: "b", PublicURL: "https://cdn.example.com"}
-	if err := ok.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	for _, bad := range []s3disk.Config{
-		{PublicURL: "https://cdn.example.com"},
-		{Bucket: "b"},
-		{Bucket: "b", PublicURL: "/storage"},
-		{Bucket: "b", PublicURL: "https://x", Endpoint: "minio:9000"},
-		{Bucket: "b", PublicURL: "https://x", AccessKey: "k"},
-	} {
-		if err := bad.Validate(); err == nil {
-			t.Errorf("%+v accepted", bad)
-		}
-	}
 }
 
 func TestPutSmallAndLarge(t *testing.T) {
@@ -186,5 +168,14 @@ func TestDirectUpload(t *testing.T) {
 	}
 	if err := disk.AbortMultipart(ctx, "stale.bin", stale); err != nil {
 		t.Fatalf("abort is not idempotent: %v", err)
+	}
+}
+
+func TestOpenRequiresConfig(t *testing.T) {
+	if _, err := s3disk.Open(context.Background(), filesystem.S3Config{}); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("zero config = %v", err)
+	}
+	if _, err := s3disk.New(nil, "b", "https://x"); err == nil {
+		t.Fatal("nil client accepted")
 	}
 }

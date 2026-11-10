@@ -45,7 +45,7 @@ type env struct {
 func newEnv(t *testing.T) env {
 	t.Helper()
 	db := dbtest.Open(t, filesystem.Migrations())
-	localDisk, err := local.Open(local.Config{Root: filepath.Join(t.TempDir(), "files"), PublicURL: "/storage"})
+	localDisk, err := local.Open(filesystem.LocalConfig{Root: filepath.Join(t.TempDir(), "files"), PublicURL: "/storage"})
 	if err != nil {
 		t.Fatal(err)
 	}

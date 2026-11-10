@@ -12,34 +12,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/filesystem/local"
 )
 
 func openDisk(t *testing.T, publicURL string) (*local.Disk, string) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "files")
-	disk, err := local.Open(local.Config{Root: root, PublicURL: publicURL})
+	disk, err := local.Open(filesystem.LocalConfig{Root: root, PublicURL: publicURL})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = disk.Close() })
 	return disk, root
-}
-
-func TestConfigValidate(t *testing.T) {
-	for _, u := range []string{"/storage", "https://cdn.example.com/files", "http://localhost:8080/storage/"} {
-		if err := (local.Config{Root: "x", PublicURL: u}).Validate(); err != nil {
-			t.Errorf("%s: %v", u, err)
-		}
-	}
-	for _, u := range []string{"", "storage", "ftp://x/y", "https:///nohost", "/s?x=1"} {
-		if err := (local.Config{Root: "x", PublicURL: u}).Validate(); err == nil {
-			t.Errorf("%q accepted", u)
-		}
-	}
-	if err := (local.Config{PublicURL: "/s"}).Validate(); err == nil {
-		t.Error("empty root accepted")
-	}
 }
 
 func TestPutOpenStatDelete(t *testing.T) {
@@ -123,5 +108,14 @@ func TestServeHTTP(t *testing.T) {
 		if code, _ := get(p); code != http.StatusNotFound {
 			t.Errorf("%s = %d", p, code)
 		}
+	}
+}
+
+func TestOpenRequiresConfig(t *testing.T) {
+	if _, err := local.Open(filesystem.LocalConfig{}); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("zero config = %v", err)
+	}
+	if _, err := local.Open(filesystem.LocalConfig{Root: t.TempDir()}); err == nil {
+		t.Fatal("missing public_url accepted")
 	}
 }

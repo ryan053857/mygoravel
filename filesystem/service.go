@@ -30,12 +30,13 @@ type Service struct {
 	cfg   Config
 }
 
-// New 创建文件服务。db 必须已执行 files 迁移；disks 的键是写入 files.disk 的稳定名称。
+// New 创建文件服务。db 必须已执行 files 迁移；disks 的键是写入 files.disk 的磁盘名，
+// 通常是 local 和 s3，由 cfg.Disks 中对应的配置打开。
 func New(db *bun.DB, cfg Config, disks map[string]Disk) (*Service, error) {
 	if db == nil {
 		return nil, errors.New("filesystem: database is required")
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.validateLimits(); err != nil {
 		return nil, errors.Wrap(err, "filesystem")
 	}
 	copied := make(map[string]Disk, len(disks))

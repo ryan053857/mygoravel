@@ -25,35 +25,6 @@ import (
 // uploadPartSize 是服务端 Put 的分片缓冲大小，大于它的正文按分片上传，内存占用不超过一片。
 const uploadPartSize = 16 << 20
 
-// Config 是 S3 磁盘配置。未提供静态密钥时使用 AWS 默认凭证链。
-type Config struct {
-	Bucket    string `yaml:"bucket"`
-	Region    string `yaml:"region"`
-	Endpoint  string `yaml:"endpoint"`   // S3 兼容服务的 API 地址，AWS 留空
-	PathStyle bool   `yaml:"path_style"` // 使用 path-style 访问桶，MinIO 等通常需要
-	AccessKey string `yaml:"access_key"`
-	SecretKey string `yaml:"secret_key"`
-	PublicURL string `yaml:"public_url"` // 公开访问基址（CDN 或桶域名），必填
-}
-
-// Validate 检查桶、公开基址、端点和静态凭证。
-func (c Config) Validate() error {
-	var errs []error
-	if strings.TrimSpace(c.Bucket) == "" {
-		errs = append(errs, errors.New("bucket is required"))
-	}
-	if !httpURL(c.PublicURL) {
-		errs = append(errs, errors.New("public_url must be an http(s) URL"))
-	}
-	if c.Endpoint != "" && !httpURL(c.Endpoint) {
-		errs = append(errs, errors.New("endpoint must be an http(s) URL"))
-	}
-	if (c.AccessKey == "") != (c.SecretKey == "") {
-		errs = append(errs, errors.New("access_key and secret_key must be set together"))
-	}
-	return errors.Join(errs...)
-}
-
 // Disk 是 S3 磁盘，实现 filesystem.Disk 和 filesystem.DirectUploader。
 type Disk struct {
 	client    *awss3.Client
@@ -67,8 +38,11 @@ var (
 	_ filesystem.DirectUploader = (*Disk)(nil)
 )
 
-// Open 按配置创建客户端并检查桶可访问。桶和公开访问策略由运维预先配置。
-func Open(ctx context.Context, cfg Config) (*Disk, error) {
+// Open 按 filesystem.disks.s3 配置创建客户端并检查桶可访问。桶和公开访问策略由运维预先配置。
+func Open(ctx context.Context, cfg filesystem.S3Config) (*Disk, error) {
+	if cfg.IsZero() {
+		return nil, errors.New("s3: disk is not configured")
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, errors.Wrap(err, "s3")
 	}
@@ -102,8 +76,11 @@ func Open(ctx context.Context, cfg Config) (*Disk, error) {
 
 // New 使用应用自己创建的客户端，不访问网络。
 func New(client *awss3.Client, bucket, publicURL string) (*Disk, error) {
-	if client == nil || strings.TrimSpace(bucket) == "" || !httpURL(publicURL) {
-		return nil, errors.New("s3: client, bucket and http(s) public URL are required")
+	if client == nil {
+		return nil, errors.New("s3: client is required")
+	}
+	if err := (filesystem.S3Config{Bucket: bucket, PublicURL: publicURL}).Validate(); err != nil {
+		return nil, errors.Wrap(err, "s3")
 	}
 	return &Disk{client: client, presigner: awss3.NewPresignClient(client), bucket: bucket, baseURL: strings.TrimRight(publicURL, "/")}, nil
 }
@@ -319,9 +296,4 @@ func optional(s string) *string {
 		return nil
 	}
 	return aws.String(s)
-}
-
-func httpURL(raw string) bool {
-	u, err := url.Parse(raw)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.RawQuery == "" && u.Fragment == ""
 }

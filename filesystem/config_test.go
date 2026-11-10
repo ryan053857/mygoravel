@@ -9,8 +9,6 @@ import (
 
 	"github.com/ryan053857/mygoravel/config"
 	"github.com/ryan053857/mygoravel/filesystem"
-	"github.com/ryan053857/mygoravel/filesystem/local"
-	"github.com/ryan053857/mygoravel/filesystem/s3"
 )
 
 func TestByteSize(t *testing.T) {
@@ -34,17 +32,8 @@ func TestByteSize(t *testing.T) {
 	}
 }
 
-// filesystemConfig 是文档推荐的应用配置形状：内联服务配置，并在同一段下嵌套磁盘配置。
-type filesystemConfig struct {
-	filesystem.Config `yaml:",inline"`
-	Disks             struct {
-		Local local.Config `yaml:"local"`
-		S3    s3.Config    `yaml:"s3"`
-	} `yaml:"disks"`
-}
-
 type appConfig struct {
-	Filesystem filesystemConfig `yaml:"filesystem"`
+	Filesystem filesystem.Config `yaml:"filesystem"`
 }
 
 func TestConfigLoad(t *testing.T) {
@@ -63,30 +52,69 @@ func TestConfigLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fs := cfg.Filesystem
-	if fs.Config != (filesystem.Config{DefaultDisk: "local", MaxUploadSize: filesystem.GiB, TempTTL: 24 * time.Hour}) {
-		t.Fatalf("defaults = %+v", fs.Config)
+	want := filesystem.Config{
+		DefaultDisk: "local", MaxUploadSize: filesystem.GiB, TempTTL: 24 * time.Hour,
+		Disks: filesystem.DisksConfig{
+			Local: filesystem.LocalConfig{Root: "storage/files", PublicURL: "/storage"},
+			S3:    filesystem.S3Config{Bucket: "b", PublicURL: "https://cdn.example.com"},
+		},
 	}
-	if fs.Disks.Local.Root != "storage/files" || fs.Disks.S3.PublicURL != "https://cdn.example.com" {
-		t.Fatalf("disks = %+v", fs.Disks)
+	if cfg.Filesystem != want {
+		t.Fatalf("cfg = %+v", cfg.Filesystem)
 	}
 
 	cfg, err = config.Load[appConfig](write("set.yaml", "filesystem:\n  default_disk: s3\n  max_upload_size: 2GiB\n  temp_ttl: 1h\n"+disks))
 	if err != nil || cfg.Filesystem.MaxUploadSize != 2*filesystem.GiB || cfg.Filesystem.DefaultDisk != "s3" {
-		t.Fatalf("cfg = %+v err=%v", cfg.Filesystem.Config, err)
+		t.Fatalf("cfg = %+v err=%v", cfg.Filesystem, err)
 	}
 	cfg, err = config.Load[appConfig](write("int.yaml", "filesystem:\n  max_upload_size: 1048576\n"+disks))
 	if err != nil || cfg.Filesystem.MaxUploadSize != filesystem.MiB {
-		t.Fatalf("integer size = %+v err=%v", cfg.Filesystem.Config, err)
+		t.Fatalf("integer size = %+v err=%v", cfg.Filesystem, err)
 	}
 
-	_, err = config.Load[appConfig](write("bad.yaml", "filesystem:\n  max_upload_size: 0\n  disks:\n    local:\n      root: x\n"))
-	if err == nil {
-		t.Fatal("invalid config accepted")
+	// 只配置本地磁盘时，S3 保持零值且不校验。
+	cfg, err = config.Load[appConfig](write("local.yaml", "filesystem:\n  disks:\n    local:\n      root: x\n      public_url: /s\n"))
+	if err != nil || !cfg.Filesystem.Disks.S3.IsZero() {
+		t.Fatalf("local only = %+v err=%v", cfg.Filesystem, err)
 	}
-	for _, want := range []string{"filesystem: max_upload_size", "filesystem.disks.local: public_url", "filesystem.disks.s3: bucket is required"} {
-		if strings.Count(err.Error(), want) != 1 {
-			t.Errorf("error should mention %q once: %v", want, err)
+
+	for name, c := range map[string]struct{ body, want string }{
+		"limits":       {"filesystem:\n  max_upload_size: 0\n" + disks, "filesystem: max_upload_size"},
+		"local":        {"filesystem:\n  disks:\n    local:\n      root: x\n", "filesystem.disks.local: public_url"},
+		"s3":           {"filesystem:\n  disks:\n    local:\n      root: x\n      public_url: /s\n    s3:\n      region: r\n", "filesystem.disks.s3: bucket is required"},
+		"default disk": {"filesystem:\n  default_disk: s3\n  disks:\n    local:\n      root: x\n      public_url: /s\n", `default_disk "s3" must be local or s3 and configured`},
+		"no disks":     {"filesystem: {}\n", `default_disk "local"`},
+	} {
+		_, err := config.Load[appConfig](write(name+".yaml", c.body))
+		if err == nil || strings.Count(err.Error(), c.want) != 1 {
+			t.Errorf("%s: error should mention %q once: %v", name, c.want, err)
+		}
+	}
+}
+
+func TestDiskConfigValidate(t *testing.T) {
+	for _, u := range []string{"/storage", "https://cdn.example.com/files", "http://localhost:8080/storage/"} {
+		if err := (filesystem.LocalConfig{Root: "x", PublicURL: u}).Validate(); err != nil {
+			t.Errorf("local %s: %v", u, err)
+		}
+	}
+	for _, u := range []string{"", "storage", "ftp://x/y", "https:///nohost", "/s?x=1"} {
+		if err := (filesystem.LocalConfig{Root: "x", PublicURL: u}).Validate(); err == nil {
+			t.Errorf("local %q accepted", u)
+		}
+	}
+	if err := (filesystem.S3Config{Bucket: "b", PublicURL: "https://cdn.example.com"}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []filesystem.S3Config{
+		{PublicURL: "https://cdn.example.com"},
+		{Bucket: "b"},
+		{Bucket: "b", PublicURL: "/storage"},
+		{Bucket: "b", PublicURL: "https://x", Endpoint: "minio:9000"},
+		{Bucket: "b", PublicURL: "https://x", AccessKey: "k"},
+	} {
+		if err := bad.Validate(); err == nil {
+			t.Errorf("s3 %+v accepted", bad)
 		}
 	}
 }
