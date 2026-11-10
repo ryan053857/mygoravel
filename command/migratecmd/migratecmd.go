@@ -19,7 +19,7 @@ import (
 	"github.com/ryan053857/mygoravel/database/migrate"
 )
 
-// New 构造 migrate 命令及其 up、status、down 子命令。fsys 的根目录直接包含 SQL 迁移文件，
+// New 构造 migrate 命令及其 up、status、down、make 子命令。fsys 的根目录直接包含 SQL 迁移文件，
 // dbConfig 从应用配置中取出数据库配置。数据库连不上时以 ExitUnavailable 退出。
 func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command {
 	// withProvider 连接数据库并创建迁移器，run 结束后关闭连接。
@@ -71,6 +71,7 @@ func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command
 			}
 			return errors.Wrap(err, "migrate: down")
 		})),
+		Make(),
 	)
 	return root
 }

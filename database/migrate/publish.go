@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cockroachdb/errors"
 )
@@ -66,8 +65,7 @@ func Publish(dir string, sources ...Source) ([]string, error) {
 	if maxVersion > math.MaxInt64-int64(len(pending)) {
 		return nil, errors.New("migrate: migration version overflow")
 	}
-	now, _ := strconv.ParseInt(time.Now().UTC().Format("20060102150405"), 10, 64)
-	version := max(now, maxVersion+1)
+	version := nextVersion(maxVersion)
 
 	var written []string
 	for _, item := range pending {

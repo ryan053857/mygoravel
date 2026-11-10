@@ -24,18 +24,30 @@ mygoravel 使用 [goose](https://github.com/pressly/goose) 管理迁移。迁移
 <a id="writing-migrations"></a>
 ## 编写迁移
 
-在应用的 `migrations` 目录中新建一个 SQL 文件。文件名以一个唯一、递增的 UTC 时间戳开头，后面跟上描述，例如 `20261111090000_create_articles.sql`。
-
-你也可以使用 goose 的命令行工具生成文件：
+用 `migrate make` 新建迁移。名称使用 snake_case，以动作开头、表名结尾：
 
 ```bash
-goose -dir migrations create create_articles sql
+go run ./cmd/api migrate make create_articles_table
 ```
+
+命令输出新文件的路径，例如 `migrations/20261111090000_create_articles_table.sql`。文件名是 UTC 时间戳加名称，版本保证大于目录中已有的迁移，所以新迁移总是排在最后。命令不加载配置、不连接数据库，`--dir` 默认是 `migrations`。
+
+与 Laravel 一样，命令会从名称推断表名并生成骨架：
+
+| 名称 | 生成的骨架 |
+| --- | --- |
+| `create_articles_table` | `CREATE TABLE articles`，带 `id`、`created_at`、`updated_at`；`Down` 中 `DROP TABLE articles` |
+| `add_published_at_to_articles_table`、`drop_summary_from_articles_table` | `ALTER TABLE articles`，补全后才能执行 |
+| 其他名称，例如 `backfill_article_slugs` | 只有 goose 注解 |
+
+时间戳使用 goose 的格式 `20261111090000`，而不是 Laravel 的 `2026_11_11_090000`：goose 把第一个下划线之前的数字当作版本号。
+
+应用还没有任何迁移时，`migrations/embed.go` 中的 `//go:embed *.sql` 无法编译，应用的 `migrate make` 也就无法运行。这时用一个不导入迁移包的独立入口创建第一个迁移，见[发布框架迁移](#publishing-framework-migrations)末尾的 `cmd/publish/main.go`。
 
 <a id="migration-structure"></a>
 ### 迁移文件结构
 
-每个迁移文件包含两部分：`Up` 描述如何应用这次变更，`Down` 描述如何撤销它：
+每个迁移文件包含两部分：`Up` 描述如何应用这次变更，`Down` 描述如何撤销它。下面是补全后的 `create_articles_table`，主键改成了 uuid：
 
 ```sql
 -- +goose Up
@@ -114,7 +126,7 @@ go run ./cmd/api migrate publish --dir migrations
 > [!NOTE]
 > 发布完成后，需要审查和提交 SQL，再重新构建应用，将新文件嵌入二进制。然后运行 `migrate up`。已经在任何环境执行过的迁移不能修改，后续调整必须新增迁移。`CheckPublished` 继续用于检查应用自身的历史基线，不用于比较框架源 SQL 与应用定制后的 SQL。
 
-如果应用还没有任何 SQL，`//go:embed *.sql` 暂时无法编译。可以先创建独立的发布入口，不导入应用的迁移包。下面是完整的 `cmd/publish/main.go`：
+如果应用还没有任何 SQL，`//go:embed *.sql` 暂时无法编译。可以先创建独立的入口，不导入应用的迁移包。下面是完整的 `cmd/publish/main.go`，它同时提供 `make` 和 `publish`：
 
 ```go
 package main
@@ -127,15 +139,16 @@ import (
 )
 
 func main() {
-    root := command.Root("publish-migrations", "发布应用需要的迁移")
-    root.AddCommand(migratecmd.Publish(
-        migrate.Source{Name: "filesystem", FS: filesystem.Migrations()},
-    ))
+    root := command.Root("migrations", "新建或发布迁移")
+    root.AddCommand(
+        migratecmd.Make(),
+        migratecmd.Publish(migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}),
+    )
     command.Execute(root)
 }
 ```
 
-执行 `go run ./cmd/publish publish --dir migrations` 后，再添加应用的 `migrations/embed.go` 和迁移执行命令。这个发布入口也可以一直保留，供开发时使用。
+执行 `go run ./cmd/publish make create_articles_table` 或 `go run ./cmd/publish publish --dir migrations` 生成第一个 SQL 后，再添加应用的 `migrations/embed.go` 和迁移执行命令。这个入口也可以一直保留，供开发时使用。
 
 自定义命令或工具也可以直接调用 `migrate.Publish("migrations", sources...)`；`sources` 是应用显式选择的 `[]migrate.Source`。每个来源的 `Name` 是稳定的包标识，`FS` 根目录直接包含带数字版本的 SQL。来源按传入顺序发布，同一来源的文件按数字版本排序。
 
@@ -145,7 +158,7 @@ func main() {
 <a id="migration-commands"></a>
 ### 迁移命令
 
-在[装配命令行](commands.md#declaring-the-cli)时加入 `command/migratecmd` 包的 `migratecmd.New`，应用就有了 `migrate up`、`migrate status` 和 `migrate down` 三个命令：
+在[装配命令行](commands.md#declaring-the-cli)时加入 `command/migratecmd` 包的 `migratecmd.New`，应用就有了 `migrate up`、`migrate status`、`migrate down` 和[新建迁移](#writing-migrations)的 `migrate make`：
 
 ```go
 root.AddCommand(migratecmd.New(migrations.FS, func(cfg settings.Config) database.Config {

@@ -160,23 +160,24 @@ Huma 自动注册的 `/docs`、`/openapi.json`、`/schemas/{schema}` 等文档�
 <a id="migrate-command"></a>
 ### migrate 命令
 
-`migratecmd.New(fsys, dbConfig)` 创建三个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`dbConfig` 从应用配置中取出数据库配置：
+`migratecmd.New(fsys, dbConfig)` 创建四个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`dbConfig` 从应用配置中取出数据库配置：
 
 ```bash
 ./bin/api migrate up       # 执行全部未执行的迁移
 ./bin/api migrate status   # 查看每个迁移的状态
 ./bin/api migrate down     # 回滚最近一次迁移
+go run ./cmd/api migrate make create_articles_table  # 新建迁移文件
 ```
 
 `up` 和 `down` 每完成一个迁移输出一行，`status` 输出一张表：
 
 ```text
 VERSION         STATE    APPLIED AT           FILE
-20261111090000  applied  2026-11-11 09:12:03  20261111090000_create_articles.sql
-20261112100000  pending  -                    20261112100000_add_article_tags.sql
+20261111090000  applied  2026-11-11 09:12:03  20261111090000_create_articles_table.sql
+20261112100000  pending  -                    20261112100000_create_article_tags_table.sql
 ```
 
-命令会加载配置、连接数据库并在结束后关闭连接。数据库连不上时以 `ExitUnavailable` 退出，部署脚本可以据此重试。迁移文件的编写与嵌入见[迁移](migrations.md)。
+除 `make` 外，命令会加载配置、连接数据库并在结束后关闭连接。数据库连不上时以 `ExitUnavailable` 退出，部署脚本可以据此重试。迁移文件的编写与嵌入见[迁移](migrations.md)。
 
 需要文件上传等功能自带的 SQL 时，可在 `migratecmd.New` 返回的命令上显式添加 `migratecmd.Publish(sources...)`。其中 `sources` 是应用选择的 `[]migrate.Source`，例如 `migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}`。注册后可以执行：
 
