@@ -19,13 +19,13 @@
 <a id="defining-forms"></a>
 ## 定义表单
 
-表单结构体与 API 的输入结构体写法相同，字段名取 `json` 标签，也就是 HTML 中 `<input>` 的 `name`：
+表单结构体与 API 的请求体写法相同，字段名取 `json` 标签，也就是 HTML 中 `<input>` 的 `name`。编辑文章的表单直接使用文章模块的 `Changes`，它也是修改文章接口的请求体和 `Update` action 的参数，验证规则只写一次，见[数据对象](actions.md#data-objects)：
 
 ```go
-type ArticleInput struct {
+type Changes struct {
     Title   string `json:"title" minLength:"1" maxLength:"200"`
-    Slug    string `json:"slug" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" patternDescription:"小写字母、数字和连字符"`
-    Content string `json:"content" minLength:"1"`
+    Slug    string `json:"slug" maxLength:"100" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" patternDescription:"小写字母、数字和连字符"`
+    Content string `json:"content"`
 }
 ```
 
@@ -42,10 +42,10 @@ type ArticleInput struct {
 <a id="rendering-forms"></a>
 ## 渲染表单
 
-组件接收 `*web.Form[ArticleInput]`，用 `Value` 回填输入，用 `Error` 显示错误：
+组件接收 `*web.Form[article.Changes]`，用 `Value` 回填输入，用 `Error` 显示错误：
 
 ```templ
-templ ArticleForm(id uuid.UUID, f *web.Form[ArticleInput]) {
+templ ArticleForm(id uuid.UUID, f *web.Form[article.Changes]) {
 	<form hx-put={ "/admin/articles/" + id.String() } hx-swap="outerMorph">
 		<label>标题 <input name="title" value={ f.Value("title") }/></label>
 		@fieldError(f.Error("title"))
@@ -69,7 +69,7 @@ templ fieldError(message string) {
 首次打开编辑页时，把[渲染页面](views.md#rendering-pages)中的 `Edit` 改为用 `web.NewForm` 包装已有数据，`Value` 返回各字段的文本：
 
 ```go
-in := ArticleInput{Title: item.Title, Slug: item.Slug, Content: item.Content}
+in := article.Changes{Title: item.Title, Slug: item.Slug, Content: item.Content}
 return web.Render(w, r, http.StatusOK, views.EditArticle(item.ID, web.NewForm(in)))
 ```
 
@@ -84,7 +84,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) error {
     if err != nil {
         return web.ErrNotFound.New()
     }
-    f, err := web.ParseForm[ArticleInput](r)
+    f, err := web.ParseForm[article.Changes](r)
     if err != nil {
         return err
     }
@@ -92,8 +92,7 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) error {
         return web.Render(w, r, http.StatusUnprocessableEntity, views.ArticleForm(id, f))
     }
     sub, _ := identity.FromContext(r.Context())
-    changes := article.Changes{Title: f.Data.Title, Slug: f.Data.Slug, Content: f.Data.Content}
-    if _, err := h.articles.Update(r.Context(), sub, id, changes); err != nil {
+    if _, err := h.update.Handle(r.Context(), sub, id, f.Data); err != nil {
         return err
     }
     web.Redirect(w, r, "/admin/articles")
@@ -114,10 +113,10 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) error {
 <a id="business-validation"></a>
 ## 业务规则验证
 
-需要查询数据的规则在业务服务中检查，并返回[业务错误](validation.md#business-validation)，例如已发布的文章不能修改 slug。把它放到对应字段旁边时，用 `SetError`：
+需要查询数据的规则在 action 中检查，并返回[业务错误](validation.md#business-validation)，例如已发布的文章不能修改 slug。把它放到对应字段旁边时，用 `SetError`：
 
 ```go
-if _, err := h.articles.Update(r.Context(), sub, id, changes); errors.Is(err, article.ErrSlugLocked) {
+if _, err := h.update.Handle(r.Context(), sub, id, f.Data); errors.Is(err, article.ErrSlugLocked) {
     f.SetError("slug", httpx.ErrorDetail(r.Context(), err))
     return web.Render(w, r, http.StatusUnprocessableEntity, views.ArticleForm(id, f))
 } else if err != nil {
@@ -151,7 +150,7 @@ if _, err := h.articles.Update(r.Context(), sub, id, changes); errors.Is(err, ar
 表单设置 `enctype="multipart/form-data"` 后，`ParseForm` 同样能解析其中的普通字段，文件用标准库读取：
 
 ```go
-f, err := web.ParseForm[ArticleInput](r)
+f, err := web.ParseForm[article.Changes](r)
 // ……
 file, header, err := r.FormFile("cover")
 ```

@@ -103,26 +103,26 @@ func (a *App) HTTP(ctx context.Context) error {
         r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
         opts := API
         opts.Router, opts.BasePath = r, "/api/v1"
-        Routes(rest.New(opts), auth.Validator(a.cfg.Auth), a.articles)
+        Routes(rest.New(opts), auth.Validator(a.cfg.Auth), a.db)
     })
     router.Group(func(r chi.Router) {
         r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
-        PageRoutes(r, pages, a.users, a.articles)
+        PageRoutes(r, pages, a.db, a.hasher)
     })
     return httpx.ListenAndServe(ctx, a.cfg.HTTP, router, httpx.ServeOptions{})
 }
 
 // PageRoutes 注册应用的全部页面，HTTP 方法和 DocRouter 共用它。
-func PageRoutes(r chi.Router, pages *web.Pages, users *user.Service, articles *article.Service) {
-    authweb.Register(r, pages, users)
-    articleweb.Register(r, pages, articles)
+func PageRoutes(r chi.Router, pages *web.Pages, db *bun.DB, hasher *hashing.Hasher) {
+    authweb.Register(r, pages, db, hasher)
+    articleweb.Register(r, pages, db)
 }
 ```
 
 几点说明：
 
 - 页面和 JSON API 共用一个 Router。API 挂在 `/api/v1` 下，不经过会话；`BasePath` 让 OpenAPI 文档中的地址带上这个前缀，见 [API 版本](routing.md#api-versioning)。`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
-- `a.users` 是应用自己的用户服务，和 `a.articles` 一样在 `open` 中构造，见[依赖装配](dependencies.md#assembling-the-application)。
+- `a.hasher` 是登录校验密码用的[哈希器](hashing.md#hashing-passwords)，和数据库一样在 `open` 中创建，见[依赖装配](dependencies.md#assembling-the-application)。
 - `web.New` 接管会话的错误处理：会话存储出错时记录日志，并用 `ErrorPage` 呈现 `500`。
 - [请求超时](middleware.md#request-timeout)按路由组安装，[服务端推送](sse.md)的路由不能有超时。
 
@@ -134,8 +134,8 @@ func PageRoutes(r chi.Router, pages *web.Pages, users *user.Service, articles *a
 ```go
 package articleweb
 
-func Register(r chi.Router, pages *web.Pages, articles *article.Service) {
-    h := &Handlers{articles: articles}
+func Register(r chi.Router, pages *web.Pages, db *bun.DB) {
+    h := &Handlers{get: article.NewGet(db), update: article.NewUpdate(db)}
     editor := pages.Routes(r, web.Require("articles"))
     editor.Get("/admin/articles/{id}/edit", h.Edit)
     editor.Put("/admin/articles/{id}", h.Update)
@@ -163,7 +163,7 @@ func DocRouter() chi.Routes {
 }
 ```
 
-`PageRoutes` 收到的服务都是 `nil`。处理器只是被登记，不会被调用，所以不受影响。
+`PageRoutes` 收到的依赖都是 `nil`。处理器只是被登记，不会被调用，所以不受影响。
 
 <a id="login"></a>
 ## 登录
@@ -174,9 +174,9 @@ func DocRouter() chi.Routes {
 | --- | --- |
 | 未登录 | 跳转到 `Options.Login`，`next` 参数带上原地址；htmx 请求通过 `HX-Redirect` 整页跳转，原地址取自发起请求的页面 |
 | 缺少所需的权限 | 呈现 `403`，见[错误页](#error-pages) |
-| 通过 | 主体写入请求的 context，处理器和业务服务用 `identity.FromContext` 读取 |
+| 通过 | 主体写入请求的 context，处理器用 `identity.FromContext` 读取，再传给 action |
 
-登录页由应用自己实现，注册为公开路由。下面是 `internal/auth/authweb/routes.go`，`users` 是应用自己的用户服务，`Authenticate` 校验密码，见[哈希](hashing.md#hashing-passwords)：
+登录页由应用自己实现，注册为公开路由。下面是 `internal/auth/authweb/routes.go`，`user.Authenticate` 是用户模块校验密码的 action，见[哈希](hashing.md#hashing-passwords)：
 
 ```go
 type LoginInput struct {
@@ -184,8 +184,8 @@ type LoginInput struct {
     Password string `json:"password" minLength:"1"`
 }
 
-func Register(r chi.Router, pages *web.Pages, users *user.Service) {
-    h := &Handlers{pages: pages, users: users}
+func Register(r chi.Router, pages *web.Pages, db *bun.DB, hasher *hashing.Hasher) {
+    h := &Handlers{pages: pages, authenticate: user.NewAuthenticate(db, hasher)}
     public := pages.Routes(r, web.Public)
     public.Get("/login", h.LoginPage)
     public.Post("/login", h.Login)
@@ -198,7 +198,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
         return err
     }
     if f.Valid() {
-        u, err := h.users.Authenticate(r.Context(), f.Data.Email, f.Data.Password)
+        u, err := h.authenticate.Handle(r.Context(), f.Data.Email, f.Data.Password)
         if err == nil {
             sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}
             if err := h.pages.Login(r.Context(), sub); err != nil {
@@ -233,7 +233,7 @@ pages := web.New(web.Options{
     Sessions: sessions,
     Login:    "/login",
     Resolve: func(ctx context.Context, stored identity.Subject) (identity.Subject, error) {
-        u, err := a.users.Get(ctx, stored.ID)
+        u, err := user.Find(ctx, a.db, stored.ID)
         if err != nil {
             return identity.Subject{}, err
         }
@@ -253,12 +253,12 @@ pages := web.New(web.Options{
 | 其他 4xx 类错误（例如不是这个租户的成员） | 按分类呈现错误页，例如 `404`，不登出 |
 | 5xx 类错误（例如数据库故障） | 呈现错误页 |
 
-每个请求因此多一次查询，访问量大时可以在 `users.Get` 中加缓存。页面同样支持[多租户](authentication.md#tenants)：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 `Resolve` 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
+`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 `Resolve` 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面
 
-处理器调用业务服务，再用 `web.Render` 渲染组件。返回的错误交给 `pages` 呈现：
+处理器调用 action 的 `Handle`，再用 `web.Render` 渲染组件。返回的错误交给 `pages` 呈现：
 
 ```go
 func (h *Handlers) Edit(w http.ResponseWriter, r *http.Request) error {
@@ -267,7 +267,7 @@ func (h *Handlers) Edit(w http.ResponseWriter, r *http.Request) error {
         return web.ErrNotFound.New()
     }
     sub, _ := identity.FromContext(r.Context())
-    item, err := h.articles.Get(r.Context(), sub, id)
+    item, err := h.get.Handle(r.Context(), sub, id)
     if err != nil {
         return err // 例如 article.ErrNotFound，呈现为 404 页面
     }
@@ -277,7 +277,7 @@ func (h *Handlers) Edit(w http.ResponseWriter, r *http.Request) error {
 
 `web.Render` 先把组件渲染到缓冲区，成功后再写出。组件用请求的 context 渲染，所以组件里可以直接用 `i18n.T(ctx, ...)` 翻译文案，见[本地化](localization.md)。templ 组件里的 `ctx` 就是这个 context。
 
-业务服务和[授权](authorization.md)规则与 JSON API 完全相同，`articlehttp` 和 `articleweb` 调用的是同一个 `article.Service`。
+页面和 JSON API 调用的是同一组 [action](actions.md)，业务规则和[授权](authorization.md)完全相同。
 
 <a id="partial-updates"></a>
 ## 局部更新

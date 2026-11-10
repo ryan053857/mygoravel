@@ -38,15 +38,15 @@ SSE 只负责服务端到浏览器。浏览器发给服务端的仍然是普通�
 <ol id="progress"></ol>
 ```
 
-处理器在 `web.SSE` 中逐篇发布，每次用 `Send` 发出一个组件：
+处理器在 `web.SSE` 中逐篇调用 [Publish](actions.md#writing-actions) action，每次用 `Send` 发出一个组件。`h.publish` 是 `articleweb.Register` 中用 `article.NewPublish(db)` 构造的：
 
 ```go
-type PublishInput struct {
+type PublishBatchInput struct {
     IDs []string `json:"ids" minItems:"1"`
 }
 
 func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) error {
-    f, err := web.ParseForm[PublishInput](r)
+    f, err := web.ParseForm[PublishBatchInput](r)
     if err != nil {
         return err
     }
@@ -59,7 +59,7 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) error {
             line := "已发布"
             id, err := uuid.Parse(raw)
             if err == nil {
-                _, err = h.articles.Publish(s.Context(), sub, id)
+                _, err = h.publish.Handle(s.Context(), sub, id)
             }
             if err != nil {
                 line = httpx.ErrorDetail(s.Context(), err)
@@ -75,7 +75,7 @@ func (h *Handlers) Publish(w http.ResponseWriter, r *http.Request) error {
 
 每条消息按 `hx-target` 和 `hx-swap` 放进 `#progress`，`fn` 返回后响应结束。开始写事件之前，错误照常由 `pages` 呈现；开始之后，返回的错误只会记录日志。
 
-`s.Context()` 在浏览器断开或服务器开始停机时取消，传给业务服务，让它们随之停止。
+`s.Context()` 在浏览器断开或服务器开始停机时取消，传给 action，让它们随之停止。
 
 <a id="long-lived-connections"></a>
 ## 长连接
@@ -141,11 +141,11 @@ templ Notice(ev ArticlePublished) {
 <a id="json-api"></a>
 ## JSON API
 
-App 或第三方调用者需要同样的进度时，用 `rest.RegisterSSE` 注册一个 JSON 事件流接口。它的参数和 `rest.Register` 相同，多一个事件表：键是事件名，值是事件数据的类型，用于生成 OpenAPI 文档：
+App 或第三方调用者需要同样的进度时，用 `rest.RegisterSSE` 注册一个 JSON 事件流接口。它的参数和 `rest.Register` 相同，多一个事件表：键是事件名，值是事件数据的类型，用于生成 OpenAPI 文档。`publish` 是 `article.NewPublish(db)`：
 
 ```go
-type PublishRequest struct {
-    Body PublishInput
+type PublishBatchRequest struct {
+    Body PublishBatchInput
 }
 
 type PublishProgress struct {
@@ -154,31 +154,29 @@ type PublishProgress struct {
 }
 
 rest.RegisterSSE(api, op, map[string]any{"progress": PublishProgress{}},
-    func() func(context.Context, *PublishRequest) (*huma.StreamResponse, error) {
-        return func(ctx context.Context, in *PublishRequest) (*huma.StreamResponse, error) {
-            ids := make([]uuid.UUID, len(in.Body.IDs))
-            for i, raw := range in.Body.IDs {
-                id, err := uuid.Parse(raw)
-                if err != nil {
-                    // 还没有开始推送，客户端照常收到 Problem Details
-                    return nil, huma.Error422UnprocessableEntity("invalid article id " + raw)
-                }
-                ids[i] = id
+    func(ctx context.Context, in *PublishBatchRequest) (*huma.StreamResponse, error) {
+        ids := make([]uuid.UUID, len(in.Body.IDs))
+        for i, raw := range in.Body.IDs {
+            id, err := uuid.Parse(raw)
+            if err != nil {
+                // 还没有开始推送，客户端照常收到 Problem Details
+                return nil, huma.Error422UnprocessableEntity("invalid article id " + raw)
             }
-            sub, _ := identity.FromContext(ctx)
-            return rest.SSE(func(s *httpx.Stream) error {
-                for _, id := range ids {
-                    p := PublishProgress{ID: id.String(), Result: "已发布"}
-                    if _, err := articles.Publish(s.Context(), sub, id); err != nil {
-                        p.Result = httpx.ErrorDetail(s.Context(), err)
-                    }
-                    if err := s.SendJSON(httpx.Event{Name: "progress"}, p); err != nil {
-                        return nil // 客户端已经离开
-                    }
-                }
-                return nil
-            }), nil
+            ids[i] = id
         }
+        sub, _ := identity.FromContext(ctx)
+        return rest.SSE(func(s *httpx.Stream) error {
+            for _, id := range ids {
+                p := PublishProgress{ID: id.String(), Result: "已发布"}
+                if _, err := publish.Handle(s.Context(), sub, id); err != nil {
+                    p.Result = httpx.ErrorDetail(s.Context(), err)
+                }
+                if err := s.SendJSON(httpx.Event{Name: "progress"}, p); err != nil {
+                    return nil // 客户端已经离开
+                }
+            }
+            return nil
+        }), nil
     })
 ```
 

@@ -37,29 +37,25 @@ func newAPI() *rest.API {
 	api := rest.New(rest.Options{Title: "page"})
 	rest.Register(api, huma.Operation{Security: []map[string][]string{},
 		OperationID: "list-offset", Method: http.MethodGet, Path: "/offset",
-	}, func() func(context.Context, *listOffsetIn) (*listOffsetOut, error) {
-		return func(_ context.Context, in *listOffsetIn) (*listOffsetOut, error) {
-			lo := min(in.Offset(), len(all))
-			hi := min(lo+in.Limit(), len(all))
-			return &listOffsetOut{Body: page.NewOffset(all[lo:hi], in.OffsetParams, len(all))}, nil
-		}
+	}, func(_ context.Context, in *listOffsetIn) (*listOffsetOut, error) {
+		lo := min(in.Offset(), len(all))
+		hi := min(lo+in.Limit(), len(all))
+		return &listOffsetOut{Body: page.NewOffset(all[lo:hi], in.OffsetParams, len(all))}, nil
 	})
 	rest.Register(api, huma.Operation{Security: []map[string][]string{},
 		OperationID: "list-cursor", Method: http.MethodGet, Path: "/cursor",
-	}, func() func(context.Context, *listCursorIn) (*listCursorOut, error) {
-		return func(_ context.Context, in *listCursorIn) (*listCursorOut, error) {
-			var after key
-			ok, err := in.After(&after)
-			if err != nil {
-				return nil, err
-			}
-			tail := all
-			if ok {
-				tail = all[after.ID:]
-			}
-			tail = tail[:min(in.Limit(), len(tail))]
-			return &listCursorOut{Body: page.NewCursor(tail, in.CursorParams, func(d itemDTO) any { return key{d.ID} })}, nil
+	}, func(_ context.Context, in *listCursorIn) (*listCursorOut, error) {
+		var after key
+		ok, err := in.After(&after)
+		if err != nil {
+			return nil, err
 		}
+		tail := all
+		if ok {
+			tail = all[after.ID:]
+		}
+		tail = tail[:min(in.Limit(), len(tail))]
+		return &listCursorOut{Body: page.NewCursor(tail, in.CursorParams, func(d itemDTO) any { return key{d.ID} })}, nil
 	})
 	return api
 }

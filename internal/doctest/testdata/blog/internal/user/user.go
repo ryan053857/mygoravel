@@ -1,7 +1,11 @@
 // Package user 只声明第三方登录用到的部分，账号关联的写法见第三方登录一章。
 package user
 
-import "context"
+import (
+	"context"
+
+	"github.com/uptrace/bun"
+)
 
 type User struct {
 	ID          string
@@ -17,8 +21,13 @@ type ExternalAccount struct {
 	Name          string
 }
 
-type Service struct{}
+// SignInWith 按第三方账号找到或创建用户。
+type SignInWith struct {
+	db *bun.DB
+}
 
-func (s *Service) SignInWith(ctx context.Context, acc ExternalAccount) (*User, error) {
+func NewSignInWith(db *bun.DB) *SignInWith { return &SignInWith{db: db} }
+
+func (a *SignInWith) Handle(ctx context.Context, acc ExternalAccount) (*User, error) {
 	return &User{ID: "u1"}, nil
 }

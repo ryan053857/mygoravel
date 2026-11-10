@@ -15,7 +15,7 @@
 
 很多 API 都需要知道“是谁在调用”。mygoravel 内置了基于 Bearer Token 的认证：客户端在请求头中携带 `Authorization: Bearer <token>`，框架调用你提供的校验函数确认身份，然后把身份信息交给处理器。
 
-JSON API 只使用 Bearer token，不使用会话。浏览器访问的服务端渲染页面使用会话登录，见[页面登录](views.md#login)。两者产生的都是 `identity.Subject`，业务服务和[授权](authorization.md)规则不需要区分。
+JSON API 只使用 Bearer token，不使用会话。浏览器访问的服务端渲染页面使用会话登录，见[页面登录](views.md#login)。两者产生的都是 `identity.Subject`，action 和[授权](authorization.md)规则不需要区分。
 
 mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API Key，也可以是由认证服务签发的 JWT——你只需要写一个函数，告诉框架这个 token 对应谁。
 
@@ -149,7 +149,7 @@ auth:
 
 使用 `rest.RequireBearer` 为路由启用认证。它的参数是 API 实例、校验器，以及调用者必须能执行的权限。
 
-下面是 `articlehttp` 包中注册“获取文章”接口的片段：`api` 由 `rest.New` 创建，`cfg.Auth` 来自应用配置，`articles` 是已经构造好的业务服务。`actions` 的导入路径是 `example.com/blog/internal/article/articlehttp/actions`，其中的输入、输出和处理器定义见[路由](routing.md#organizing-routes)：
+下面是文章模块的 `routes.go` 中注册“获取文章”接口的片段：`api` 由 `rest.New` 创建，`cfg.Auth` 来自应用配置，`db` 是入口打开的数据库。`Get` action 的定义见[路由](routing.md#http-actions)：
 
 ```go
 requireArticles := rest.RequireBearer(api, auth.Validator(cfg.Auth), "articles")
@@ -160,9 +160,7 @@ op := huma.Operation{
     Path:        "/articles/{id}",
 }
 requireArticles(&op)
-rest.Register(api, op, func() func(context.Context, *actions.GetArticleInput) (*actions.ArticleOutput, error) {
-    return actions.NewGetArticle(articles).Handle
-})
+rest.Register(api, op, NewGet(db).HTTP)
 ```
 
 `RequireBearer` 返回的函数可以复用于多条路由。可以传入多个权限，`sub.Can` 必须对**全部**权限返回 `true` 才能访问；不传权限则只要求认证通过。
@@ -275,17 +273,17 @@ func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error
 <a id="retrieving-the-subject"></a>
 ## 获取已认证的主体
 
-认证通过后，主体会被放入请求的 context。在处理器中使用 `identity.FromContext` 读取它，再传给业务服务。
+认证通过后，主体会被放入请求的 context。在处理器中使用 `identity.FromContext` 读取它，再传给 action 的 `Handle`。
 
-例如，你可以把 `articlehttp/actions/get_article.go` 中[获取文章处理器](routing.md#http-actions)的 `Handle` 方法改为下面这样，显式拒绝没有主体的请求。这个方法位于 `actions` 包中，`a.articles` 由 `NewGetArticle` 注入，`auth.ErrUnauthenticated` 定义在本章的 `internal/auth/auth.go` 中：
+例如，你可以把 `internal/article/get.go` 中[获取文章](routing.md#http-actions)的 `HTTP` 方法改为下面这样，显式拒绝没有主体的请求。`auth.ErrUnauthenticated` 定义在本章的 `internal/auth/auth.go` 中：
 
 ```go
-func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleOutput, error) {
+func (a *Get) HTTP(ctx context.Context, in *GetInput) (*ArticleOutput, error) {
     subject, ok := identity.FromContext(ctx)
     if !ok {
         return nil, auth.ErrUnauthenticated.New()
     }
-    item, err := a.articles.Get(ctx, subject, in.ID)
+    item, err := a.Handle(ctx, subject, in.ID)
     if err != nil {
         return nil, err
     }
@@ -295,7 +293,7 @@ func (a *GetArticle) Handle(ctx context.Context, in *GetArticleInput) (*ArticleO
 
 对于受 `RequireBearer` 保护的路由，`ok` 总是为 `true`。保留这个检查可以防止路由配置被误改为公开后，处理器在没有身份的情况下继续执行。
 
-另一种做法是让业务服务拒绝空的主体，见[授权](authorization.md#ownership)。这样即使路由被误改为公开，请求也会在服务中被拒绝，处理器就可以简单地写成 `subject, _ := identity.FromContext(ctx)`，[路由](routing.md#organizing-routes)一章中 `actions` 包的处理器就是这样做的。
+另一种做法是让 `Handle` 拒绝空的主体，见[授权](authorization.md#ownership)。这样即使路由被误改为公开，请求也会在 `Handle` 中被拒绝，`HTTP` 就可以简单地写成 `subject, _ := identity.FromContext(ctx)`，[路由](routing.md#organizing-routes)一章中的 action 就是这样做的。
 
 <a id="managing-credentials"></a>
 ## 管理凭据

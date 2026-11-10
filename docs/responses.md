@@ -238,7 +238,7 @@ return &ListPublishedOutput{Body: body}, nil
 业务失败时，处理器直接返回 `error` 即可，不需要在输出类型中设计错误字段：
 
 ```go
-item, err := articles.Find(ctx, in.ID)
+item, err := a.Handle(ctx, subject, in.ID)
 if err != nil {
     return nil, err
 }

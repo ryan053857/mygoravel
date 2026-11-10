@@ -17,20 +17,21 @@
 <a id="validation-quickstart"></a>
 ## 快速上手
 
-假设我们要实现一个创建文章的接口：标题必填，长度不超过 200 个字符；slug 只能包含小写字母、数字和连字符；标签最多 10 个：
+假设我们要实现一个创建文章的接口：标题必填，长度不超过 200 个字符；slug 只能包含小写字母、数字和连字符。规则写在文章模块提交的数据 `Changes` 上，创建文章的输入类型把它作为请求体：
 
 ```go
-type CreateArticleInput struct {
-    Body struct {
-        Title   string   `json:"title" minLength:"1" maxLength:"200"`
-        Slug    string   `json:"slug" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" maxLength:"100"`
-        Content string   `json:"content"`
-        Tags    []string `json:"tags,omitempty" maxItems:"10"`
-    }
+type Changes struct {
+    Title   string `json:"title" minLength:"1" maxLength:"200"`
+    Slug    string `json:"slug" maxLength:"100" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" patternDescription:"小写字母、数字和连字符"`
+    Content string `json:"content"`
+}
+
+type CreateInput struct {
+    Body Changes
 }
 ```
 
-就是这样！当客户端发送的标题为空、slug 含有空格或大写字母时，Huma 会自动返回一个 `422` 错误响应，你的处理器不会被调用。
+就是这样！当客户端发送的标题为空、slug 含有空格或大写字母时，Huma 会自动返回一个 `422` 错误响应，你的处理器不会被调用。修改文章的接口和[页面表单](forms.md)使用同一个 `Changes`，规则只写一次。
 
 <a id="available-validation-rules"></a>
 ## 可用的验证规则
@@ -63,7 +64,7 @@ type CreateArticleInput struct {
 - **路径参数**总是必填。
 
 ```go
-type UpdateArticleInput struct {
+type PatchInput struct {
     ID   uuid.UUID `path:"id"`
     Body struct {
         Title   string  `json:"title" minLength:"1" maxLength:"200"`
@@ -112,12 +113,12 @@ type UpdateArticleInput struct {
 <a id="business-validation"></a>
 ## 业务规则验证
 
-结构体标签适合描述格式上的约束，例如长度、范围和格式。而“slug 不能与其他文章重复”、“已发布的文章不能修改 slug”这类需要查询数据或依赖业务状态的规则，应该放在业务服务中检查，并返回一个[业务错误](errors.md)：
+结构体标签适合描述格式上的约束，例如长度、范围和格式。而“slug 不能与其他文章重复”、“已发布的文章不能修改 slug”这类需要查询数据或依赖业务状态的规则，应该放在 [action](actions.md) 的 `Handle` 中检查，并返回一个[业务错误](errors.md)：
 
 ```go
 var ErrSlugLocked = errorx.Define(errorx.InvalidArgument, "article.slug_locked")
 
-func (s *Service) Update(ctx context.Context, subject identity.Subject, id uuid.UUID, c Changes) (*Article, error) {
+func (a *Update) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID, c Changes) (*Article, error) {
     // ……读取文章
     if item.Status == StatusPublished && c.Slug != item.Slug {
         return nil, ErrSlugLocked.New()
@@ -129,4 +130,4 @@ func (s *Service) Update(ctx context.Context, subject identity.Subject, id uuid.
 `errorx.InvalidArgument` 分类的错误同样会被转换为 `422` 响应，但它没有 `errors` 数组，而是带有 `code` 字段 `article.slug_locked`，客户端可以据此给出准确的提示。完整的例子见[错误处理](errors.md#example)。
 
 > [!TIP]
-> 业务服务也可能被命令行或测试直接调用，绕过 HTTP 层的验证。对于必须成立的约束（例如标题不能为空），在服务中再检查一次是一个好习惯。
+> `Handle` 也可能被命令行、队列或测试直接调用，绕过 HTTP 层的验证。对于必须成立的约束（例如标题不能为空），在 `Handle` 中再检查一次是一个好习惯。

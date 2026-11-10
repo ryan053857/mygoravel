@@ -58,13 +58,11 @@ func tenantAPI(t *testing.T) *rest.API {
 		}
 		return sub, nil
 	}
-	who := func() func(ctx context.Context, _ *struct{}) (*whoOut, error) {
-		return func(ctx context.Context, _ *struct{}) (*whoOut, error) {
-			sub, _ := identity.FromContext(ctx)
-			out := &whoOut{}
-			out.Body.ID, out.Body.Tenant, out.Body.Context = sub.ID, sub.Tenant, identity.TenantFromContext(ctx)
-			return out, nil
-		}
+	who := func(ctx context.Context, _ *struct{}) (*whoOut, error) {
+		sub, _ := identity.FromContext(ctx)
+		out := &whoOut{}
+		out.Body.ID, out.Body.Tenant, out.Body.Context = sub.ID, sub.Tenant, identity.TenantFromContext(ctx)
+		return out, nil
 	}
 	for _, r := range []struct {
 		id, method, path, perm string

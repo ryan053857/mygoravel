@@ -18,6 +18,7 @@ var (
 	ErrTooLarge    = errorx.Define(errorx.InvalidArgument, "filesystem.too_large")                 // 422：超过 max_upload_size
 	ErrNotUploaded = errorx.Define(errorx.Conflict, "filesystem.not_uploaded")                     // 409：确认时对象尚未完整上传
 	ErrUnsupported = errorx.Define(errorx.InvalidArgument, "filesystem.direct_upload_unsupported") // 422：磁盘不支持客户端直传
+	ErrNotAccepted = errorx.Define(errorx.InvalidArgument, "filesystem.not_accepted")              // 422：类型或大小不符合 Confirm 的 Accept
 )
 
 // Object 是存储中实际对象的信息。

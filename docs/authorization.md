@@ -27,8 +27,8 @@ mygoravel 的授权分为三层：
 | 层次 | 回答的问题 | 由谁检查 |
 | --- | --- | --- |
 | 路由 | 能不能使用这一类功能，例如“编辑文章” | 框架，按路由声明的权限，在调用处理器之前 |
-| 资源 | 能不能操作这一条数据，例如“只能修改自己的文章” | 业务服务，在读写数据的事务中 |
-| 数据范围 | 列表里应该出现哪些数据 | 业务服务，在构造查询时 |
+| 资源 | 能不能操作这一条数据，例如“只能修改自己的文章” | [action](actions.md) 的 `Handle`，在读写数据的事务中 |
+| 数据范围 | 列表里应该出现哪些数据 | action 的 `Handle`，在构造查询时 |
 
 三层缺一不可：路由挡住明显不该访问的请求，资源级检查保证每一条数据只被正确的人修改，数据范围保证列表和搜索不会泄露别人的数据。
 
@@ -57,7 +57,7 @@ pages.Routes(r, web.Require("articles:write")).Put("/admin/articles/{id}", pages
 <a id="checking-permissions"></a>
 ### 在代码中检查
 
-同一个接口有时需要根据权限返回不同的内容，这时在处理器或服务中调用 `Can`：
+同一个接口有时需要根据权限返回不同的内容，这时在 `Handle` 中调用 `Can`：
 
 ```go
 if subject.Can("articles:read-drafts") {
@@ -92,7 +92,7 @@ const (
     ArticlesRead       = "articles:read"
     ArticlesReadDrafts = "articles:read-drafts"
     ArticlesWrite      = "articles:write"
-    ArticlesEditAny    = "articles:edit-any"
+    ArticlesAdmin      = "articles:admin"
     CommentsDelete     = "comments:delete"
     MembersManage      = "members:manage"
 )
@@ -101,7 +101,7 @@ var Permissions = authz.Catalog{
     {Name: ArticlesRead, Description: "查看文章"},
     {Name: ArticlesReadDrafts, Description: "查看所有人的草稿"},
     {Name: ArticlesWrite, Description: "撰写和修改自己的文章"},
-    {Name: ArticlesEditAny, Description: "修改任何人的文章"},
+    {Name: ArticlesAdmin, Description: "修改和发布任何人的文章"},
     {Name: CommentsDelete, Description: "删除评论"},
     {Name: MembersManage, Description: "管理成员"},
 }
@@ -151,11 +151,11 @@ pages := web.New(web.Options{Resolve: roles.Resolve /* 其余字段见视图 */}
 
 ```go
 resolve := func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
-    disabled, err := a.users.Disabled(ctx, sub.ID)
+    u, err := user.Find(ctx, a.db, sub.ID)
     if err != nil {
         return identity.Subject{}, err
     }
-    if disabled {
+    if u.Disabled {
         return identity.Subject{}, auth.ErrUnauthenticated.New() // 401，页面登出
     }
     return roles.Resolve(ctx, sub)
@@ -171,12 +171,12 @@ resolve := func(ctx context.Context, sub identity.Subject) (identity.Subject, er
 admin, err := roles.CreateRole(ctx, authz.Role{Name: "admin", Permissions: []string{"*"}})
 ```
 
-`*` 只作用于权限检查。资源级的授权函数如果要让管理员也能修改别人的文章，应当检查一个具体的权限，例如下面的 `articles:edit-any`，而不是判断角色。
+`*` 只作用于权限检查。资源级的授权函数如果要让管理员也能修改别人的文章，应当检查一个具体的权限，例如下面的 `articles:admin`，而不是判断角色。
 
 <a id="ownership"></a>
 ## 资源级授权：所有权
 
-具备 `articles:read` 只说明调用者可以使用文章接口，并不意味着他可以读取任意一篇文章。已发布的文章所有人都能看，但草稿只有作者本人能看。业务服务需要根据当前的主体检查：
+具备 `articles:read` 只说明调用者可以使用文章接口，并不意味着他可以读取任意一篇文章。已发布的文章所有人都能看，但草稿只有作者本人能看。“获取文章”的 `Get` action 需要根据当前的主体检查：
 
 ```go
 var (
@@ -184,11 +184,11 @@ var (
     ErrForbidden = errorx.Define(errorx.PermissionDenied, "article.forbidden")
 )
 
-func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     if subject.ID == "" {
         return nil, ErrForbidden.New()
     }
-    item, err := s.find(ctx, id)
+    item, err := find(ctx, a.db, id)
     if err != nil {
         return nil, err
     }
@@ -199,9 +199,9 @@ func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUI
 }
 ```
 
-请注意，主体是作为参数**显式传入**业务服务的，而不是在服务内部从 context 中读取。这样，服务的权限要求一目了然，在测试中也很容易构造不同身份的调用者。
+请注意，主体是作为参数**显式传入** `Handle` 的，而不是在内部从 context 中读取。这样，action 的权限要求一目了然，在测试中也很容易构造不同身份的调用者。`find` 是文章模块中按 ID 查询的函数，见[模块内共享的代码](actions.md#shared-code)。
 
-服务在入口处拒绝空的主体 ID。这保证了即使服务被命令行或其他代码直接调用，也不会跳过身份检查。
+`Handle` 一开始就拒绝空的主体 ID。这保证了即使 action 被命令行或其他代码直接调用，也不会跳过身份检查。
 
 > [!TIP]
 > 上面对别人的草稿返回 `404` 而不是 `403`，这样不会泄露“这篇草稿存在”的信息。而修改别人已发布的文章时，文章本身是公开的，返回 `403` 更准确。你可以根据业务需要选择 `errorx.NotFound` 或 `errorx.PermissionDenied`。
@@ -209,12 +209,12 @@ func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUI
 <a id="authorization-functions"></a>
 ### 编写授权函数
 
-把针对资源的规则写成业务包中**导出**的函数，相当于 Laravel 的 Policy。服务和[页面](#authorization-in-views)调用同一个函数，规则只有一份：
+当授权规则变得复杂时，把它提取为业务包 `article.go` 中**导出**的函数，相当于 Laravel 的 Policy。各个 action 和[页面](#authorization-in-views)调用同一个函数，规则只有一份：
 
 ```go
 // CanEdit 报告 subject 能否修改 item：作者本人，或者能修改任何文章的编辑。
 func CanEdit(subject identity.Subject, item *Article) bool {
-    return subject.Can("articles:edit-any") || (subject.Can("articles:write") && item.AuthorID == subject.ID)
+    return subject.Can("articles:admin") || item.AuthorID == subject.ID
 }
 ```
 
@@ -225,12 +225,12 @@ func CanEdit(subject identity.Subject, item *Article) bool {
 
 对于写操作，请在实际读写数据的**同一个事务**中完成所有权检查。如果先在事务外检查、再在事务内修改，两步之间资源可能已经被其他请求改变。
 
-下面是发布文章的完整实现。它用 `FOR UPDATE` 锁住这篇文章，在同一个事务中检查权限和状态，然后更新：
+下面是“发布文章”的 `Publish` action 的 `Handle`，完整的 `publish.go` 见[编写 action](actions.md#writing-actions)。它用 `FOR UPDATE` 锁住这篇文章，在同一个事务中检查权限和状态，然后更新：
 
 ```go
-func (s *Service) Publish(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         err := tx.NewSelect().Model(item).Where("id = ?", id).For("UPDATE").Scan(ctx)
         if errors.Is(err, sql.ErrNoRows) {
             return ErrNotFound.New()
@@ -278,9 +278,9 @@ var ErrAlreadyPublished = errorx.Define(errorx.Conflict, "article.already_publis
 列表、搜索和导出要在**查询条件**中限定范围，而不是查出来之后再过滤：后者既浪费，又容易在分页、计数时漏掉。下面的文章列表让编辑看到全部文章，其他人只看到已发布的和自己的草稿：
 
 ```go
-func (s *Service) List(ctx context.Context, subject identity.Subject, limit int) ([]Article, error) {
+func (a *List) Handle(ctx context.Context, subject identity.Subject, limit int) ([]Article, error) {
     var items []Article
-    q := s.db.NewSelect().Model(&items).OrderExpr("created_at DESC").Limit(limit)
+    q := a.db.NewSelect().Model(&items).OrderExpr("created_at DESC").Limit(limit)
     if !subject.Can("articles:read-drafts") {
         q = q.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
             return q.Where("status = ?", StatusPublished).WhereOr("author_id = ?", subject.ID)
@@ -327,13 +327,13 @@ templ ArticleActions(item *article.Article) {
 }
 ```
 
-隐藏按钮只是为了界面友好，不能代替服务端的检查：处理器和服务仍然要按上面的方式授权。
+隐藏按钮只是为了界面友好，不能代替服务端的检查：action 仍然要按上面的方式授权。
 
 <a id="authorization-failures"></a>
 ## 授权失败的响应
 
 - 缺少路由所需的权限时，API 返回 `403`，错误码为 `auth.forbidden`，页面呈现 `403` 错误页；
 - 在租户中没有任何角色时，`authz` 的 `Resolve` 返回 `authz.not_member`，状态码为 `404`；
-- 业务服务返回 `errorx.PermissionDenied` 或 `errorx.NotFound` 分类的错误时，响应对应的状态码，错误码为你定义的业务错误码，例如 `article.forbidden`。
+- action 返回 `errorx.PermissionDenied` 或 `errorx.NotFound` 分类的错误时，响应对应的状态码，错误码为你定义的业务错误码，例如 `article.forbidden`。
 
 它们都使用统一的[错误响应格式](errors.md#response-format)。

@@ -375,13 +375,11 @@ func TestRequireBearer(t *testing.T) {
 			Credential string `json:"credential"`
 		}
 	}
-	rest.Register(api, op, func() func(context.Context, *struct{}) (*meOut, error) {
-		return func(ctx context.Context, _ *struct{}) (*meOut, error) {
-			sub, _ := identity.FromContext(ctx)
-			out := &meOut{}
-			out.Body.ID, out.Body.Credential = sub.ID, sub.Credential
-			return out, nil
-		}
+	rest.Register(api, op, func(ctx context.Context, _ *struct{}) (*meOut, error) {
+		sub, _ := identity.FromContext(ctx)
+		out := &meOut{}
+		out.Body.ID, out.Body.Credential = sub.ID, sub.Credential
+		return out, nil
 	})
 	call := func(token string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "/me", nil)

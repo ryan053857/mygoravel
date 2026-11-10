@@ -16,7 +16,7 @@ import (
 )
 
 // OpenAPI 构造 openapi 命令：以文档模式创建 API、调用 register 注册路由，
-// 把 OpenAPI 文档输出到标准输出。不读取配置，不调用处理器工厂。
+// 把 OpenAPI 文档输出到标准输出。不读取配置，不调用处理器。
 func OpenAPI(opts rest.Options, register func(api *rest.API)) *cobra.Command {
 	return leaf("openapi", "输出 OpenAPI 文档", func(cmd *cobra.Command) error {
 		data, err := docAPI(opts, register).OpenAPIJSON()

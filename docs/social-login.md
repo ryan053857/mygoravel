@@ -226,7 +226,7 @@ CREATE TABLE user_identities (
 );
 ```
 
-`users.SignInWith(ctx, acc)` 在一个[事务](database.md#transactions)中按下面的顺序找到或创建用户：
+用户模块的 `user.SignInWith` action 在一个[事务](database.md#transactions)中按下面的顺序找到或创建用户：
 
 1. 按 `(provider, provider_id)` 找到关联，返回关联的用户；
 2. 没有关联，但第三方确认邮箱**已验证**，且应用中已有这个邮箱的用户：建立关联，返回该用户；
@@ -256,6 +256,7 @@ import (
     "github.com/alexedwards/scs/v2"
     "github.com/coreos/go-oidc/v3/oidc"
     "github.com/go-chi/chi/v5"
+    "github.com/uptrace/bun"
     "golang.org/x/oauth2"
 
     "example.com/blog/internal/auth/social"
@@ -268,12 +269,12 @@ type socialHandlers struct {
     pages     *web.Pages
     sessions  *scs.SessionManager
     providers map[string]*social.Provider
-    users     *user.Service
+    signIn    *user.SignInWith
 }
 
 // RegisterSocial 注册第三方登录的跳转和回调页面。
-func RegisterSocial(r chi.Router, pages *web.Pages, sessions *scs.SessionManager, providers map[string]*social.Provider, users *user.Service) {
-    h := &socialHandlers{pages: pages, sessions: sessions, providers: providers, users: users}
+func RegisterSocial(r chi.Router, pages *web.Pages, sessions *scs.SessionManager, providers map[string]*social.Provider, db *bun.DB) {
+    h := &socialHandlers{pages: pages, sessions: sessions, providers: providers, signIn: user.NewSignInWith(db)}
     public := pages.Routes(r, web.Public)
     public.Get("/auth/{provider}", h.redirect)
     public.Get("/auth/{provider}/callback", h.callback)
@@ -321,7 +322,7 @@ func (h *socialHandlers) callback(w http.ResponseWriter, r *http.Request) error 
     if err != nil {
         return err
     }
-    u, err := h.users.SignInWith(ctx, acc)
+    u, err := h.signIn.Handle(ctx, acc)
     if err != nil {
         return err
     }
@@ -340,7 +341,7 @@ providers, err := social.Providers(ctx, a.cfg.Social)
 if err != nil {
     return err
 }
-authweb.RegisterSocial(r, pages, sessions, providers, a.users)
+authweb.RegisterSocial(r, pages, sessions, providers, a.db)
 ```
 
 这几个随机值各有用途：
@@ -375,6 +376,7 @@ import (
     "slices"
 
     "github.com/danielgtaylor/huma/v2"
+    "github.com/uptrace/bun"
     "golang.org/x/oauth2"
 
     "example.com/blog/internal/auth/social"
@@ -409,41 +411,40 @@ type SocialTokenOutput struct {
 }
 
 // RegisterSocial 注册用第三方授权码换取 API 令牌的接口。
-func RegisterSocial(api *rest.API, providers map[string]*social.Provider, cfg social.Config, users *user.Service, tokens *apitoken.Store) {
+func RegisterSocial(api *rest.API, providers map[string]*social.Provider, cfg social.Config, db *bun.DB, tokens *apitoken.Store) {
+    signIn := user.NewSignInWith(db)
     op := huma.Operation{OperationID: "auth-social-token", Method: http.MethodPost, Path: "/auth/{provider}/tokens"}
     rest.Public()(&op)
-    rest.Register(api, op, func() func(context.Context, *SocialTokenInput) (*SocialTokenOutput, error) {
-        return func(ctx context.Context, in *SocialTokenInput) (*SocialTokenOutput, error) {
-            p, ok := providers[in.Provider]
-            if !ok {
-                return nil, social.ErrUnknownProvider.New()
-            }
-            if !slices.Contains(cfg.ClientRedirectURLs, in.Body.RedirectURI) {
-                return nil, social.ErrInvalid.New()
-            }
-            conf := *p.OAuth2
-            conf.RedirectURL = in.Body.RedirectURI
-            tok, err := conf.Exchange(ctx, in.Body.Code, oauth2.VerifierOption(in.Body.CodeVerifier))
-            if err != nil {
-                return nil, social.ErrInvalid.Wrap(err)
-            }
-            acc, err := p.Account(ctx, tok, in.Body.Nonce)
-            if err != nil {
-                return nil, err
-            }
-            u, err := users.SignInWith(ctx, acc)
-            if err != nil {
-                return nil, err
-            }
-            sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser}
-            plain, err := tokens.Login(ctx, sub, apitoken.Device{IP: in.ip, UserAgent: in.UserAgent})
-            if err != nil {
-                return nil, err
-            }
-            out := &SocialTokenOutput{}
-            out.Body.Token = plain
-            return out, nil
+    rest.Register(api, op, func(ctx context.Context, in *SocialTokenInput) (*SocialTokenOutput, error) {
+        p, ok := providers[in.Provider]
+        if !ok {
+            return nil, social.ErrUnknownProvider.New()
         }
+        if !slices.Contains(cfg.ClientRedirectURLs, in.Body.RedirectURI) {
+            return nil, social.ErrInvalid.New()
+        }
+        conf := *p.OAuth2
+        conf.RedirectURL = in.Body.RedirectURI
+        tok, err := conf.Exchange(ctx, in.Body.Code, oauth2.VerifierOption(in.Body.CodeVerifier))
+        if err != nil {
+            return nil, social.ErrInvalid.Wrap(err)
+        }
+        acc, err := p.Account(ctx, tok, in.Body.Nonce)
+        if err != nil {
+            return nil, err
+        }
+        u, err := signIn.Handle(ctx, acc)
+        if err != nil {
+            return nil, err
+        }
+        sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser}
+        plain, err := tokens.Login(ctx, sub, apitoken.Device{IP: in.ip, UserAgent: in.UserAgent})
+        if err != nil {
+            return nil, err
+        }
+        out := &SocialTokenOutput{}
+        out.Body.Token = plain
+        return out, nil
     })
 }
 ```

@@ -8,9 +8,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
-// Register 登记端点。ModeServe 调用 newHandler，ModeOpenAPI 安装文档占位处理器。
+// Register 登记端点。handler 通常是 action 的方法值，例如 article.NewPublish(db).HTTP；
+// ModeOpenAPI 只生成文档，不调用 handler，可以传 nil。
 // 处理器错误经 FromError 转换为 HTTP 错误，业务错误的 detail 按请求语言翻译。
-func Register[I, O any](api *API, op huma.Operation, newHandler func() func(context.Context, *I) (*O, error)) {
+func Register[I, O any](api *API, op huma.Operation, handler func(context.Context, *I) (*O, error)) {
 	if api == nil {
 		panic("rest: nil API")
 	}
@@ -31,18 +32,14 @@ func Register[I, O any](api *API, op huma.Operation, newHandler func() func(cont
 			}
 		}
 	}
-	var handler func(context.Context, *I) (*O, error)
+	h := handler
 	if api.mode == ModeOpenAPI {
 		handler = func(context.Context, *I) (*O, error) {
 			return nil, errors.New("rest: schema-only handler invoked")
 		}
 	} else {
-		if newHandler == nil {
-			panic("rest: nil newHandler")
-		}
-		h := newHandler()
 		if h == nil {
-			panic("rest: newHandler returned nil")
+			panic("rest: nil handler")
 		}
 		handler = func(ctx context.Context, in *I) (*O, error) {
 			out, err := h(ctx, in)

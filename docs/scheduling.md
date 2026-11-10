@@ -25,12 +25,14 @@
 
 ```go
 sched := schedule.New(locker, nil)
-sched.Add("articles:publish-scheduled", "* * * * *", articles.PublishScheduled)
+sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(db).Handle)
 ```
+
+任务通常是 [action](actions.md#as-scheduled-tasks) 的 `Handle` 方法：发布到期文章的 `PublishScheduled` 不需要参数，它的 `Handle` 正好是任务的签名。
 
 `locker` 是[原子锁](locks.md)，调度器用它在多个实例之间去重、防止任务重叠，见[多个实例](#multiple-instances)。第二个参数是日志器，`nil` 时使用 `slog.Default()`。
 
-[原子锁](locks.md#running-once)一章中，每个实例都要自己定时调用 `PublishScheduled` 并用锁避免重复执行；交给调度器之后，`PublishScheduled` 里的 `locker.Do` 可以去掉，调度器已经保证每次只在一个实例上执行。
+[原子锁](locks.md#running-once)一章中，每个实例都要自己定时调用 `PublishScheduled` 并用锁避免重复执行；交给调度器之后，`PublishScheduled` 里的 `locker.Do` 可以去掉，它也不再需要 `locker` 依赖，调度器已经保证每次只在一个实例上执行。
 
 <a id="expressions"></a>
 ### 表达式
@@ -69,6 +71,7 @@ import (
     "context"
     "time"
 
+    "example.com/blog/internal/article"
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/lock"
     "github.com/ryan053857/mygoravel/queue"
@@ -79,7 +82,7 @@ import (
 // Scheduler 按时执行定时任务，直到 ctx 被取消。
 func (a *App) Scheduler(ctx context.Context) error {
     sched := schedule.New(a.locker, nil)
-    sched.Add("articles:publish-scheduled", "* * * * *", a.articles.PublishScheduled)
+    sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(a.db).Handle)
     sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000))
     sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDBStore(a.db).Cleanup, 1000))
     sched.Add("queue:prune-failed", "@daily", func(ctx context.Context) error {

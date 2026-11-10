@@ -33,7 +33,7 @@ func TestMissingSecurityRejectedBeforeFactory(t *testing.T) {
 					t.Fatal("unmarked endpoint accepted")
 				}
 			}()
-			rest.Register(rest.New(rest.Options{Mode: mode}), huma.Operation{OperationID: "missing", Method: "GET", Path: "/missing"}, func() func(context.Context, *pingIn) (*pingOut, error) { t.Fatal("factory ran"); return nil })
+			rest.Register(rest.New(rest.Options{Mode: mode}), huma.Operation{OperationID: "missing", Method: "GET", Path: "/missing"}, func(context.Context, *pingIn) (*pingOut, error) { t.Fatal("handler ran"); return nil, nil })
 		}()
 	}
 }
@@ -53,9 +53,7 @@ func TestErrorResponsesMatchDocumentedSchema(t *testing.T) {
 	register := func(path string, err error) {
 		op := huma.Operation{OperationID: strings.TrimPrefix(path, "/"), Method: "POST", Path: path}
 		rest.Public()(&op)
-		rest.Register(api, op, func() func(context.Context, *echoIn) (*echoOut, error) {
-			return func(context.Context, *echoIn) (*echoOut, error) { return nil, err }
-		})
+		rest.Register(api, op, func(context.Context, *echoIn) (*echoOut, error) { return nil, err })
 	}
 	register("/business", errorx.Define(errorx.NotFound, "example.missing").New())
 	register("/native", errors.WithStack(huma.Error409Conflict("already exists")))
@@ -125,9 +123,7 @@ func TestLocalizedBusinessErrorUsesPublicParams(t *testing.T) {
 	for path, err := range map[string]error{"/busy": busy.New(errorx.Public("retry", 3)), "/untranslated": untranslated.New(), "/en-only": enOnly.New()} {
 		op := huma.Operation{OperationID: strings.TrimPrefix(path, "/"), Method: "GET", Path: path}
 		rest.Public()(&op)
-		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
-			return func(context.Context, *pingIn) (*pingOut, error) { return nil, err }
-		})
+		rest.Register(api, op, func(context.Context, *pingIn) (*pingOut, error) { return nil, err })
 	}
 	for lang, want := range map[string]string{"en": "Busy, retry in 3s", "zh-CN": "繁忙，请 3 秒后重试"} {
 		req := httptest.NewRequest("GET", "/busy", nil)
@@ -160,11 +156,9 @@ func TestBearerRejectsEmptySubjectAndDocumentsNoOAuthScopes(t *testing.T) {
 	if len(op.Security[0]["bearer"]) != 0 {
 		t.Fatal("HTTP bearer cannot carry OAuth scopes")
 	}
-	rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(context.Context, *pingIn) (*pingOut, error) {
-			t.Fatal("anonymous subject reached handler")
-			return nil, nil
-		}
+	rest.Register(api, op, func(context.Context, *pingIn) (*pingOut, error) {
+		t.Fatal("anonymous subject reached handler")
+		return nil, nil
 	})
 	req := httptest.NewRequest("GET", "/auth", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -180,9 +174,7 @@ func TestConflictingRouteRejectedBeforeBinding(t *testing.T) {
 		api := rest.New(rest.Options{Mode: mode})
 		first := huma.Operation{OperationID: "first", Method: "GET", Path: "/same"}
 		rest.Public()(&first)
-		rest.Register(api, first, func() func(context.Context, *pingIn) (*pingOut, error) {
-			return func(context.Context, *pingIn) (*pingOut, error) { return &pingOut{}, nil }
-		})
+		rest.Register(api, first, func(context.Context, *pingIn) (*pingOut, error) { return &pingOut{}, nil })
 		second := huma.Operation{OperationID: "second", Method: "GET", Path: "/same"}
 		rest.Public()(&second)
 		func() {
@@ -191,9 +183,9 @@ func TestConflictingRouteRejectedBeforeBinding(t *testing.T) {
 					t.Fatal("route silently overwritten")
 				}
 			}()
-			rest.Register(api, second, func() func(context.Context, *pingIn) (*pingOut, error) {
-				t.Fatal("conflict executed factory")
-				return nil
+			rest.Register(api, second, func(context.Context, *pingIn) (*pingOut, error) {
+				t.Fatal("conflict executed handler")
+				return nil, nil
 			})
 		}()
 	}
@@ -212,16 +204,12 @@ func TestLanguageAndLoggerAreInstanceLocal(t *testing.T) {
 		api := withLanguages(rest.Options{Logger: slog.New(slog.NewJSONHandler(tc.buf, nil))}, bundle)
 		op := huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"}
 		rest.Public()(&op)
-		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
-			return func(context.Context, *pingIn) (*pingOut, error) {
-				return nil, errorx.Define(errorx.Unauthenticated, "auth.unauthenticated").Wrap(errors.New("private-secret-diagnostics"))
-			}
+		rest.Register(api, op, func(context.Context, *pingIn) (*pingOut, error) {
+			return nil, errorx.Define(errorx.Unauthenticated, "auth.unauthenticated").Wrap(errors.New("private-secret-diagnostics"))
 		})
 		op = huma.Operation{OperationID: "crash", Method: "GET", Path: "/crash"}
 		rest.Public()(&op)
-		rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
-			return func(context.Context, *pingIn) (*pingOut, error) { return nil, errors.New("private-secret-diagnostics") }
-		})
+		rest.Register(api, op, func(context.Context, *pingIn) (*pingOut, error) { return nil, errors.New("private-secret-diagnostics") })
 		rr := httptest.NewRecorder()
 		api.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/fail", nil))
 		if !strings.Contains(rr.Body.String(), tc.expected) {
@@ -257,16 +245,12 @@ func TestAccessLogCarriesBusinessCode(t *testing.T) {
 	api := withDefaults(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
 	op := huma.Operation{OperationID: "conflict", Method: "GET", Path: "/conflict"}
 	rest.Public()(&op)
-	rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(context.Context, *pingIn) (*pingOut, error) {
-			return nil, errorx.Define(errorx.Conflict, "demo.conflict").Wrap(errors.New("pq: duplicate key"))
-		}
+	rest.Register(api, op, func(context.Context, *pingIn) (*pingOut, error) {
+		return nil, errorx.Define(errorx.Conflict, "demo.conflict").Wrap(errors.New("pq: duplicate key"))
 	})
 	secured := huma.Operation{OperationID: "secured", Method: "GET", Path: "/secured"}
 	rest.RequireBearer(api, func(context.Context, string) (identity.Subject, error) { return identity.Subject{ID: "u"}, nil })(&secured)
-	rest.Register(api, secured, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(context.Context, *pingIn) (*pingOut, error) { return &pingOut{}, nil }
-	})
+	rest.Register(api, secured, func(context.Context, *pingIn) (*pingOut, error) { return &pingOut{}, nil })
 	for path, code := range map[string]string{"/conflict": "demo.conflict", "/secured": "auth.unauthenticated"} {
 		logs.Reset()
 		api.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", path, nil))
@@ -296,13 +280,11 @@ func TestNewInstallsNoMiddleware(t *testing.T) {
 	api := rest.New(rest.Options{})
 	op := huma.Operation{OperationID: "ping", Method: "GET", Path: "/ping"}
 	rest.Public()(&op)
-	rest.Register(api, op, func() func(context.Context, *pingIn) (*pingOut, error) {
-		return func(ctx context.Context, _ *pingIn) (*pingOut, error) {
-			if _, deadline := ctx.Deadline(); deadline || httpx.RequestID(ctx) != "" {
-				t.Fatal("rest.New installed middleware")
-			}
-			return &pingOut{}, nil
+	rest.Register(api, op, func(ctx context.Context, _ *pingIn) (*pingOut, error) {
+		if _, deadline := ctx.Deadline(); deadline || httpx.RequestID(ctx) != "" {
+			t.Fatal("rest.New installed middleware")
 		}
+		return &pingOut{}, nil
 	})
 	rr := httptest.NewRecorder()
 	api.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/ping", nil))

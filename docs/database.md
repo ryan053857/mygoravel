@@ -174,7 +174,7 @@ func Check(ctx context.Context, dsn string) error {
 
 `database.Open` 使用你传入的配置值，包括显式设置的零值。为 `ctx` 设置一个截止时间，可以避免数据库不可达时启动过程无限等待。
 
-在应用中，连接池应当在入口打开**一次**，然后传给所有需要它的业务服务，在应用退出时关闭，见[依赖装配](dependencies.md)。
+在应用中，连接池应当在入口打开**一次**，然后传给所有需要它的 [action](actions.md)，在应用退出时关闭，见[依赖装配](dependencies.md)。
 
 <a id="defining-models"></a>
 ## 定义模型
@@ -319,7 +319,7 @@ CREATE UNIQUE INDEX articles_slug_key ON articles ((IF(deleted_at IS NULL, slug,
 <a id="running-queries"></a>
 ## 执行查询
 
-在业务服务中，使用注入的 `db` 构建查询：
+在 action 中，使用注入的 `db` 构建查询：
 
 ```go
 var item Article
@@ -386,7 +386,7 @@ MySQL 更容易出现死锁：在 REPEATABLE READ 下，范围查询和查询不
 
 ```go
 for attempt := 1; ; attempt++ {
-    err := s.db.RunInTx(ctx, nil, publish)
+    err := a.db.RunInTx(ctx, nil, publish)
     if postgres.IsDeadlock(err) && attempt < 3 {
         continue
     }
@@ -397,10 +397,10 @@ for attempt := 1; ; attempt++ {
 <a id="constraint-errors"></a>
 ## 处理约束错误
 
-数据库约束是保证数据一致性的最后一道防线。当插入的数据违反唯一约束时，例如两篇文章使用了相同的 slug，你通常希望返回一个 `409 Conflict`，而不是 `500`。下面是创建文章的完整实现，`articles_slug_key` 是[迁移](migrations.md#migration-structure)中定义的唯一约束：
+数据库约束是保证数据一致性的最后一道防线。当插入的数据违反唯一约束时，例如两篇文章使用了相同的 slug，你通常希望返回一个 `409 Conflict`，而不是 `500`。下面是“创建文章”的 `Create` action 的 `Handle`，`articles_slug_key` 是[迁移](migrations.md#migration-structure)中定义的唯一约束：
 
 ```go
-func (s *Service) Create(ctx context.Context, subject identity.Subject, c Changes) (*Article, error) {
+func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes) (*Article, error) {
     if subject.ID == "" {
         return nil, ErrForbidden.New()
     }
@@ -408,7 +408,7 @@ func (s *Service) Create(ctx context.Context, subject identity.Subject, c Change
         ID: uuid.Must(uuid.NewV7()), AuthorID: subject.ID, Status: StatusDraft,
         Title: c.Title, Slug: c.Slug, Content: c.Content,
     }
-    _, err := s.db.NewInsert().Model(item).Exec(ctx)
+    _, err := a.db.NewInsert().Model(item).Exec(ctx)
     if postgres.IsUniqueViolation(err, "articles_slug_key") {
         return nil, ErrSlugTaken.Wrap(err, errorx.Public("slug", c.Slug))
     }

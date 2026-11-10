@@ -61,7 +61,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 
 ```go
 tokens := apitoken.NewStore(a.db, a.cfg.APIToken)
-requireArticles := rest.RequireBearer(api, tokens.Validate, "articles:read")
+requireArticles := rest.RequireBearer(api, tokens.Validate, "articles")
 ```
 
 `Validate` 返回的主体 `Method` 为 `bearer`，`Credential` 是 token 的 ID。token 只说明“这是谁”，不携带用户的权限：权限在每个请求中[加载](#loading-permissions)。它每分钟最多为一个 token 写一次库，记录最近使用时间并延长登录 token 的有效期，因此空闲时长的精度约为一分钟。
@@ -69,7 +69,7 @@ requireArticles := rest.RequireBearer(api, tokens.Validate, "articles:read")
 <a id="login-and-logout"></a>
 ## 登录与登出
 
-单页应用和 App 用账号密码换取登录 token。下面是 `internal/auth/authhttp/routes.go` 中的登录和登出接口，`users` 是应用自己的用户服务，`Authenticate` 校验密码，见[哈希](hashing.md#hashing-passwords)：
+单页应用和 App 用账号密码换取登录 token。下面是 `internal/auth/authhttp/routes.go` 中的登录和登出接口，`authenticate` 是用户模块校验密码的 `user.Authenticate` action，见[哈希](hashing.md#hashing-passwords)：
 
 ```go
 type TokenInput struct {
@@ -94,9 +94,9 @@ type TokenOutput struct {
     }
 }
 
-func issueToken(users *user.Service, tokens *apitoken.Store) func(context.Context, *TokenInput) (*TokenOutput, error) {
+func issueToken(authenticate *user.Authenticate, tokens *apitoken.Store) func(context.Context, *TokenInput) (*TokenOutput, error) {
     return func(ctx context.Context, in *TokenInput) (*TokenOutput, error) {
-        u, err := users.Authenticate(ctx, in.Body.Email, in.Body.Password)
+        u, err := authenticate.Handle(ctx, in.Body.Email, in.Body.Password)
         if err != nil {
             return nil, err
         }
@@ -128,15 +128,11 @@ func revokeToken(tokens *apitoken.Store) func(context.Context, *struct{}) (*stru
 ```go
 op := huma.Operation{OperationID: "auth-token-create", Method: http.MethodPost, Path: "/auth/tokens"}
 rest.Public()(&op)
-rest.Register(api, op, func() func(context.Context, *TokenInput) (*TokenOutput, error) {
-    return issueToken(users, tokens)
-})
+rest.Register(api, op, issueToken(authenticate, tokens))
 
 op = huma.Operation{OperationID: "auth-token-delete", Method: http.MethodDelete, Path: "/auth/tokens/current"}
 rest.RequireBearer(api, tokens.Validate)(&op)
-rest.Register(api, op, func() func(context.Context, *struct{}) (*struct{}, error) {
-    return revokeToken(tokens)
-})
+rest.Register(api, op, revokeToken(tokens))
 ```
 
 `Login` 记录 IP 和 User-Agent，用于[设备列表](#listing-tokens)。登出时把主体的 `Credential` 交给 `Revoke`，撤销的就是本次请求所用的 token。防止密码被暴力猜测，见[在处理器中限流](rate-limiting.md#in-handlers)。
@@ -208,14 +204,14 @@ for _, t := range list {
 
 撤销立即生效，被撤销的 token 在下一次请求时返回 `401`；用它建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)。
 
-同一个用户可能还在浏览器中通过[会话](session.md)登录了页面。让用户在所有地方下线时，两边都要撤销：
+同一个用户可能还在浏览器中通过[会话](session.md)登录了页面。让用户在所有地方下线时，两边都要撤销。下面是用户模块的 `SignOutEverywhere` action 的 `Handle`，会话存储和 token 存储由构造函数传入：
 
 ```go
-func (s *Service) SignOutEverywhere(ctx context.Context, userID string) error {
-    if _, err := s.sessions.RevokeSubject(ctx, userID); err != nil {
+func (a *SignOutEverywhere) Handle(ctx context.Context, userID string) error {
+    if _, err := a.sessions.RevokeSubject(ctx, userID); err != nil {
         return err
     }
-    _, err := s.tokens.RevokeSubject(ctx, userID)
+    _, err := a.tokens.RevokeSubject(ctx, userID)
     return err
 }
 ```
@@ -230,7 +226,7 @@ token 不保存用户的权限，所以权限变化、账号停用都能立即�
 ```go
 api := rest.New(rest.Options{
     Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
-        u, err := users.Get(ctx, sub.ID)
+        u, err := user.Find(ctx, a.db, sub.ID)
         if err != nil {
             return identity.Subject{}, err
         }

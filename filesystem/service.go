@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"io"
 	"io/fs"
+	"mime"
+	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,15 +122,24 @@ func (s *Service) Upload(ctx context.Context, owner identity.Subject, in FileInp
 	return r, nil
 }
 
-// Confirm 核对对象已完整上传，并把 temporary 文件转为 ready。重复确认返回原记录。
-// 只有上传者本人可以确认，避免引用他人上传的临时文件。
-func (s *Service) Confirm(ctx context.Context, owner identity.Subject, id uuid.UUID) (File, error) {
+// Confirm 核对对象已完整上传并符合 accept，然后把 temporary 文件转为 ready。重复确认返回原记录，
+// 同样要符合 accept。只有上传者本人可以确认，避免引用他人上传的临时文件。
+// 不符合 accept 时返回 ErrNotAccepted，文件保持 temporary，到期后被 Cleanup 回收。
+func (s *Service) Confirm(ctx context.Context, owner identity.Subject, id uuid.UUID, accept Accept) (File, error) {
 	r, err := s.owned(ctx, owner, id)
-	if err != nil || r.Status == StatusReady {
-		return r, err
-	}
-	if err := s.checkUploaded(ctx, r); err != nil {
+	if err != nil {
 		return File{}, err
+	}
+	if r.Status != StatusReady {
+		if err := s.checkUploaded(ctx, r); err != nil {
+			return File{}, err
+		}
+	}
+	if err := s.checkAccept(ctx, r, accept); err != nil {
+		return File{}, err
+	}
+	if r.Status == StatusReady {
+		return r, nil
 	}
 	now := time.Now().UTC()
 	res, err := s.db.NewUpdate().Model((*File)(nil)).
@@ -278,6 +290,52 @@ func (s *Service) checkUploaded(ctx context.Context, r File) error {
 		return ErrNotUploaded
 	}
 	return nil
+}
+
+// checkAccept 检查大小，并在限定类型时按文件内容识别真实类型。
+func (s *Service) checkAccept(ctx context.Context, r File, accept Accept) error {
+	if accept.MaxSize > 0 && r.Size > int64(accept.MaxSize) {
+		return errors.Wrapf(ErrNotAccepted, "size %d exceeds %s", r.Size, accept.MaxSize)
+	}
+	if len(accept.Types) == 0 {
+		return nil
+	}
+	body, err := s.disk(r).Open(ctx, r.Key)
+	if err != nil {
+		return errors.Wrap(err, "filesystem: open")
+	}
+	head := make([]byte, 512)
+	n, err := io.ReadFull(body, head)
+	_ = body.Close()
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return errors.Wrap(err, "filesystem: read")
+	}
+	actual := mediaType(http.DetectContentType(head[:n]))
+	if !slices.ContainsFunc(accept.Types, func(t string) bool { return typeMatches(t, actual) }) {
+		return errors.Wrapf(ErrNotAccepted, "content type %s", actual)
+	}
+	if declared := mediaType(r.ContentType); declared != actual {
+		return errors.Wrapf(ErrNotAccepted, "declared %s but content is %s", declared, actual)
+	}
+	if ext := path.Ext(r.Key); ext != "" && mediaType(mime.TypeByExtension(ext)) != actual {
+		return errors.Wrapf(ErrNotAccepted, "extension %s does not match %s", ext, actual)
+	}
+	return nil
+}
+
+// mediaType 返回去掉参数、转为小写的 MIME 类型，例如 "text/html; charset=utf-8" 返回 "text/html"。
+func mediaType(contentType string) string {
+	t, _, _ := strings.Cut(contentType, ";")
+	return strings.ToLower(strings.TrimSpace(t))
+}
+
+// typeMatches 报告 actual 是否匹配 pattern：完全相同，或 pattern 为 "image/*" 这样的一类。
+func typeMatches(pattern, actual string) bool {
+	pattern = mediaType(pattern)
+	if prefix, ok := strings.CutSuffix(pattern, "/*"); ok {
+		return strings.HasPrefix(actual, prefix+"/")
+	}
+	return pattern == actual
 }
 
 func (s *Service) disk(r File) Disk {

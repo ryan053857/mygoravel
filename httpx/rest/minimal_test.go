@@ -25,12 +25,10 @@ func TestMinimalHTTPWithoutDatabaseOrCache(t *testing.T) {
 		OperationID: "ping",
 		Method:      http.MethodGet,
 		Path:        "/ping",
-	}, func() func(context.Context, *minimalInput) (*minimalOutput, error) {
-		return func(context.Context, *minimalInput) (*minimalOutput, error) {
-			out := &minimalOutput{}
-			out.Body.OK = true
-			return out, nil
-		}
+	}, func(context.Context, *minimalInput) (*minimalOutput, error) {
+		out := &minimalOutput{}
+		out.Body.OK = true
+		return out, nil
 	})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

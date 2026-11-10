@@ -26,9 +26,9 @@ SaaS 应用通常有三类用户：
 
 1. 从请求中**确定租户**；
 2. 按用户在这个租户中的**角色**加载权限；
-3. 业务服务只读写**这个租户的数据**。
+3. 业务代码只读写**这个租户的数据**。
 
-前两件由框架和 [`authz`](authorization.md#roles) 完成，第三件是业务代码必须遵守的约定。
+前两件由框架和 [`authz`](authorization.md#roles) 完成，第三件是 [action](actions.md) 必须遵守的约定。
 
 <a id="identifying-tenants"></a>
 ## 确定租户
@@ -83,15 +83,15 @@ member, err := roles.CreateRole(ctx, authz.Role{Name: "member", Permissions: []s
 <a id="creating-tenants"></a>
 ### 创建租户
 
-租户本身是应用的数据，例如一张 `tenants` 表。用户创建组织时，在同一个流程中把他设为所有者：
+租户本身是应用的数据，例如一张 `tenants` 表。用户创建组织时，在同一个 action 中把他设为所有者：
 
 ```go
-func (s *Service) CreateTenant(ctx context.Context, subject identity.Subject, name string) (*Tenant, error) {
-    t, err := s.insertTenant(ctx, name)
+func (a *Create) Handle(ctx context.Context, subject identity.Subject, name string) (*Tenant, error) {
+    t, err := insert(ctx, a.db, name)
     if err != nil {
         return nil, err
     }
-    return t, s.roles.Assign(ctx, subject.ID, t.ID, s.ownerRoleID)
+    return t, a.roles.Assign(ctx, subject.ID, t.ID, a.ownerRoleID)
 }
 ```
 
@@ -134,12 +134,12 @@ CREATE TABLE articles (
 CREATE INDEX articles_tenant_created ON articles (tenant_id, created_at);
 ```
 
-业务服务从主体中取租户，每一个查询都加上这个条件，写入时也从主体中取：
+action 从主体中取租户，每一个查询都加上这个条件，写入时也从主体中取。模块内共享的 `find` 接收主体，而不是单独的租户 ID：
 
 ```go
-func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+func find(ctx context.Context, db bun.IDB, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := s.db.NewSelect().Model(item).
+    err := db.NewSelect().Model(item).
         Where("tenant_id = ?", subject.Tenant).Where("id = ?", id).Scan(ctx)
     if errors.Is(err, sql.ErrNoRows) {
         return nil, ErrNotFound.New() // 其他租户的文章与不存在的文章无法区分
@@ -147,7 +147,7 @@ func (s *Service) Get(ctx context.Context, subject identity.Subject, id uuid.UUI
     // ……
 }
 
-func (s *Service) Create(ctx context.Context, subject identity.Subject, c Changes) (*Article, error) {
+func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes) (*Article, error) {
     item := &Article{TenantID: subject.Tenant, AuthorID: subject.ID /* ... */}
     // ……
 }
@@ -155,9 +155,9 @@ func (s *Service) Create(ctx context.Context, subject identity.Subject, c Change
 
 这是多租户应用中最重要的约定：漏掉一个条件，就会把一个租户的数据暴露给另一个租户。几个习惯可以降低风险：
 
-- 服务方法总是接收 `identity.Subject`，不单独接收租户 ID；
+- `Handle` 和模块内的查询函数总是接收 `identity.Subject`，不单独接收租户 ID；
 - 按 ID 查询时也带上 `tenant_id`，不要先按 ID 查出来再比较；
-- 为每个服务写一个“其他租户访问不到”的测试，例如用租户 B 的主体读取租户 A 的文章，期望 `404`；
+- 为每个 action 写一个“其他租户访问不到”的测试，例如用租户 B 的主体读取租户 A 的文章，期望 `404`，见[测试 action](testing.md#testing-actions)；
 - 使用 PostgreSQL 时，可以再加上[行级安全策略](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)作为兜底：在事务开始时 `SET LOCAL app.tenant_id`，由策略限制每个查询只能看到这个租户的行。
 
 <a id="platform"></a>
