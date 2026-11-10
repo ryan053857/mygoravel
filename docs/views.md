@@ -80,7 +80,7 @@ templ ErrorFragment(status int, message string) {
 <a id="assembling-pages"></a>
 ## 装配页面
 
-在[入口](dependencies.md#assembling-the-application)的 `Serve` 中创建[会话](session.md#assembling-sessions)和 `web.Pages`，再挂载内嵌脚本和 404 页面：
+在入口的 [`HTTP` 方法](dependencies.md#assembling-the-application)中创建[会话](session.md#assembling-sessions)和 `web.Pages`，再挂载内嵌脚本和 404 页面：
 
 ```go
 import (
@@ -89,7 +89,7 @@ import (
     layout "example.com/blog/internal/web"
 )
 
-sessions := session.New(cfg.Session, session.NewStore(db))
+sessions := session.New(a.cfg.Session, session.NewStore(a.db))
 pages := web.New(web.Options{
     Sessions:      sessions,
     Login:         "/login",
@@ -99,26 +99,28 @@ pages := web.New(web.Options{
 })
 
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 router.Handle(web.AssetsPath+"*", web.Assets())
 router.NotFound(pages.NotFound)
 
 router.Route("/api", func(r chi.Router) {
-    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
-    api := rest.New(rest.Options{Router: r})
-    bootstrap.Routes(api, ...)
+    r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
+    opts := API
+    opts.Router = r
+    Routes(rest.New(opts), auth.Validator(a.cfg.Auth), a.articles)
 })
 
 router.Group(func(r chi.Router) {
-    r.Use(pages.Middleware, httpx.Timeout(cfg.HTTP.Timeout))
-    authweb.Register(r, pages, sessions, users)
-    articleweb.Register(r, pages, articles)
+    r.Use(pages.Middleware, httpx.Timeout(a.cfg.HTTP.Timeout))
+    authweb.Register(r, pages, sessions, a.users)
+    articleweb.Register(r, pages, a.articles)
 })
 ```
 
 几点说明：
 
 - `pages.Middleware` 是每个页面路由都需要的中间件：先拒绝跨站的非安全请求，再加载和保存会话。它使用 Go 标准库的 `http.CrossOriginProtection`，htmx 发出的是同源请求，表单不需要 CSRF token，见[跨站请求伪造](session.md#csrf)。
+- 这段代码在 `internal/bootstrap/http.go` 的 `HTTP` 方法中，`API`、`Routes` 见[依赖装配](dependencies.md#assembling-the-application)。`a.users` 是应用自己的用户服务，和 `a.articles` 一样在 `open` 中构造。
 - 页面和 JSON API 共用一个 Router。API 挂在 `/api` 下，不经过会话；`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
 - `web.New` 接管会话的错误处理：会话存储出错时记录日志，并用 `ErrorPage` 呈现 `500`。
 - [请求超时](middleware.md#request-timeout)按路由组安装，[服务端推送](sse.md)的路由不能有超时。

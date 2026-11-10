@@ -53,7 +53,7 @@ func (s *Service) Find(ctx context.Context, id uuid.UUID) (*Article, error) {
 <a id="assembling-the-application"></a>
 ## 在入口中组装应用
 
-应用的入口（通常是 `internal/bootstrap` 包）负责创建所有依赖，并按正确的顺序把它们连接起来。下面是博客应用完整的 `internal/bootstrap/serve.go`，`serve` 命令会调用其中的 `Serve`（见[命令行](commands.md#declaring-the-cli)）：
+应用的入口（通常是 `internal/bootstrap` 包）负责创建所有依赖，并按正确的顺序把它们连接起来。博客应用把入口分成两部分：`App` 装配各个运行部分共用的资源和服务，每个运行部分（HTTP 服务、[队列 worker](queue.md#running-workers) 等）是 `App` 的一个方法。下面是完整的 `internal/bootstrap/app.go`：
 
 ```go
 package bootstrap
@@ -63,16 +63,75 @@ import (
     "log/slog"
 
     "example.com/blog/internal/article"
-    "example.com/blog/internal/article/articlehttp"
-    "example.com/blog/internal/auth"
     "example.com/blog/internal/settings"
-    "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/cleanup"
+    "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/database/postgres"
+    "github.com/ryan053857/mygoravel/logging"
+    "github.com/uptrace/bun"
+)
+
+// App 是各个运行部分共用的资源和服务，每个进程只装配一次。
+type App struct {
+    cfg      settings.Config
+    db       *bun.DB
+    articles *article.Service
+}
+
+// open 安装全局日志器，打开数据库并构造业务服务，把关闭操作登记到 stack。
+func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App, error) {
+    slog.SetDefault(logging.New(cfg.Logs))
+
+    db, err := database.Open(ctx, postgres.Driver, cfg.Database)
+    if err != nil {
+        return nil, err
+    }
+    stack.MustAdd("database", func(context.Context) error {
+        return db.Close()
+    })
+
+    return &App{cfg: cfg, db: db, articles: article.NewService(db)}, nil
+}
+
+// run 装配 App，然后在同一个进程中运行 parts，直到收到停止信号。
+func run(ctx context.Context, cfg settings.Config, parts ...func(*App, context.Context) error) (err error) {
+    var stack cleanup.Stack
+    defer func() {
+        err = stack.CloseWith(context.Background(), err)
+    }()
+
+    app, err := open(ctx, cfg, &stack)
+    if err != nil {
+        return err
+    }
+    runs := make([]func(context.Context) error, len(parts))
+    for i, part := range parts {
+        runs[i] = func(ctx context.Context) error { return part(app, ctx) }
+    }
+    return command.Concurrently(ctx, runs...)
+}
+
+// Serve 只运行 HTTP 服务，serve 命令调用它。
+func Serve(ctx context.Context, cfg settings.Config) error {
+    return run(ctx, cfg, (*App).HTTP)
+}
+```
+
+HTTP 服务在 `internal/bootstrap/http.go` 中：
+
+```go
+package bootstrap
+
+import (
+    "context"
+
+    "example.com/blog/internal/article"
+    "example.com/blog/internal/article/articlehttp"
+    "example.com/blog/internal/auth"
+    "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/logging"
 )
 
 // API 是应用的 API 选项，serve、openapi 和 routes 命令共用它。
@@ -89,47 +148,27 @@ func DocRoutes(api *rest.API) {
     Routes(api, auth.Validator(auth.Config{}), nil)
 }
 
-func Serve(ctx context.Context, cfg settings.Config) (err error) {
-    var stack cleanup.Stack
-    defer func() {
-        err = stack.CloseWith(context.Background(), err)
-    }()
-
-    // 1. 安装全局日志器
-    slog.SetDefault(logging.New(cfg.Logs))
-
-    // 2. 打开资源，并登记关闭操作
-    db, err := database.Open(ctx, postgres.Driver, cfg.Database)
-    if err != nil {
-        return err
-    }
-    stack.MustAdd("database", func(context.Context) error {
-        return db.Close()
-    })
-
-    // 3. 构造业务服务
-    articles := article.NewService(db)
-
-    // 4. 安装中间件，创建 API 并注册路由
+// HTTP 安装中间件、注册路由并开始监听，直到 ctx 被取消。
+func (a *App) HTTP(ctx context.Context) error {
     router := chi.NewRouter()
-    router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
-    router.Use(httpx.Timeout(cfg.HTTP.Timeout))
+    router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+    router.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
     opts := API
     opts.Router = router
     api := rest.New(opts)
-    Routes(api, auth.Validator(cfg.Auth), articles)
-
-    // 5. 开始监听，直到 ctx 被取消
-    return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{})
+    Routes(api, auth.Validator(a.cfg.Auth), a.articles)
+    return httpx.ListenAndServe(ctx, a.cfg.HTTP, api.Handler(), httpx.ServeOptions{})
 }
 ```
 
 其中 `settings.Config` 是应用的[配置结构](configuration.md#loading-configuration)，`auth.Validator` 是 token 校验器（见[认证](authentication.md#token-validators)），`article` 和 `articlehttp` 是应用自己的业务包（见[路由](routing.md#organizing-routes)）。路由声明保留在各模块的 `routes.go`，`bootstrap.Routes` 统一调用各模块的 `Register`，让 `serve`、`openapi` 和 [routes](commands.md#routes-command) 命令复用同一份声明。后两个命令通过 `DocRoutes` 在文档模式下注册，不打开运行时资源；action 在处理器工厂内部构造，只有 `serve` 会调用它们。
 
-整个过程就是普通的函数调用：先创建被依赖的对象，再创建依赖它们的对象。`httpx.ListenAndServe` 返回后，`defer` 中的 `stack.CloseWith` 才会关闭数据库连接，因此正在处理的请求不会因为数据库提前关闭而失败。请求处理与停机的完整顺序见[请求生命周期](lifecycle.md)。
+整个过程就是普通的函数调用：先创建被依赖的对象，再创建依赖它们的对象。数据库、缓存、锁这类多个运行部分都用到的资源放进 `open`；只有某个部分用到的，例如 HTTP 中间件，在它自己的方法里创建。`run` 返回之前，`defer` 中的 `stack.CloseWith` 不会执行，因此正在处理的请求不会因为数据库提前关闭而失败。请求处理与停机的完整顺序见[请求生命周期](lifecycle.md)。
+
+`run` 可以同时运行多个部分，`command.Concurrently` 让它们共用一个 `ctx`，一个出错时其余的一起停止。把 HTTP 服务、队列和定时任务放在一个进程中运行，见[在一个进程中运行多个部分](commands.md#running-together)。
 
 > [!TIP]
-> 入口只打开当前命令真正需要的资源。例如 `serve` 命令需要数据库和 HTTP 监听，而上面的 `openapi`、`routes` 命令不需要这些资源。把不同命令的组装逻辑分开，可以让每个命令都快速、独立地运行。
+> 入口只打开当前命令真正需要的资源。例如 `serve` 命令需要数据库和 HTTP 监听，而 `openapi`、`routes` 命令不需要这些资源，它们直接使用 `API` 和 `DocRoutes`，不调用 `open`。
 
 <a id="closing-resources"></a>
 ## 关闭资源

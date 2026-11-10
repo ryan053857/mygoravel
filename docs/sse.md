@@ -145,9 +145,9 @@ for _, n := range h.notifier.Since(s.LastEventID()) {
 router.Group(func(r chi.Router) {
     r.Use(pages.Middleware)
     r.Group(func(r chi.Router) {
-        r.Use(httpx.Timeout(cfg.HTTP.Timeout))
-        authweb.Register(r, pages, sessions, users)
-        articleweb.Register(r, pages, articles)
+        r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
+        authweb.Register(r, pages, sessions, a.users)
+        articleweb.Register(r, pages, a.articles)
     })
     r.Group(func(r chi.Router) {
         r.Use(pages.Require("articles"))

@@ -98,49 +98,35 @@ queue.Handle(router, sub, "mail.send", mailer.Send)
 <a id="running-workers"></a>
 ### 启动 worker
 
-worker 是一个[常驻命令](commands.md#run-command)。下面是博客应用完整的 `internal/bootstrap/work.go`：
+worker 是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/worker.go`：
 
 ```go
 package bootstrap
 
 import (
     "context"
-    "log/slog"
 
     "example.com/blog/internal/settings"
-    "github.com/ryan053857/mygoravel/cleanup"
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/database/postgres"
-    "github.com/ryan053857/mygoravel/logging"
     "github.com/ryan053857/mygoravel/queue"
 )
 
-func Work(ctx context.Context, cfg settings.Config) (err error) {
-    var stack cleanup.Stack
-    defer func() {
-        err = stack.CloseWith(context.Background(), err)
-    }()
-
-    slog.SetDefault(logging.New(cfg.Logs))
-    db, err := database.Open(ctx, postgres.Driver, cfg.Database)
-    if err != nil {
-        return err
-    }
-    stack.MustAdd("database", func(context.Context) error {
-        return db.Close()
-    })
-    mailer, err := newMailer(cfg.Mail)
+// Worker 处理队列任务，直到 ctx 被取消。
+func (a *App) Worker(ctx context.Context) error {
+    mailer, err := newMailer(a.cfg.Mail)
     if err != nil {
         return err
     }
 
-    sub := queue.NewSubscriber(db, cfg.Queue, nil)
-    stack.MustAdd("queue", func(context.Context) error {
-        return sub.Close()
-    })
+    sub := queue.NewSubscriber(a.db, a.cfg.Queue, nil)
+    defer sub.Close()
     router := queue.NewRouter(nil)
     queue.Handle(router, sub, "mail.send", mailer.Send)
     return router.Run(ctx)
+}
+
+// Work 只运行队列 worker，work 命令调用它。
+func Work(ctx context.Context, cfg settings.Config) error {
+    return run(ctx, cfg, (*App).Worker)
 }
 ```
 
@@ -150,9 +136,9 @@ func Work(ctx context.Context, cfg settings.Config) (err error) {
 root.AddCommand(command.Run("work", "处理队列任务", bootstrap.Work))
 ```
 
-`router.Run` 一直运行到进程收到停止信号。订阅者要登记在数据库之后：`cleanup.Stack` 先关闭订阅者，等它把最后的处理结果写回数据库，再关闭数据库。
+`router.Run` 一直运行到进程收到停止信号。`defer sub.Close()` 在它返回后等待最后的处理结果写回数据库；数据库由 `run` 在所有部分都返回之后才关闭。
 
-worker 可以和 `serve` 运行在同一个进程中，但通常单独部署，按任务量增减实例数。多个 worker 同时运行是安全的，每个任务只会被其中一个领取。
+worker 可以和 HTTP 服务[运行在同一个进程中](commands.md#running-together)，任务量大了再单独部署，按任务量增减实例数。多个 worker 同时运行是安全的，每个任务只会被其中一个领取。
 
 <a id="configuration"></a>
 ### 配置

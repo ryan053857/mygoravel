@@ -34,9 +34,9 @@ blog/
 │   └── api/
 │       └── main.go          进程入口：执行命令行
 ├── internal/
-│   ├── cli/                 装配命令行：serve、routes、openapi、migrate、config、seed
+│   ├── cli/                 装配命令行：serve、work、start、routes、openapi、migrate、config、seed
 │   ├── settings/            配置结构与加载
-│   ├── bootstrap/           打开资源、组装服务、注册路由
+│   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker 等运行部分
 │   ├── auth/                token 校验器；authweb/ 是登录页
 │   ├── web/                 页面布局与错误页组件（templ）
 │   └── article/             文章业务模块
@@ -64,7 +64,8 @@ blog/
 | `cmd/api/main.go`、`internal/cli/cli.go` | [命令行](commands.md#declaring-the-cli) |
 | `internal/cli/seed.go` | [填充数据](migrations.md#seeding) |
 | `config/`、`.env`、`internal/settings` | [配置](configuration.md) |
-| `internal/bootstrap/serve.go` | [依赖装配](dependencies.md#assembling-the-application) |
+| `internal/bootstrap/app.go`、`http.go` | [依赖装配](dependencies.md#assembling-the-application) |
+| `internal/bootstrap/worker.go` | [队列](queue.md#running-workers) |
 | `internal/auth/auth.go` | [认证](authentication.md#token-validators) |
 | `internal/article/article.go`、`service.go` | [数据库](database.md#defining-models)、[错误处理](errors.md#example)、[授权](authorization.md#checking-in-transactions) |
 | `internal/article/articlehttp/routes.go` | [模块内注册](routing.md#module-registration) |

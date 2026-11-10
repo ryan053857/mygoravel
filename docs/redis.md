@@ -52,12 +52,12 @@ URL 形如 `redis://:password@localhost:6379/0`，路径部分是 DB 编号；�
 <a id="connecting"></a>
 ## 连接 Redis
 
-在[入口](dependencies.md#assembling-the-application)的 `Serve` 中，打开数据库之后创建客户端，并登记到 [`cleanup.Stack`](dependencies.md#closing-resources)：
+在[入口](dependencies.md#assembling-the-application)的 `open` 中，打开数据库之后创建客户端，并登记到 [`cleanup.Stack`](dependencies.md#closing-resources)：
 
 ```go
 opts, err := redis.ParseURL(cfg.Redis.URL)
 if err != nil {
-    return err
+    return nil, err
 }
 opts.ContextTimeoutEnabled = true
 rdb := redis.NewClient(opts)
@@ -65,14 +65,14 @@ stack.MustAdd("redis", func(context.Context) error {
     return rdb.Close()
 })
 if err := rdb.Ping(ctx).Err(); err != nil {
-    return err
+    return nil, err
 }
 ```
 
 - `ContextTimeoutEnabled` 让命令遵守 ctx 的截止时间。不开启时，go-redis 只按自己的 `ReadTimeout`、`WriteTimeout` 设置网络超时，会忽略 ctx 的截止时间。
 - `NewClient` 不会立即建立连接，启动时用 `Ping` 确认 Redis 可达。先登记 `Close` 再 `Ping`，这样 `Ping` 失败时客户端也会被关闭。
 
-客户端可以并发使用，整个应用共享这一个 `rdb`。
+客户端可以并发使用，整个应用共享这一个 `rdb`：把它存进 `App` 的 `rdb` 字段，各个运行部分通过 `a.rdb` 使用。
 
 <a id="running-commands"></a>
 ## 执行命令

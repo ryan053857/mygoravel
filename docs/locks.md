@@ -24,7 +24,7 @@
 <a id="assembling-locks"></a>
 ## 装配锁
 
-在[入口](dependencies.md#assembling-the-application)的 `Serve` 中创建 `Locker`，传给需要它的服务：
+在[入口](dependencies.md#assembling-the-application)的 `open` 中创建 `Locker`，传给需要它的服务：
 
 ```go
 import "github.com/ryan053857/mygoravel/lock"
