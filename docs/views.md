@@ -4,6 +4,7 @@
 - [安装 templ](#installing-templ)
 - [布局](#layouts)
 - [装配页面](#assembling-pages)
+- [登录](#login)
 - [渲染页面](#rendering-pages)
 - [局部更新](#partial-updates)
 - [错误页](#error-pages)
@@ -19,14 +20,16 @@
 - [htmx 4](https://four.htmx.org) 用 HTML 属性声明「点这里就请求某个地址，把返回的片段放到某个位置」，服务端只管返回 HTML；
 - [Alpine.js](https://alpinejs.dev) 处理下拉、弹窗这类纯前端的小交互。
 
-`httpx/web` 包负责把它们接到框架上：渲染 templ 组件、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。
+`web` 包负责把它们接到框架上：渲染 templ 组件、加载会话和检查登录、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。
+
+页面总是使用[会话](session.md)：用户登录后，服务器把身份记在会话里，浏览器通过 cookie 自动携带。JSON API 则只用 Bearer token，不使用会话，见[认证](authentication.md)。
 
 本章把博客的编辑后台做成服务端渲染的页面：编辑登录后打开文章的编辑页，预览并保存修改。表单见[表单](forms.md)，实时推送见[服务端推送](sse.md)。
 
 <a id="installing-templ"></a>
 ## 安装 templ
 
-templ 的运行时库随 `httpx/web` 引入，只需要把它的命令行工具加入 go.mod：
+templ 的运行时库随 `web` 包引入，只需要把它的命令行工具加入 go.mod：
 
 ```bash
 go get -tool github.com/a-h/templ/cmd/templ
@@ -42,7 +45,7 @@ go get -tool github.com/a-h/templ/cmd/templ
 ```templ
 package web
 
-import "github.com/ryan053857/mygoravel/httpx/web"
+import "github.com/ryan053857/mygoravel/web"
 
 templ Layout(title string) {
 	<!DOCTYPE html>
@@ -77,15 +80,19 @@ templ ErrorFragment(status int, message string) {
 <a id="assembling-pages"></a>
 ## 装配页面
 
-在[入口](dependencies.md#assembling-the-application)的 `Serve` 中用错误页组件创建 `web.Pages`，再挂载内嵌脚本和 404 页面：
+在[入口](dependencies.md#assembling-the-application)的 `Serve` 中创建[会话](session.md#assembling-sessions)和 `web.Pages`，再挂载内嵌脚本和 404 页面：
 
 ```go
 import (
-    "github.com/ryan053857/mygoravel/httpx/web"
+    "github.com/ryan053857/mygoravel/session"
+    "github.com/ryan053857/mygoravel/web"
     layout "example.com/blog/internal/web"
 )
 
+sessions := session.New(cfg.Session, session.NewStore(db))
 pages := web.New(web.Options{
+    Sessions:      sessions,
+    Login:         "/login",
     ErrorPage:     layout.ErrorPage,
     ErrorFragment: layout.ErrorFragment,
     ErrorTarget:   "#flash",
@@ -93,9 +100,6 @@ pages := web.New(web.Options{
 
 router := chi.NewRouter()
 router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
-router.Use(http.NewCrossOriginProtection().Handler)
-router.Use(sessions.LoadAndSave)
-
 router.Handle(web.AssetsPath+"*", web.Assets())
 router.NotFound(pages.NotFound)
 
@@ -106,17 +110,73 @@ router.Route("/api", func(r chi.Router) {
 })
 
 router.Group(func(r chi.Router) {
-    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
-    articleweb.Register(r, pages, sessions, articles)
+    r.Use(pages.Middleware, httpx.Timeout(cfg.HTTP.Timeout))
+    authweb.Register(r, pages, sessions, users)
+    articleweb.Register(r, pages, articles)
 })
 ```
 
 几点说明：
 
-- 页面和 JSON API 共用一个 Router。API 挂在 `/api` 下，`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
-- `sessions` 是[会话](session.md#assembling-sessions)管理器。页面通常用会话登录，见[保护页面](authentication.md#protecting-pages)。
-- `CrossOriginProtection` 防御跨站请求伪造。htmx 发出的是同源请求，表单不需要 CSRF token，见[跨站请求伪造](session.md#csrf)。
+- `pages.Middleware` 是每个页面路由都需要的中间件：先拒绝跨站的非安全请求，再加载和保存会话。它使用 Go 标准库的 `http.CrossOriginProtection`，htmx 发出的是同源请求，表单不需要 CSRF token，见[跨站请求伪造](session.md#csrf)。
+- 页面和 JSON API 共用一个 Router。API 挂在 `/api` 下，不经过会话；`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
+- `web.New` 接管会话的错误处理：会话存储出错时记录日志，并用 `ErrorPage` 呈现 `500`。
 - [请求超时](middleware.md#request-timeout)按路由组安装，[服务端推送](sse.md)的路由不能有超时。
+
+<a id="login"></a>
+## 登录
+
+`pages.Require` 要求请求已经登录，并具备给出的全部 scope：
+
+| 情况 | 结果 |
+| --- | --- |
+| 未登录 | 跳转到 `Options.Login`，`next` 参数带上原地址；htmx 请求通过 `HX-Redirect` 整页跳转，原地址取自发起请求的页面 |
+| 缺少所需的 scope | 呈现 `403`，见[错误页](#error-pages) |
+| 通过 | 主体写入请求的 context，处理器和业务服务用 `identity.FromContext` 读取 |
+
+登录页由应用自己实现。下面是 `internal/auth/authweb/routes.go` 中的登录和登出处理器。`users` 是应用自己的用户服务，`Authenticate` 校验密码，见[哈希](hashing.md#hashing-passwords)：
+
+```go
+type LoginInput struct {
+    Email    string `json:"email" format:"email"`
+    Password string `json:"password" minLength:"1"`
+}
+
+func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
+    f, err := web.ParseForm[LoginInput](r)
+    if err != nil {
+        return err
+    }
+    if f.Valid() {
+        u, err := h.users.Authenticate(r.Context(), f.Data.Email, f.Data.Password)
+        if err == nil {
+            sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser, Scopes: u.Scopes}
+            if err := session.Login(r.Context(), h.sessions, sub); err != nil {
+                return err
+            }
+            web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
+            return nil
+        }
+        if !errors.Is(err, user.ErrInvalidCredentials) {
+            return err
+        }
+        f.SetError("password", httpx.ErrorDetail(r.Context(), err))
+    }
+    return web.Render(w, r, http.StatusUnprocessableEntity, views.Login(f))
+}
+
+func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
+    if err := session.Logout(r.Context(), h.sessions); err != nil {
+        return err
+    }
+    web.Redirect(w, r, "/login")
+    return nil
+}
+```
+
+`session.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
+
+会话保存的是登录时主体的快照。用户的 scope 变化后，已登录的会话仍然使用旧的 scope，直到重新登录。需要立即生效时，销毁该用户的会话，见[读写会话数据](session.md#session-data)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面
@@ -126,10 +186,10 @@ router.Group(func(r chi.Router) {
 ```go
 package articleweb
 
-func Register(r chi.Router, pages *web.Pages, sessions *scs.SessionManager, articles *article.Service) {
+func Register(r chi.Router, pages *web.Pages, articles *article.Service) {
     h := &Handlers{articles: articles}
     r.Group(func(r chi.Router) {
-        r.Use(session.RequirePage(pages, sessions, "/login", "articles"))
+        r.Use(pages.Require("articles"))
         r.Get("/admin/articles/{id}/edit", pages.Handle(h.Edit))
         r.Put("/admin/articles/{id}", pages.Handle(h.Update))
         r.Post("/admin/articles/preview", pages.Handle(h.Preview))

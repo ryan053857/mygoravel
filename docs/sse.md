@@ -139,17 +139,21 @@ for _, n := range h.notifier.Since(s.LastEventID()) {
 <a id="routes-and-timeouts"></a>
 ## 路由与超时
 
-长连接会一直保持，所以 SSE 路由不能安装 [`httpx.Timeout`](middleware.md#request-timeout)，否则到期就会被切断。把它们放在不安装 Timeout 的路由组中：
+长连接会一直保持，所以 SSE 路由不能安装 [`httpx.Timeout`](middleware.md#request-timeout)，否则到期就会被切断。把[装配页面](views.md#assembling-pages)中的页面路由组拆成两组，只给普通页面安装 Timeout：
 
 ```go
 router.Group(func(r chi.Router) {
-    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
-    articleweb.Register(r, pages, sessions, articles)
-})
-router.Group(func(r chi.Router) {
-    r.Use(session.RequirePage(pages, sessions, "/login"))
-    r.Get("/admin/events", pages.Handle(h.Events))
-    r.Post("/admin/articles/publish", pages.Handle(h.Publish))
+    r.Use(pages.Middleware)
+    r.Group(func(r chi.Router) {
+        r.Use(httpx.Timeout(cfg.HTTP.Timeout))
+        authweb.Register(r, pages, sessions, users)
+        articleweb.Register(r, pages, articles)
+    })
+    r.Group(func(r chi.Router) {
+        r.Use(pages.Require("articles"))
+        r.Get("/admin/events", pages.Handle(h.Events))
+        r.Post("/admin/articles/publish", pages.Handle(h.Publish))
+    })
 })
 ```
 

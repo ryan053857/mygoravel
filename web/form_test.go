@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/httpx/web"
+	"github.com/ryan053857/mygoravel/web"
 )
 
 type articleInput struct {

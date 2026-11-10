@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/httpx/web"
+	"github.com/ryan053857/mygoravel/web"
 )
 
 func TestScriptsAreServed(t *testing.T) {

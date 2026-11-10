@@ -7,32 +7,40 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/a-h/templ"
+	"time"
 
 	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx/web"
+	"github.com/ryan053857/mygoravel/web"
 )
 
 var errLocked = errorx.Define(errorx.Conflict, "auth.forbidden") // 借用内置译文
 
-func TestNewRequiresErrorComponents(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected panic")
-		}
-	}()
-	web.New(web.Options{ErrorPage: func(int, string) templ.Component { return text("") }})
+func TestNewRequiresAllOptions(t *testing.T) {
+	for name, mutate := range map[string]func(*web.Options){
+		"sessions":       func(o *web.Options) { o.Sessions = nil },
+		"login":          func(o *web.Options) { o.Login = "" },
+		"error page":     func(o *web.Options) { o.ErrorPage = nil },
+		"error fragment": func(o *web.Options) { o.ErrorFragment = nil },
+		"error target":   func(o *web.Options) { o.ErrorTarget = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic")
+				}
+			}()
+			o := options()
+			mutate(&o)
+			web.New(o)
+		})
+	}
 }
 
 func TestHandleErrors(t *testing.T) {
 	var logs bytes.Buffer
-	p := web.New(web.Options{
-		ErrorPage:     func(status int, msg string) templ.Component { return text("page %d %s", status, msg) },
-		ErrorFragment: func(status int, msg string) templ.Component { return text("fragment %d %s", status, msg) },
-		ErrorTarget:   "#flash",
-		Logger:        slog.New(slog.NewTextHandler(&logs, nil)),
-	})
+	o := options()
+	o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	p := web.New(o)
 	conflict := p.Handle(func(http.ResponseWriter, *http.Request) error { return errLocked.New() })
 	internal := p.Handle(func(http.ResponseWriter, *http.Request) error { return errorx.Define(errorx.Internal, "x.y").New() })
 
@@ -59,12 +67,9 @@ func TestHandleErrors(t *testing.T) {
 
 func TestHandleErrorAfterResponseStarted(t *testing.T) {
 	var logs bytes.Buffer
-	p := web.New(web.Options{
-		ErrorPage:     func(int, string) templ.Component { return text("error page") },
-		ErrorFragment: func(int, string) templ.Component { return text("error fragment") },
-		ErrorTarget:   "#flash",
-		Logger:        slog.New(slog.NewTextHandler(&logs, nil)),
-	})
+	o := options()
+	o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	p := web.New(o)
 	h := p.Handle(func(w http.ResponseWriter, r *http.Request) error {
 		_, _ = w.Write([]byte("partial"))
 		return errorx.Define(errorx.Internal, "x.y").New()
@@ -94,5 +99,15 @@ func TestNotFound(t *testing.T) {
 	rr := serve(http.HandlerFunc(pages().NotFound), zh(t, httptest.NewRequest("GET", "/nope", nil)))
 	if rr.Code != 404 || rr.Body.String() != "page 404 页面不存在" {
 		t.Fatalf("%d %q", rr.Code, rr.Body.String())
+	}
+}
+
+func TestErrorSetsRetryAfter(t *testing.T) {
+	h := pages().Handle(func(http.ResponseWriter, *http.Request) error {
+		return errorx.Define(errorx.ResourceExhausted, "rate_limit.exceeded").New(errorx.RetryAfter(1500 * time.Millisecond))
+	})
+	rr := serve(h, httptest.NewRequest("POST", "/login", nil))
+	if rr.Code != 429 || rr.Header().Get("Retry-After") != "2" {
+		t.Fatalf("%d %v", rr.Code, rr.Header())
 	}
 }

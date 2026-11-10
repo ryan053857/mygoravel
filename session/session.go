@@ -3,15 +3,11 @@ package session
 import (
 	"context"
 	"encoding/gob"
-	"log/slog"
-	"net/http"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/logging"
 )
 
 // subjectKey 是会话中保存已认证主体的键。
@@ -23,18 +19,17 @@ func init() {
 }
 
 // New 按 cfg 创建 scs 会话管理器，读写会话数据直接使用它的原生方法。
-// store 是会话存储，例如 NewStore 或 scs 的 memstore；logger 记录会话存储错误，nil 时使用 slog.Default()。
-// 会话加载或保存失败时返回统一格式的 500。cfg 不合法或 store 为 nil 时 panic。
+// store 是会话存储，例如 NewStore 或 scs 的 memstore。cfg 不合法或 store 为 nil 时 panic。
 //
-// 返回值的 LoadAndSave 中间件需要安装在路由上，Login、Logout、Require 和 scs 的读写方法都依赖它。
-func New(cfg Config, store scs.Store, logger *slog.Logger) *scs.SessionManager {
+// 会话用于服务端渲染的页面：把返回值交给 web.New，由 Pages.Middleware 加载和保存会话，
+// 并把会话存储的错误呈现为错误页。Login、Logout 和 scs 的读写方法都依赖这个中间件。
+func New(cfg Config, store scs.Store) *scs.SessionManager {
 	if err := cfg.Validate(); err != nil {
 		panic(errors.Wrap(err, "session"))
 	}
 	if store == nil {
 		panic("session: nil store")
 	}
-	logger = logging.Or(logger).With(logging.AttrComponent, "session")
 	sameSite, _ := cfg.Cookie.sameSite()
 
 	sm := scs.New()
@@ -49,10 +44,6 @@ func New(cfg Config, store scs.Store, logger *slog.Logger) *scs.SessionManager {
 		Secure:   cfg.Cookie.Secure,
 		SameSite: sameSite,
 		Persist:  cfg.Cookie.Persist,
-	}
-	sm.ErrorFunc = func(w http.ResponseWriter, r *http.Request, err error) {
-		logger.ErrorContext(r.Context(), "session store failed", "error", err)
-		httpx.WriteProblem(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 	}
 	return sm
 }
@@ -77,7 +68,7 @@ func Logout(ctx context.Context, sm *scs.SessionManager) error {
 }
 
 // Subject 返回当前会话中已登录的主体。
-// 受 Require 保护的路由应当使用 identity.FromContext 读取主体。
+// 受 web.Pages.Require 保护的路由应当使用 identity.FromContext 读取主体。
 func Subject(ctx context.Context, sm *scs.SessionManager) (identity.Subject, bool) {
 	sub, ok := sm.Get(ctx, subjectKey).(identity.Subject)
 	return sub, ok && sub.ID != ""

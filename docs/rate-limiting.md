@@ -97,23 +97,20 @@ router.Use(httpx.RateLimit(ratelimit.NewMemory(cfg.HTTP.RateLimit), skipHealth))
 <a id="in-handlers"></a>
 ## 在处理器中限流
 
-博客的编辑后台使用邮箱和密码[登录](authentication.md#login-and-logout)。为了防止密码被暴力猜测，同一个邮箱每分钟最多尝试 5 次。只需在登录处理器开头调用限流器：
+博客的编辑后台使用邮箱和密码[登录](views.md#login)。为了防止密码被暴力猜测，同一个邮箱每分钟最多尝试 5 次。只需在登录处理器开头调用限流器：
 
 ```go
-func login(users *user.Service, sessions *scs.SessionManager, attempts ratelimit.Limiter) func(context.Context, *LoginInput) (*struct{}, error) {
-    return func(ctx context.Context, in *LoginInput) (*struct{}, error) {
-        if err := attempts.Allow(ctx, in.Body.Email); err != nil {
-            return nil, err
-        }
-        u, err := users.Authenticate(ctx, in.Body.Email, in.Body.Password)
-        // ...
+func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
+    if err := h.attempts.Allow(r.Context(), r.PostFormValue("email")); err != nil {
+        return err
     }
+    // ……解析表单、校验密码、登录
 }
 ```
 
-`ErrExceeded` 是分类为 `errorx.ResourceExhausted` 的业务错误，处理器直接返回即可：响应 `429`，带 `Retry-After` 响应头，错误码为 `rate_limit.exceeded`，提示文案按请求语言翻译。
+`ErrExceeded` 是分类为 `errorx.ResourceExhausted` 的业务错误，处理器直接返回即可：页面显示 `429` 错误页，带 `Retry-After` 响应头，提示文案按请求语言翻译。JSON API 的处理器同样直接返回它，响应 `429` 和错误码 `rate_limit.exceeded`。
 
-入口中创建限流器并传入处理器：
+入口中创建限流器并传给登录处理器：
 
 ```go
 attempts := ratelimit.NewDatabase(db, "login", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})

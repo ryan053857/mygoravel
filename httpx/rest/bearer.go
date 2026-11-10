@@ -43,7 +43,7 @@ func RequireBearer(api huma.API, validate TokenValidator, scopes ...string) func
 // RequireAuth 为路由声明名为 name 的安全方案：在 OpenAPI 组件中登记 scheme 并标记路由的 Security，
 // 同时安装运行时中间件。authenticate 返回的主体满足 scopes 中的全部权限后写入 identity.WithSubject；
 // 没有凭据返回 401，权限不足返回 403，认证后端故障返回对应的 5xx。
-// 每条路由只能声明一种认证方案。RequireBearer 和 session.Require 都基于它实现。
+// 每条路由只能声明一种认证方案。RequireBearer 基于它实现。
 func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authenticate Authenticator, scopes ...string) func(op *huma.Operation) {
 	if name == "" || scheme == nil || authenticate == nil {
 		panic("rest: RequireAuth requires a scheme name, a security scheme and an authenticator")

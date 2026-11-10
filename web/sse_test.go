@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/httpx/web"
+	"github.com/ryan053857/mygoravel/web"
 )
 
 // startServer 用 httpx.Serve 运行 handler，返回地址和停止函数（返回 Serve 用时）。

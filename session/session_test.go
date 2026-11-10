@@ -1,21 +1,19 @@
 package session_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/alexedwards/scs/v2/memstore"
-	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/session"
 )
@@ -50,8 +48,8 @@ func TestConfigValidate(t *testing.T) {
 
 func TestNewPanicsOnInvalidInput(t *testing.T) {
 	for name, build := range map[string]func(){
-		"invalid config": func() { session.New(session.Config{}, memstore.New(), nil) },
-		"nil store":      func() { session.New(defaults(), nil, nil) },
+		"invalid config": func() { session.New(session.Config{}, memstore.New()) },
+		"nil store":      func() { session.New(defaults(), nil) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
@@ -68,72 +66,59 @@ func TestNewAppliesCookieConfig(t *testing.T) {
 	cfg := defaults()
 	cfg.Cookie.Name = "sid"
 	cfg.Cookie.SameSite = "strict"
-	sm := session.New(cfg, memstore.New(), nil)
+	sm := session.New(cfg, memstore.New())
 	if sm.Cookie.Name != "sid" || !sm.Cookie.HttpOnly || !sm.Cookie.Secure || sm.Cookie.SameSite != http.SameSiteStrictMode || sm.Lifetime != 24*time.Hour {
 		t.Fatalf("cookie=%+v lifetime=%v", sm.Cookie, sm.Lifetime)
 	}
 }
 
-type loginIn struct {
-	Body struct {
-		User string `json:"user"`
-	}
-}
-
-type meOut struct {
-	Body struct {
-		ID     string `json:"id"`
-		Method string `json:"method"`
-	}
-}
-
-// newApp 装配一个最小应用：login 公开，me 需要登录，admin 还需要 admin scope。
-func newApp(t *testing.T, store scs.Store) (*httptest.Server, *rest.API) {
+// newApp 装配一个最小应用：login 接收 {"user": ...} 登录，me 返回当前主体，
+// admin 还需要 admin scope，logout 登出。
+func newApp(t *testing.T, store scs.Store) *httptest.Server {
 	t.Helper()
 	cfg := defaults()
-	cfg.Cookie.Secure = false // httptest 使用 http://127.0.0.1
-	sm := session.New(cfg, store, nil)
+	cfg.Cookie.Secure = false
+	sm := session.New(cfg, store)
 	router := chi.NewRouter()
 	router.Use(sm.LoadAndSave)
-	api := rest.New(rest.Options{Router: router})
-
-	login := huma.Operation{OperationID: "login", Method: http.MethodPost, Path: "/login"}
-	rest.Public()(&login)
-	rest.Register(api, login, func() func(context.Context, *loginIn) (*struct{}, error) {
-		return func(ctx context.Context, in *loginIn) (*struct{}, error) {
-			sub := identity.Subject{ID: in.Body.User, Type: identity.SubjectUser}
-			if in.Body.User == "root" {
-				sub.Scopes = []string{"admin"}
+	router.Post("/login", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ User string }
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		sub := identity.Subject{ID: in.User, Type: identity.SubjectUser}
+		if in.User == "root" {
+			sub.Scopes = []string{"admin"}
+		}
+		if err := session.Login(r.Context(), sm, sub); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	router.Post("/logout", func(w http.ResponseWriter, r *http.Request) {
+		if err := session.Logout(r.Context(), sm); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	me := func(scope string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			sub, ok := session.Subject(r.Context(), sm)
+			switch {
+			case !ok:
+				w.WriteHeader(http.StatusUnauthorized)
+			case scope != "" && !slices.Contains(sub.Scopes, scope):
+				w.WriteHeader(http.StatusForbidden)
+			default:
+				_ = json.NewEncoder(w).Encode(map[string]string{"id": sub.ID, "method": sub.Method})
 			}
-			return nil, session.Login(ctx, sm, sub)
 		}
-	})
-
-	logout := huma.Operation{OperationID: "logout", Method: http.MethodPost, Path: "/logout"}
-	session.Require(api, sm)(&logout)
-	rest.Register(api, logout, func() func(context.Context, *struct{}) (*struct{}, error) {
-		return func(ctx context.Context, _ *struct{}) (*struct{}, error) {
-			return nil, session.Logout(ctx, sm)
-		}
-	})
-
-	me := func(ctx context.Context, _ *struct{}) (*meOut, error) {
-		sub, _ := identity.FromContext(ctx)
-		out := &meOut{}
-		out.Body.ID, out.Body.Method = sub.ID, sub.Method
-		return out, nil
 	}
-	meOp := huma.Operation{OperationID: "me", Method: http.MethodGet, Path: "/me"}
-	session.Require(api, sm)(&meOp)
-	rest.Register(api, meOp, func() func(context.Context, *struct{}) (*meOut, error) { return me })
-
-	adminOp := huma.Operation{OperationID: "admin", Method: http.MethodGet, Path: "/admin"}
-	session.Require(api, sm, "admin")(&adminOp)
-	rest.Register(api, adminOp, func() func(context.Context, *struct{}) (*meOut, error) { return me })
-
+	router.Get("/me", me(""))
+	router.Get("/admin", me("admin"))
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
-	return srv, api
+	return srv
 }
 
 func newClient(t *testing.T) *http.Client {
@@ -171,14 +156,12 @@ func sessionCookie(resp *http.Response) *http.Cookie {
 	return nil
 }
 
-func TestLoginRequireLogout(t *testing.T) {
-	srv, _ := newApp(t, memstore.New())
+func TestLoginSubjectLogout(t *testing.T) {
+	srv := newApp(t, memstore.New())
 	c := newClient(t)
 
 	if resp := do(t, c, http.MethodGet, srv.URL+"/me", ""); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("anonymous /me status=%d", resp.StatusCode)
-	} else if resp.Header.Get("WWW-Authenticate") != "" {
-		t.Fatalf("cookie scheme must not send a bearer challenge: %q", resp.Header.Get("WWW-Authenticate"))
 	}
 
 	resp := do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"alice"}`)
@@ -188,15 +171,12 @@ func TestLoginRequireLogout(t *testing.T) {
 	}
 
 	resp = do(t, c, http.MethodGet, srv.URL+"/me", "")
-	var out meOut
-	if err := json.NewDecoder(resp.Body).Decode(&out.Body); err != nil || resp.StatusCode != http.StatusOK {
+	var out map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("me status=%d err=%v", resp.StatusCode, err)
 	}
-	if out.Body.ID != "alice" || out.Body.Method != "session" {
-		t.Fatalf("subject=%+v", out.Body)
-	}
-	if resp.Header.Get("Cache-Control") != "no-store" {
-		t.Fatalf("Cache-Control=%q", resp.Header.Get("Cache-Control"))
+	if out["id"] != "alice" || out["method"] != "session" {
+		t.Fatalf("subject=%+v", out)
 	}
 
 	if resp := do(t, c, http.MethodGet, srv.URL+"/admin", ""); resp.StatusCode != http.StatusForbidden {
@@ -226,7 +206,7 @@ func TestLoginRequireLogout(t *testing.T) {
 }
 
 func TestLoginRenewsToken(t *testing.T) {
-	srv, _ := newApp(t, memstore.New())
+	srv := newApp(t, memstore.New())
 	c := newClient(t)
 	first := sessionCookie(do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"alice"}`))
 	second := sessionCookie(do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"root"}`))
@@ -239,57 +219,8 @@ func TestLoginRenewsToken(t *testing.T) {
 }
 
 func TestLoginRequiresSubjectID(t *testing.T) {
-	srv, _ := newApp(t, memstore.New())
+	srv := newApp(t, memstore.New())
 	if resp := do(t, newClient(t), http.MethodPost, srv.URL+"/login", `{"user":""}`); resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
-}
-
-type failingStore struct{ scs.Store }
-
-func (failingStore) Find(string) ([]byte, bool, error) { return nil, false, context.DeadlineExceeded }
-
-func TestStoreFailureReturnsProblem(t *testing.T) {
-	srv, _ := newApp(t, failingStore{memstore.New()})
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/me", nil)
-	req.AddCookie(&http.Cookie{Name: "session", Value: "token"})
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusInternalServerError || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/problem+json") {
-		t.Fatalf("status=%d content-type=%q", resp.StatusCode, resp.Header.Get("Content-Type"))
-	}
-}
-
-func TestOpenAPIAndRoutes(t *testing.T) {
-	_, api := newApp(t, memstore.New())
-	scheme := api.OpenAPI().Components.SecuritySchemes["session"]
-	if scheme == nil || scheme.Type != "apiKey" || scheme.In != "cookie" || scheme.Name != "session" {
-		t.Fatalf("scheme=%+v", scheme)
-	}
-	access := map[string]rest.Route{}
-	for _, r := range api.Routes() {
-		access[r.Path] = r
-	}
-	if access["/login"].Access != rest.AccessPublic || access["/me"].Access != "session" {
-		t.Fatalf("routes=%+v", access)
-	}
-	if got := access["/admin"].Scopes; len(got) != 1 || got[0] != "admin" {
-		t.Fatalf("admin scopes=%v", got)
-	}
-}
-
-func TestRequireCannotCombineWithBearer(t *testing.T) {
-	_, api := newApp(t, memstore.New())
-	sm := session.New(defaults(), memstore.New(), nil)
-	op := huma.Operation{OperationID: "x", Method: http.MethodGet, Path: "/x"}
-	rest.RequireBearer(api, func(huma.Context, string) (identity.Subject, error) { return identity.Subject{}, nil })(&op)
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected panic")
-		}
-	}()
-	session.Require(api, sm)(&op)
 }

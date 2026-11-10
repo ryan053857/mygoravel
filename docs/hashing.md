@@ -12,7 +12,7 @@
 
 哈希使用 PHC 字符串格式，例如 `$argon2id$v=19$m=19456,t=2,p=1$<盐>$<哈希>`。算法、参数和随机盐都编码在字符串中，保存在一个文本列里即可。这个格式与 PHP 的 `password_hash` 互通，从 Laravel 等应用迁移过来的密码哈希可以直接校验。
 
-本章为博客应用的用户服务实现密码校验，也就是[会话认证](authentication.md#login-and-logout)中登录处理器调用的 `users.Authenticate`。
+本章为博客应用的用户服务实现密码校验，也就是[页面登录](views.md#login)中登录处理器调用的 `users.Authenticate`。
 
 <a id="configuration"></a>
 ## 配置

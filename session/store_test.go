@@ -102,7 +102,7 @@ func TestStoreCleanup(t *testing.T) {
 func TestStoreWithSessionManager(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, driver database.Driver) {
 		db := openDB(t, driver)
-		srv, _ := newApp(t, session.NewStore(db))
+		srv := newApp(t, session.NewStore(db))
 		c := newClient(t)
 		if resp := do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"root"}`); resp.StatusCode != http.StatusNoContent {
 			t.Fatalf("login status=%d", resp.StatusCode)

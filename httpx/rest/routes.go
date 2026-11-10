@@ -15,7 +15,7 @@ type Route struct {
 	Path        string
 	OperationID string
 	Summary     string
-	// Access 是路由声明的访问策略：Access* 常量之一，或 RequireAuth 声明的方案名（例如 bearer、session）。
+	// Access 是路由声明的访问策略：Access* 常量之一，或 RequireAuth 声明的方案名（例如 bearer）。
 	// 它不推断 chi 中间件的行为；没有可识别声明的路由一律为 AccessUnknown。
 	Access string
 	// Scopes 是需要认证的路由要求调用者具备的全部 scope。

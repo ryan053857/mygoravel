@@ -4,6 +4,7 @@ page.invalid_cursor: 分页游标无效
 rate_limit.exceeded: 请求过于频繁，请稍后再试
 web.not_found: 页面不存在
 web.bad_form: 无法解析提交的表单
+web.cross_origin: 跨站请求被拒绝
 validation.required: 必填
 validation.filled: 不能为空
 validation.min_length: 至少 {{.Min}} 个字符

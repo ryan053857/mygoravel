@@ -37,7 +37,7 @@ blog/
 │   ├── cli/                 装配命令行：serve、routes、openapi、migrate、config、seed
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务、注册路由
-│   ├── auth/                token 校验器
+│   ├── auth/                token 校验器；authweb/ 是登录页
 │   ├── web/                 页面布局与错误页组件（templ）
 │   └── article/             文章业务模块
 │       ├── article.go       模型与业务错误
@@ -71,6 +71,7 @@ blog/
 | `internal/article/articlehttp/actions/` 下的 `create_article.go`、`get_article.go`、`publish_article.go` | [按业务动作组织处理器](routing.md#http-actions) |
 | `internal/article/articlehttp/actions/dto.go` | [共享响应结构](routing.md#shared-responses) |
 | `internal/web/`、`internal/article/articleweb/` | [视图](views.md)、[表单](forms.md) |
+| `internal/auth/authweb/` | [登录](views.md#login) |
 | `migrations/` | [迁移](migrations.md#embedding-migrations) |
 
 目录不必一次建齐，等真正有代码要放时再创建即可。
@@ -162,7 +163,8 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `page` | 固定分页与游标分页的参数和响应结构 | [分页](responses.md#pagination) |
 | `httpx` | HTTP 中间件、平滑停机 | [中间件](middleware.md)、[请求生命周期](lifecycle.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
-| `httpx/web` | 服务端渲染页面：渲染组件、错误页、表单、SSE，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[服务端推送](sse.md) |
+| `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
+| `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、SSE，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[服务端推送](sse.md) |
 | `database` | 打开 PostgreSQL 或 SQLite 连接，识别约束错误 | [数据库](database.md) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |

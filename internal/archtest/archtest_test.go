@@ -24,11 +24,12 @@ var dependencies = map[string][]string{
 	"mail":       {"i18n"},
 	"ratelimit":  {"errorx"},
 	"httpx":      {"errorx", "identity", "i18n", "logging", "ratelimit"},
-	"session":    {"errorx", "identity", "httpx", "logging"},
+	"session":    {"identity"},
+	"web":        {"errorx", "httpx", "i18n", "identity", "logging", "session"},
 	"lock":       {},
 	"hashing":    {},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "web"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
@@ -125,7 +126,11 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/mail", module + "/i18n", true},
 		{module + "/mail", module + "/database", false},
 		{module + "/httpx", module + "/mail", false},
-		{module + "/session", module + "/httpx/rest", true},
+		{module + "/session", module + "/httpx/rest", false},
+		{module + "/session", module + "/web", false},
+		{module + "/web", module + "/session", true},
+		{module + "/web", module + "/httpx", true},
+		{module + "/httpx", module + "/web", false},
 		{module + "/httpx", module + "/session", false},
 		{module + "/session", module + "/database", false},
 		{module + "/lock", "github.com/uptrace/bun", true},
@@ -188,10 +193,9 @@ func TestDependencyScope(t *testing.T) {
 	}
 }
 
-// TestAPIDoesNotLinkTempl 确保只用 httpx 与 httpx/rest 的 JSON API 不会链接 templ，
-// templ 只由 httpx/web（以及依赖它的 session）引入。
+// TestAPIDoesNotLinkTempl 确保 JSON API 与会话存储不会链接 templ，templ 只由 web 引入。
 func TestAPIDoesNotLinkTempl(t *testing.T) {
-	for _, pkg := range []string{module + "/httpx", module + "/httpx/rest"} {
+	for _, pkg := range []string{module + "/httpx", module + "/httpx/rest", module + "/session"} {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)
