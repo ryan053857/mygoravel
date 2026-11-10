@@ -437,7 +437,7 @@ err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         return err
     }
     // ……保存文章
-    return queue.Publish(ctx, queue.NewPublisher(tx), "files.process", cover.ID)
+    return queue.Publish(ctx, queue.Database(tx), "files.process", cover.ID)
 })
 ```
 
