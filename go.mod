@@ -10,6 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/joho/godotenv v1.5.1
+	github.com/lmittmann/tint v1.2.1
 	github.com/nicksnyder/go-i18n/v2 v2.7.0
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/samber/slog-chi v1.19.1
@@ -19,6 +20,7 @@ require (
 	github.com/uptrace/bun v1.3.0
 	github.com/uptrace/bun/dialect/pgdialect v1.3.0
 	go.yaml.in/yaml/v4 v4.0.0
+	golang.org/x/term v0.48.0
 	golang.org/x/text v0.43.0
 	golang.org/x/time v0.16.0
 )
@@ -50,5 +52,5 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 )

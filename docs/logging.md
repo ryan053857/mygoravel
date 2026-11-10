@@ -37,7 +37,7 @@ slog.SetDefault(logging.New(cfg.Logs))
 ```yaml
 logs:
   level: ${LOG_LEVEL:-info}
-  format: json
+  format: ${LOG_FORMAT:-json}
   service: blog
   time_zone: UTC
 ```
@@ -45,7 +45,7 @@ logs:
 | 字段 | 说明 | 默认值 |
 | --- | --- | --- |
 | `level` | 最低记录级别：`debug`、`info`、`warn`、`error` | `info` |
-| `format` | `json` 或 `text` | `json` |
+| `format` | `json` 或 `text`，见[输出格式](#formats) | `json` |
 | `add_source` | 是否记录源码位置 | `false` |
 | `service` | 附加到每条日志的 `service` 字段，为空时省略 | 空 |
 | `version` | 附加到每条日志的 `version` 字段 | 构建信息中的模块版本，取不到时省略 |
@@ -58,7 +58,25 @@ logs:
 slog.SetDefault(logging.New(cfg.Logs))
 ```
 
-`logging.Config` 的零值可以直接使用，不写 `logs` 段也能得到合理的日志。本地开发时，`text` 格式的输出更便于阅读；生产环境中，JSON 格式更便于日志系统采集和检索。
+`logging.Config` 的零值可以直接使用，不写 `logs` 段也能得到合理的日志。
+
+<a id="formats"></a>
+两种输出格式分别面向机器和人：
+
+- `json`：每行一个 JSON 对象，供日志系统采集和检索。生产环境使用它。
+- `text`：本地开发时阅读，基于 [tint](https://github.com/lmittmann/tint)。时间显示到毫秒，级别缩写为 `DBG`、`INF`、`WRN`、`ERR`，分组字段以 `.` 连接：
+
+  ```text
+  2026-11-10 17:05:12.345 INF http request service=blog component=http request.method=GET response.status=200 request_id=9F2K…
+  2026-11-10 17:05:12.401 ERR request failed error.message=boom request_id=9F2K…
+  ```
+
+  输出到终端时，时间变暗、级别按颜色区分。输出到管道、文件或 CI 时自动去掉颜色；设置 `NO_COLOR=1` 也会关闭颜色（见 [no-color.org](https://no-color.org)）。
+
+`text` 不是严格的 [logfmt](https://brandur.org/logfmt)，不要让日志系统解析它。确实需要 logfmt 时，用 `logging.Fanout(slog.NewTextHandler(w, nil))` 追加一个输出，见[多个输出](#multiple-outputs)。
+
+> [!TIP]
+> 让 AI agent 读取或分析日志时，请使用 `json`：字段完整、结构明确。agent 执行命令时通常不在终端中，`text` 也不会带颜色码；如果 agent 工具分配了伪终端，设置 `NO_COLOR=1` 可以避免输出转义码。
 
 没有设置 `time_zone` 时使用进程的本地时区，它由 `TZ` 环境变量或 `/etc/localtime` 决定：开发机上通常是 `+08:00`，容器中往往是 UTC。时间始终带有时区偏移，不会产生歧义；多个环境混合检索时，建议统一设为 `UTC`。
 

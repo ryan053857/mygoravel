@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -58,8 +59,23 @@ func TestConfigControlsLevelAndFormat(t *testing.T) {
 	logger := logging.New(logging.Config{Level: slog.LevelWarn, Format: logging.FormatText, Writer: &buf})
 	logger.Info("hidden")
 	logger.Warn("shown")
-	if strings.Contains(buf.String(), "hidden") || !strings.Contains(buf.String(), "level=WARN msg=shown") {
+	if strings.Contains(buf.String(), "hidden") || !strings.Contains(buf.String(), " WRN shown") {
 		t.Fatalf("output=%q", buf.String())
+	}
+}
+
+func TestTextFormatIsPlainWhenNotATerminal(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logging.New(logging.Config{Format: logging.FormatText, TimeZone: "UTC", Writer: &buf})
+	ctx := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "r1"))
+	logger.ErrorContext(ctx, "failed", "error", plainErr("boom"), slog.Group("response", "status", 500))
+	out := buf.String()
+	if strings.Contains(out, "\x1b[") {
+		t.Fatalf("colored output to a buffer: %q", out)
+	}
+	if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} ERR failed `).MatchString(out) ||
+		!strings.Contains(out, "error.message=boom") || !strings.Contains(out, "response.status=500") || !strings.Contains(out, "request_id=r1") {
+		t.Fatalf("output=%q", out)
 	}
 }
 

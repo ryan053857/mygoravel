@@ -9,8 +9,10 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/lmittmann/tint"
 	slogformatter "github.com/samber/slog-formatter"
 	slogmulti "github.com/samber/slog-multi"
+	"golang.org/x/term"
 )
 
 // 输出格式。
@@ -37,7 +39,8 @@ type Config struct {
 	// Levels 按 component 字段覆盖 Level，例如 {http: warn, billing: debug}；
 	// 框架组件的 component 见 docs/logging.md。
 	Levels map[string]slog.Level `yaml:"levels"`
-	// Format 为 json 或 text，空值视为 json。
+	// Format 为 json 或 text，空值视为 json。json 供日志系统采集；
+	// text 供本地开发阅读，输出到终端时着色（遵守 NO_COLOR），不是严格的 logfmt。
 	Format string `yaml:"format"`
 	// AddSource 在日志中附加源码位置。
 	AddSource bool `yaml:"add_source"`
@@ -174,9 +177,27 @@ func baseHandler(cfg Config, loc *time.Location) slog.Handler {
 		}
 	}
 	if cfg.Format == FormatText {
-		return slog.NewTextHandler(w, hopts)
+		return tint.NewHandler(w, &tint.Options{
+			AddSource:   hopts.AddSource,
+			Level:       hopts.Level,
+			ReplaceAttr: hopts.ReplaceAttr,
+			TimeFormat:  textTimeFormat,
+			NoColor:     !colorful(w),
+		})
 	}
 	return slog.NewJSONHandler(w, hopts)
+}
+
+// textTimeFormat 是 text 格式的时间格式：带日期，跨天查看或按时间关联日志时没有歧义。
+const textTimeFormat = "2006-01-02 15:04:05.000"
+
+// colorful 报告是否为 w 输出颜色：w 是终端且未设置 NO_COLOR（https://no-color.org）。
+func colorful(w io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	f, ok := w.(interface{ Fd() uintptr })
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
 // Or 返回 l，l 为 nil 时返回当前的 slog.Default()。框架组件用它解析可选的 Logger 参数。
