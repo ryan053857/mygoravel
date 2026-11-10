@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/session"
@@ -111,7 +113,7 @@ func newApp(t *testing.T, store scs.Store) (*httptest.Server, *rest.API) {
 	})
 
 	logout := huma.Operation{OperationID: "logout", Method: http.MethodPost, Path: "/logout"}
-	session.Require(api, sm)(&logout)
+	session.Require(api, sm, session.Stored)(&logout)
 	rest.Register(api, logout, func() func(context.Context, *struct{}) (*struct{}, error) {
 		return func(ctx context.Context, _ *struct{}) (*struct{}, error) {
 			return nil, session.Logout(ctx, sm)
@@ -125,16 +127,16 @@ func newApp(t *testing.T, store scs.Store) (*httptest.Server, *rest.API) {
 		return out, nil
 	}
 	meOp := huma.Operation{OperationID: "me", Method: http.MethodGet, Path: "/me"}
-	session.Require(api, sm)(&meOp)
+	session.Require(api, sm, session.Stored)(&meOp)
 	rest.Register(api, meOp, func() func(context.Context, *struct{}) (*meOut, error) { return me })
 
 	adminOp := huma.Operation{OperationID: "admin", Method: http.MethodGet, Path: "/admin"}
-	session.Require(api, sm, "admin")(&adminOp)
+	session.Require(api, sm, session.Stored, "admin")(&adminOp)
 	rest.Register(api, adminOp, func() func(context.Context, *struct{}) (*meOut, error) { return me })
 
 	if st, ok := store.(*session.Store); ok {
 		others := huma.Operation{OperationID: "logout-others", Method: http.MethodPost, Path: "/logout-others"}
-		session.Require(api, sm)(&others)
+		session.Require(api, sm, session.Stored)(&others)
 		rest.Register(api, others, func() func(context.Context, *struct{}) (*revokedOut, error) {
 			return func(ctx context.Context, _ *struct{}) (*revokedOut, error) {
 				n, err := st.RevokeOthers(ctx, sm)
@@ -311,5 +313,115 @@ func TestRequireCannotCombineWithBearer(t *testing.T) {
 			t.Fatal("expected panic")
 		}
 	}()
-	session.Require(api, sm)(&op)
+	session.Require(api, sm, session.Stored)(&op)
+}
+
+func TestRequireResolver(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		scopes   = map[string][]string{"alice": nil}
+		disabled = map[string]bool{}
+		down     bool
+	)
+	// resolve 模拟每次请求查询用户的当前权限和状态，返回的主体不带 Method。
+	resolve := func(_ huma.Context, stored identity.Subject) (identity.Subject, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case down:
+			return identity.Subject{}, errorx.Define(errorx.Unavailable, "users.unavailable").New()
+		case disabled[stored.ID]:
+			return identity.Subject{}, errorx.Define(errorx.Unauthenticated, "users.disabled").New()
+		}
+		return identity.Subject{ID: stored.ID, Type: stored.Type, Scopes: scopes[stored.ID]}, nil
+	}
+	set := func(f func()) { mu.Lock(); f(); mu.Unlock() }
+
+	cfg := defaults()
+	cfg.Cookie.Secure = false
+	sm := session.New(cfg, memstore.New(), nil)
+	router := chi.NewRouter()
+	router.Use(sm.LoadAndSave)
+	api := rest.New(rest.Options{Router: router})
+	login := huma.Operation{OperationID: "login", Method: http.MethodPost, Path: "/login"}
+	rest.Public()(&login)
+	rest.Register(api, login, func() func(context.Context, *loginIn) (*struct{}, error) {
+		return func(ctx context.Context, in *loginIn) (*struct{}, error) {
+			return nil, session.Login(ctx, sm, identity.Subject{ID: in.Body.User, Type: identity.SubjectUser})
+		}
+	})
+	me := func(ctx context.Context, _ *struct{}) (*meOut, error) {
+		sub, _ := identity.FromContext(ctx)
+		out := &meOut{}
+		out.Body.ID, out.Body.Method = sub.ID, sub.Method
+		return out, nil
+	}
+	adminOp := huma.Operation{OperationID: "admin", Method: http.MethodGet, Path: "/admin"}
+	session.Require(api, sm, resolve, "admin")(&adminOp)
+	rest.Register(api, adminOp, func() func(context.Context, *struct{}) (*meOut, error) { return me })
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	c := newClient(t)
+	if resp := do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"alice"}`); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("login status=%d", resp.StatusCode)
+	}
+	if resp := do(t, c, http.MethodGet, srv.URL+"/admin", ""); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("admin before grant status=%d", resp.StatusCode)
+	}
+	// 授权后不需要重新登录。
+	set(func() { scopes["alice"] = []string{"admin"} })
+	resp := do(t, c, http.MethodGet, srv.URL+"/admin", "")
+	var out meOut
+	if err := json.NewDecoder(resp.Body).Decode(&out.Body); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin after grant status=%d err=%v", resp.StatusCode, err)
+	}
+	if out.Body.ID != "alice" || out.Body.Method != "session" {
+		t.Fatalf("subject=%+v", out.Body)
+	}
+	set(func() { down = true })
+	if resp := do(t, c, http.MethodGet, srv.URL+"/admin", ""); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("admin with resolver down status=%d", resp.StatusCode)
+	}
+	set(func() { down, disabled["alice"] = false, true })
+	if resp := do(t, c, http.MethodGet, srv.URL+"/admin", ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("admin after disable status=%d", resp.StatusCode)
+	}
+}
+
+func TestRequireSchemePerCookie(t *testing.T) {
+	cfg := defaults()
+	cfg.Cookie.Name = "admin_session"
+	members := session.New(defaults(), memstore.New(), nil)
+	staff := session.New(cfg, memstore.New(), nil)
+	api := rest.New(rest.Options{Router: chi.NewRouter()})
+	for path, sm := range map[string]*scs.SessionManager{"/me": members, "/admin/me": staff} {
+		op := huma.Operation{OperationID: path, Method: http.MethodGet, Path: path}
+		session.Require(api, sm, session.Stored)(&op)
+		rest.Register(api, op, func() func(context.Context, *struct{}) (*struct{}, error) {
+			return func(context.Context, *struct{}) (*struct{}, error) { return nil, nil }
+		})
+	}
+	schemes := api.OpenAPI().Components.SecuritySchemes
+	for _, name := range []string{"session", "admin_session"} {
+		if s := schemes[name]; s == nil || s.In != "cookie" || s.Name != name {
+			t.Fatalf("scheme %s=%+v", name, s)
+		}
+	}
+	access := map[string]string{}
+	for _, r := range api.Routes() {
+		access[r.Path] = r.Access
+	}
+	if access["/me"] != "session" || access["/admin/me"] != "admin_session" {
+		t.Fatalf("access=%v", access)
+	}
+}
+
+func TestRequirePanicsOnNilResolver(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	session.Require(rest.New(rest.Options{Router: chi.NewRouter()}), session.New(defaults(), memstore.New(), nil), nil)
 }

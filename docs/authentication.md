@@ -8,6 +8,7 @@
 - [会话认证](#session-authentication)
     - [登录与登出](#login-and-logout)
     - [保护会话路由](#protecting-session-routes)
+    - [每次请求重新加载主体](#resolving-subjects)
 - [获取已认证的主体](#retrieving-the-subject)
 - [管理凭据](#managing-credentials)
 
@@ -257,15 +258,13 @@ rest.Register(api, op, func() func(context.Context, *LoginInput) (*struct{}, err
 })
 ```
 
-会话保存的是登录时主体的快照。用户的 scope 变化后，已登录的会话仍然使用旧的 scope，直到重新登录。需要立即生效时，用 `RevokeSubject` 撤销该用户的全部会话，让他重新登录，见[撤销会话](session.md#revoking-sessions)。
-
 <a id="protecting-session-routes"></a>
 ### 保护会话路由
 
-`session.Require` 的用法和 [`rest.RequireBearer`](#protecting-routes) 相同，只是凭据来自会话：
+`session.Require` 的用法和 [`rest.RequireBearer`](#protecting-routes) 相同，只是凭据来自会话。第三个参数决定每次请求使用什么主体，`session.Stored` 表示直接使用登录时保存的主体：
 
 ```go
-requireEditor := session.Require(api, sessions, "articles")
+requireEditor := session.Require(api, sessions, session.Stored, "articles")
 
 op := huma.Operation{OperationID: "admin-article-update", Method: http.MethodPut, Path: "/admin/articles/{id}"}
 requireEditor(&op)
@@ -281,9 +280,37 @@ rest.Register(api, op, func() func(context.Context, *actions.UpdateArticleInput)
 | 没有会话，或会话中没有登录的主体 | 401 | `auth.unauthenticated` |
 | 缺少所需的 scope | 403 | `auth.forbidden` |
 
-响应同样带有 `Cache-Control: no-store`，但不带 `WWW-Authenticate` 头。OpenAPI 文档中，这些路由使用名为 `session` 的 cookie 安全方案，`routes` 命令把它们的访问策略显示为 `session`。
+响应同样带有 `Cache-Control: no-store`，但不带 `WWW-Authenticate` 头。OpenAPI 文档中，这些路由使用一个 cookie 安全方案，方案名就是会话 cookie 的名字，默认为 `session`；`routes` 命令把它显示为路由的访问策略。前台用户和后台员工使用两个会话管理器时，给它们配置不同的 cookie 名，文档中就是两个独立的方案。
 
 一条路由只能声明一种认证方式，同时调用 `RequireBearer` 和 `session.Require` 会在注册时 panic。
+
+<a id="resolving-subjects"></a>
+### 每次请求重新加载主体
+
+`session.Stored` 使用的是登录时保存的主体快照：编辑被收回 `articles` 权限，或者账号被停用之后，已登录的会话仍然有效，直到重新登录。
+
+需要立即生效时，把 `session.Stored` 换成自己的函数。它在每次请求时收到登录时保存的主体，返回当前的主体。下面在 `adminhttp` 包中按用户的最新状态重新加载，`users.Get` 是应用自己的查询：
+
+```go
+func resolveEditor(users *user.Service) session.Resolver {
+    return func(ctx huma.Context, stored identity.Subject) (identity.Subject, error) {
+        u, err := users.Get(ctx.Context(), stored.ID)
+        if err != nil {
+            return identity.Subject{}, err // 用户不存在等 4xx 类错误得到 401，数据库故障得到 503
+        }
+        if u.Disabled {
+            return identity.Subject{}, auth.ErrUnauthenticated.New() // 401
+        }
+        return identity.Subject{ID: u.ID, Type: identity.SubjectUser, Scopes: u.Scopes}, nil
+    }
+}
+
+requireEditor := session.Require(api, sessions, resolveEditor(users), "articles")
+```
+
+返回值的处理方式和 [Token 校验器](#token-validators)相同，scope 检查使用返回的主体，主体的 `Method` 由框架设为 `session`。这样每个请求会多一次查询，访问量大时可以在 `users.Get` 中加缓存。
+
+要让用户立即下线而不是等下一次检查，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
 
 <a id="retrieving-the-subject"></a>
 ## 获取已认证的主体

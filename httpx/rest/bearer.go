@@ -1,6 +1,8 @@
 package rest
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -96,7 +98,8 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 	}
 }
 
-// registerScheme 在 OpenAPI 组件中登记安全方案。
+// registerScheme 在 OpenAPI 组件中登记安全方案；同名方案已存在且定义不同时 panic，
+// 防止两种认证方式互相覆盖文档。
 func registerScheme(api huma.API, name string, scheme *huma.SecurityScheme) {
 	oapi := api.OpenAPI()
 	if oapi.Components == nil {
@@ -104,6 +107,9 @@ func registerScheme(api huma.API, name string, scheme *huma.SecurityScheme) {
 	}
 	if oapi.Components.SecuritySchemes == nil {
 		oapi.Components.SecuritySchemes = map[string]*huma.SecurityScheme{}
+	}
+	if existing, ok := oapi.Components.SecuritySchemes[name]; ok && !reflect.DeepEqual(existing, scheme) {
+		panic(fmt.Sprintf("rest: security scheme %q is already registered with a different definition", name))
 	}
 	oapi.Components.SecuritySchemes[name] = scheme
 }

@@ -175,6 +175,23 @@ func TestBearerRejectsEmptySubjectAndDocumentsNoOAuthScopes(t *testing.T) {
 	}
 }
 
+func TestRequireAuthRejectsConflictingSchemeDefinitions(t *testing.T) {
+	api := rest.New(rest.Options{})
+	anon := func(huma.Context) (identity.Subject, error) { return identity.Subject{}, nil }
+	cookie := func(name string) *huma.SecurityScheme {
+		return &huma.SecurityScheme{Type: "apiKey", In: "cookie", Name: name}
+	}
+	// 同一定义可以重复声明，例如多次调用 RequireBearer。
+	rest.RequireAuth(api, "web", cookie("web"), anon)
+	rest.RequireAuth(api, "web", cookie("web"), anon)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for a different definition under the same name")
+		}
+	}()
+	rest.RequireAuth(api, "web", cookie("other"), anon)
+}
+
 func TestConflictingRouteRejectedBeforeBinding(t *testing.T) {
 	for _, mode := range []rest.Mode{rest.ModeServe, rest.ModeOpenAPI} {
 		api := rest.New(rest.Options{Mode: mode})
