@@ -10,6 +10,7 @@ import (
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
 func fastDatabase(db bun.IDB, gapTimeout time.Duration) *broadcast.Database {
@@ -19,9 +20,9 @@ func fastDatabase(db bun.IDB, gapTimeout time.Duration) *broadcast.Database {
 }
 
 func TestDatabase(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		broadcasttest.TestBackend(t, func(t *testing.T) (broadcast.Backend, broadcast.Backend) {
-			db := openDB(t, driver)
+			db := dbtesting.Open(t, driver, broadcast.Migrations())
 			return fastDatabase(db, time.Second), fastDatabase(db, time.Second)
 		})
 	})
@@ -29,12 +30,12 @@ func TestDatabase(t *testing.T) {
 
 // 自增 id 先分配后提交：未提交的较小 id 在等待时间内提交时按顺序投递，回滚时超时后跳过。
 func TestDatabaseWaitsForUncommittedIDs(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		if driver.Name() == "sqlite" {
 			t.Skip("SQLite 只有一个写入者，id 按分配顺序提交")
 		}
 		ctx := context.Background()
-		db := openDB(t, driver)
+		db := dbtesting.Open(t, driver, broadcast.Migrations())
 		h := broadcast.New(fastDatabase(db, 500*time.Millisecond), nil)
 		defer h.Close()
 		sub := h.Subscribe("room:1")
@@ -75,9 +76,9 @@ func TestDatabaseWaitsForUncommittedIDs(t *testing.T) {
 }
 
 func TestDatabaseCleanup(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		db := openDB(t, driver)
+		db := dbtesting.Open(t, driver, broadcast.Migrations())
 		d := broadcast.NewDatabase(db, nil)
 		for range 5 {
 			if err := d.Publish(ctx, broadcast.Message{Topic: "room:1"}); err != nil {
@@ -102,9 +103,9 @@ func TestDatabaseCleanup(t *testing.T) {
 
 // 数据库暂时不可用后从上次的位置继续，不结束订阅。
 func TestDatabaseResumesAfterErrors(t *testing.T) {
-	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		db := openDB(t, driver)
+		db := dbtesting.Open(t, driver, broadcast.Migrations())
 		h := broadcast.New(fastDatabase(db, time.Second), nil)
 		defer h.Close()
 		sub := h.Subscribe("room:1")

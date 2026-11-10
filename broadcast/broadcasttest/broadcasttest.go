@@ -59,7 +59,9 @@ func TestBackend(t *testing.T, newBackends func(t *testing.T) (a, b broadcast.Ba
 		if err := b.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := <-kept.C(); ok || !errors.Is(kept.Err(), broadcast.ErrClosed) {
+		for range kept.C() { // 关闭前已到达的消息仍可读出，读完后通道关闭
+		}
+		if !errors.Is(kept.Err(), broadcast.ErrClosed) {
 			t.Fatalf("hub close: err=%v", kept.Err())
 		}
 	})
