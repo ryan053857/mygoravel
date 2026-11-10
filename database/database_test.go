@@ -73,9 +73,14 @@ func TestPublishedMigrationsIncludeNestedFiles(t *testing.T) {
 func TestOpenAndValidateShareConfigurationChecks(t *testing.T) {
 	for _, cfg := range []database.Config{
 		{},
-		{DSN: "postgres://user:pass@host:not-a-port/db"},
-		{DSN: "postgres://localhost/db", MaxOpenConns: -1},
-		{DSN: "postgres://localhost/db", ConnMaxLifetime: -1},
+		{DSN: "postgres://localhost/db"},
+		{Driver: "mysql", DSN: "root@/db"},
+		{Driver: database.Postgres, DSN: "postgres://user:pass@host:not-a-port/db"},
+		{Driver: database.Postgres, DSN: "postgres://localhost/db", MaxOpenConns: -1},
+		{Driver: database.Postgres, DSN: "postgres://localhost/db", ConnMaxLifetime: -1},
+		{Driver: database.SQLite, DSN: ":memory:"},
+		{Driver: database.SQLite, DSN: "file:app.db"},
+		{Driver: database.SQLite, DSN: "app.db?_pragma=foreign_keys(0)"},
 	} {
 		validation := cfg.Validate()
 		db, err := database.Open(context.Background(), cfg)

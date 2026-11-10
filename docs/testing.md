@@ -150,13 +150,14 @@ import (
 
     "example.com/blog/internal/article"
     "example.com/blog/migrations"
+    "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/database/dbtest"
     "github.com/ryan053857/mygoravel/identity"
 )
 
 func TestDraftVisibilityAndPublishing(t *testing.T) {
     ctx := context.Background()
-    svc := article.NewService(dbtest.Open(t, migrations.FS))
+    svc := article.NewService(dbtest.Open(t, database.Postgres, migrations.FS))
     alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
     bob := identity.Subject{ID: "bob", Type: identity.SubjectUser}
 
@@ -204,7 +205,7 @@ func TestDraftVisibilityAndPublishing(t *testing.T) {
 func TestLoadConfig(t *testing.T) {
     t.Setenv("HTTP_ADDR", ":9000")
     path := filepath.Join(t.TempDir(), "config.yaml")
-    data := "http:\n  addr: ${HTTP_ADDR}\ndatabase:\n  dsn: postgres://localhost/test\n"
+    data := "http:\n  addr: ${HTTP_ADDR}\ndatabase:\n  driver: postgres\n  dsn: postgres://localhost/test\n"
     if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
         t.Fatal(err)
     }
@@ -229,27 +230,29 @@ func TestLoadConfig(t *testing.T) {
 <a id="creating-test-databases"></a>
 ### 创建测试数据库
 
-测试数据库代码时，最可靠的方式是使用真实的 PostgreSQL。`dbtest.Open` 会为**每个测试**创建一个独立的临时数据库，执行你的迁移，并在测试结束时删除它。测试之间互不干扰，可以放心地并行运行。
+测试数据库代码时，最可靠的方式是使用与生产相同的真实数据库。`dbtest.Open` 会为**每个测试**创建一个独立的临时数据库，执行你的迁移，并在测试结束时删除它。测试之间互不干扰，可以放心地并行运行。
 
 上一节的 `service_test.go` 就是这样使用它的：
 
 ```go
-svc := article.NewService(dbtest.Open(t, migrations.FS))
+svc := article.NewService(dbtest.Open(t, database.Postgres, migrations.FS))
 ```
 
 `dbtest.Open` 返回一个已执行迁移的 `*bun.DB`，你可以把它直接传给业务服务进行测试。迁移参数传 `nil` 时会创建一个空数据库。
 
-`dbtest` 通过环境变量 `DATABASE_TEST_DSN` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
+使用 SQLite 的应用传入 `database.SQLite`，`dbtest` 在 `t.TempDir()` 中创建数据库文件。它不需要任何外部服务，也不需要环境变量，可以和普通测试一样直接用 `go test ./...` 运行，不必加 `integration` 构建标签。
+
+PostgreSQL 的 `dbtest` 通过环境变量 `DATABASE_TEST_DSN` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
 
 > [!WARNING]
 > 请为 `DATABASE_TEST_DSN` 使用专门的测试数据库实例，不要指向任何存放真实数据的数据库。
 
-文件开头的 `//go:build integration` 让这些测试只在显式指定 `-tags=integration` 时运行，普通的 `go test ./...` 不会执行它们。
+PostgreSQL 测试文件开头的 `//go:build integration` 让这些测试只在显式指定 `-tags=integration` 时运行，普通的 `go test ./...` 不会执行它们。
 
 <a id="running-database-tests-locally"></a>
 ### 在本地运行数据库测试
 
-如果你安装了 Docker，可以用下面的命令启动一个临时的 PostgreSQL：
+使用 SQLite 时不需要准备任何东西。使用 PostgreSQL 时，如果你安装了 Docker，可以用下面的命令启动一个临时的 PostgreSQL：
 
 ```bash
 docker run --name app-test-postgres --rm -d \

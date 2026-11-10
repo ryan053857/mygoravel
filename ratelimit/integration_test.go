@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/ratelimit"
 )
 
 func TestDatabase(t *testing.T) {
-	db := dbtest.Open(t, ratelimit.Migrations())
+	db := dbtest.Open(t, database.Postgres, ratelimit.Migrations())
 	n := 0
 	testLimiter(t, func(cfg ratelimit.Config) ratelimit.Limiter {
 		n++
@@ -23,7 +24,7 @@ func TestDatabase(t *testing.T) {
 
 func TestDatabaseNamesAreIsolated(t *testing.T) {
 	ctx := context.Background()
-	db := dbtest.Open(t, ratelimit.Migrations())
+	db := dbtest.Open(t, database.Postgres, ratelimit.Migrations())
 	cfg := ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1}
 	login, reset := ratelimit.NewDatabase(db, "login", cfg), ratelimit.NewDatabase(db, "reset", cfg)
 	if err := login.Allow(ctx, "alice"); err != nil {
@@ -39,7 +40,7 @@ func TestDatabaseNamesAreIsolated(t *testing.T) {
 
 func TestDatabaseConcurrentCallsAreExact(t *testing.T) {
 	ctx := context.Background()
-	l := ratelimit.NewDatabase(dbtest.Open(t, ratelimit.Migrations()), "burst", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 5})
+	l := ratelimit.NewDatabase(dbtest.Open(t, database.Postgres, ratelimit.Migrations()), "burst", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 5})
 	results := make(chan error, 20)
 	for range cap(results) {
 		go func() { results <- l.Allow(ctx, "k") }()
@@ -57,7 +58,7 @@ func TestDatabaseConcurrentCallsAreExact(t *testing.T) {
 
 func TestDatabaseCleanup(t *testing.T) {
 	ctx := context.Background()
-	db := dbtest.Open(t, ratelimit.Migrations())
+	db := dbtest.Open(t, database.Postgres, ratelimit.Migrations())
 	short := ratelimit.NewDatabase(db, "short", ratelimit.Config{Rate: 1, Interval: 10 * time.Millisecond, Burst: 1})
 	long := ratelimit.NewDatabase(db, "long", ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1})
 	for _, key := range []string{"a", "b", "c"} {

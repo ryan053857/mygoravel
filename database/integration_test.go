@@ -50,12 +50,12 @@ func sub(t *testing.T, root embed.FS, dir string) fs.FS {
 }
 
 func TestMigrateEmptyAndUpgrade(t *testing.T) {
-	db := dbtest.Open(t, nil)
+	db := dbtest.Open(t, database.Postgres, nil)
 	ctx := context.Background()
 	fixture := sub(t, fixtureV1Root, "testdata/fixture_v1")
 	all := sub(t, migrationsRoot, "testdata/migrations")
 
-	p1, err := migrate.NewProvider(db.DB, fixture)
+	p1, err := migrate.NewProvider(db, fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestMigrateEmptyAndUpgrade(t *testing.T) {
 		t.Fatalf("version=%d err=%v", ver, err)
 	}
 
-	p2, err := migrate.NewProvider(db.DB, all)
+	p2, err := migrate.NewProvider(db, all)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestPublishedBaseline(t *testing.T) {
 }
 
 func TestConcurrentMigrate(t *testing.T) {
-	db := dbtest.Open(t, nil)
+	db := dbtest.Open(t, database.Postgres, nil)
 	ctx := context.Background()
 	all := sub(t, migrationsRoot, "testdata/migrations")
 	var wg sync.WaitGroup
@@ -98,7 +98,7 @@ func TestConcurrentMigrate(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p, err := migrate.NewProvider(db.DB, all)
+			p, err := migrate.NewProvider(db, all)
 			if err != nil {
 				errs <- err
 				return
@@ -113,7 +113,7 @@ func TestConcurrentMigrate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	p, err := migrate.NewProvider(db.DB, all)
+	p, err := migrate.NewProvider(db, all)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestConcurrentMigrate(t *testing.T) {
 
 func TestTxRollbackUniqueAndCancel(t *testing.T) {
 	all := sub(t, migrationsRoot, "testdata/migrations")
-	db := dbtest.Open(t, all)
+	db := dbtest.Open(t, database.Postgres, all)
 	ctx := context.Background()
 
 	id := uuid.Must(uuid.NewV7())
@@ -178,10 +178,10 @@ func TestTxRollbackUniqueAndCancel(t *testing.T) {
 }
 
 func TestNonTransactionalMigrationRequiresManualRecovery(t *testing.T) {
-	db := dbtest.Open(t, nil)
+	db := dbtest.Open(t, database.Postgres, nil)
 	ctx := context.Background()
 	source := fstest.MapFS{"00001_partial.sql": &fstest.MapFile{Data: []byte("-- +goose NO TRANSACTION\n-- +goose Up\nCREATE TABLE partial (id int);\nINSERT INTO missing_table VALUES (1);\n-- +goose Down\nDROP TABLE partial;\n")}}
-	p, err := migrate.NewProvider(db.DB, source)
+	p, err := migrate.NewProvider(db, source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestDatabaseIsolationWithDSNFormats(t *testing.T) {
 	for name, dsn := range map[string]string{"keyword": keyword, "database-query": uri.String()} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(dbtest.EnvDSN, dsn)
-			db := dbtest.Open(t, nil)
+			db := dbtest.Open(t, database.Postgres, nil)
 			var actual string
 			if err := db.QueryRow("select current_database()").Scan(&actual); err != nil {
 				t.Fatal(err)

@@ -20,7 +20,8 @@ import (
 )
 
 // New 构造 migrate 命令及其 up、status、down、make 子命令。fsys 的根目录直接包含 SQL 迁移文件，
-// dbConfig 从应用配置中取出数据库配置。数据库连不上时以 ExitUnavailable 退出。
+// dbConfig 从应用配置中取出数据库配置。数据库连不上时以 ExitUnavailable 退出；
+// make 只从配置中读取 driver，不连接数据库。
 func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command {
 	// withProvider 连接数据库并创建迁移器，run 结束后关闭连接。
 	withProvider := func(run func(context.Context, io.Writer, *goose.Provider) error) func(*cobra.Command) error {
@@ -34,7 +35,7 @@ func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command
 				return command.AsExitError(command.ExitUnavailable, err)
 			}
 			defer db.Close()
-			provider, err := migrate.NewProvider(db.DB, fsys)
+			provider, err := migrate.NewProvider(db, fsys)
 			if err != nil {
 				return err
 			}
@@ -71,7 +72,13 @@ func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command
 			}
 			return errors.Wrap(err, "migrate: down")
 		})),
-		Make(),
+		makeCmd(func(cmd *cobra.Command) (database.Driver, error) {
+			cfg, err := command.LoadConfig[C](cmd)
+			if err != nil {
+				return "", err
+			}
+			return dbConfig(cfg).Driver, nil
+		}),
 	)
 	return root
 }

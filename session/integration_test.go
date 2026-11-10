@@ -10,6 +10,7 @@ import (
 
 	"github.com/alexedwards/scs/v2"
 
+	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/session"
 )
@@ -21,7 +22,7 @@ var (
 
 func TestStore(t *testing.T) {
 	ctx := context.Background()
-	store := session.NewStore(dbtest.Open(t, session.Migrations()))
+	store := session.NewStore(dbtest.Open(t, database.Postgres, session.Migrations()))
 	now := time.Now()
 
 	if _, found, err := store.FindCtx(ctx, "missing"); found || err != nil {
@@ -73,7 +74,7 @@ func TestStore(t *testing.T) {
 
 func TestStoreCleanup(t *testing.T) {
 	ctx := context.Background()
-	store := session.NewStore(dbtest.Open(t, session.Migrations()))
+	store := session.NewStore(dbtest.Open(t, database.Postgres, session.Migrations()))
 	past := time.Now().Add(-time.Minute)
 	for _, token := range []string{"x1", "x2", "x3"} {
 		if err := store.CommitCtx(ctx, token, []byte(token), past); err != nil {
@@ -98,7 +99,7 @@ func TestStoreCleanup(t *testing.T) {
 }
 
 func TestStoreWithSessionManager(t *testing.T) {
-	db := dbtest.Open(t, session.Migrations())
+	db := dbtest.Open(t, database.Postgres, session.Migrations())
 	srv, _ := newApp(t, session.NewStore(db))
 	c := newClient(t)
 	if resp := do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"root"}`); resp.StatusCode != http.StatusNoContent {

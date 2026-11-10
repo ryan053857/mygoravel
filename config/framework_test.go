@@ -42,6 +42,7 @@ logs:
   levels:
     http: warn
 database:
+  driver: postgres
   dsn: postgres://localhost/app
 `)
 	if err != nil {

@@ -47,7 +47,7 @@ func execute(root *cobra.Command, args ...string) (stdout, stderr string, err er
 
 func TestExitCodes(t *testing.T) {
 	// 端口 1 上没有 PostgreSQL，连接会立即被拒绝
-	unreachable := writeConfig(t, "database:\n  dsn: postgres://postgres@127.0.0.1:1/blog?sslmode=disable&connect_timeout=2\n")
+	unreachable := writeConfig(t, "database:\n  driver: postgres\n  dsn: postgres://postgres@127.0.0.1:1/blog?sslmode=disable&connect_timeout=2\n")
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
 	for _, tc := range []struct {
 		args []string

@@ -30,13 +30,13 @@ mygoravel 使用 [goose](https://github.com/pressly/goose) 管理迁移。迁移
 go run ./cmd/api migrate make create_articles_table
 ```
 
-命令输出新文件的路径，例如 `migrations/20261111090000_create_articles_table.sql`。文件名是 UTC 时间戳加名称，版本保证大于目录中已有的迁移，所以新迁移总是排在最后。命令不加载配置、不连接数据库，`--dir` 默认是 `migrations`。
+命令输出新文件的路径，例如 `migrations/20261111090000_create_articles_table.sql`。文件名是 UTC 时间戳加名称，版本保证大于目录中已有的迁移，所以新迁移总是排在最后。命令只从配置中读取 `driver`，按数据库类型生成骨架，不连接数据库；`--dir` 默认是 `migrations`。
 
 与 Laravel 一样，命令会从名称推断表名并生成骨架：
 
 | 名称 | 生成的骨架 |
 | --- | --- |
-| `create_articles_table` | `CREATE TABLE articles`，带 uuid 主键 `id`、`created_at`、`updated_at`；`Down` 中 `DROP TABLE articles` |
+| `create_articles_table` | `CREATE TABLE articles`，带 UUID 主键 `id`、`created_at`、`updated_at`；`Down` 中 `DROP TABLE articles`。SQLite 中这三列都是 `TEXT`，时间列没有默认值，见[使用 SQLite](database.md#sqlite) |
 | `add_published_at_to_articles_table`、`drop_summary_from_articles_table` | `ALTER TABLE articles`，补全后才能执行 |
 | 其他名称，例如 `backfill_article_slugs` | 只有 goose 注解 |
 
@@ -134,6 +134,7 @@ package main
 import (
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/command/migratecmd"
+    "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/database/migrate"
     "github.com/ryan053857/mygoravel/filesystem"
 )
@@ -141,14 +142,14 @@ import (
 func main() {
     root := command.Root("migrations", "新建或发布迁移")
     root.AddCommand(
-        migratecmd.Make(),
+        migratecmd.Make(database.Postgres),
         migratecmd.Publish(migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}),
     )
     command.Execute(root)
 }
 ```
 
-执行 `go run ./cmd/publish make create_articles_table` 或 `go run ./cmd/publish publish --dir migrations` 生成第一个 SQL 后，再添加应用的 `migrations/embed.go` 和迁移执行命令。这个入口也可以一直保留，供开发时使用。
+`migratecmd.Make` 的参数是应用使用的数据库类型。执行 `go run ./cmd/publish make create_articles_table` 或 `go run ./cmd/publish publish --dir migrations` 生成第一个 SQL 后，再添加应用的 `migrations/embed.go` 和迁移执行命令。这个入口也可以一直保留，供开发时使用。
 
 自定义命令或工具也可以直接调用 `migrate.Publish("migrations", sources...)`；`sources` 是应用显式选择的 `[]migrate.Source`。每个来源的 `Name` 是稳定的包标识，`FS` 根目录直接包含带数字版本的 SQL。来源按传入顺序发布，同一来源的文件按数字版本排序。
 
@@ -183,18 +184,18 @@ root.AddCommand(migratecmd.New(migrations.FS, func(cfg settings.Config) database
 在测试或自定义命令中，可以用 `migrate.NewProvider` 创建一个 goose 迁移器（Provider），然后调用它的方法：
 
 ```go
-provider, err := migrate.NewProvider(db.DB, migrations.FS)
+provider, err := migrate.NewProvider(db, migrations.FS)
 if err != nil {
     return err
 }
 err = migrate.Up(ctx, provider)
 ```
 
-其中 `db` 是 `database.Open` 打开的 `*bun.DB`，`db.DB` 是它底层的 `*sql.DB`。`NewProvider` 要求文件系统的**根目录**直接包含迁移文件，`migrations.FS` 正好满足这个要求。如果你的迁移文件嵌入在某个子目录中，可以先用 `migrate.Sub(files, "migrations")` 取出子目录。
+其中 `db` 是 `database.Open` 打开的 `*bun.DB`，迁移器按它的方言执行。`NewProvider` 要求文件系统的**根目录**直接包含迁移文件，`migrations.FS` 正好满足这个要求。如果你的迁移文件嵌入在某个子目录中，可以先用 `migrate.Sub(files, "migrations")` 取出子目录。
 
 `NewProvider` 返回的是原生的 `*goose.Provider`，你可以直接调用它的 `Up`、`Down`、`Status` 等方法。它已经配置好了以下行为：
 
-- 使用 PostgreSQL 的会话锁，保证多个实例同时执行迁移时也只会串行运行；
+- 在 PostgreSQL 上使用会话锁，保证多个实例同时执行迁移时也只会串行运行；SQLite 只有一个数据库文件，不加锁；
 - 只使用 SQL 文件，不使用 goose 的全局 Go 迁移注册。
 
 版本记录表、事务和锁都由 goose 管理。`migrate.Up(ctx, provider)` 在调用 `provider.Up` 的基础上为错误附加了上下文信息。`migrate` 命令使用的也是同一个迁移器。

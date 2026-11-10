@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/lock"
 )
@@ -14,7 +15,7 @@ import (
 var _ lock.Store = (*lock.DBStore)(nil)
 
 func TestDBStore(t *testing.T) {
-	db := dbtest.Open(t, lock.Migrations())
+	db := dbtest.Open(t, database.Postgres, lock.Migrations())
 	ctx := context.Background()
 	testStore(t, func() lock.Store {
 		if _, err := db.NewTruncateTable().Table("locks").Exec(ctx); err != nil {
@@ -26,7 +27,7 @@ func TestDBStore(t *testing.T) {
 
 func TestDBStoreCleanup(t *testing.T) {
 	ctx := context.Background()
-	db := dbtest.Open(t, lock.Migrations())
+	db := dbtest.Open(t, database.Postgres, lock.Migrations())
 	store := lock.NewDBStore(db)
 	for _, name := range []string{"x1", "x2", "x3"} {
 		if ok, err := store.Acquire(ctx, name, "o", time.Millisecond); !ok || err != nil {

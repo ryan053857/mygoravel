@@ -23,6 +23,7 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"github.com/uptrace/bun"
 
+	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/filesystem/local"
@@ -44,7 +45,7 @@ type env struct {
 
 func newEnv(t *testing.T) env {
 	t.Helper()
-	db := dbtest.Open(t, filesystem.Migrations())
+	db := dbtest.Open(t, database.Postgres, filesystem.Migrations())
 	localDisk, err := local.Open(filesystem.LocalConfig{Root: filepath.Join(t.TempDir(), "files"), PublicURL: "/storage"})
 	if err != nil {
 		t.Fatal(err)
