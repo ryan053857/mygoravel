@@ -257,7 +257,7 @@ rest.Register(api, op, func() func(context.Context, *LoginInput) (*struct{}, err
 })
 ```
 
-会话保存的是登录时主体的快照。用户的 scope 变化后，已登录的会话仍然使用旧的 scope，直到重新登录。需要立即生效时，用 scs 的 `Iterate` 找到该用户的会话并销毁，见[读写会话数据](session.md#session-data)。
+会话保存的是登录时主体的快照。用户的 scope 变化后，已登录的会话仍然使用旧的 scope，直到重新登录。需要立即生效时，用 `RevokeSubject` 撤销该用户的全部会话，让他重新登录，见[撤销会话](session.md#revoking-sessions)。
 
 <a id="protecting-session-routes"></a>
 ### 保护会话路由

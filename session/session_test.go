@@ -87,7 +87,8 @@ type meOut struct {
 	}
 }
 
-// newApp 装配一个最小应用：login 公开，me 需要登录，admin 还需要 admin scope。
+// newApp 装配一个最小应用：login 公开，me 需要登录，admin 还需要 admin scope；
+// store 为 *session.Store 时另有 logout-others 撤销其他会话。
 func newApp(t *testing.T, store scs.Store) (*httptest.Server, *rest.API) {
 	t.Helper()
 	cfg := defaults()
@@ -131,9 +132,28 @@ func newApp(t *testing.T, store scs.Store) (*httptest.Server, *rest.API) {
 	session.Require(api, sm, "admin")(&adminOp)
 	rest.Register(api, adminOp, func() func(context.Context, *struct{}) (*meOut, error) { return me })
 
+	if st, ok := store.(*session.Store); ok {
+		others := huma.Operation{OperationID: "logout-others", Method: http.MethodPost, Path: "/logout-others"}
+		session.Require(api, sm)(&others)
+		rest.Register(api, others, func() func(context.Context, *struct{}) (*revokedOut, error) {
+			return func(ctx context.Context, _ *struct{}) (*revokedOut, error) {
+				n, err := st.RevokeOthers(ctx, sm)
+				out := &revokedOut{}
+				out.Body.Revoked = n
+				return out, err
+			}
+		})
+	}
+
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv, api
+}
+
+type revokedOut struct {
+	Body struct {
+		Revoked int `json:"revoked"`
+	}
 }
 
 func newClient(t *testing.T) *http.Client {

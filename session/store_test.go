@@ -2,13 +2,16 @@ package session_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
+	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/session"
 )
 
@@ -16,6 +19,30 @@ var (
 	_ scs.CtxStore         = (*session.Store)(nil)
 	_ scs.IterableCtxStore = (*session.Store)(nil)
 )
+
+// data 按 scs 默认编码生成会话数据；subjectID 非空时包含登录主体。
+func data(t *testing.T, subjectID, note string) []byte {
+	t.Helper()
+	values := map[string]any{"note": note}
+	if subjectID != "" {
+		values["mygoravel.subject"] = identity.Subject{ID: subjectID}
+	}
+	b, err := scs.GobCodec{}.Encode(time.Now().Add(time.Hour), values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// note 解码会话数据中的 note。
+func note(t *testing.T, b []byte) string {
+	t.Helper()
+	_, values, err := scs.GobCodec{}.Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return values["note"].(string)
+}
 
 func TestStore(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, driver database.Driver) {
@@ -26,17 +53,17 @@ func TestStore(t *testing.T) {
 		if _, found, err := store.FindCtx(ctx, "missing"); found || err != nil {
 			t.Fatalf("missing found=%v err=%v", found, err)
 		}
-		if err := store.CommitCtx(ctx, "a", []byte("one"), now.Add(time.Hour)); err != nil {
+		if err := store.CommitCtx(ctx, "a", data(t, "", "one"), now.Add(time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 		// 再次提交覆盖数据和过期时间：缩短到已过期后读不到。
-		if err := store.CommitCtx(ctx, "a", []byte("two"), now.Add(2*time.Hour)); err != nil {
+		if err := store.CommitCtx(ctx, "a", data(t, "", "two"), now.Add(2*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
-		if b, found, err := store.FindCtx(ctx, "a"); !found || err != nil || string(b) != "two" {
-			t.Fatalf("a=%q found=%v err=%v", b, found, err)
+		if b, found, err := store.FindCtx(ctx, "a"); !found || err != nil || note(t, b) != "two" {
+			t.Fatalf("a found=%v err=%v", found, err)
 		}
-		if err := store.CommitCtx(ctx, "a", []byte("three"), now.Add(-time.Second)); err != nil {
+		if err := store.CommitCtx(ctx, "a", data(t, "", "three"), now.Add(-time.Second)); err != nil {
 			t.Fatal(err)
 		}
 		if _, found, err := store.FindCtx(ctx, "a"); found || err != nil {
@@ -45,18 +72,18 @@ func TestStore(t *testing.T) {
 
 		// 非 UTC 时区的过期时间按同一时刻比较。
 		east := time.FixedZone("UTC+8", 8*3600)
-		if err := store.CommitCtx(ctx, "b", []byte("b"), now.Add(time.Minute).In(east)); err != nil {
+		if err := store.CommitCtx(ctx, "b", data(t, "", "b"), now.Add(time.Minute).In(east)); err != nil {
 			t.Fatal(err)
 		}
 		if _, found, _ := store.FindCtx(ctx, "b"); !found {
 			t.Fatal("b not found")
 		}
-		if err := store.CommitCtx(ctx, "c", []byte("c"), now.Add(time.Minute)); err != nil {
+		if err := store.CommitCtx(ctx, "c", data(t, "", "c"), now.Add(time.Minute)); err != nil {
 			t.Fatal(err)
 		}
 		all, err := store.AllCtx(ctx)
-		if err != nil || len(all) != 2 || string(all["b"]) != "b" || string(all["c"]) != "c" {
-			t.Fatalf("all=%v err=%v", all, err)
+		if err != nil || len(all) != 2 || note(t, all["b"]) != "b" || note(t, all["c"]) != "c" {
+			t.Fatalf("all=%d err=%v", len(all), err)
 		}
 
 		if err := store.DeleteCtx(ctx, "c"); err != nil {
@@ -68,20 +95,123 @@ func TestStore(t *testing.T) {
 		if _, found, _ := store.FindCtx(ctx, "c"); found {
 			t.Fatal("c still found")
 		}
+		// 删除前已在处理中的请求再次提交，会话也不会复活。
+		if err := store.CommitCtx(ctx, "c", data(t, "", "c2"), now.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, found, _ := store.FindCtx(ctx, "c"); found {
+			t.Fatal("deleted c resurrected by commit")
+		}
+		if all, _ := store.AllCtx(ctx); len(all) != 1 {
+			t.Fatalf("all after delete=%d", len(all))
+		}
+
+		if err := store.CommitCtx(ctx, "bad", []byte("not gob"), now.Add(time.Hour)); err == nil {
+			t.Fatal("expected decode error")
+		}
+	})
+}
+
+func TestStoreRevokeSubject(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		db := openDB(t, driver)
+		store := session.NewStore(db)
+		live := time.Now().Add(time.Hour)
+		for token, subject := range map[string]string{"a1": "alice", "a2": "alice", "b1": "bob", "anon": ""} {
+			if err := store.CommitCtx(ctx, token, data(t, subject, token), live); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := store.CommitCtx(ctx, "a-old", data(t, "alice", "old"), time.Now().Add(-time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		var rows []struct {
+			Token     string  `bun:"token"`
+			SubjectID *string `bun:"subject_id"`
+		}
+		if err := db.NewSelect().Table("sessions").Column("token", "subject_id").Scan(ctx, &rows); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rows {
+			if (r.Token == "anon") != (r.SubjectID == nil) {
+				t.Fatalf("token %s subject_id=%v", r.Token, r.SubjectID)
+			}
+		}
+
+		if _, err := store.RevokeSubject(ctx, ""); err == nil {
+			t.Fatal("expected error for empty subject")
+		}
+		// 已过期的 a-old 不计入。
+		if n, err := store.RevokeSubject(ctx, "alice"); n != 2 || err != nil {
+			t.Fatalf("revoke alice n=%d err=%v", n, err)
+		}
+		if n, err := store.RevokeSubject(ctx, "alice"); n != 0 || err != nil {
+			t.Fatalf("revoke alice again n=%d err=%v", n, err)
+		}
+		// 撤销前已在处理中的请求再次提交，会话也不会复活。
+		if err := store.CommitCtx(ctx, "a1", data(t, "alice", "late"), live); err != nil {
+			t.Fatal(err)
+		}
+		all, err := store.AllCtx(ctx)
+		if err != nil || len(all) != 2 || all["b1"] == nil || all["anon"] == nil {
+			t.Fatalf("all=%d err=%v", len(all), err)
+		}
+	})
+}
+
+func TestStoreRevokeOthers(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, driver database.Driver) {
+		store := session.NewStore(openDB(t, driver))
+		srv, _ := newApp(t, store)
+		laptop, phone, bob := newClient(t), newClient(t), newClient(t)
+		for c, user := range map[*http.Client]string{laptop: "alice", phone: "alice", bob: "bob"} {
+			if resp := do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"`+user+`"}`); resp.StatusCode != http.StatusNoContent {
+				t.Fatalf("login %s status=%d", user, resp.StatusCode)
+			}
+		}
+
+		resp := do(t, laptop, http.MethodPost, srv.URL+"/logout-others", "")
+		var out revokedOut
+		if err := json.NewDecoder(resp.Body).Decode(&out.Body); err != nil || resp.StatusCode != http.StatusOK || out.Body.Revoked != 1 {
+			t.Fatalf("logout-others status=%d revoked=%d err=%v", resp.StatusCode, out.Body.Revoked, err)
+		}
+		for c, want := range map[*http.Client]int{laptop: http.StatusOK, phone: http.StatusUnauthorized, bob: http.StatusOK} {
+			if resp := do(t, c, http.MethodGet, srv.URL+"/me", ""); resp.StatusCode != want {
+				t.Fatalf("/me status=%d want %d", resp.StatusCode, want)
+			}
+		}
+
+		// 未登录的会话不能撤销其他会话。
+		sm := session.New(defaults(), store, nil)
+		ctx, err := sm.Load(context.Background(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.RevokeOthers(ctx, sm); err == nil {
+			t.Fatal("expected error when not logged in")
+		}
 	})
 }
 
 func TestStoreCleanup(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		store := session.NewStore(openDB(t, driver))
+		db := openDB(t, driver)
+		store := session.NewStore(db)
 		past := time.Now().Add(-time.Minute)
 		for _, token := range []string{"x1", "x2", "x3"} {
-			if err := store.CommitCtx(ctx, token, []byte(token), past); err != nil {
+			if err := store.CommitCtx(ctx, token, data(t, "", token), past); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := store.CommitCtx(ctx, "live", []byte("live"), time.Now().Add(time.Hour)); err != nil {
+		for _, token := range []string{"live", "revoked"} {
+			if err := store.CommitCtx(ctx, token, data(t, "", token), time.Now().Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// 撤销的行保留到过期，过期前不清理。
+		if err := store.DeleteCtx(ctx, "revoked"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.Cleanup(ctx, 0); err == nil {
@@ -95,6 +225,9 @@ func TestStoreCleanup(t *testing.T) {
 		}
 		if _, found, _ := store.FindCtx(ctx, "live"); !found {
 			t.Fatal("live session removed")
+		}
+		if n := countSessions(t, db, false); n != 2 {
+			t.Fatalf("rows after cleanup=%d", n)
 		}
 	})
 }
@@ -110,15 +243,28 @@ func TestStoreWithSessionManager(t *testing.T) {
 		if resp := do(t, c, http.MethodGet, srv.URL+"/admin", ""); resp.StatusCode != http.StatusOK {
 			t.Fatalf("admin status=%d", resp.StatusCode)
 		}
-		var count int
-		if err := db.NewSelect().Table("sessions").ColumnExpr("count(*)").Scan(context.Background(), &count); err != nil || count != 1 {
-			t.Fatalf("sessions=%d err=%v", count, err)
+		if n := countSessions(t, db, true); n != 1 {
+			t.Fatalf("live sessions=%d", n)
 		}
 		if resp := do(t, c, http.MethodPost, srv.URL+"/logout", ""); resp.StatusCode != http.StatusNoContent {
 			t.Fatalf("logout status=%d", resp.StatusCode)
 		}
-		if err := db.NewSelect().Table("sessions").ColumnExpr("count(*)").Scan(context.Background(), &count); err != nil || count != 0 {
-			t.Fatalf("sessions after logout=%d err=%v", count, err)
+		if n := countSessions(t, db, true); n != 0 {
+			t.Fatalf("live sessions after logout=%d", n)
 		}
 	})
+}
+
+// countSessions 返回 sessions 表的行数；liveOnly 时只计未撤销的行。
+func countSessions(t *testing.T, db *bun.DB, liveOnly bool) int {
+	t.Helper()
+	q := db.NewSelect().Table("sessions").ColumnExpr("count(*)")
+	if liveOnly {
+		q = q.Where("revoked_at IS NULL")
+	}
+	var n int
+	if err := q.Scan(context.Background(), &n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
