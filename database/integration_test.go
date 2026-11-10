@@ -19,9 +19,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/ryan053857/mygoravel/database/postgres"
 )
 
 //go:embed testdata/migrations
@@ -50,7 +50,7 @@ func sub(t *testing.T, root embed.FS, dir string) fs.FS {
 }
 
 func TestMigrateEmptyAndUpgrade(t *testing.T) {
-	db := dbtest.Open(t, database.Postgres, nil)
+	db := dbtest.Open(t, postgres.Driver, nil)
 	ctx := context.Background()
 	fixture := sub(t, fixtureV1Root, "testdata/fixture_v1")
 	all := sub(t, migrationsRoot, "testdata/migrations")
@@ -89,7 +89,7 @@ func TestPublishedBaseline(t *testing.T) {
 }
 
 func TestConcurrentMigrate(t *testing.T) {
-	db := dbtest.Open(t, database.Postgres, nil)
+	db := dbtest.Open(t, postgres.Driver, nil)
 	ctx := context.Background()
 	all := sub(t, migrationsRoot, "testdata/migrations")
 	var wg sync.WaitGroup
@@ -125,7 +125,7 @@ func TestConcurrentMigrate(t *testing.T) {
 
 func TestTxRollbackUniqueAndCancel(t *testing.T) {
 	all := sub(t, migrationsRoot, "testdata/migrations")
-	db := dbtest.Open(t, database.Postgres, all)
+	db := dbtest.Open(t, postgres.Driver, all)
 	ctx := context.Background()
 
 	id := uuid.Must(uuid.NewV7())
@@ -139,7 +139,7 @@ func TestTxRollbackUniqueAndCancel(t *testing.T) {
 
 	err = db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewInsert().Model(&item{ID: uuid.Must(uuid.NewV7()), Name: "b", SKU: "s1"}).Exec(ctx)
-		if !database.IsUniqueViolation(err, "items_sku_key") {
+		if !postgres.IsUniqueViolation(err, "items_sku_key") {
 			t.Fatalf("want unique violation, got %v", err)
 		}
 		return err
@@ -178,7 +178,7 @@ func TestTxRollbackUniqueAndCancel(t *testing.T) {
 }
 
 func TestNonTransactionalMigrationRequiresManualRecovery(t *testing.T) {
-	db := dbtest.Open(t, database.Postgres, nil)
+	db := dbtest.Open(t, postgres.Driver, nil)
 	ctx := context.Background()
 	source := fstest.MapFS{"00001_partial.sql": &fstest.MapFile{Data: []byte("-- +goose NO TRANSACTION\n-- +goose Up\nCREATE TABLE partial (id int);\nINSERT INTO missing_table VALUES (1);\n-- +goose Down\nDROP TABLE partial;\n")}}
 	p, err := migrate.NewProvider(db, source)
@@ -226,7 +226,7 @@ func TestDatabaseIsolationWithDSNFormats(t *testing.T) {
 	for name, dsn := range map[string]string{"keyword": keyword, "database-query": uri.String()} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(dbtest.EnvDSN, dsn)
-			db := dbtest.Open(t, database.Postgres, nil)
+			db := dbtest.Open(t, postgres.Driver, nil)
 			var actual string
 			if err := db.QueryRow("select current_database()").Scan(&actual); err != nil {
 				t.Fatal(err)

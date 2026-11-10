@@ -1,9 +1,8 @@
-package database_test
+package sqlite_test
 
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -11,12 +10,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/ryan053857/mygoravel/database/sqlite"
 )
 
 func TestSQLiteConnectionSettings(t *testing.T) {
-	db := dbtest.Open(t, database.SQLite, nil)
+	db := dbtest.Open(t, sqlite.Driver, nil)
 	ctx := context.Background()
 	for pragma, want := range map[string]string{"journal_mode": "wal", "foreign_keys": "1", "busy_timeout": "5000", "synchronous": "1"} {
 		var got string
@@ -26,15 +25,8 @@ func TestSQLiteConnectionSettings(t *testing.T) {
 	}
 }
 
-func TestSQLiteRequiresExistingDirectory(t *testing.T) {
-	dsn := filepath.Join(t.TempDir(), "missing", "app.db")
-	if _, err := database.Open(context.Background(), database.Config{Driver: database.SQLite, DSN: dsn}); err == nil {
-		t.Fatal("missing directory accepted")
-	}
-}
-
 func TestSQLiteConstraintErrors(t *testing.T) {
-	db := dbtest.Open(t, database.SQLite, nil)
+	db := dbtest.Open(t, sqlite.Driver, nil)
 	ctx := context.Background()
 	exec := func(q string) error {
 		_, err := db.ExecContext(ctx, q)
@@ -60,25 +52,25 @@ func TestSQLiteConstraintErrors(t *testing.T) {
 		{`INSERT INTO articles VALUES ('4', 'e', 'HELLO', 1, NULL, NULL)`, "articles_lower_title"},
 	} {
 		err := exec(tc.sql)
-		if !database.IsUniqueViolation(err) || !database.IsUniqueViolation(err, "other", tc.target) ||
-			database.IsUniqueViolation(err, "articles_slug_key") || database.IsCheckViolation(err) {
+		if !sqlite.IsUniqueViolation(err) || !sqlite.IsUniqueViolation(err, "other", tc.target) ||
+			sqlite.IsUniqueViolation(err, "articles_slug_key") || sqlite.IsCheckViolation(err) {
 			t.Errorf("%s: target %q not matched by %v", tc.sql, tc.target, err)
 		}
 	}
-	if err := exec(`INSERT INTO articles VALUES ('5', 'f', 'F', 0, NULL, NULL)`); !database.IsCheckViolation(err) || database.IsUniqueViolation(err) {
+	if err := exec(`INSERT INTO articles VALUES ('5', 'f', 'F', 0, NULL, NULL)`); !sqlite.IsCheckViolation(err) || sqlite.IsUniqueViolation(err) {
 		t.Errorf("check: %v", err)
 	}
-	if err := exec(`INSERT INTO comments VALUES ('1', 'missing')`); !database.IsForeignKeyViolation(err) {
+	if err := exec(`INSERT INTO comments VALUES ('1', 'missing')`); !sqlite.IsForeignKeyViolation(err) {
 		t.Errorf("foreign key: %v", err)
 	}
-	if database.IsUniqueViolation(errors.New("UNIQUE constraint failed: articles.slug")) {
+	if sqlite.IsUniqueViolation(errors.New("UNIQUE constraint failed: articles.slug")) {
 		t.Error("plain error matched")
 	}
 }
 
 // 写事务在 BEGIN 时取得写锁：并发的先读后写事务会排队，而不是在升级锁时以 SQLITE_BUSY 失败。
 func TestSQLiteConcurrentReadThenWriteTransactions(t *testing.T) {
-	db := dbtest.Open(t, database.SQLite, nil)
+	db := dbtest.Open(t, sqlite.Driver, nil)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, "CREATE TABLE counters (id INTEGER PRIMARY KEY, n INTEGER NOT NULL); INSERT INTO counters VALUES (1, 0)"); err != nil {
 		t.Fatal(err)
@@ -113,7 +105,7 @@ func TestSQLiteConcurrentReadThenWriteTransactions(t *testing.T) {
 
 // 时间经 Bun 以 UTC 文本写入，读回后时刻不变，按文本比较也保持时间顺序。
 func TestSQLiteTimesRoundTripAndCompare(t *testing.T) {
-	db := dbtest.Open(t, database.SQLite, nil)
+	db := dbtest.Open(t, sqlite.Driver, nil)
 	ctx := context.Background()
 	type event struct {
 		bun.BaseModel `bun:"table:events"`

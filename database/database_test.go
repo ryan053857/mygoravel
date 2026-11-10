@@ -9,6 +9,8 @@ import (
 
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/ryan053857/mygoravel/database/postgres"
+	"github.com/ryan053857/mygoravel/database/sqlite"
 )
 
 func TestConfigValidate(t *testing.T) {
@@ -70,23 +72,38 @@ func TestPublishedMigrationsIncludeNestedFiles(t *testing.T) {
 	}
 }
 
-func TestOpenAndValidateShareConfigurationChecks(t *testing.T) {
+func TestOpenRunsConfigurationChecks(t *testing.T) {
 	for _, cfg := range []database.Config{
 		{},
-		{DSN: "postgres://localhost/db"},
-		{Driver: "mysql", DSN: "root@/db"},
-		{Driver: database.Postgres, DSN: "postgres://user:pass@host:not-a-port/db"},
-		{Driver: database.Postgres, DSN: "postgres://localhost/db", MaxOpenConns: -1},
-		{Driver: database.Postgres, DSN: "postgres://localhost/db", ConnMaxLifetime: -1},
-		{Driver: database.SQLite, DSN: ":memory:"},
-		{Driver: database.SQLite, DSN: "file:app.db"},
-		{Driver: database.SQLite, DSN: "app.db?_pragma=foreign_keys(0)"},
+		{DSN: "postgres://localhost/db", MaxOpenConns: -1},
+		{DSN: "postgres://localhost/db", ConnMaxLifetime: -1},
 	} {
 		validation := cfg.Validate()
-		db, err := database.Open(context.Background(), cfg)
+		db, err := database.Open(context.Background(), postgres.Driver, cfg)
 		if db != nil || validation == nil || err == nil || err.Error() != "database: "+validation.Error() {
 			t.Fatalf("validation=%v open=%v db=%v", validation, err, db)
 		}
+	}
+}
+
+func TestDriversRejectInvalidDSN(t *testing.T) {
+	for _, tc := range []struct {
+		driver database.Driver
+		dsn    string
+	}{
+		{postgres.Driver, "postgres://user:pass@host:not-a-port/db"},
+		{sqlite.Driver, ":memory:"},
+		{sqlite.Driver, "file:app.db"},
+		{sqlite.Driver, "app.db?_pragma=foreign_keys(0)"},
+		{sqlite.Driver, filepath.Join(os.TempDir(), "missing-dir-for-test", "app.db")},
+	} {
+		db, err := database.Open(context.Background(), tc.driver, database.Config{DSN: tc.dsn})
+		if db != nil || err == nil || !strings.HasPrefix(err.Error(), "database: "+tc.driver.Name()+": ") {
+			t.Errorf("%s %q: db=%v err=%v", tc.driver.Name(), tc.dsn, db, err)
+		}
+	}
+	if _, err := database.Open(context.Background(), nil, database.Config{DSN: "x"}); err == nil {
+		t.Error("nil driver accepted")
 	}
 }
 

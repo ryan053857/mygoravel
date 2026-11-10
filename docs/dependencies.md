@@ -69,6 +69,7 @@ import (
     "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/cleanup"
     "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/logging"
@@ -98,7 +99,7 @@ func Serve(ctx context.Context, cfg settings.Config) (err error) {
     slog.SetDefault(logging.New(cfg.Logs))
 
     // 2. 打开资源，并登记关闭操作
-    db, err := database.Open(ctx, cfg.Database)
+    db, err := database.Open(ctx, postgres.Driver, cfg.Database)
     if err != nil {
         return err
     }
@@ -150,7 +151,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-func WithDatabase(ctx context.Context, cfg database.Config,
+func WithDatabase(ctx context.Context, driver database.Driver, cfg database.Config,
     run func(*bun.DB) error,
 ) (err error) {
     var stack cleanup.Stack
@@ -158,7 +159,7 @@ func WithDatabase(ctx context.Context, cfg database.Config,
         err = stack.CloseWith(context.Background(), err)
     }()
 
-    db, err := database.Open(ctx, cfg)
+    db, err := database.Open(ctx, driver, cfg)
     if err != nil {
         return err
     }

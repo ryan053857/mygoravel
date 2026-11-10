@@ -129,12 +129,12 @@ attempts := ratelimit.NewDatabase(db, "login", ratelimit.Config{Rate: 5, Interva
 使用前先发布 `rate_limits` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "ratelimit", FS: ratelimit.Migrations()},
 ))
 ```
 
-每个 key 只占一行，每次 `Allow` 是一条原子的 SQL 语句，多个实例并发调用时计数也是精确的。在 PostgreSQL 上，时间取自数据库时钟；这张表是 `UNLOGGED` 表，不写 WAL，数据库崩溃后表会被清空，相当于所有 key 的配额回满。SQLite 只在单机上使用，时间取自应用时钟。
+每个 key 只占一行，每次 `Allow` 是一条原子的 SQL 语句，多个实例并发调用时计数也是精确的。时间取自数据库时钟（SQLite 精确到毫秒）。在 PostgreSQL 上这张表是 `UNLOGGED` 表，不写 WAL，数据库崩溃后表会被清空，相当于所有 key 的配额回满。
 
 每次 `Allow` 都是一次数据库写入，因此不要用它做每个请求都经过的全局限流，那种场景请使用内存或 [Redis](#redis-limiter) 限流器，或者在网关中配置。
 

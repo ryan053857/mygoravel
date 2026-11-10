@@ -30,7 +30,7 @@ mygoravel 使用 [goose](https://github.com/pressly/goose) 管理迁移。迁移
 go run ./cmd/api migrate make create_articles_table
 ```
 
-命令输出新文件的路径，例如 `migrations/20261111090000_create_articles_table.sql`。文件名是 UTC 时间戳加名称，版本保证大于目录中已有的迁移，所以新迁移总是排在最后。命令只从配置中读取 `driver`，按数据库类型生成骨架，不连接数据库；`--dir` 默认是 `migrations`。
+命令输出新文件的路径，例如 `migrations/20261111090000_create_articles_table.sql`。文件名是 UTC 时间戳加名称，版本保证大于目录中已有的迁移，所以新迁移总是排在最后。命令按 `migratecmd.New` 传入的驱动生成对应数据库的骨架，不加载配置、不连接数据库；`--dir` 默认是 `migrations`。
 
 与 Laravel 一样，命令会从名称推断表名并生成骨架：
 
@@ -95,17 +95,17 @@ var FS embed.FS
 
 文件上传等可选功能自带迁移 SQL。使用这些功能时，把迁移发布到你的应用目录，审查并纳入版本控制，然后交给应用现有的 goose 迁移流程执行。
 
-发布命令需要显式注册。下面是加入已有命令装配代码的片段：`root` 是 `command.Root` 返回的根命令，`migrations.FS` 是应用嵌入的迁移，`dbConfig` 是应用命令装配中从配置取出数据库配置的函数。需要导入 `command/migratecmd`、`database`、`database/migrate` 和 `filesystem` 包：
+发布命令需要显式注册。下面是加入已有命令装配代码的片段：`root` 是 `command.Root` 返回的根命令，`migrations.FS` 是应用嵌入的迁移，`dbConfig` 是应用命令装配中从配置取出数据库配置的函数。需要导入 `command/migratecmd`、`database/migrate`、`database/postgres` 和 `filesystem` 包：
 
 ```go
-migrationCmd := migratecmd.New(migrations.FS, dbConfig)
-migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
+migrationCmd := migratecmd.New(migrations.FS, postgres.Driver, dbConfig)
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "filesystem", FS: filesystem.Migrations()},
 ))
 root.AddCommand(migrationCmd)
 ```
 
-`Publish` 的第一个参数是应用使用的数据库类型。框架迁移按数据库类型各写了一份，发布时只复制对应的那一份；使用 SQLite 时传入 `database.SQLite`。
+`Publish` 的第一个参数是应用使用的数据库驱动。框架迁移按数据库类型各写了一份，发布时只复制对应的那一份；使用 SQLite 时传入 `sqlite.Driver`。
 
 在应用根目录执行：
 
@@ -136,24 +136,24 @@ package main
 import (
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/command/migratecmd"
-    "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/database/migrate"
+    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/filesystem"
 )
 
 func main() {
     root := command.Root("migrations", "新建或发布迁移")
     root.AddCommand(
-        migratecmd.Make(database.Postgres),
-        migratecmd.Publish(database.Postgres, migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}),
+        migratecmd.Make(postgres.Driver),
+        migratecmd.Publish(postgres.Driver, migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}),
     )
     command.Execute(root)
 }
 ```
 
-`migratecmd.Make` 和 `migratecmd.Publish` 的第一个参数都是应用使用的数据库类型。执行 `go run ./cmd/publish make create_articles_table` 或 `go run ./cmd/publish publish --dir migrations` 生成第一个 SQL 后，再添加应用的 `migrations/embed.go` 和迁移执行命令。这个入口也可以一直保留，供开发时使用。
+`migratecmd.Make` 和 `migratecmd.Publish` 的第一个参数都是应用使用的数据库驱动。执行 `go run ./cmd/publish make create_articles_table` 或 `go run ./cmd/publish publish --dir migrations` 生成第一个 SQL 后，再添加应用的 `migrations/embed.go` 和迁移执行命令。这个入口也可以一直保留，供开发时使用。
 
-自定义命令或工具也可以直接调用 `migrate.Publish("migrations", database.Postgres, sources...)`；`sources` 是应用显式选择的 `[]migrate.Source`。每个来源的 `Name` 是稳定的包标识，`FS` 根目录下按数据库类型分为 `postgres`、`sqlite` 等目录，每个目录直接包含带数字版本的 SQL。来源按传入顺序发布，同一来源的文件按数字版本排序。各数据库的同名文件描述同一次变更，共用一个来源标记。
+自定义命令或工具也可以直接调用 `migrate.Publish("migrations", postgres.Driver, sources...)`；`sources` 是应用显式选择的 `[]migrate.Source`。每个来源的 `Name` 是稳定的包标识，`FS` 根目录下按数据库类型分为 `postgres`、`sqlite` 等目录，每个目录直接包含带数字版本的 SQL。来源按传入顺序发布，同一来源的文件按数字版本排序。各数据库的同名文件描述同一次变更，共用一个来源标记。
 
 <a id="running-migrations"></a>
 ## 运行迁移
@@ -164,7 +164,7 @@ func main() {
 在[装配命令行](commands.md#declaring-the-cli)时加入 `command/migratecmd` 包的 `migratecmd.New`，应用就有了 `migrate up`、`migrate status`、`migrate down` 和[新建迁移](#writing-migrations)的 `migrate make`：
 
 ```go
-root.AddCommand(migratecmd.New(migrations.FS, func(cfg settings.Config) database.Config {
+root.AddCommand(migratecmd.New(migrations.FS, postgres.Driver, func(cfg settings.Config) database.Config {
     return cfg.Database
 }))
 ```
@@ -224,6 +224,7 @@ import (
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/identity"
 )
 
@@ -237,7 +238,7 @@ func seed() *cobra.Command {
             if err != nil {
                 return err
             }
-            db, err := database.Open(cmd.Context(), cfg.Database)
+            db, err := database.Open(cmd.Context(), postgres.Driver, cfg.Database)
             if err != nil {
                 return command.AsExitError(command.ExitUnavailable, err)
             }

@@ -119,7 +119,7 @@ locker := lock.New(lock.NewDBStore(db))
 使用前先发布 `locks` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(database.Postgres,
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "lock", FS: lock.Migrations()},
 ))
 ```

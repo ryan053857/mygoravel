@@ -27,9 +27,12 @@ var (
 // 与 Laravel 一样，Create 从 name 推断表名并生成对应的骨架：create_<table>[_table]
 // 生成 CREATE TABLE，主键是由应用用 uuid.NewV7() 生成的 UUID；..._to|from|in_<table>[_table] 生成 ALTER TABLE，其余只有 goose 注解。
 func Create(driver database.Driver, dir, name string) (string, error) {
-	create, ok := createStubs[driver]
+	if driver == nil {
+		return "", errors.New("migrate: nil driver")
+	}
+	create, ok := createStubs[driver.Name()]
 	if !ok {
-		return "", errors.Newf("migrate: unsupported driver %q", driver)
+		return "", errors.Newf("migrate: unsupported driver %q", driver.Name())
 	}
 	if !migrationName.MatchString(name) {
 		return "", errors.Newf("migrate: migration name %q must be snake_case, for example create_articles_table", name)
@@ -53,8 +56,8 @@ func Create(driver database.Driver, dir, name string) (string, error) {
 
 // createStubs 是各方言的建表骨架。SQLite 没有 uuid 与时间类型，都存为 TEXT；
 // 时间由应用经 Bun 以 UTC 写入，不使用 CURRENT_TIMESTAMP 默认值，以免两种文本格式混在一起比较。
-var createStubs = map[database.Driver]string{
-	database.Postgres: `-- +goose Up
+var createStubs = map[string]string{
+	"postgres": `-- +goose Up
 CREATE TABLE %[1]s (
     id         uuid PRIMARY KEY,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -64,7 +67,7 @@ CREATE TABLE %[1]s (
 -- +goose Down
 DROP TABLE %[1]s;
 `,
-	database.SQLite: `-- +goose Up
+	"sqlite": `-- +goose Up
 CREATE TABLE %[1]s (
     id         TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,

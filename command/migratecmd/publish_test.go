@@ -9,8 +9,8 @@ import (
 
 	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/command/migratecmd"
-	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/ryan053857/mygoravel/database/postgres"
 )
 
 func TestPublishWithoutConfigurationOrDatabase(t *testing.T) {
@@ -19,8 +19,8 @@ func TestPublishWithoutConfigurationOrDatabase(t *testing.T) {
 	}}
 	dir := filepath.Join(t.TempDir(), "migrations")
 	for i := range 2 {
-		migrationCmd := migratecmd.New(fstest.MapFS{}, dbConfig)
-		migrationCmd.AddCommand(migratecmd.Publish(database.Postgres, source))
+		migrationCmd := migratecmd.New(fstest.MapFS{}, postgres.Driver, dbConfig)
+		migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver, source))
 		root := newRoot(migrationCmd)
 		out, _, err := execute(root, "migrate", "publish", "--dir", dir, "--config", filepath.Join(t.TempDir(), "absent.yaml"))
 		if err != nil {
@@ -41,7 +41,7 @@ func TestPublishWithoutConfigurationOrDatabase(t *testing.T) {
 }
 
 func TestPublishRejectsExtraArguments(t *testing.T) {
-	root := newRoot(migratecmd.Publish(database.Postgres))
+	root := newRoot(migratecmd.Publish(postgres.Driver))
 	_, _, err := execute(root, "publish", "extra")
 	if command.ExitCode(err) != command.ExitUsage {
 		t.Fatalf("err=%v exit=%d", err, command.ExitCode(err))

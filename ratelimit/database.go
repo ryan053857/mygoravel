@@ -12,7 +12,7 @@ import (
 
 // Database 把计数存在数据库中，多个实例共享同一份配额，表结构由 Migrations 提供。
 // 每个 key 只存一个理论到达时间（tat），一次 Allow 是一条原子的 upsert。
-// PostgreSQL 取数据库时钟；SQLite 只在单机上使用，取应用时钟，tat 存为 Unix 微秒。
+// 时间取数据库时钟，在语句执行时求值，并发调用按执行顺序看到递增的时间；SQLite 的 tat 存为 Unix 微秒，时钟精确到毫秒。
 //
 // 支持 PostgreSQL 和 SQLite。每次 Allow 都是一次写入，适合登录、验证码、发邮件这类低频操作；
 // 每个请求都要经过的全局限流请使用 Memory。
@@ -70,17 +70,21 @@ SELECT (extract(epoch FROM tat - statement_timestamp()) * 1000000)::bigint - ?
 	return d.exceeded(wait)
 }
 
-// allowSQLite 与 PostgreSQL 的逻辑相同，tat 与当前时间都是应用时钟的 Unix 微秒。
+// sqliteNow 是 SQLite 当前时间的 Unix 微秒（精确到毫秒）。同一条语句内取值不变，
+// 并且在语句取得写锁后才求值：若在应用中先取时间，后执行的语句可能带着更早的时间，在配额边界被误拒。
+var sqliteNow = bun.Safe("CAST(unixepoch('subsec') * 1000000 AS INTEGER)")
+
+// allowSQLite 与 PostgreSQL 的逻辑相同，tat 与当前时间都是 Unix 微秒。
 func (d *Database) allowSQLite(ctx context.Context, key string) error {
-	now, step, ahead := time.Now().UnixMicro(), d.step.Microseconds(), d.ahead.Microseconds()
+	step, ahead := d.step.Microseconds(), d.ahead.Microseconds()
 	var allowed bool
 	err := d.db.NewRaw(`
-INSERT INTO rate_limits AS r (name, key, tat) VALUES (?, ?, ?)
+INSERT INTO rate_limits AS r (name, key, tat) VALUES (?, ?, ? + ?)
 ON CONFLICT (name, key) DO UPDATE
    SET tat = max(r.tat, ?) + ?
- WHERE r.tat <= ?
+ WHERE r.tat <= ? + ?
 RETURNING true`,
-		d.name, key, now+step, now, step, now+ahead).Scan(ctx, &allowed)
+		d.name, key, sqliteNow, step, sqliteNow, step, sqliteNow, ahead).Scan(ctx, &allowed)
 	if err == nil {
 		return nil
 	}
@@ -88,7 +92,7 @@ RETURNING true`,
 		return errors.Wrap(err, "ratelimit: allow")
 	}
 	var wait int64
-	err = d.db.NewRaw(`SELECT tat - ? FROM rate_limits WHERE name = ? AND key = ?`, now+ahead, d.name, key).Scan(ctx, &wait)
+	err = d.db.NewRaw(`SELECT tat - ? - ? FROM rate_limits WHERE name = ? AND key = ?`, sqliteNow, ahead, d.name, key).Scan(ctx, &wait)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return errors.Wrap(err, "ratelimit: allow")
 	}
@@ -113,10 +117,9 @@ func (d *Database) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("ratelimit: cleanup limit must be positive")
 	}
-	// SQLite 的 tat 是应用时钟的 Unix 微秒。
-	var now any = bun.Safe("statement_timestamp()")
+	now := bun.Safe("statement_timestamp()")
 	if d.sqlite {
-		now = time.Now().UnixMicro()
+		now = sqliteNow
 	}
 	res, err := d.db.NewRaw(`
 DELETE FROM rate_limits WHERE (name, key) IN (

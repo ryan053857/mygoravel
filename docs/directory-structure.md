@@ -156,7 +156,8 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `page` | 固定分页与游标分页的参数和响应结构 | [分页](responses.md#pagination) |
 | `httpx` | HTTP 中间件、平滑停机 | [中间件](middleware.md)、[请求生命周期](lifecycle.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
-| `database` | 打开 PostgreSQL 或 SQLite 连接，识别约束错误 | [数据库](database.md) |
+| `database` | 用应用选定的驱动打开连接池 | [数据库](database.md) |
+| `database/postgres`、`database/sqlite` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |

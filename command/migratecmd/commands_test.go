@@ -7,15 +7,17 @@ import (
 	"testing/fstest"
 
 	"github.com/ryan053857/mygoravel/command/migratecmd"
+	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/sqlite"
 )
 
 func TestMigrateCommandsOnSQLite(t *testing.T) {
-	path := writeConfig(t, "database:\n  driver: sqlite\n  dsn: "+filepath.Join(t.TempDir(), "app.db")+"\n")
-	testMigrateCommands(t, path)
+	path := writeConfig(t, "database:\n  dsn: "+filepath.Join(t.TempDir(), "app.db")+"\n")
+	testMigrateCommands(t, sqlite.Driver, path)
 }
 
-// testMigrateCommands 用 configPath 指向的空数据库依次检查 status、up、down 的输出。
-func testMigrateCommands(t *testing.T, configPath string) {
+// testMigrateCommands 用 driver 和 configPath 指向的空数据库依次检查 status、up、down 的输出。
+func testMigrateCommands(t *testing.T, driver database.Driver, configPath string) {
 	path := configPath
 	migrations := fstest.MapFS{
 		"00001_create_notes.sql": {Data: []byte("-- +goose Up\nCREATE TABLE notes (id int);\n-- +goose Down\nDROP TABLE notes;\n")},
@@ -23,7 +25,7 @@ func testMigrateCommands(t *testing.T, configPath string) {
 	}
 	run := func(args ...string) string {
 		t.Helper()
-		root := newRoot(migratecmd.New(migrations, dbConfig))
+		root := newRoot(migratecmd.New(migrations, driver, dbConfig))
 		out, _, err := execute(root, append(args, "--config", path)...)
 		if err != nil {
 			t.Fatalf("%v: %v", args, err)
