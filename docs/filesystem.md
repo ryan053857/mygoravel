@@ -13,6 +13,11 @@
 - [确认文件](#confirming-files)
 - [访问文件](#accessing-files)
 - [删除文件](#deleting-files)
+- [常见用法](#common-patterns)
+    - [替换文件](#replacing-files)
+    - [多个有序文件](#ordered-files)
+    - [确认后异步处理](#processing-files)
+    - [图片缩略图](#thumbnails)
 - [在 REST 接口中使用](#rest)
     - [路由](#rest-routes)
     - [服务端上传接口](#rest-upload)
@@ -119,6 +124,8 @@ router.Handle("/storage/*", disk)
 
 它会去掉 `public_url` 的路径前缀，再按对象键读取文件；不列目录，也不暴露正在写入的临时文件。文件按扩展名设置 `Content-Type`，并支持 `Range` 和缓存校验。
 
+文件与应用同源，而扩展名来自上传者提交的文件名。因此磁盘为所有响应加上 `X-Content-Type-Options: nosniff`；HTML、SVG、XML 这类在浏览器中可以执行脚本的类型，还会加上 `Content-Security-Policy: sandbox` 并作为附件下载，上传的网页无法在应用的源下运行脚本。`<img>` 中引用的 SVG 不受影响。
+
 写入先落到同目录的临时文件，完整写入后再原子重命名，上传失败不会留下半个文件。多个进程共享同一个本地磁盘时，它们需要挂载同一个目录。
 
 <a id="s3-disk"></a>
@@ -138,6 +145,8 @@ disk, err := s3.Open(ctx, cfg.Filesystem.Disks.S3)
 ```
 
 `Open` 会检查桶是否可以访问。你需要为桶（或 CDN 回源）配置公开读，让 `public_url` 加对象键能直接访问文件。`endpoint` 是程序调用的 API 地址，`public_url` 是给用户访问的地址，两者可以不同。
+
+S3 按上传时声明的 `Content-Type` 返回文件。请让 `public_url` 使用与应用不同的域名，这样即使有人上传了网页，它也读不到应用的 cookie；需要展示给用户的文件，确认时用 [`Accept`](#confirming-files) 限定类型。
 
 已经有原生 SDK 客户端时，可以用 `s3.New(client, bucket, publicURL)` 创建磁盘；`disk.Client()` 返回原生客户端，供你使用未封装的 S3 功能。
 
@@ -277,23 +286,35 @@ record, err := fileService.CompleteMultipart(ctx, owner, record.ID, uploadID, []
 <a id="confirming-files"></a>
 ## 确认文件
 
-上传完成的文件仍是 `temporary`。业务真正使用它时调用 `Confirm`，例如把文件设为文章封面：
+上传完成的文件仍是 `temporary`。业务真正使用它时调用 `Confirm`，并用 `filesystem.Accept` 说明这个用途接受什么样的文件。例如文章封面只接受 5 MiB 以内的图片：
 
 ```go
-cover, err := fileService.Confirm(ctx, owner, input.CoverID)
+var coverImage = filesystem.Accept{
+    Types:   []string{"image/png", "image/jpeg", "image/webp"},
+    MaxSize: 5 * filesystem.MiB,
+}
+
+cover, err := fileService.Confirm(ctx, owner, input.CoverID, coverImage)
 if err != nil {
     return err
 }
 article.CoverURL = cover.URL
 ```
 
-`Confirm` 会检查对象确实存在且大小与登记的一致，然后把文件改为 `ready`。重复确认返回同一条记录。只有上传者本人可以确认，其他主体会得到 `filesystem.ErrNotFound`，因此用户无法引用他人上传的临时文件。
+`Confirm` 先检查对象确实存在且大小与登记的一致，再按 `Accept` 检查：
+
+- `MaxSize` 限制这个用途的大小，所有文件的上限仍是 `max_upload_size`；
+- `Types` 非空时，读取文件开头的内容识别真实类型。它必须在 `Types` 中（`image/*` 匹配一类），还必须与上传时声明的类型、文件扩展名对应的类型一致，否则一个扩展名为 `.html` 的“图片”会被浏览器当作网页打开。内容识别适用于图片、PDF、音视频、压缩包等二进制格式，不适用于 CSV、JSON 等文本格式。
+
+不符合时返回 `filesystem.ErrNotAccepted`，文件保持 `temporary`，到期后被回收。`filesystem.Accept{}` 只要求文件已完整上传。
+
+检查通过后文件变为 `ready`。重复确认返回同一条记录，同样要符合传入的 `Accept`。只有上传者本人可以确认，其他主体会得到 `filesystem.ErrNotFound`，因此用户无法引用他人上传的临时文件。
 
 希望文件状态和业务数据一起提交时，使用 `WithDB` 在业务事务中确认：
 
 ```go
 err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-    cover, err := fileService.WithDB(tx).Confirm(ctx, owner, input.CoverID)
+    cover, err := fileService.WithDB(tx).Confirm(ctx, owner, input.CoverID, coverImage)
     if err != nil {
         return err
     }
@@ -350,6 +371,88 @@ err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 ```
 
 事务回滚时文件原样保留。注意在清理任务执行之前，对象仍然可以通过公开地址访问。
+
+<a id="common-patterns"></a>
+## 常见用法
+
+<a id="replacing-files"></a>
+### 替换文件
+
+更换封面时，在同一个事务中确认新文件、删除旧文件。新旧 ID 相同时什么也不用做：
+
+```go
+if newCoverID == article.CoverID {
+    return nil
+}
+err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    files := fileService.WithDB(tx)
+    cover, err := files.Confirm(ctx, owner, newCoverID, coverImage)
+    if err != nil {
+        return err
+    }
+    if err := files.Delete(ctx, article.CoverID); err != nil {
+        return err
+    }
+    _, err = tx.NewUpdate().Model(&article).Set("cover_id = ?", cover.ID).WherePK().Exec(ctx)
+    return err
+})
+```
+
+<a id="ordered-files"></a>
+### 多个有序文件
+
+一篇文章有多张配图时，用一张关联表保存文件 ID 和顺序：
+
+```sql
+CREATE TABLE article_images (
+    article_id uuid NOT NULL REFERENCES articles (id),
+    file_id    uuid NOT NULL,
+    position   integer NOT NULL,
+    PRIMARY KEY (article_id, file_id)
+);
+```
+
+保存时逐个 `Confirm` 并插入关联行；移除配图时，在同一个事务中删除关联行并 `Delete` 文件。读取时关联 `files` 表按顺序查询，地址由磁盘的 `URL` 生成：
+
+```go
+var images []filesystem.File
+err := db.NewSelect().Model(&images).
+    Join("JOIN article_images AS ai ON ai.file_id = f.id").
+    Where("ai.article_id = ?", article.ID).Where("f.status = ?", filesystem.StatusReady).
+    OrderExpr("ai.position").Scan(ctx)
+for i := range images {
+    images[i].URL = disk.URL(images[i].Key)
+}
+```
+
+<a id="processing-files"></a>
+### 确认后异步处理
+
+需要在上传后处理文件（例如提取元数据、生成视频封面）时，在确认文件的同一个事务中发布一个[队列](queue.md)任务。任务和文件状态一起提交，事务回滚时任务也不会执行：
+
+```go
+err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    cover, err := fileService.WithDB(tx).Confirm(ctx, owner, input.CoverID, coverImage)
+    if err != nil {
+        return err
+    }
+    // ……保存文章
+    return queue.Publish(ctx, queue.NewPublisher(tx), "files.process", cover.ID)
+})
+```
+
+处理函数用 `Open` 读取正文；需要保存处理结果时，把它作为新文件 `Upload` 并 `Confirm`。
+
+<a id="thumbnails"></a>
+### 图片缩略图
+
+文件都有公开地址，缩略图最简单的做法是交给图片处理服务：在 `public_url` 前面放 [imgproxy](https://imgproxy.net) 或 CDN 自带的图片处理，用 URL 参数指定尺寸和格式，不需要保存额外的文件。例如 imgproxy 的地址：
+
+```text
+https://img.example.com/<签名>/rs:fill:300:200/plain/https://cdn.example.com/2026/11/10/0193a3c2-....jpg
+```
+
+地址由应用在返回数据时拼出。请开启 imgproxy 的 URL 签名，避免它被用来处理任意图片。
 
 <a id="rest"></a>
 ## 在 REST 接口中使用
@@ -731,7 +834,7 @@ type CreateArticleInput struct {
 
 func (a *CreateArticle) Handle(ctx context.Context, in *CreateArticleInput) (*ArticleOutput, error) {
     owner, _ := identity.FromContext(ctx)
-    cover, err := a.files.Confirm(ctx, owner, in.Body.CoverID)
+    cover, err := a.files.Confirm(ctx, owner, in.Body.CoverID, coverImage)
     if err != nil {
         return nil, err
     }
@@ -747,7 +850,7 @@ func (a *CreateArticle) Handle(ctx context.Context, in *CreateArticleInput) (*Ar
 }
 ```
 
-用户提交了别人的文件 ID、已过期的 ID，或者文件还没上传完时，`Confirm` 会返回错误，接口直接返回它即可。需要确认与业务写入在同一事务中时，在业务服务内部使用 `WithDB(tx)`，见[确认文件](#confirming-files)。
+用户提交了别人的文件 ID、已过期的 ID，文件还没上传完，或者不是允许的图片时，`Confirm` 会返回错误，接口直接返回它即可。需要确认与业务写入在同一事务中时，在业务服务内部使用 `WithDB(tx)`，见[确认文件](#confirming-files)。
 
 <a id="rest-limits"></a>
 ### 请求体大小与超时
@@ -768,6 +871,7 @@ func (a *CreateArticle) Handle(ctx context.Context, in *CreateArticleInput) (*Ar
 | `filesystem.ErrNotFound` | 404 | `filesystem.not_found` |
 | `filesystem.ErrNotUploaded` | 409 | `filesystem.not_uploaded` |
 | `filesystem.ErrUnsupported` | 422 | `filesystem.direct_upload_unsupported` |
+| `filesystem.ErrNotAccepted` | 422 | `filesystem.not_accepted` |
 
 ```json
 {

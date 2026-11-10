@@ -119,3 +119,37 @@ func TestOpenRequiresConfig(t *testing.T) {
 		t.Fatal("missing public_url accepted")
 	}
 }
+
+// 上传的 HTML、SVG 在应用的源下打开时不能执行脚本：按 Content-Type 加上 sandbox 并作为附件下载；
+// 内容嗅探为 HTML 的无扩展名文件同样处理。所有响应都禁止浏览器再次嗅探。
+func TestServeHTTPSecurityHeaders(t *testing.T) {
+	ctx := context.Background()
+	disk, _ := openDisk(t, "/storage")
+	html := "<!DOCTYPE html><script>alert(1)</script>"
+	for key, body := range map[string]string{
+		"a.html": html, "b.svg": `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`,
+		"noext": html, "c.png": "\x89PNG\r\n\x1a\n0000", "d.txt": "hi",
+	} {
+		if err := disk.Put(ctx, key, "", strings.NewReader(body), int64(len(body))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for key, active := range map[string]bool{"a.html": true, "b.svg": true, "noext": true, "c.png": false, "d.txt": false} {
+		for _, rangeHeader := range []string{"", "bytes=0-3"} {
+			req := httptest.NewRequest(http.MethodGet, "/storage/"+key, nil)
+			if rangeHeader != "" {
+				req.Header.Set("Range", rangeHeader)
+			}
+			rec := httptest.NewRecorder()
+			http.StripPrefix("", disk).ServeHTTP(rec, req)
+			h := rec.Header()
+			if rec.Code >= 300 || h.Get("X-Content-Type-Options") != "nosniff" {
+				t.Errorf("%s %q: code=%d headers=%v", key, rangeHeader, rec.Code, h)
+			}
+			sandboxed := h.Get("Content-Security-Policy") == "sandbox" && h.Get("Content-Disposition") == "attachment"
+			if sandboxed != active {
+				t.Errorf("%s %q: content-type=%q sandboxed=%v", key, rangeHeader, h.Get("Content-Type"), sandboxed)
+			}
+		}
+	}
+}

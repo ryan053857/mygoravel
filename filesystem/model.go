@@ -40,6 +40,17 @@ type FileInput struct {
 	Size        int64
 }
 
+// Accept 描述一种用途接受的文件，由 Confirm 检查。零值只要求文件已完整上传。
+type Accept struct {
+	// Types 是允许的 MIME 类型，例如 "image/png"，或用 "image/*" 匹配一类。
+	// 非空时从文件开头的内容识别真实类型（http.DetectContentType），它必须在 Types 中，
+	// 并且与上传时声明的类型、文件扩展名对应的类型一致，浏览器才会按同一种类型处理这个文件。
+	// 内容识别适用于图片、PDF、音视频、压缩包等二进制格式，不适用于 CSV、JSON 等文本格式。
+	Types []string
+	// MaxSize 是允许的最大字节数，0 表示只受 max_upload_size 限制。
+	MaxSize ByteSize
+}
+
 // Multipart 是分片直传会话。除最后一片外，每片正好 PartSize 字节。
 type Multipart struct {
 	UploadID  string `json:"upload_id"`

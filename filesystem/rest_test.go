@@ -189,7 +189,7 @@ func registerFileRoutes(api *rest.API, auth func(*huma.Operation), files *filesy
 	rest.Register(api, create, func() func(context.Context, *CreateArticleInput) (*ArticleOutput, error) {
 		return func(ctx context.Context, in *CreateArticleInput) (*ArticleOutput, error) {
 			owner, _ := identity.FromContext(ctx)
-			cover, err := files.Confirm(ctx, owner, in.Body.CoverID)
+			cover, err := files.Confirm(ctx, owner, in.Body.CoverID, filesystem.Accept{})
 			if err != nil {
 				return nil, err
 			}
