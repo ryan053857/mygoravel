@@ -189,15 +189,18 @@ func TestDependencyScope(t *testing.T) {
 	}
 }
 
-// TestLockCoreDoesNotLinkRedis 确保只用 lock 核心包不会链接 go-redis，Redis 存储在 lock/redislock 中。
-func TestLockCoreDoesNotLinkRedis(t *testing.T) {
-	out, err := exec.Command("go", "list", "-deps", module+"/lock").CombinedOutput()
-	if err != nil {
-		t.Fatalf("go list: %v\n%s", err, out)
-	}
-	for _, dep := range strings.Fields(string(out)) {
-		if under(dep, "github.com/redis/go-redis") {
-			t.Errorf("lock depends on %s", dep)
+// TestCoreDoesNotLinkRedis 确保不用 Redis 的应用不会链接 go-redis，
+// Redis 实现分别在 lock/redislock 和 ratelimit/redislimit 中。
+func TestCoreDoesNotLinkRedis(t *testing.T) {
+	for _, pkg := range []string{module + "/lock", module + "/ratelimit", module + "/httpx"} {
+		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			if under(dep, "github.com/redis/go-redis") {
+				t.Errorf("%s depends on %s", pkg, dep)
+			}
 		}
 	}
 }

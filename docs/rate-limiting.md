@@ -7,6 +7,7 @@
 - [在处理器中限流](#in-handlers)
 - [使用数据库存储](#database-limiter)
     - [清理](#cleanup)
+- [使用 Redis 存储](#redis-limiter)
 
 <a id="introduction"></a>
 ## 简介
@@ -46,8 +47,9 @@ ratelimit.Config{
 | --- | --- | --- |
 | `ratelimit.NewMemory(cfg)` | 进程内存，每个实例分别计数 | 每个请求都要经过的全局限流 |
 | `ratelimit.NewDatabase(db, name, cfg)` | 数据库，多个实例共享 | 登录、验证码、发邮件等低频操作 |
+| `redislimit.New(rdb, name, cfg)` | Redis，多个实例共享 | 多实例共享的全局限流，以及低频操作 |
 
-两者的算法相同，换实现不会改变限流结果。
+三者的算法相同，换实现不会改变限流结果。
 
 <a id="http-middleware"></a>
 ## 限制请求频率
@@ -134,7 +136,7 @@ migrationCmd.AddCommand(migratecmd.Publish(
 
 每个 key 只占一行，每次 `Allow` 是一条原子的 SQL 语句，时间取自数据库时钟，多个实例并发调用时计数也是精确的。这张表是 `UNLOGGED` 表，不写 WAL；数据库崩溃后表会被清空，相当于所有 key 的配额回满。
 
-每次 `Allow` 都是一次数据库写入，因此不要用它做每个请求都经过的全局限流，那种场景请使用内存限流器，或者在网关中配置。
+每次 `Allow` 都是一次数据库写入，因此不要用它做每个请求都经过的全局限流，那种场景请使用内存或 [Redis](#redis-limiter) 限流器，或者在网关中配置。
 
 <a id="cleanup"></a>
 ### 清理
@@ -149,3 +151,24 @@ n, err := attempts.Cleanup(ctx, 1000)
 
 > [!NOTE]
 > 异步队列功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它，例如每小时一次。
+
+<a id="redis-limiter"></a>
+## 使用 Redis 存储
+
+应用已经使用 [Redis](redis.md) 时，也可以把计数放进 Redis。`redislimit.New` 接收[入口中创建的客户端](redis.md#connecting) `rdb`，其余参数与 `NewDatabase` 相同：
+
+```go
+import "github.com/ryan053857/mygoravel/ratelimit/redislimit"
+
+attempts := redislimit.New(rdb, "blog:login", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
+```
+
+每个 key 对应一个 Redis 键，键名是 `name:key`，例如 `blog:login:alice@example.com`；多个应用共用一个 Redis 时，在 `name` 中带上应用的命名空间。每次 `Allow` 是一次原子的脚本调用，时间取自 Redis 服务端时钟，多个实例并发调用时计数也是精确的。键在配额回满时自动过期，不需要迁移，也不需要清理。
+
+Redis 的写入很快，也适合多个实例共享的全局限流：
+
+```go
+router.Use(httpx.RateLimit(redislimit.New(rdb, "blog:http", cfg.HTTP.RateLimit), httpx.KeyByIP))
+```
+
+这时 Redis 不可用会让所有请求都得到 `503`。如果宁可短时间不限流也要保证可用，请继续使用内存限流器。
