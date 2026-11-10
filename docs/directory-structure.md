@@ -149,6 +149,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `logging` | 构造 slog 日志器，传递请求关联字段 | [日志](logging.md) |
 | `i18n` | 组合 go-i18n 消息目录 | [本地化](localization.md) |
 | `identity` | 表示已认证的主体，并在 context 中传递 | [认证](authentication.md) |
+| `page` | 固定分页与游标分页的参数和响应结构 | [分页](responses.md#pagination) |
 | `httpx` | HTTP 中间件、平滑停机 | [中间件](middleware.md)、[请求生命周期](lifecycle.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
 | `database` | 打开 PostgreSQL 连接，识别约束错误 | [数据库](database.md) |

@@ -47,9 +47,9 @@ type GetArticleInput struct {
 使用 `query` 标签读取查询参数。你可以同时声明默认值和取值范围：
 
 ```go
-type ListArticlesInput struct {
-    Before string `query:"before"`
-    Limit  int    `query:"limit" default:"20" minimum:"1" maximum:"100"`
+type SearchArticlesInput struct {
+    Q     string `query:"q"`
+    Limit int    `query:"limit" default:"20" minimum:"1" maximum:"100"`
 }
 ```
 
@@ -57,6 +57,9 @@ type ListArticlesInput struct {
 
 > [!NOTE]
 > 上面的写法会把超出范围的 `limit` 当作错误拒绝。如果你希望把它悄悄截断为 100，就不要声明 `maximum`，而是在业务服务中处理，并在接口描述中说明这一行为。
+
+> [!TIP]
+> 列表接口的分页参数不需要自己声明，嵌入 `page.OffsetParams` 或 `page.CursorParams` 即可，见[分页](responses.md#pagination)。
 
 <a id="headers"></a>
 ### 请求头

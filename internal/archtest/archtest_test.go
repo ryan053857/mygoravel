@@ -18,10 +18,11 @@ var dependencies = map[string][]string{
 	"logging":  {},
 	"i18n":     {},
 	"identity": {},
+	"page":     {"errorx"},
 	"database": {"config"},
 	"httpx":    {"errorx", "identity", "i18n", "logging"},
-	"command":  {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx"},
-	"internal": {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "command"},
+	"command":  {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
+	"internal": {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command"},
 }
 
 // 传输、数据库和命令组件的包前缀。

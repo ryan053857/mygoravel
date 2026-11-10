@@ -62,6 +62,7 @@ func NewAPI(cfg httpx.Config) (*rest.API, error) {
 | --- | --- | --- |
 | `auth.unauthenticated` | Authentication required | 请先认证 |
 | `auth.forbidden` | Permission denied | 没有访问权限 |
+| `page.invalid_cursor` | Invalid pagination cursor | 分页游标无效 |
 
 <a id="determining-the-locale"></a>
 ## 确定请求语言
