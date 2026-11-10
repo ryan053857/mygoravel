@@ -7,5 +7,5 @@
 //   - RequireApproval 让指定的工具停下等待审批，Runs.Approve 和 Runs.Reject 在任意进程中继续；
 //   - UIStream、Submit、UIMessages 实现 Vercel AI SDK 的 UI 消息流协议，前端直接使用 useChat。
 //
-// 运行只存在于启动它的进程中：部署多个实例时，同一个对话的请求需要落在同一个实例上。
+// 运行在启动它的实例上执行；部署多个实例时用 Cluster 让各实例协作，同一个对话的请求可以落在任何实例上。
 package ai

@@ -33,7 +33,7 @@ var dependencies = map[string][]string{
 	"queue":      {"logging"},
 	"broadcast":  {"logging"},
 	"schedule":   {"lock", "logging"},
-	"ai":         {"errorx", "httpx", "logging", "database"},
+	"ai":         {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
 	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "broadcast"},
 }
@@ -233,9 +233,9 @@ func TestCoreDoesNotLinkRedis(t *testing.T) {
 	}
 }
 
-// TestBroadcastCoreDoesNotLinkNATS 确保不用 NATS 的应用不会链接 nats.go，NATS 实现在 broadcast/natsbroadcast 中。
-func TestBroadcastCoreDoesNotLinkNATS(t *testing.T) {
-	for _, pkg := range []string{module + "/broadcast", module + "/broadcast/redisbroadcast"} {
+// TestCoreDoesNotLinkNATS 确保不用 NATS 的应用不会链接 nats.go，NATS 实现在 broadcast/natsbroadcast 和 queue/natsqueue 中。
+func TestCoreDoesNotLinkNATS(t *testing.T) {
+	for _, pkg := range []string{module + "/broadcast", module + "/broadcast/redisbroadcast", module + "/queue", module + "/queue/redisqueue"} {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)

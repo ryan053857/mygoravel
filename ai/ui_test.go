@@ -44,7 +44,10 @@ func chatServer(t *testing.T, rs *ai.Runs) string {
 	get := huma.Operation{OperationID: "chat-resume", Method: http.MethodGet, Path: "/chat/{id}/stream"}
 	rest.Public()(&get)
 	rest.RegisterSSE(api, get, ai.UIEvents, func(ctx context.Context, in *resumeInput) (*huma.StreamResponse, error) {
-		run, _ := rs.Get("u1", in.ID)
+		run, err := rs.Get(ctx, "u1", in.ID)
+		if err != nil {
+			return nil, err
+		}
 		return ai.UIResume(run), nil
 	})
 	srv := httptest.NewServer(api.Handler())
@@ -175,7 +178,7 @@ func TestUIStreamRejectAndSteer(t *testing.T) {
 
 	resp := postChat(t, url, map[string]any{"id": "c1", "message": userMessage("查 A1")})
 	time.Sleep(100 * time.Millisecond)
-	if err := rs.Steer("u1", "c1", model.NewUserMessage("顺便退款")); err != nil {
+	if err := rs.Steer(context.Background(), "u1", "c1", model.NewUserMessage("顺便退款")); err != nil {
 		t.Fatal(err)
 	}
 	got := chunks(t, resp)

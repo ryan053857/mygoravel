@@ -119,7 +119,7 @@ func TestStartStreamsAnswer(t *testing.T) {
 	if got := strings.Join(rest, ","); got != "text:世界,done" {
 		t.Fatalf("resumed events %s", got)
 	}
-	if got, ok := rs.Get("u1", "c1"); !ok || got != r {
+	if got, err := rs.Get(context.Background(), "u1", "c1"); err != nil || got != r {
 		t.Fatal("finished run should be kept for reconnects")
 	}
 }
@@ -158,7 +158,7 @@ func TestSteerDuringToolCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if err := r.Steer(model.NewUserMessage("还有 B2")); err != nil {
+	if err := r.Steer(context.Background(), model.NewUserMessage("还有 B2")); err != nil {
 		t.Fatal(err)
 	}
 	names, _ := collect(t, r, "")
@@ -181,7 +181,7 @@ func TestSteerDuringFinalAnswerContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if err := r.Steer(model.NewUserMessage("问题二")); err != nil {
+	if err := r.Steer(context.Background(), model.NewUserMessage("问题二")); err != nil {
 		t.Fatal(err)
 	}
 	names, _ := collect(t, r, "")
@@ -191,7 +191,7 @@ func TestSteerDuringFinalAnswerContinues(t *testing.T) {
 	if got := messagesOf(m.LastRequest()); !strings.HasSuffix(got, "user:问题一 | assistant:第一个回答 | user:问题二") {
 		t.Fatalf("second request %s", got)
 	}
-	if err := r.Steer(model.NewUserMessage("太晚了")); !errors.Is(err, ai.ErrFinished) {
+	if err := r.Steer(context.Background(), model.NewUserMessage("太晚了")); !errors.Is(err, ai.ErrFinished) {
 		t.Fatalf("steer after finish: %v", err)
 	}
 }
@@ -315,7 +315,7 @@ func TestSteerBeforeApprovalIsDeliveredAfterIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if err := r.Steer(model.NewUserMessage("还有 B2")); err != nil {
+	if err := r.Steer(context.Background(), model.NewUserMessage("还有 B2")); err != nil {
 		t.Fatal(err)
 	}
 	<-r.Done()
