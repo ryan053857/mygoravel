@@ -12,6 +12,7 @@
 - [任务的租约与停止](#leases-and-shutdown)
 - [日志](#logging)
 - [测试](#testing)
+- [使用 Redis](#redis-driver)
 - [使用 Watermill](#using-watermill)
 
 <a id="introduction"></a>
@@ -257,6 +258,32 @@ if err != nil || n != 1 {
     t.Fatalf("queued %d jobs, err %v", n, err)
 }
 ```
+
+<a id="redis-driver"></a>
+## 使用 Redis
+
+任务量大、不想让队列的轮询和写入占用数据库时，可以把任务放进 [Redis](redis.md)。`redisqueue.New` 接收[入口中创建的客户端](redis.md#connecting)和一个键名前缀：
+
+```go
+import "github.com/ryan053857/mygoravel/queue/redisqueue"
+
+jobs := redisqueue.New(a.rdb, "blog:queue")
+
+// 发布
+err := queue.Publish(ctx, jobs, "mail.send", msg)
+
+// 处理：失败任务仍然写入数据库
+failed := queue.NewFailedJobs(a.db, jobs)
+sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
+```
+
+其余的用法和数据库驱动完全相同：退避重试、失败任务、租约与平滑停止的行为一致，`failed.Retry` 把任务放回 Redis。与数据库驱动的区别：
+
+- **不能在事务中发布。** Redis 不参与数据库事务，发布任务和业务写入不是原子的。需要「业务数据提交，任务就一定在」的场景，仍然使用 `queue.Database(tx)`。
+- **失败任务需要数据库。** 用 `WithFailedJobs` 指定，表结构见[准备数据表](#preparing-tables)。
+- **持久性取决于 Redis 的配置。** 只开启 RDB 快照时，Redis 重启会丢失最近一次快照之后发布的任务；需要可靠的队列时开启 AOF（`appendonly yes`）。主从切换同样可能丢失刚写入的任务。
+
+每个 topic 在 Redis 中有四个键，键名以 `blog:queue:{mail.send}:` 开头，花括号让同一个 topic 的键落在同一个集群槽位，因此也可以使用 Redis 集群。任务完成后对应的记录都会删除，不需要清理。租约和延迟按 Redis 服务端的时钟计算，不受各实例时钟偏差影响。
 
 <a id="using-watermill"></a>
 ## 使用 Watermill
