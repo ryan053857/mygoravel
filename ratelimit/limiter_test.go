@@ -34,26 +34,46 @@ func testLimiter(t *testing.T, newLimiter func(ratelimit.Config) ratelimit.Limit
 	})
 
 	t.Run("refills and rejected calls do not consume", func(t *testing.T) {
-		l := newLimiter(ratelimit.Config{Rate: 1, Interval: 300 * time.Millisecond, Burst: 1})
-		if err := l.Allow(ctx, "a"); err != nil {
-			t.Fatal(err)
-		}
-		var retry time.Duration
-		for range 5 {
-			err := l.Allow(ctx, "a")
-			if !errors.Is(err, ratelimit.ErrExceeded) {
-				t.Fatalf("expected rejection, got %v", err)
+		// 结果取决于调用耗时：一组调用接近 interval 时（例如 CI 上 SQLite 写盘慢），
+		// 无法区分配额回满和实现错误，放大 interval 重新检查。
+		for interval := 300 * time.Millisecond; !refillsWithoutConsuming(t, newLimiter(ratelimit.Config{Rate: 1, Interval: interval, Burst: 1}), interval); interval *= 4 {
+			if interval > 5*time.Second {
+				t.Fatal("calls are too slow to check refill timing")
 			}
-			retry = errorx.RetryAfterOf(err)
-		}
-		if retry <= 0 || retry > 300*time.Millisecond {
-			t.Fatalf("retry after=%v", retry)
-		}
-		time.Sleep(retry + 20*time.Millisecond)
-		if err := l.Allow(ctx, "a"); err != nil {
-			t.Fatalf("after waiting retry-after: %v", err)
+			t.Logf("calls took too long for interval %v, retrying with a longer interval", interval)
 		}
 	})
+}
+
+// refillsWithoutConsuming 检查容量为 1 的限流器 l：取得配额后的连续调用都被拒绝且不消耗配额，
+// 等待 Retry-After 之后配额回满。调用耗时超过 interval 的 3/4、结果不能说明问题时返回 false。
+func refillsWithoutConsuming(t *testing.T, l ratelimit.Limiter, interval time.Duration) bool {
+	t.Helper()
+	ctx := context.Background()
+	start := time.Now()
+	if err := l.Allow(ctx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	tooSlow := func() bool { return time.Since(start) >= interval*3/4 }
+	var retry time.Duration
+	for range 5 {
+		err := l.Allow(ctx, "a")
+		if tooSlow() {
+			return false
+		}
+		if !errors.Is(err, ratelimit.ErrExceeded) {
+			t.Fatalf("expected rejection %v after the first call, got %v", time.Since(start), err)
+		}
+		retry = errorx.RetryAfterOf(err)
+	}
+	if retry <= 0 || retry > interval {
+		t.Fatalf("retry after=%v, interval=%v", retry, interval)
+	}
+	time.Sleep(retry + 20*time.Millisecond)
+	if err := l.Allow(ctx, "a"); err != nil {
+		t.Fatalf("after waiting retry-after: %v", err)
+	}
+	return true
 }
 
 func TestMemory(t *testing.T) {

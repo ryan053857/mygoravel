@@ -138,7 +138,7 @@ root.AddCommand(command.Run("work", "处理队列任务", bootstrap.Work))
 
 `router.Run` 一直运行到进程收到停止信号。`defer sub.Close()` 在它返回后等待最后的处理结果写回数据库；数据库由 `run` 在所有部分都返回之后才关闭。
 
-worker 可以和 HTTP 服务[运行在同一个进程中](commands.md#running-together)，任务量大了再单独部署，按任务量增减实例数。多个 worker 同时运行是安全的，每个任务只会被其中一个领取。
+worker 可以和 HTTP 服务、调度器[运行在同一个进程中](commands.md#running-together)，任务量大了再单独部署，按任务量增减实例数。多个 worker 同时运行是安全的，每个任务只会被其中一个领取。
 
 <a id="configuration"></a>
 ### 配置
@@ -208,8 +208,14 @@ err := failed.Retry(ctx, id) // 不存在时返回 queue.ErrFailedJobNotFound
 n, err := failed.Cleanup(ctx, time.Now().AddDate(0, 0, -30), 1000)
 ```
 
-> [!NOTE]
-> 定时任务功能还在开发中，完成后会提供把 `Cleanup` 注册为定时任务的方式。在此之前，可以在应用自己的定时器或命令中定期调用它。
+用[定时任务](scheduling.md#framework-cleanups)每天执行一次：
+
+```go
+sched.Add("queue:prune-failed", "@daily", func(ctx context.Context) error {
+    _, err := failed.Cleanup(ctx, time.Now().AddDate(0, 0, -30), 1000)
+    return err
+})
+```
 
 <a id="leases-and-shutdown"></a>
 ## 任务的租约与停止

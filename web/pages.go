@@ -42,7 +42,7 @@ const (
 	ModeRoutes
 )
 
-// Options 创建 Pages。运行模式下，除 TrustedOrigins、Logger 外都必须设置。
+// Options 创建 Pages。运行模式下，除 Resolve、TrustedOrigins、Logger 外都必须设置。
 type Options struct {
 	Mode Mode
 	// Sessions 是页面使用的会话，由 session.New 创建。Pages 接管它的错误处理：
@@ -50,6 +50,10 @@ type Options struct {
 	Sessions *scs.SessionManager
 	// Login 是登录页地址。Require 的路由把未登录的请求带到这里，并在 next 参数中附上原地址。
 	Login string
+	// Resolve 在 Require 保护的每个请求中，把登录时保存的主体转换为当前的主体，例如重新查询用户的状态和权限；
+	// nil 时直接使用保存的主体。返回 4xx 类错误或 ID 为空的主体表示主体已失效：销毁会话并按未登录处理；
+	// 返回 5xx 类错误时呈现错误页。scope 检查使用返回的主体，主体的 Method 为 session。
+	Resolve func(r *http.Request, stored identity.Subject) (identity.Subject, error)
 	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求。
 	// message 来自 httpx.ErrorDetail：业务错误的译文，或状态描述。
 	ErrorPage func(status int, message string) templ.Component
@@ -98,12 +102,17 @@ func New(opts Options) *Pages {
 }
 
 // authorize 按 access 检查登录和 scope，通过后把主体写入 identity.WithSubject。
+// 设置了 Options.Resolve 时，主体和 scope 取自它的返回值。
 func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 	if !access.login {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sub, ok := session.Subject(r.Context(), p.opts.Sessions)
+		sub, ok, err := p.subject(r)
+		if err != nil {
+			p.Error(w, r, err)
+			return
+		}
 		if !ok {
 			Redirect(w, r, p.opts.Login+"?next="+url.QueryEscape(returnTo(r)))
 			return
@@ -126,6 +135,25 @@ func (p *Pages) Login(ctx context.Context, sub identity.Subject) error {
 // Logout 销毁当前会话，见 session.Logout。
 func (p *Pages) Logout(ctx context.Context) error {
 	return session.Logout(ctx, p.opts.Sessions)
+}
+
+// subject 返回当前请求的主体：会话中保存的主体，经过 Options.Resolve 转换。
+// Resolve 认为主体已失效时销毁会话，返回 ok 为 false；只有需要呈现错误页时返回 err。
+func (p *Pages) subject(r *http.Request) (identity.Subject, bool, error) {
+	ctx := r.Context()
+	stored, ok := session.Subject(ctx, p.opts.Sessions)
+	if !ok || p.opts.Resolve == nil {
+		return stored, ok, nil
+	}
+	sub, err := p.opts.Resolve(r, stored)
+	if err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError {
+		return identity.Subject{}, false, errors.Wrap(err, "resolve subject")
+	}
+	if err != nil || sub.ID == "" {
+		return identity.Subject{}, false, session.Logout(ctx, p.opts.Sessions)
+	}
+	sub.Method = "session"
+	return sub, true, nil
 }
 
 // returnTo 返回登录后应回到的本站地址：htmx 请求取发起请求的页面，其余取请求本身。

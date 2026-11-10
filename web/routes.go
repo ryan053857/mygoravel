@@ -24,7 +24,8 @@ var Public = Access{declared: true}
 
 // Require 要求请求属于已登录的会话，并具备 scopes 中的全部权限：
 // 未登录时跳转到 Options.Login，并在 next 参数中带上原地址（htmx 请求取自 HX-Current-URL）；
-// 缺少 scope 时呈现 403。通过后主体写入 identity.WithSubject，处理器用 identity.FromContext 读取。
+// 缺少 scope 时呈现 403。设置了 Options.Resolve 时，主体和 scope 取自它的返回值。
+// 通过后主体写入 identity.WithSubject，处理器用 identity.FromContext 读取。
 func Require(scopes ...string) Access {
 	return Access{declared: true, login: true, scopes: slices.Clone(scopes)}
 }

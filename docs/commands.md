@@ -54,7 +54,8 @@ func New() *cobra.Command {
     root.AddCommand(
         command.Run("serve", "启动 HTTP 服务", bootstrap.Serve),
         command.Run("work", "处理队列任务", bootstrap.Work),
-        command.Run("start", "在一个进程中运行 HTTP 服务和队列", bootstrap.Start),
+        command.Run("schedule", "执行定时任务", bootstrap.Schedule),
+        command.Run("start", "在一个进程中运行 HTTP 服务、队列和定时任务", bootstrap.Start),
         migratecmd.New(migrations.FS, postgres.Driver, dbConfig),
         httpcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
         httpcmd.Routes(bootstrap.DocRouter),
@@ -125,7 +126,7 @@ root.AddCommand(
 <a id="running-together"></a>
 ### 在一个进程中运行多个部分
 
-博客应用有两个常驻部分：HTTP 服务和[队列 worker](queue.md#running-workers)，分别是 `App` 的 `HTTP` 和 `Worker` 方法（见[依赖装配](dependencies.md#assembling-the-application)）。每个命令只是选择运行哪些部分：
+博客应用有三个常驻部分：HTTP 服务、[队列 worker](queue.md#running-workers) 和[定时任务调度器](scheduling.md#running-the-scheduler)，分别是 `App` 的 `HTTP`、`Worker` 和 `Scheduler` 方法（见[依赖装配](dependencies.md#assembling-the-application)）。每个命令只是选择运行哪些部分：
 
 ```go
 // internal/bootstrap/app.go
@@ -137,8 +138,12 @@ func Work(ctx context.Context, cfg settings.Config) error {
     return run(ctx, cfg, (*App).Worker)
 }
 
+func Schedule(ctx context.Context, cfg settings.Config) error {
+    return run(ctx, cfg, (*App).Scheduler)
+}
+
 func Start(ctx context.Context, cfg settings.Config) error {
-    return run(ctx, cfg, (*App).HTTP, (*App).Worker)
+    return run(ctx, cfg, (*App).HTTP, (*App).Worker, (*App).Scheduler)
 }
 ```
 
@@ -146,13 +151,14 @@ func Start(ctx context.Context, cfg settings.Config) error {
 | --- | --- |
 | `serve` | HTTP 服务 |
 | `work` | 队列 worker |
-| `start` | 两者，在同一个进程中 |
+| `schedule` | 定时任务调度器 |
+| `start` | 以上三者，在同一个进程中 |
 
-小型部署只运行 `start`：一个进程、一份配置、一套资源。业务量增长后改为分别部署 `serve` 和 `work`，各自按负载增减实例，代码不用改。
+小型部署只运行 `start`：一个进程、一份配置、一套资源。业务量增长后改为分别部署 `serve`、`work` 和 `schedule`，各自按负载增减实例，代码不用改。`start` 也可以部署多个实例：worker 竞争领取任务，调度器通过锁保证[每次触发只执行一次](scheduling.md#multiple-instances)。
 
 `run` 用 `command.Concurrently` 同时运行这些部分：
 
-- 收到停止信号时，各部分同时平滑停止：HTTP 服务排空请求，worker 停止领取并等待处理中的任务。全部返回之后才关闭数据库。
+- 收到停止信号时，各部分同时平滑停止：HTTP 服务排空请求，worker 停止领取并等待处理中的任务，调度器不再触发并等待执行中的任务。全部返回之后才关闭数据库。
 - 一个部分启动失败（例如端口被占用）或出错退出时，其余部分随之停止，进程以非 0 状态退出。
 - 一个部分在收到停止信号之前就正常返回，同样视为异常，错误中包含 `command.ErrStoppedEarly`，交给 systemd、Kubernetes 等重启。
 

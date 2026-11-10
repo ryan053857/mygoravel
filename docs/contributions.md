@@ -63,16 +63,16 @@ docker exec mygoravel-test-postgres pg_isready -U postgres
 然后在仓库根目录执行：
 
 ```bash
-export DATABASE_TEST_DSN='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
+export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
 export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
 go test -race -count=1 -tags=integration ./...
 ```
 
-没有设置 `DATABASE_TEST_DSN` 或 `REDIS_TEST_URL` 时，集成测试会失败而不是跳过。Redis 测试给每个键加随机前缀，不会清空数据，但仍请使用专门的测试实例。测试完成后执行 `docker stop mygoravel-test-postgres mygoravel-test-redis` 清理。
+没有设置 `POSTGRES_TEST_URL` 或 `REDIS_TEST_URL` 时，集成测试会失败而不是跳过。Redis 测试给每个键加随机前缀，不会清空数据，但仍请使用专门的测试实例。测试完成后执行 `docker stop mygoravel-test-postgres mygoravel-test-redis` 清理。
 
 集成测试中包含对迁移失败场景的演练，例如非事务迁移执行到一半失败后，检查数据库状态、人工恢复并再次执行。
 
-文件服务集成测试同时使用真实 PostgreSQL 和本地存储或 gofakes3，验证单张 `files` 表的状态变化、预签名直传、分片上传、确认、删除和清理。只运行文件相关测试可以执行 `go test -race -tags=integration ./filesystem/...`，仍需设置上述 `DATABASE_TEST_DSN`。
+文件服务集成测试同时使用真实 PostgreSQL 和本地存储或 gofakes3，验证单张 `files` 表的状态变化、预签名直传、分片上传、确认、删除和清理。只运行文件相关测试可以执行 `go test -race -tags=integration ./filesystem/...`，仍需设置上述 `POSTGRES_TEST_URL`。
 
 <a id="architecture-tests"></a>
 ### 架构测试

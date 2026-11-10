@@ -59,8 +59,8 @@ CREATE TABLE articles (
     content      text NOT NULL,
     status       text NOT NULL DEFAULT 'draft',
     published_at timestamptz,
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    updated_at   timestamptz NOT NULL DEFAULT now(),
+    created_at   timestamptz NOT NULL,
+    updated_at   timestamptz NOT NULL,
     deleted_at   timestamptz,
     CONSTRAINT articles_slug_key UNIQUE (slug)
 );
@@ -69,7 +69,7 @@ CREATE TABLE articles (
 DROP TABLE articles;
 ```
 
-这里显式声明了三个时间字段，与[文章模型](database.md#defining-models)保持一致。`DEFAULT now()` 仅在插入未提供列值或使用 `DEFAULT` 时生效；`updated_at` 的更新由[模型钩子](database.md#timestamps)维护，允许为空的 `deleted_at` 配合 Bun 的[软删除标签](database.md#soft-deletes)使用。模型标签不会自动修改数据库表结构。
+这里显式声明了三个时间字段，与[文章模型](database.md#defining-models)保持一致。时间列不设数据库默认值，`created_at` 和 `updated_at` 由[模型钩子](database.md#timestamps)写入，三种数据库的规则相同；允许为空的 `deleted_at` 配合 Bun 的[软删除标签](database.md#soft-deletes)使用。模型标签不会自动修改数据库表结构。
 
 默认情况下，每个迁移文件在一个事务中执行，失败时整体回滚。
 

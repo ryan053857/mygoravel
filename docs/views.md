@@ -226,7 +226,33 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
 
 `pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
 
-会话保存的是登录时主体的快照。用户的 scope 变化后，已登录的会话仍然使用旧的 scope，直到重新登录。需要立即生效时，用 `RevokeSubject` 撤销该用户的全部会话，见[撤销会话](session.md#revoking-sessions)。
+会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时设置 `Options.Resolve`，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回当前的主体：
+
+```go
+pages := web.New(web.Options{
+    Sessions: sessions,
+    Login:    "/login",
+    Resolve: func(r *http.Request, stored identity.Subject) (identity.Subject, error) {
+        u, err := a.users.Get(r.Context(), stored.ID)
+        if err != nil {
+            return identity.Subject{}, err
+        }
+        if u.Disabled {
+            return identity.Subject{}, user.ErrDisabled.New()
+        }
+        return identity.Subject{ID: u.ID, Type: identity.SubjectUser, Scopes: u.Scopes}, nil
+    },
+    // ErrorPage 等其余字段同上
+})
+```
+
+| `Resolve` 返回 | 结果 |
+| --- | --- |
+| 主体 | scope 检查和处理器都使用它，`Method` 为 `session` |
+| 4xx 类错误（例如账号已停用、用户不存在），或 `ID` 为空的主体 | 销毁会话，按未登录跳转到登录页 |
+| 5xx 类错误（例如数据库故障） | 呈现错误页 |
+
+每个请求因此多一次查询，访问量大时可以在 `users.Get` 中加缓存。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面
