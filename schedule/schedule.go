@@ -11,6 +11,7 @@ import (
 
 	"github.com/adhocore/gronx"
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/logging"
@@ -35,6 +36,7 @@ type Scheduler struct {
 	logger          *slog.Logger
 	shutdownTimeout time.Duration
 	metrics         *metrics
+	tracer          trace.Tracer // 为 nil 时不创建 span
 
 	mu      sync.Mutex
 	tasks   []*task
@@ -264,8 +266,10 @@ func (s *Scheduler) execute(ctx context.Context, t *task, tick time.Time) error 
 			defer stop()
 		}
 	}
+	ctx, end := s.startSpan(ctx, t.name, tick)
 	start := time.Now()
 	err := call(ctx, t.run)
+	end(err)
 	s.metrics.ran(ctx, t.name, time.Since(start), err)
 	s.logger.DebugContext(ctx, "scheduled task finished", "duration", time.Since(start), "error", err)
 	return err

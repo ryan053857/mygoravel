@@ -144,7 +144,7 @@ sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
 
 队列负责重试、记录失败，耗时的工作也不会占用调度器所在的进程。
 
-调度器的日志带有 `component=schedule` 字段，任务的 `ctx` 中带有 `task` 字段，用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它。传入 `schedule.WithMeterProvider(a.meters)` 时，调度器还会报告每次执行的耗时、结果和被跳过的次数，用来发现长时间没有成功执行的任务，见[指标与链路追踪](telemetry.md#schedule-metrics)。
+调度器的日志带有 `component=schedule` 字段，任务的 `ctx` 中带有 `task` 字段，用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它。传入 `schedule.WithMeterProvider(a.meters)` 时，调度器还会报告每次执行的耗时、结果和被跳过的次数，用来发现长时间没有成功执行的任务，见[指标与链路追踪](telemetry.md#schedule-metrics)；传入 `schedule.WithTracerProvider(a.tracers)` 时，每次执行是一条链路的起点。
 
 调度器不补跑错过的触发：进程暂停或调度落后不到一分钟时，错过的触发会补上，同一个任务只补一次；部署、重启期间错过的触发直接跳过。收到停止信号后，调度器不再触发新任务，等待执行中的任务结束，最多等待 `shutdown_timeout`，超时后取消它们的 `ctx`。这个时间在应用配置的调度段中设置：
 

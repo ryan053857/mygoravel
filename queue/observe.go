@@ -76,4 +76,5 @@ func (s *Subscriber) observe(ctx context.Context, e Event) {
 			o(ctx, e)
 		}()
 	}
+	s.endSpan(ctx, e)
 }
