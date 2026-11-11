@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -133,4 +134,52 @@ func TestSubscribeAfterClose(t *testing.T) {
 		t.Fatalf("err=%v", sub.Err())
 	}
 	sub.Close() // 重复关闭无害
+}
+
+func TestListenReceivesEveryTopic(t *testing.T) {
+	h := broadcast.New(broadcast.Memory(), nil)
+	defer h.Close()
+	var got []string
+	stop := h.Listen(func(m broadcast.Message) {
+		got = append(got, m.Topic+"="+string(m.Data))
+		// 回调中可以再发布：Memory 后端会直接回到投递。
+		if m.Topic == "room:1" {
+			_ = h.Publish(context.Background(), "echo", m.Data)
+		}
+	}, nil)
+	sub := h.Subscribe("room:1")
+	for _, topic := range []string{"room:1", "room:2"} {
+		if err := h.Publish(context.Background(), topic, []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := []string{"room:1=x", "echo=x", "room:2=x"}; !slices.Equal(got, want) {
+		t.Fatalf("listener received %v, want %v", got, want)
+	}
+	broadcasttest.Receive(t, sub) // 订阅照常收到
+
+	stop()
+	stop()
+	_ = h.Publish(context.Background(), "room:1", []byte("y"))
+	if len(got) != 3 {
+		t.Fatalf("listener received %v after stop", got)
+	}
+}
+
+func TestListenIsToldAboutLostMessages(t *testing.T) {
+	backend := lossy{lose: make(chan error)}
+	h := broadcast.New(backend, nil)
+	defer h.Close()
+	lost := make(chan error, 1)
+	h.Listen(func(broadcast.Message) {}, func(err error) { lost <- err })
+	cause := errors.New("connection reset")
+	backend.lose <- cause
+	select {
+	case err := <-lost:
+		if !errors.Is(err, cause) {
+			t.Fatalf("lost called with %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("lost was not called")
+	}
 }

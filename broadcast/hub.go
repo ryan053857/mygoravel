@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -22,6 +23,7 @@ type Hub struct {
 
 	mu     sync.Mutex
 	topics map[string]map[*Subscription]struct{}
+	taps   []*tap // 写时复制，读取后可以在锁外使用
 	closed bool
 
 	cancel context.CancelFunc
@@ -104,6 +106,34 @@ func (h *Hub) Subscribe(topics ...string) *Subscription {
 	return s
 }
 
+// tap 是 Listen 登记的一对回调。
+type tap struct {
+	deliver func(Message)
+	lost    func(error)
+}
+
+// Listen 登记 deliver 接收本实例收到的每一条消息，不区分主题；Backend 可能丢了消息时调用 lost。
+// 它供需要自己按主题分发的组件使用，例如 realtime 把消息转给 WebSocket 客户端；业务代码用 Subscribe。
+//
+// 两个回调按消息到达的顺序依次调用，不能阻塞：慢的回调会拖住本实例的全部订阅。lost 可以为 nil。
+// 返回的函数取消登记，可以重复调用。
+func (h *Hub) Listen(deliver func(Message), lost func(error)) (stop func()) {
+	if deliver == nil {
+		panic("broadcast: nil deliver")
+	}
+	t := &tap{deliver: deliver, lost: lost}
+	h.mu.Lock()
+	h.taps = append(h.taps[:len(h.taps):len(h.taps)], t)
+	h.mu.Unlock()
+	return func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if i := slices.Index(h.taps, t); i >= 0 {
+			h.taps = slices.Delete(slices.Clone(h.taps), i, i+1)
+		}
+	}
+}
+
 // Close 停止接收消息，并以 ErrClosed 结束全部订阅。之后的 Publish 仍会交给 Backend。
 func (h *Hub) Close() error {
 	h.cancel()
@@ -117,7 +147,6 @@ func (h *Hub) Close() error {
 
 func (h *Hub) deliver(msg Message) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	for s := range h.topics[msg.Topic] {
 		select {
 		case s.ch <- msg:
@@ -126,13 +155,25 @@ func (h *Hub) deliver(msg Message) {
 			s.end(ErrSlow)
 		}
 	}
+	taps := h.taps
+	h.mu.Unlock()
+	// 在锁外调用：回调可以再调用 Publish（Memory 后端会直接回到 deliver）。
+	for _, t := range taps {
+		t.deliver(msg)
+	}
 }
 
 func (h *Hub) lost(err error) {
 	h.logger.Warn("broadcast messages may have been lost; ending subscriptions", "error", err)
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.endAll(errors.WithSecondaryError(ErrLost, err))
+	taps := h.taps
+	h.mu.Unlock()
+	for _, t := range taps {
+		if t.lost != nil {
+			t.lost(err)
+		}
+	}
 }
 
 // endAll 以 err 结束全部订阅。调用方持有 h.mu。

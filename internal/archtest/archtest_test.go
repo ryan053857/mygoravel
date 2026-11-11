@@ -41,10 +41,11 @@ var dependencies = map[string][]string{
 	"hashing":      {},
 	"queue":        {"logging"},
 	"broadcast":    {"identity", "logging"},
+	"realtime":     {"broadcast", "errorx", "httpx", "identity", "logging"},
 	"schedule":     {"lock", "logging"},
 	"ai":           {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
 	"command":      {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports", "exports"},
+	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports", "exports", "realtime"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
@@ -176,6 +177,22 @@ func TestLocalFilesDoesNotLinkS3(t *testing.T) {
 	for _, dep := range strings.Fields(string(out)) {
 		if under(dep, "github.com/aws/aws-sdk-go-v2") {
 			t.Errorf("local filesystem depends on %s", dep)
+		}
+	}
+}
+
+// TestOnlyRealtimeLinksCentrifuge 确保不使用 WebSocket 实时频道的应用不会链接 Centrifuge：
+// 广播、SSE 和 AI 的集群协作都只依赖 broadcast。
+func TestOnlyRealtimeLinksCentrifuge(t *testing.T) {
+	for _, pkg := range []string{"/broadcast", "/broadcast/redisbroadcast", "/broadcast/natsbroadcast", "/httpx/rest", "/web", "/ai"} {
+		out, err := exec.Command("go", "list", "-deps", module+pkg).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			if under(dep, "github.com/centrifugal") {
+				t.Errorf("%s depends on %s", pkg, dep)
+			}
 		}
 	}
 }
