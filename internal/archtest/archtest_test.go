@@ -27,6 +27,7 @@ var dependencies = map[string][]string{
 	"session":    {"identity"},
 	"apitoken":   {"errorx", "identity"},
 	"authz":      {"errorx", "identity"},
+	"activity":   {"identity", "logging"},
 	"web":        {"errorx", "httpx", "i18n", "identity", "logging", "session"},
 	"lock":       {},
 	"hashing":    {},
@@ -35,7 +36,7 @@ var dependencies = map[string][]string{
 	"schedule":   {"lock", "logging"},
 	"ai":         {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
 	"command":    {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "broadcast"},
+	"internal":   {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "broadcast"},
 }
 
 // 基础包不引用传输、数据库和命令组件。

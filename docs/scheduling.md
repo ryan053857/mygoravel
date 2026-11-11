@@ -160,6 +160,7 @@ sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
 | [广播](broadcasting.md#database-backend) | `broadcast.NewDatabase(db, nil).Cleanup` | 每 10 分钟 |
 | [限流](rate-limiting.md#cleanup) | 任意一个 `ratelimit.NewDatabase(...)` 的 `Cleanup` | 每小时 |
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
+| [操作日志](activity.md#retention) | `activity.Cleanup(db, 保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(ctx, before, limit)` | 每天 |
 
 使用 Redis 存储时过期的数据由 Redis 自动删除，不需要注册清理任务。
