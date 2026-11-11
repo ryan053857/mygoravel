@@ -142,10 +142,17 @@ func TestRenderUnreachable(t *testing.T) {
 }
 
 func TestRenderCanceled(t *testing.T) {
+	// 处理器一直不响应，直到测试结束。不能只等 r.Context()：请求体还没读完时，
+	// net/http 发现不了客户端已经断开，处理器会一直阻塞，srv.Close 也就等不到它返回。
+	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
 	}))
 	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) }) // 先于 srv.Close 执行
 	r, err := gotenberg.New(gotenberg.Config{URL: srv.URL})
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
