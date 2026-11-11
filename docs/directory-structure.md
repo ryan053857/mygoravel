@@ -158,7 +158,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `apitoken` | 存在数据库中的 API 令牌，用作 JSON API 的 Bearer 凭据 | [API 令牌](api-tokens.md) |
 | `authz` | 基于角色的权限：代码中声明的权限目录，角色按租户分配 | [授权](authorization.md)、[多租户](tenancy.md) |
 | `hashing` | 密码的单向哈希与重新哈希 | [哈希](hashing.md) |
-| `database` | 用应用选定的驱动打开连接池，`RunInTx` 与提交后回调 | [数据库](database.md) |
+| `database` | 用应用选定的驱动打开连接池，`RunInTx` 与提交后回调，查询链路用的 `ChildSpans` | [数据库](database.md)、[数据库的链路](telemetry.md#database-tracing) |
 | `database/postgres`、`database/sqlite`、`database/mysql` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |

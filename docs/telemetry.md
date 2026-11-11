@@ -215,33 +215,15 @@ sched := schedule.New(a.locker, a.cfg.Schedule, nil,
 ```go
 db.AddQueryHook(bunotel.NewQueryHook(
     bunotel.WithMeterProvider(meters),
-    bunotel.WithTracerProvider(childSpans{tracers}),
+    bunotel.WithTracerProvider(database.ChildSpans(tracers)),
 ))
 ```
 
 span 的名称是操作（如 `SELECT`），带有 SQL 语句和发起查询的代码位置。语句中的参数保持为占位符，例如 `WHERE (id = ?)`，用户数据不会进入链路。
 
-不要直接传入 `tracers`。bunotel 为每条查询都创建 span，不管 `ctx` 中有没有上级 span；而队列轮询、调度器加锁这些后台查询不属于任何请求，每秒都会各自成为一条只有一个 span 的链路，淹没真正有用的数据。`childSpans` 只在已有上级 span 时创建：
+`database.ChildSpans` 让查询只在已有上级 span 时创建 span。不要直接传入 `tracers`：bunotel 为每条查询都创建 span，不管 `ctx` 中有没有上级 span；而队列轮询、调度器加锁这些后台查询不属于任何请求，每秒都会各自成为一条只有一个 span 的链路，淹没真正有用的数据。
 
-```go
-// childSpans 只为已在链路中的查询创建 span，后台查询不产生孤立的链路。
-type childSpans struct{ trace.TracerProvider }
-
-func (p childSpans) Tracer(name string, opts ...trace.TracerOption) trace.Tracer {
-    return childTracer{p.TracerProvider.Tracer(name, opts...)}
-}
-
-type childTracer struct{ trace.Tracer }
-
-func (t childTracer) Start(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-    if !trace.SpanContextFromContext(ctx).IsValid() {
-        return ctx, trace.SpanFromContext(ctx) // 不记录的空 span
-    }
-    return t.Tracer.Start(ctx, name, opts...)
-}
-```
-
-`trace` 是 `go.opentelemetry.io/otel/trace`。查询要接在请求的链路上，前提是把请求的 `ctx` 一路传给 Bun 的 `Scan`、`Exec`；用 `context.Background()` 发起的查询不会出现在链路中。
+查询要接在请求的链路上，前提是把请求的 `ctx` 一路传给 Bun 的 `Scan`、`Exec`；用 `context.Background()` 发起的查询不会出现在链路中。
 
 <a id="trace-logs"></a>
 ### 日志
