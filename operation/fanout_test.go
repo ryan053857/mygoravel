@@ -212,10 +212,22 @@ func TestRetryFailedUnit(t *testing.T) {
 		mu.Lock()
 		down = false
 		mu.Unlock()
+		// 最后一次尝试先在 settle 中记下失败（操作因此已经完成），再把错误交给队列，由队列记入失败任务，
+		// 所以失败任务可能稍晚出现。
 		failed := queue.NewFailedJobs(e.db)
-		jobs, err := failed.List(ctx, queue.FailedQuery{Topic: string(unitTopic)})
-		if err != nil || len(jobs) != 1 {
-			t.Fatalf("failed jobs: %+v %v", jobs, err)
+		var jobs []queue.FailedJob
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			var err error
+			jobs, err = failed.List(ctx, queue.FailedQuery{Topic: string(unitTopic)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(jobs) > 0 || time.Now().After(deadline) {
+				break
+			}
+		}
+		if len(jobs) != 1 {
+			t.Fatalf("failed jobs: %+v", jobs)
 		}
 		if err := failed.Retry(ctx, jobs[0].ID); err != nil {
 			t.Fatal(err)
