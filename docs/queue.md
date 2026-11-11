@@ -12,6 +12,10 @@
     - [失败任务](#failed-jobs)
 - [任务的租约与停止](#leases-and-shutdown)
 - [日志](#logging)
+- [观测](#observability)
+    - [任务事件](#job-events)
+    - [队列状态](#queue-stats)
+    - [一个现成的命令](#stats-command)
 - [测试](#testing)
 - [使用 Redis](#redis-driver)
 - [使用 NATS](#nats-driver)
@@ -211,16 +215,20 @@ if errors.Is(err, article.ErrNotFound) {
 <a id="failed-jobs"></a>
 ### 失败任务
 
-失败任务保存在 `queue_failed_jobs` 表中，`error` 列是最后一次的错误信息，包括堆栈。直接用 SQL 查询它们：
-
-```sql
-SELECT id, topic, attempts, failed_at, error FROM queue_failed_jobs ORDER BY failed_at DESC;
-```
-
-修复问题之后，用 `FailedJobs.Retry` 把任务放回队列，执行次数从 0 开始计算：
+失败任务保存在 `queue_failed_jobs` 表中，`queue.FailedJobs` 用来查看和处理它们：
 
 ```go
 failed := queue.NewFailedJobs(db)
+
+jobs, err := failed.List(ctx, queue.FailedQuery{Topic: "mail.send", Limit: 50}) // 从新到旧
+job, err := failed.Get(ctx, id)      // job.Error 是最后一次的错误信息，包括堆栈
+counts, err := failed.Count(ctx)     // 每个 topic 的失败任务数
+err = failed.Delete(ctx, id)         // 不再需要的任务直接删除
+```
+
+修复问题之后，用 `Retry` 把任务放回队列，执行次数从 0 开始计算：
+
+```go
 err := failed.Retry(ctx, id) // 不存在时返回 queue.ErrFailedJobNotFound
 ```
 
@@ -256,6 +264,120 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 队列的日志带有 `component=queue` 字段，可以[单独设置级别](logging.md#component-levels)。任务失败后等待重试记录为 `warn`，转入失败任务表记录为 `error`，日志中包含 topic、错误和下次重试的等待时间。
 
 处理函数的 `ctx` 中带有 `message_id`（任务 ID）、`attempt`（第几次执行），以及发布时的 `request_id`。使用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它们，可以把一个请求和它产生的任务串起来。
+
+<a id="observability"></a>
+## 观测
+
+`queue` 不内置管理页面和监控指标，而是提供观测需要的数据：任务事件、队列状态和失败任务。用它们写命令、做后台页面，或者接入你使用的监控系统。
+
+<a id="job-events"></a>
+### 任务事件
+
+`queue.WithObserver` 让订阅者在每次状态变化时通知你。成功的任务会从队列中删除，执行历史、耗时这类数据只能从事件中得到：
+
+```go
+sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil,
+    queue.WithObserver(func(ctx context.Context, e queue.Event) {
+        if e.Kind == queue.JobStarted {
+            return
+        }
+        _, err := a.db.NewInsert().Model(&JobRun{
+            JobID: e.Job.ID, Topic: e.Job.Topic, Attempt: e.Job.Attempt,
+            Status: e.Kind.String(), Duration: e.Duration, Error: errorText(e.Err),
+        }).Exec(ctx)
+        if err != nil {
+            slog.ErrorContext(ctx, "record job run failed", "error", err)
+        }
+    }))
+```
+
+这里把结束的任务写进应用自己的 `job_runs` 表，后台页面查询这张表就能看到执行历史；保留多久由应用决定，用[定时任务](scheduling.md)清理。
+
+| 事件 | 时机 |
+| --- | --- |
+| `JobStarted` | 任务交给处理函数 |
+| `JobSucceeded` | 处理成功并已确认 |
+| `JobRetrying` | 处理失败，`RetryAt` 是下一次执行时间 |
+| `JobFailed` | 转入失败任务表 |
+| `JobReleased` | 停止等待超时，还回队列 |
+| `JobLeaseLost` | 租约过期，任务可能已被其他实例领取 |
+
+除 `JobStarted` 外，事件都在结果写回队列之后报告，`Duration` 是处理耗时，`Err` 是失败原因。Observer 在处理任务的 goroutine 中同步调用，耗时会占用并发名额：上面的写库很快没有问题，更重的工作请缓冲后批量处理。推送到 Prometheus、OpenTelemetry 等监控系统也在这里完成，框架不绑定具体的监控方案。
+
+<a id="queue-stats"></a>
+### 队列状态
+
+`queue.Stats` 返回每个 topic 当前的任务数：
+
+```go
+stats, err := queue.Stats(ctx, queue.Database(db))
+for _, s := range stats {
+    // s.Ready、s.Delayed、s.Retrying、s.Running、s.OldestReadyAt
+}
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `Ready` | 已经到期、等待领取，包括租约过期、等待重新领取的任务 |
+| `Delayed` | 还没到执行时间、从未执行过 |
+| `Retrying` | 失败后等待重试 |
+| `Running` | 正在处理 |
+| `OldestReadyAt` | `Ready` 中最早到期的时间 |
+
+最值得关注的是 `time.Since(s.OldestReadyAt)`：积压最久的任务已经等了多久。worker 跟不上时它会持续变大，适合作为告警条件。
+
+[NATS 驱动](#nats-driver)只能给出 `Ready` 和 `Running`（`Running` 包括等待重试的任务），`Delayed` 和 `Retrying` 为 `queue.Unknown`，`OldestReadyAt` 为零值。统计会扫描队列中的任务，适合命令和后台页面，不适合每秒抓取；高频的指标请从任务事件中记录。
+
+<a id="stats-command"></a>
+### 一个现成的命令
+
+下面的命令列出每个 topic 的任务数和失败数，加入[根命令](commands.md#declaring-the-cli)后执行 `./bin/api queue stats`：
+
+```go
+func queueCmd() *cobra.Command {
+    stats := &cobra.Command{
+        Use:   "stats",
+        Short: "查看队列中的任务数",
+        Args:  command.NoArgs,
+        RunE: func(cmd *cobra.Command, _ []string) error {
+            cfg, err := command.LoadConfig[settings.Config](cmd)
+            if err != nil {
+                return err
+            }
+            db, err := database.Open(cmd.Context(), postgres.Driver, cfg.Database)
+            if err != nil {
+                return command.AsExitError(command.ExitUnavailable, err)
+            }
+            defer db.Close()
+
+            stats, err := queue.Stats(cmd.Context(), queue.Database(db))
+            if err != nil {
+                return err
+            }
+            failed, err := queue.NewFailedJobs(db).Count(cmd.Context())
+            if err != nil {
+                return err
+            }
+            w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+            fmt.Fprintln(w, "TOPIC\tREADY\tDELAYED\tRETRYING\tRUNNING\tFAILED\tWAITING")
+            for _, s := range stats {
+                waiting := "-"
+                if !s.OldestReadyAt.IsZero() {
+                    waiting = time.Since(s.OldestReadyAt).Round(time.Second).String()
+                }
+                fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%s\n",
+                    s.Topic, s.Ready, s.Delayed, s.Retrying, s.Running, failed[s.Topic], waiting)
+            }
+            return w.Flush()
+        },
+    }
+    root := &cobra.Command{Use: "queue", Short: "队列"}
+    root.AddCommand(stats)
+    return root
+}
+```
+
+查看和重试失败任务的命令写法相同，调用 `FailedJobs` 的 `List` 和 `Retry` 即可。
 
 <a id="testing"></a>
 ## 测试

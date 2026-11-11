@@ -79,7 +79,8 @@ func TestFinishedJobsLeaveNoKeys(t *testing.T) {
 	if err := claims[0].Ack(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if keys, _ := rdb.Keys(ctx, prefix+"*").Result(); len(keys) != 0 {
+	// 只剩记录 topic 的集合。
+	if keys, _ := rdb.Keys(ctx, prefix+"*").Result(); len(keys) != 1 || keys[0] != prefix+":topics" {
 		t.Fatalf("keys left: %v", keys)
 	}
 }

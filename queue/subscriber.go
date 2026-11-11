@@ -41,10 +41,11 @@ const dbTimeout = 30 * time.Second
 //	sub := queue.NewSubscriber(queue.Database(db), cfg, logger)
 //	defer sub.Close()
 type Subscriber struct {
-	driver Driver
-	failed *FailedJobs
-	cfg    Config
-	logger *slog.Logger
+	driver    Driver
+	failed    *FailedJobs
+	cfg       Config
+	logger    *slog.Logger
+	observers []Observer
 
 	mu     sync.Mutex
 	closed bool
@@ -242,6 +243,7 @@ func (s *Subscriber) deliver(ctx context.Context, out chan<- *message.Message, c
 		return false
 	}
 	l.inflight.Add(1)
+	s.observe(msgCtx, Event{Kind: JobStarted, Job: j})
 	go s.track(msgCtx, c, msg, o, cancel, l)
 	return true
 }
@@ -254,6 +256,7 @@ func (s *Subscriber) track(ctx context.Context, c Claim, msg *message.Message, o
 	defer cancel(nil)
 
 	topic := c.Job().Topic
+	started := time.Now()
 	ticker := time.NewTicker(max(s.cfg.Lease/3, time.Millisecond))
 	defer ticker.Stop()
 	held := true
@@ -261,12 +264,12 @@ func (s *Subscriber) track(ctx context.Context, c Claim, msg *message.Message, o
 		select {
 		case <-msg.Acked():
 			if held {
-				s.ack(ctx, c)
+				s.ack(ctx, c, started)
 			}
 			return
 		case <-msg.Nacked():
 			if held {
-				s.nack(ctx, c, o.err)
+				s.nack(ctx, c, o.err, started)
 			}
 			return
 		case <-ticker.C:
@@ -278,13 +281,14 @@ func (s *Subscriber) track(ctx context.Context, c Claim, msg *message.Message, o
 			case errors.Is(err, ErrLeaseLost):
 				held = false
 				s.logger.WarnContext(ctx, "job lease lost", "topic", topic)
+				s.observe(ctx, Event{Kind: JobLeaseLost, Job: c.Job(), Duration: time.Since(started)})
 				cancel(ErrLeaseLost)
 			case err != nil:
 				s.logger.ErrorContext(ctx, "extend lease failed", "topic", topic, "error", err)
 			}
 		case <-l.abandon:
-			if held {
-				s.release(c)
+			if held && s.release(c) {
+				s.observe(ctx, Event{Kind: JobReleased, Job: c.Job(), Duration: time.Since(started)})
 			}
 			cancel(ErrShuttingDown)
 			return
@@ -299,25 +303,34 @@ func withTimeout(fn func(ctx context.Context) error) error {
 	return fn(ctx)
 }
 
-func (s *Subscriber) ack(ctx context.Context, c Claim) {
-	if err := withTimeout(c.Ack); err != nil {
+func (s *Subscriber) ack(ctx context.Context, c Claim, started time.Time) {
+	err := withTimeout(c.Ack)
+	switch {
+	case err == nil:
+		s.observe(ctx, Event{Kind: JobSucceeded, Job: c.Job(), Duration: time.Since(started)})
+	case errors.Is(err, ErrLeaseLost):
+		s.logger.WarnContext(ctx, "job lease lost before acknowledgement", "topic", c.Job().Topic)
+		s.observe(ctx, Event{Kind: JobLeaseLost, Job: c.Job(), Duration: time.Since(started)})
+	default:
 		s.logger.ErrorContext(ctx, "acknowledge finished job failed", "topic", c.Job().Topic, "error", err)
 	}
 }
 
-func (s *Subscriber) nack(ctx context.Context, c Claim, cause error) {
+func (s *Subscriber) nack(ctx context.Context, c Claim, cause error, started time.Time) {
 	j := c.Job()
 	if cause == nil {
 		cause = errors.New("queue: message nacked")
 	}
 	if !IsPermanent(cause) && j.Attempt < s.cfg.MaxAttempts {
 		delay := backoff(j.Attempt)
-		err := withTimeout(func(ctx context.Context) error { return c.Retry(ctx, time.Now().Add(delay)) })
+		at := time.Now().Add(delay)
+		err := withTimeout(func(ctx context.Context) error { return c.Retry(ctx, at) })
 		if err != nil {
 			s.logger.ErrorContext(ctx, "schedule retry failed", "topic", j.Topic, "error", err)
 			return
 		}
 		s.logger.WarnContext(ctx, "job failed, will retry", "topic", j.Topic, "retry_in", delay, "error", cause)
+		s.observe(ctx, Event{Kind: JobRetrying, Job: j, Duration: time.Since(started), Err: cause, RetryAt: at})
 		return
 	}
 	if err := withTimeout(func(ctx context.Context) error { return s.fail(ctx, c, cause) }); err != nil {
@@ -325,6 +338,7 @@ func (s *Subscriber) nack(ctx context.Context, c Claim, cause error) {
 		return
 	}
 	s.logger.ErrorContext(ctx, "job failed", "topic", j.Topic, "error", cause)
+	s.observe(ctx, Event{Kind: JobFailed, Job: j, Duration: time.Since(started), Err: cause})
 }
 
 // failer 由能在一个事务中删除任务并写入失败记录的领取实现（数据库驱动）。
@@ -349,9 +363,11 @@ func (s *Subscriber) fail(ctx context.Context, c Claim, cause error) error {
 	return c.Ack(ctx)
 }
 
-// release 把领取的任务还回队列，立即可被领取，本次领取不计入处理次数。
-func (s *Subscriber) release(c Claim) {
-	if err := withTimeout(c.Release); err != nil && !errors.Is(err, ErrLeaseLost) {
+// release 把领取的任务还回队列，立即可被领取，本次领取不计入处理次数。返回是否还回成功。
+func (s *Subscriber) release(c Claim) bool {
+	err := withTimeout(c.Release)
+	if err != nil && !errors.Is(err, ErrLeaseLost) {
 		s.logger.Error("release job failed", "topic", c.Job().Topic, logging.AttrMessageID, c.Job().ID.String(), "error", err)
 	}
+	return err == nil
 }
