@@ -210,40 +210,28 @@ err = migrate.Up(ctx, provider)
 - **每个环境都必须有的数据**，例如角色或分类，写进迁移的 `Up` 部分。它们和表结构一起受版本控制，在每个环境中只执行一次。
 - **只在开发和演示时需要的数据**，例如几篇示例文章，写成一个应用自己的 `seed` 命令。
 
-下面是博客应用的 `internal/cli/seed.go`，它以 alice 的身份创建并发布两篇文章：
+下面是博客应用的 `internal/bootstrap/seed.go`，它以 alice 的身份创建并发布两篇文章。`db` 由 [bootstrap.Commands](actions.md#as-commands) 在命令执行时装配：
 
 ```go
-package cli
+package bootstrap
 
 import (
     "errors"
 
     "github.com/spf13/cobra"
+    "github.com/uptrace/bun"
 
     "example.com/blog/internal/article"
-    "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/identity"
 )
 
-func seed() *cobra.Command {
+func seed(db *bun.DB) *cobra.Command {
     return &cobra.Command{
         Use:   "seed",
         Short: "写入开发用的示例数据",
         Args:  command.NoArgs,
         RunE: func(cmd *cobra.Command, _ []string) error {
-            cfg, err := command.LoadConfig[settings.Config](cmd)
-            if err != nil {
-                return err
-            }
-            db, err := database.Open(cmd.Context(), postgres.Driver, cfg.Database)
-            if err != nil {
-                return command.AsExitError(command.ExitUnavailable, err)
-            }
-            defer db.Close()
-
             create, publish := article.NewCreate(db), article.NewPublish(db)
             alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
             for _, c := range []article.Changes{
@@ -269,7 +257,7 @@ func seed() *cobra.Command {
 
 示例数据通过 [action](actions.md) 写入，而不是直接插入表中，这样它们和真实请求创建的数据经过相同的验证与规则，表结构变化时也不需要单独维护。slug 的唯一约束让命令可以重复执行：已经存在的文章会被跳过。
 
-把 `seed()` 加入[命令行装配](commands.md#declaring-the-cli)后，在本地准备数据库：
+`seed` 不是某一个 action 的入口，它组合了 `Create` 和 `Publish` 两个动作，直接调用它们的 `Handle`。在本地准备数据库：
 
 ```bash
 go run ./cmd/api migrate up

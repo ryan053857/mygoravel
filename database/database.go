@@ -7,7 +7,13 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
+
+	"github.com/ryan053857/mygoravel/errorx"
 )
+
+// ErrUnavailable 表示 Open 时数据库连不上。它属于 errorx.Unavailable 分类，
+// 命令因此以 command.ExitUnavailable 退出，部署脚本可以据此重试。
+var ErrUnavailable = errorx.Define(errorx.Unavailable, "database.unavailable")
 
 // Driver 是一种数据库的驱动，由子包 database/postgres 和 database/sqlite 提供。
 // 应用只链接自己 import 的驱动；迁移是按数据库写的，因此数据库类型在代码中选定，而不是在配置中。
@@ -55,7 +61,7 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Open 用 driver 创建连接池并 Ping；任何失败都关闭已打开的资源。
+// Open 用 driver 创建连接池并 Ping；任何失败都关闭已打开的资源。Ping 失败时返回 ErrUnavailable。
 func Open(ctx context.Context, driver Driver, cfg Config) (*bun.DB, error) {
 	if driver == nil {
 		return nil, errors.New("database: nil driver")
@@ -73,7 +79,7 @@ func Open(ctx context.Context, driver Driver, cfg Config) (*bun.DB, error) {
 	db.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, errors.Wrap(err, "database: ping")
+		return nil, ErrUnavailable.Wrap(errors.Wrap(err, "database: ping"))
 	}
 	return db, nil
 }

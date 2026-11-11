@@ -60,7 +60,6 @@ func New() *cobra.Command {
         httpcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
         httpcmd.Routes(bootstrap.DocRouter),
         command.Config[settings.Config](),
-        seed(),
     )
     root.AddCommand(bootstrap.Commands()...)
     return root
@@ -266,7 +265,7 @@ root.AddCommand(&cobra.Command{
         }
         db, err := database.Open(cmd.Context(), postgres.Driver, cfg.Database)
         if err != nil {
-            return command.AsExitError(command.ExitUnavailable, err)
+            return err // 连不上时是 database.ErrUnavailable，以 ExitUnavailable 退出
         }
         return db.Close()
     },
@@ -275,7 +274,7 @@ root.AddCommand(&cobra.Command{
 
 选项使用 Cobra 原生的 `Flags` 定义。命令的 context 通过 `cmd.Context()` 获取，进程收到停止信号时它会被取消。需要恰好 n 个位置参数时，用 `command.ExactArgs(n)`，参数个数不对同样以 `ExitUsage` 失败。
 
-执行某个业务动作的命令不必这样手动加载配置和打开数据库：把它写成 action 的 `Command` 入口，用 `command.Bind` 在执行时装配依赖，见[从命令行运行 action](actions.md#as-commands)。
+需要应用资源的命令不必这样手动加载配置和打开数据库：在 `bootstrap.Commands` 中声明它，由 `command.Bind` 在执行时装配 `App`。执行某个业务动作的命令写成 action 的 `Command` 入口，见[从命令行运行 action](actions.md#as-commands)。
 
 <a id="input-and-output"></a>
 ## 输入与输出
@@ -298,7 +297,7 @@ root.AddCommand(&cobra.Command{
 | 4 | `command.ExitUnavailable` | 外部依赖不可用 |
 | 5 | `command.ExitInternal` | 其他未分类的错误 |
 
-用法错误、配置错误和 `migrate` 连不上数据库由框架自动标记。其他错误按[业务错误](errors.md#error-kinds)的分类转换：
+用法错误和配置错误由框架自动标记；`database.Open` 连不上数据库时返回 `database.ErrUnavailable`，它属于 `errorx.Unavailable` 分类。其他错误按[业务错误](errors.md#error-kinds)的分类转换：
 
 | 分类 | 退出码 |
 | --- | --- |

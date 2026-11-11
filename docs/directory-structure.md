@@ -34,9 +34,9 @@ blog/
 │   └── api/
 │       └── main.go          进程入口：执行命令行
 ├── internal/
-│   ├── cli/                 装配命令行：serve、work、schedule、start、routes、openapi、migrate、config、seed，以及各模块的命令
+│   ├── cli/                 装配命令行：serve、work、schedule、start、routes、openapi、migrate、config，以及 bootstrap.Commands
 │   ├── settings/            配置结构与加载
-│   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker、调度器等运行部分，以及各模块的命令
+│   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker、调度器等运行部分，以及需要 App 的命令（各模块命令、seed、queue）
 │   ├── auth/                token 校验器；authweb/ 是登录页
 │   ├── web/                 页面布局与错误页组件（templ）
 │   └── article/             文章业务模块
@@ -61,7 +61,7 @@ blog/
 | 文件 | 章节 |
 | --- | --- |
 | `cmd/api/main.go`、`internal/cli/cli.go` | [命令行](commands.md#declaring-the-cli) |
-| `internal/cli/seed.go` | [填充数据](migrations.md#seeding) |
+| `internal/bootstrap/seed.go` | [填充数据](migrations.md#seeding) |
 | `config/`、`.env`、`internal/settings` | [配置](configuration.md) |
 | `internal/bootstrap/app.go`、`http.go` | [依赖装配](dependencies.md#assembling-the-application) |
 | `internal/bootstrap/worker.go` | [队列](queue.md#running-workers) |

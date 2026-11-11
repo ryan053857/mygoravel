@@ -20,7 +20,7 @@ type docFile struct {
 var blogFiles = []docFile{
 	{"cmd/api/main.go", "commands.md"},
 	{"internal/cli/cli.go", "commands.md"},
-	{"internal/cli/seed.go", "migrations.md"},
+	{"internal/bootstrap/seed.go", "migrations.md"},
 	{"internal/auth/auth.go", "authentication.md"},
 	{"internal/auth/permissions.go", "authorization.md"},
 	{"internal/bootstrap/app.go", "dependencies.md"},
@@ -34,6 +34,8 @@ var blogFiles = []docFile{
 	{"internal/article/get.go", "routing.md"},
 	{"internal/article/routes.go", "routing.md"},
 	{"internal/article/dto.go", "routing.md"},
+	{"internal/article/article_test.go", "testing.md"},
+	{"internal/article/commands_test.go", "testing.md"},
 	{"internal/article/commands.go", "actions.md"},
 	{"internal/bootstrap/commands.go", "actions.md"},
 }
@@ -42,7 +44,7 @@ var blogFiles = []docFile{
 var blogFragments = []struct {
 	path, doc, prefix, header string
 }{
-	{"internal/cli/queue.go", "queue.md", "func queueCmd(", `package cli
+	{"internal/bootstrap/queue.go", "queue.md", "func queueCmd(", `package bootstrap
 
 import (
 	"fmt"
@@ -50,15 +52,11 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/uptrace/bun"
 
-	"example.com/blog/internal/settings"
 	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/postgres"
 	"github.com/ryan053857/mygoravel/queue"
 )
-
-var _ = queueCmd
 `},
 	{"internal/article/publish_command.go", "actions.md", "// Command 处理 article publish", `package article
 
@@ -116,7 +114,7 @@ func TestBlogExampleCompiles(t *testing.T) {
 	}
 	writeFile(t, dir, "go.sum", string(sum))
 
-	cmd := exec.Command("go", "vet", "./...")
+	cmd := exec.Command("go", "vet", "-tags", "integration", "./...")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOWORK=off")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -124,7 +122,7 @@ func TestBlogExampleCompiles(t *testing.T) {
 	}
 }
 
-// completeFile 返回 f.doc 中路径为 f.path 的完整文件：以 package 开头、
+// completeFile 返回 f.doc 中路径为 f.path 的完整文件：以 package 或构建标签开头、
 // 并且在它与上一个代码块之间的正文中写出了 f.path 的代码块。每个路径只能出现一次。
 func completeFile(t *testing.T, root string, f docFile) string {
 	t.Helper()
@@ -134,7 +132,8 @@ func completeFile(t *testing.T, root string, f docFile) string {
 	for _, m := range goBlock.FindAllStringSubmatchIndex(text, -1) {
 		prose, body := text[prev:m[0]], text[m[2]:m[3]]
 		prev = m[1]
-		if strings.HasPrefix(body, "package ") && strings.Contains(prose, "`"+f.path+"`") {
+		isFile := strings.HasPrefix(body, "package ") || strings.HasPrefix(body, "//go:build ")
+		if isFile && strings.Contains(prose, "`"+f.path+"`") {
 			found = append(found, body)
 		}
 	}

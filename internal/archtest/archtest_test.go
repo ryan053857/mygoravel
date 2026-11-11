@@ -19,7 +19,7 @@ var dependencies = map[string][]string{
 	"i18n":       {},
 	"identity":   {},
 	"page":       {"errorx"},
-	"database":   {"config"},
+	"database":   {"config", "errorx"},
 	"filesystem": {"errorx", "identity"},
 	"mail":       {"i18n"},
 	"ratelimit":  {"errorx"},

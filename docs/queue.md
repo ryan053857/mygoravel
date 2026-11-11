@@ -331,25 +331,15 @@ for _, s := range stats {
 <a id="stats-command"></a>
 ### 一个现成的命令
 
-下面的命令列出每个 topic 的任务数和失败数，加入[根命令](commands.md#declaring-the-cli)后执行 `./bin/api queue stats`：
+下面的命令列出每个 topic 的任务数和失败数。它和 `seed` 一样在 [bootstrap.Commands](actions.md#as-commands) 中声明，`db` 在命令执行时装配，之后执行 `./bin/api queue stats`：
 
 ```go
-func queueCmd() *cobra.Command {
+func queueCmd(db *bun.DB) *cobra.Command {
     stats := &cobra.Command{
         Use:   "stats",
         Short: "查看队列中的任务数",
         Args:  command.NoArgs,
         RunE: func(cmd *cobra.Command, _ []string) error {
-            cfg, err := command.LoadConfig[settings.Config](cmd)
-            if err != nil {
-                return err
-            }
-            db, err := database.Open(cmd.Context(), postgres.Driver, cfg.Database)
-            if err != nil {
-                return command.AsExitError(command.ExitUnavailable, err)
-            }
-            defer db.Close()
-
             stats, err := queue.Stats(cmd.Context(), queue.Database(db))
             if err != nil {
                 return err
