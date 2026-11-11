@@ -27,7 +27,7 @@
 
 这些衔接都可以不用，换成应用自己的写法，见[不同区域的界面](#areas)。
 
-本章给博客的编辑后台加上组件：在对话框中新建文章、确认删除，保存后弹出提示。
+本章给博客的编辑后台加上组件：在对话框中编辑文章、确认删除，保存后弹出提示。
 
 <a id="themes"></a>
 ## 主题
@@ -112,38 +112,15 @@ import "github.com/axadrn/shadcn-templ/v2/components/button"
 
 @button.Button(button.Props{
 	Variant:    button.VariantOutline,
-	Attributes: templ.Attributes{"hx-get": "/admin/articles/new", "hx-target": ui.ModalTarget},
+	Attributes: templ.Attributes{"hx-get": "/admin/articles/" + item.ID.String() + "/edit", "hx-target": ui.ModalTarget},
 }) {
-	新建文章
+	编辑
 }
 ```
 
 每个组件的参数和示例见 [shadcn-templ 文档](https://shadcn-templ.com/docs)。`Class` 中的工具类总能覆盖风格的样式，例如 `Class: "rounded-none"` 得到方角按钮。
 
-表单字段配合 `web.Form` 显示验证错误。组件的样式按 `data-invalid="true"`、`aria-invalid="true"` 切换，所以属性的值必须是 `"true"`，没有错误时不写这个属性：
-
-```templ
-templ textField(f *web.Form[article.Changes], name, label string) {
-	@field.Field(field.Props{Attributes: invalid("data-invalid", f.Error(name))}) {
-		@field.Label(field.LabelProps{For: name}) {
-			{ label }
-		}
-		@input.Input(input.Props{ID: name, Name: name, Value: f.Value(name), Attributes: invalid("aria-invalid", f.Error(name))})
-		if msg := f.Error(name); msg != "" {
-			@field.Error() {
-				{ msg }
-			}
-		}
-	}
-}
-
-func invalid(attr, msg string) templ.Attributes {
-	if msg == "" {
-		return nil
-	}
-	return templ.Attributes{attr: "true"}
-}
-```
+表单使用 `ui.TextField`、`ui.SelectField` 等字段组件，它们读取 `web.Form` 的输入和错误，见[渲染表单](forms.md#rendering-forms)。自己组合 `field`、`input` 等组件时注意：组件的样式按 `data-invalid="true"`、`aria-invalid="true"` 切换，属性的值必须是 `"true"`，没有错误时不写这个属性。
 
 不用 Tailwind 时，页面能用的工具类是组件用到的类名，加上一组常用的布局工具类：间距、flex、grid、宽高、文字大小和对齐、主题颜色，以及它们在 `sm`、`md`、`lg` 断点上的变体，完整列表见框架的 `web/ui/css/safelist.css`。用到其他类名时，用 [Tailwind](assets.md#tailwind) 生成样式表。
 
@@ -160,30 +137,37 @@ func invalid(attr, msg string) templ.Attributes {
 <a id="opening-dialogs"></a>
 ### 打开对话框
 
-「新建文章」按钮用 `hx-get` 请求对话框，`hx-target` 是 `ui.ModalTarget`（见[使用组件](#using-components)）。处理器渲染对话框，表单沿用[表单](forms.md#rendering-forms)一章的 `ArticleForm`：
+列表中的「编辑」按钮用 `hx-get` 请求对话框，`hx-target` 是 `ui.ModalTarget`（见[使用组件](#using-components)）。处理器渲染对话框，表单沿用[表单](forms.md#rendering-forms)一章的 `ArticleForm`：
 
 ```go
-func (h *Handlers) NewDialog(w http.ResponseWriter, r *http.Request) error {
-    return web.Render(w, r, http.StatusOK, views.NewDialog(web.NewForm(article.Changes{})))
+func (h *Handlers) EditDialog(w http.ResponseWriter, r *http.Request) error {
+    item, err := h.find(r)
+    if err != nil {
+        return err
+    }
+    f := web.NewForm(article.Changes{Title: item.Title, Slug: item.Slug, Content: item.Content})
+    return web.Render(w, r, http.StatusOK, views.EditDialog(item.ID, f))
 }
 ```
 
 ```templ
-templ NewDialog(f *web.Form[article.Changes]) {
+templ EditDialog(id uuid.UUID, f *web.Form[article.Changes]) {
 	@dialog.Dialog(dialog.Props{ID: "article-dialog", DefaultOpen: true}) {
 		@dialog.Content() {
 			@dialog.Header() {
 				@dialog.Title() {
-					新建文章
+					编辑文章
 				}
 			}
-			@ArticleForm(f)
+			@ArticleForm(id, f)
 		}
 	}
 }
 ```
 
-`DefaultOpen` 让对话框加载后立即打开，焦点进入对话框，按 Esc 或点击遮罩关闭。下次打开时，新的对话框替换 `ui.Modal()` 的内容，旧的随之销毁。
+`h.find` 按路径参数查询文章。
+
+`DefaultOpen` 让对话框加载后立即打开，焦点进入对话框，按 Esc 或点击遮罩关闭。下次点击「编辑」时，新的对话框替换 `ui.Modal()` 的内容，旧的随之销毁。
 
 <a id="submitting-dialogs"></a>
 ### 提交与关闭

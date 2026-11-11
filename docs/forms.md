@@ -42,29 +42,39 @@ type Changes struct {
 <a id="rendering-forms"></a>
 ## 渲染表单
 
-组件接收 `*web.Form[article.Changes]`，用 `Value` 回填输入，用 `Error` 显示错误：
+组件接收 `*web.Form[article.Changes]`，交给 `web/ui` 的表单字段：每个字段带标签、说明和错误提示，回填用户的输入，有错误时标记为无效。
 
 ```templ
 templ ArticleForm(id uuid.UUID, f *web.Form[article.Changes]) {
-	<form hx-put={ "/admin/articles/" + id.String() } hx-swap="outerMorph">
-		<label>标题 <input name="title" value={ f.Value("title") }/></label>
-		@fieldError(f.Error("title"))
-		<label>Slug <input name="slug" value={ f.Value("slug") }/></label>
-		@fieldError(f.Error("slug"))
-		<textarea name="content">{ f.Value("content") }</textarea>
-		@fieldError(f.Error("content"))
-		<button>保存</button>
+	<form class="flex flex-col gap-4" hx-put={ "/admin/articles/" + id.String() } hx-swap="outerMorph">
+		@ui.TextField(f, "title", "标题")
+		@ui.TextField(f, "slug", "Slug", ui.FieldProps{Description: "小写字母、数字和连字符"})
+		@ui.TextareaField(f, "content", "正文", ui.FieldProps{Rows: 12})
+		@button.Button(button.Props{Type: button.TypeSubmit}) {
+			保存
+		}
 	</form>
-}
-
-templ fieldError(message string) {
-	if message != "" {
-		<p class="error">{ message }</p>
-	}
 }
 ```
 
-复选框用 `checked?={ f.Checked("name") }`，多选框和多选列表用 `Values` 取全部值。
+第二个参数是字段名，即 `json` 标签；第三个参数是标签文字。按字段类型选择组件：
+
+| 组件 | 字段类型 | 说明 |
+| --- | --- | --- |
+| `ui.TextField` | 字符串、数字 | `FieldProps.Type` 是 input 的类型，例如 `email`、`number`、`date`；`password` 不回填输入 |
+| `ui.TextareaField` | 字符串 | `Rows` 是行数 |
+| `ui.SelectField` | 字符串 | 下拉选择，选项是 `[]ui.Option`；`Placeholder` 非空时第一项的值为空 |
+| `ui.RadioGroupField` | 字符串 | 一组单选项 |
+| `ui.CheckboxField`、`ui.SwitchField` | 布尔 | 复选框、开关 |
+| `ui.CheckboxGroupField` | 字符串切片 | 一组复选框，选中的每一项提交一个同名的值 |
+
+```templ
+@ui.SelectField(f, "status", "状态", []ui.Option{{Value: "draft", Label: "草稿"}, {Value: "published", Label: "已发布"}})
+@ui.CheckboxGroupField(f, "tags", "标签", tagOptions)
+@ui.SwitchField(f, "pinned", "置顶", ui.FieldProps{Description: "显示在首页顶部"})
+```
+
+`FieldProps` 还有 `ID`、`Placeholder`、`Required`、`Disabled`，`Attributes` 加在输入控件上，例如 `autocomplete`。需要别的布局时，直接组合[界面组件](components.md#using-components)，用 `f.Value`、`f.Values`、`f.Checked` 回填，`f.Error` 取错误提示。
 
 首次打开编辑页时，把[渲染页面](views.md#rendering-pages)中的 `Edit` 改为用 `web.NewForm` 包装已有数据，`Value` 返回各字段的文本：
 

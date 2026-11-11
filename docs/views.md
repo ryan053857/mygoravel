@@ -417,20 +417,12 @@ templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
 				<tr><td>{ item.Title }</td></tr>
 			}
 		</table>
-		<nav>
-			for _, p := range list.Links(1) {
-				if p == 0 {
-					<span>…</span>
-				} else {
-					<a href={ templ.SafeURL(pageURL(q, p)) } hx-get={ pageURL(q, p) } aria-current?={ p == q.Page }>{ strconv.Itoa(p) }</a>
-				}
-			}
-		</nav>
+		@ui.Pagination(list, ui.PaginationProps{URL: func(p int) string { return pageURL(q, p) }, HTMX: true})
 	</section>
 }
 ```
 
-`list.Links(1)` 返回分页导航中要显示的页码：首页、末页，以及当前页两侧各 1 页，省略的部分用 `0` 表示，例如 `[1 0 9 10 11 0 20]`。`list.LastPage()` 是最后一页的页码。链接同时写 `href`，不支持 htmx 的场景（例如在新标签页打开）也能正常访问。
+`ui.Pagination` 显示上一页、下一页、首页、末页，以及当前页两侧各 1 页，中间省略；只有一页时不显示。`HTMX` 让链接同时带 `hx-get`，沿用区域上的 `hx-target`；链接也写了 `href`，不支持 htmx 的场景（例如在新标签页打开）也能正常访问。自己写分页导航时，`list.Links(1)` 返回要显示的页码，省略的部分用 `0` 表示，例如 `[1 0 9 10 11 0 20]`，`list.LastPage()` 是最后一页的页码。
 
 两个细节：
 

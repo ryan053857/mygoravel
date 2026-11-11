@@ -9,6 +9,8 @@
 //   - Toaster：用 toast 显示 web.Flash 的提示和局部请求的错误；
 //   - Modal：放置服务端渲染的对话框，web.CloseDialog 关闭它；
 //   - ErrorPage：web.Options.ErrorPage 的默认实现。
+//   - TextField、SelectField、CheckboxField 等表单字段：读取 web.Form 的输入和错误；
+//   - Pagination：page.Offset 的分页导航。
 //
 // 每一项都可以不用：例如租户端用自己的提示组件监听 web:flash，或者自己写 <html> 只调用 Head。
 //
@@ -22,5 +24,5 @@
 //	router.Handle(ui.AssetsPath+"*", ui.Assets())
 package ui
 
-//go:generate go tool templ generate -f ui.templ
+//go:generate go tool templ generate
 //go:generate go run ./internal/gen

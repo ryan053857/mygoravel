@@ -36,6 +36,9 @@ func NewOffset[T any](items []T, p OffsetParams, total int) Offset[T] {
 	return Offset[T]{Items: nonNil(items), Page: p.Page, PerPage: p.PerPage, Total: total}
 }
 
+// Current 返回当前页的页码，与 Page 相同。web/ui 的 Pagination 通过它读取当前页。
+func (o Offset[T]) Current() int { return o.Page }
+
 // LastPage 返回最后一页的页码，没有数据时为 1。
 func (o Offset[T]) LastPage() int {
 	if o.PerPage < 1 || o.Total <= 0 {

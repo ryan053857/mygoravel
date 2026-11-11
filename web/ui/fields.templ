@@ -1,0 +1,198 @@
+package ui
+
+import (
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/checkbox"
+	"github.com/axadrn/shadcn-templ/v2/components/field"
+	"github.com/axadrn/shadcn-templ/v2/components/input"
+	"github.com/axadrn/shadcn-templ/v2/components/nativeselect"
+	"github.com/axadrn/shadcn-templ/v2/components/pagination"
+	"github.com/axadrn/shadcn-templ/v2/components/radiogroup"
+	"github.com/axadrn/shadcn-templ/v2/components/switch"
+	"github.com/axadrn/shadcn-templ/v2/components/textarea"
+)
+
+// TextField 是带标签、说明和错误提示的输入框，值和错误取自 f（*web.Form[T]）的字段 name。
+//
+//	@ui.TextField(f, "title", "标题")
+//	@ui.TextField(f, "email", "邮箱", ui.FieldProps{Type: "email", Attributes: templ.Attributes{"autocomplete": "email"}})
+templ TextField(f Form, name, label string, props ...FieldProps) {
+	{{ p := firstProps(props) }}
+	{{ id := fieldID(p, name) }}
+	{{ msg := f.Error(name) }}
+	{{ value := f.Value(name) }}
+	if p.Type == "password" {
+		{{ value = "" }}
+	}
+	@field.Field(field.Props{Class: p.Class, Attributes: invalid("data-invalid", msg)}) {
+		@field.Label(field.LabelProps{For: id}) {
+			{ label }
+		}
+		@input.Input(input.Props{ID: id, Name: name, Type: orDefault(p.Type, "text"), Placeholder: p.Placeholder, Value: value, Required: p.Required, Disabled: p.Disabled, Attributes: merge(invalid("aria-invalid", msg), p.Attributes)})
+		@fieldHint(p.Description, msg)
+	}
+}
+
+// TextareaField 是多行文本的 TextField。
+templ TextareaField(f Form, name, label string, props ...FieldProps) {
+	{{ p := firstProps(props) }}
+	{{ id := fieldID(p, name) }}
+	{{ msg := f.Error(name) }}
+	@field.Field(field.Props{Class: p.Class, Attributes: invalid("data-invalid", msg)}) {
+		@field.Label(field.LabelProps{For: id}) {
+			{ label }
+		}
+		@textarea.Textarea(textarea.Props{ID: id, Name: name, Placeholder: p.Placeholder, Rows: p.Rows, Value: f.Value(name), Disabled: p.Disabled, Attributes: merge(invalid("aria-invalid", msg), merge(requiredAttr(p.Required), p.Attributes))})
+		@fieldHint(p.Description, msg)
+	}
+}
+
+// SelectField 是原生的下拉选择。Placeholder 非空时，第一项是值为空的这一项。
+templ SelectField(f Form, name, label string, options []Option, props ...FieldProps) {
+	{{ p := firstProps(props) }}
+	{{ id := fieldID(p, name) }}
+	{{ msg := f.Error(name) }}
+	@field.Field(field.Props{Class: p.Class, Attributes: invalid("data-invalid", msg)}) {
+		@field.Label(field.LabelProps{For: id}) {
+			{ label }
+		}
+		@nativeselect.NativeSelect(nativeselect.Props{ID: id, Name: name, Required: p.Required, Disabled: p.Disabled, Attributes: merge(invalid("aria-invalid", msg), p.Attributes)}) {
+			if p.Placeholder != "" {
+				@nativeselect.Option(nativeselect.OptionProps{Value: "", Selected: f.Value(name) == ""}) {
+					{ p.Placeholder }
+				}
+			}
+			for _, o := range options {
+				@nativeselect.Option(nativeselect.OptionProps{Value: o.Value, Selected: f.Value(name) == o.Value, Disabled: o.Disabled}) {
+					{ o.Label }
+				}
+			}
+		}
+		@fieldHint(p.Description, msg)
+	}
+}
+
+// CheckboxField 是一个复选框，标签在右侧，对应表单结构体中的布尔字段。
+templ CheckboxField(f Form, name, label string, props ...FieldProps) {
+	{{ p := firstProps(props) }}
+	{{ id := fieldID(p, name) }}
+	{{ msg := f.Error(name) }}
+	@field.Field(field.Props{Orientation: field.OrientationHorizontal, Class: p.Class, Attributes: invalid("data-invalid", msg)}) {
+		@checkbox.Checkbox(checkbox.Props{ID: id, Name: name, DefaultChecked: f.Checked(name), Required: p.Required, Disabled: p.Disabled, Attributes: merge(invalid("aria-invalid", msg), p.Attributes)})
+		@field.Content() {
+			@field.Label(field.LabelProps{For: id}) {
+				{ label }
+			}
+			@fieldHint(p.Description, msg)
+		}
+	}
+}
+
+// SwitchField 是开关，标签在左侧，对应表单结构体中的布尔字段。
+templ SwitchField(f Form, name, label string, props ...FieldProps) {
+	{{ p := firstProps(props) }}
+	{{ id := fieldID(p, name) }}
+	{{ msg := f.Error(name) }}
+	@field.Field(field.Props{Orientation: field.OrientationHorizontal, Class: p.Class, Attributes: invalid("data-invalid", msg)}) {
+		@field.Content() {
+			@field.Label(field.LabelProps{For: id}) {
+				{ label }
+			}
+			@fieldHint(p.Description, msg)
+		}
+		@switchcomp.Switch(switchcomp.Props{ID: id, Name: name, DefaultChecked: f.Checked(name), Required: p.Required, Disabled: p.Disabled, Attributes: merge(invalid("aria-invalid", msg), p.Attributes)})
+	}
+}
+
+// RadioGroupField 是一组单选项，对应表单结构体中的字符串字段。每个选项的 id 是字段 ID 加上序号。
+templ RadioGroupField(f Form, name, label string, options []Option, props ...FieldProps) {
+	{{ p := firstProps(props) }}
+	{{ id := fieldID(p, name) }}
+	{{ msg := f.Error(name) }}
+	@field.Set(field.SetProps{Class: p.Class, Attributes: invalid("data-invalid", msg)}) {
+		@field.Legend(field.LegendProps{Variant: field.LegendVariantLabel}) {
+			{ label }
+		}
+		@radiogroup.RadioGroup(radiogroup.Props{ID: id, Name: name, DefaultValue: f.Value(name), Required: p.Required, Disabled: p.Disabled, Attributes: p.Attributes}) {
+			for i, o := range options {
+				@field.Field(field.Props{Orientation: field.OrientationHorizontal}) {
+					@radiogroup.Item(radiogroup.ItemProps{ID: optionID(id, i), Value: o.Value, Disabled: o.Disabled, Attributes: invalid("aria-invalid", msg)})
+					@field.Label(field.LabelProps{For: optionID(id, i)}) {
+						{ o.Label }
+					}
+				}
+			}
+		}
+		@fieldHint(p.Description, msg)
+	}
+}
+
+// CheckboxGroupField 是一组复选框，对应表单结构体中的字符串切片字段：选中的每一项提交一个同名的值。
+templ CheckboxGroupField(f Form, name, label string, options []Option, props ...FieldProps) {
+	{{ p := firstProps(props) }}
+	{{ id := fieldID(p, name) }}
+	{{ msg := f.Error(name) }}
+	@field.Set(field.SetProps{ID: id, Class: p.Class, Attributes: merge(invalid("data-invalid", msg), p.Attributes)}) {
+		@field.Legend(field.LegendProps{Variant: field.LegendVariantLabel}) {
+			{ label }
+		}
+		@field.Group(field.GroupProps{Attributes: templ.Attributes{"data-slot": "checkbox-group"}}) {
+			for i, o := range options {
+				@field.Field(field.Props{Orientation: field.OrientationHorizontal}) {
+					@checkbox.Checkbox(checkbox.Props{ID: optionID(id, i), Name: name, Value: o.Value, DefaultChecked: selected(f, name, o.Value), Disabled: o.Disabled || p.Disabled, Attributes: invalid("aria-invalid", msg)})
+					@field.Label(field.LabelProps{For: optionID(id, i)}) {
+						{ o.Label }
+					}
+				}
+			}
+		}
+		@fieldHint(p.Description, msg)
+	}
+}
+
+// fieldHint 显示错误提示，没有错误时显示说明。
+templ fieldHint(description, msg string) {
+	if msg != "" {
+		@field.Error() {
+			{ msg }
+		}
+	} else if description != "" {
+		@field.Description() {
+			{ description }
+		}
+	}
+}
+
+// Pagination 是 p（page.Offset）的分页导航，只有一页时不显示。
+//
+//	@ui.Pagination(list, ui.PaginationProps{URL: q.PageURL, HTMX: true})
+templ Pagination(pg Pager, p PaginationProps) {
+	if pg.LastPage() > 1 {
+		{{ current, last := pg.Current(), pg.LastPage() }}
+		{{ prev, prevAttrs := pageLink(p, max(current-1, 1)) }}
+		{{ next, nextAttrs := pageLink(p, min(current+1, last)) }}
+		@pagination.Pagination() {
+			@pagination.Content() {
+				@pagination.Item() {
+					@pagination.Previous(pagination.PreviousProps{Href: prev, Disabled: current <= 1, Text: orDefault(p.Previous, "上一页"), Attributes: prevAttrs})
+				}
+				for _, n := range pg.Links(max(p.OnEachSide, 1)) {
+					@pagination.Item() {
+						if n == 0 {
+							@pagination.Ellipsis()
+						} else {
+							{{ url, attrs := pageLink(p, n) }}
+							@pagination.Link(pagination.LinkProps{Href: url, IsActive: n == current, Attributes: attrs}) {
+								{ strconv.Itoa(n) }
+							}
+						}
+					}
+				}
+				@pagination.Item() {
+					@pagination.Next(pagination.NextProps{Href: next, Disabled: current >= last, Text: orDefault(p.Next, "下一页"), Attributes: nextAttrs})
+				}
+			}
+		}
+	}
+}
