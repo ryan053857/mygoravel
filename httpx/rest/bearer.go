@@ -105,7 +105,7 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 			// 长连接期间（例如 SSE）重新执行全部检查：凭据被撤销、主体变化、不再是租户成员或失去权限时结束连接。
 			recheck := func(c context.Context) error {
 				again, err := establish(huma.WithContext(ctx, c), authenticate, resolve, required)
-				if err == nil && again.ID != sub.ID {
+				if err == nil && (again.ID != sub.ID || again.Actor != sub.Actor) {
 					return errUnauthenticated.New()
 				}
 				return err
@@ -130,7 +130,8 @@ func establish(ctx huma.Context, authenticate Authenticator, resolve func(contex
 		return identity.Subject{}, errForbidden.New()
 	}
 	if resolve != nil {
-		sub, err = resolve(ctx.Context(), sub)
+		cred := sub
+		sub, err = resolve(ctx.Context(), cred)
 		switch {
 		case err != nil && httpx.StatusOf(err) >= 500:
 			return identity.Subject{}, err
@@ -139,6 +140,8 @@ func establish(ctx huma.Context, authenticate Authenticator, resolve func(contex
 		case err != nil:
 			return identity.Subject{}, err
 		}
+		// Resolve 加载权限和租户；认证方式、凭据、凭据的限制和代为登录者由凭据决定，不随 Resolve 改变。
+		sub.Method, sub.Credential, sub.Scopes, sub.Actor = cred.Method, cred.Credential, cred.Scopes, cred.Actor
 	}
 	for _, perm := range required {
 		if !sub.Can(perm) {

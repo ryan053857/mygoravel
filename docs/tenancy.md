@@ -181,6 +181,8 @@ err = roles.Assign(ctx, staffID, authz.AllTenants, support.ID)
 
 `AllTenants` 中只能分配全局角色。它的权限很大，应当只授予只读权限，并记录访问日志。
 
+需要看到某个用户眼中的页面、或者替他完成操作时，使用[代为登录](authentication.md#impersonation)：客服以这个用户的身份和权限操作，`Actor` 记下客服本人。
+
 <a id="customers"></a>
 ## 租户的客户
 

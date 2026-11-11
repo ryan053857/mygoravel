@@ -283,3 +283,43 @@ func TestTenantPages(t *testing.T) {
 		t.Fatalf("bound session in own tenant: %d", resp.StatusCode)
 	}
 }
+
+// 代为登录：会话记录 Actor，Resolve 新建主体时它也不会丢失；回到本人账号需要重新登录。
+func TestActor(t *testing.T) {
+	resolve := func(_ context.Context, stored identity.Subject) (identity.Subject, error) {
+		return identity.Subject{ID: stored.ID, Type: stored.Type}, nil
+	}
+	o := options()
+	o.Sessions.Store = memstore.New()
+	o.Resolve = resolve
+	pages := web.New(o)
+	router := chi.NewRouter()
+	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {
+		return pages.Login(r.Context(), identity.Subject{ID: r.FormValue("user"), Actor: r.FormValue("actor")})
+	})
+	pages.Routes(router, web.Require()).Get("/me", func(w http.ResponseWriter, r *http.Request) error {
+		sub, _ := identity.FromContext(r.Context())
+		_, err := fmt.Fprintf(w, "%s actor=%s", sub.ID, sub.Actor)
+		return err
+	})
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	c := noFollow(t)
+	signIn := func(form map[string][]string) {
+		t.Helper()
+		resp, err := c.PostForm(srv.URL+"/login", form)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+
+	signIn(map[string][]string{"user": {"alice"}, "actor": {"staff"}})
+	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 || body != "alice actor=staff" {
+		t.Fatalf("impersonating: %d %q", resp.StatusCode, body)
+	}
+	signIn(map[string][]string{"user": {"staff"}})
+	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 || body != "staff actor=" {
+		t.Fatalf("back: %d %q", resp.StatusCode, body)
+	}
+}

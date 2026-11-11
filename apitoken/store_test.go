@@ -358,6 +358,36 @@ func TestTenantBinding(t *testing.T) {
 	})
 }
 
+func TestActor(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		s, _ := newStore(t, driver)
+		asAlice := identity.Subject{ID: "alice", Type: identity.SubjectUser, Actor: "staff"}
+		own := login(t, s, alice, apitoken.Device{})
+		impersonating := login(t, s, asAlice, apitoken.Device{})
+		personal := create(t, s, asAlice, apitoken.Personal{Name: "排查", Scopes: read})
+		if sub, ok := valid(t, s, own); !ok || sub.Actor != "" {
+			t.Fatalf("own token actor=%q ok=%v", sub.Actor, ok)
+		}
+		for _, token := range []string{impersonating, personal} {
+			if sub, ok := valid(t, s, token); !ok || sub.ID != "alice" || sub.Actor != "staff" {
+				t.Fatalf("impersonation token sub=%+v ok=%v", sub, ok)
+			}
+		}
+		list, err := s.List(ctx, alice)
+		if err != nil || len(list) != 3 {
+			t.Fatalf("list=%+v err=%v", list, err)
+		}
+		actors := map[string]int{}
+		for _, tok := range list {
+			actors[tok.Actor]++
+		}
+		if actors[""] != 1 || actors["staff"] != 2 {
+			t.Fatalf("actors=%v", actors)
+		}
+	})
+}
+
 // TestRequireBearer 确认 Validate 可以直接作为 rest.RequireBearer 的校验器：
 // 权限由 Resolve 按用户加载，个人访问令牌的 scope 再加以限制。
 func TestRequireBearer(t *testing.T) {

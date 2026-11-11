@@ -188,10 +188,11 @@ list, err := tokens.List(ctx, sub)
 for _, t := range list {
     // t.Kind、t.Name、t.IP、t.UserAgent、t.LastUsedAt、t.ExpiresAt
     // t.Current：是否为本次请求所用的 token
+    // t.Actor：代为登录时签发 token 的操作者，见代为登录
 }
 ```
 
-`Current` 根据 `sub.Credential` 判断，所以在 API 中传入 `identity.FromContext` 读到的主体即可。
+`Current` 根据 `sub.Credential` 判断，所以在 API 中传入 `identity.FromContext` 读到的主体即可。`Actor` 不为空的 token 是客服等人[代为登录](authentication.md#impersonation)时签发的，在设备列表中标出来，用户可以看到并撤销它。
 
 <a id="revoking-tokens"></a>
 ## 撤销令牌
