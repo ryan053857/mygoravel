@@ -7,7 +7,6 @@ import (
 	"github.com/ryan053857/mygoravel/poc/ui/components/button"
 	"github.com/ryan053857/mygoravel/poc/ui/components/icon"
 	"github.com/ryan053857/mygoravel/poc/ui/components/toast"
-	"github.com/ryan053857/mygoravel/poc/ui/static"
 	"github.com/ryan053857/mygoravel/web"
 )
 
@@ -29,7 +28,7 @@ templ Base(title string, flashes templ.Component) {
 					}
 				})();
 			</script>
-			<link rel="stylesheet" href={ static.URL(ctx, "css/app.css") }/>
+			<link rel="stylesheet" href={ web.StaticURL(ctx, "css/app.css") }/>
 			@web.Scripts()
 			@components.Scripts()
 		</head>
@@ -46,6 +45,10 @@ templ Base(title string, flashes templ.Component) {
 				// 服务端通过 HX-Trigger: {"dialog:close": {"id": "..."}} 关闭对话框。
 				document.addEventListener("dialog:close", function (e) {
 					window.templ.dialog.close(e.detail.id);
+				});
+				// htmx 请求的提示：web.Flash → HX-Trigger → body 上的 web:flash 事件。
+				document.addEventListener("web:flash", function (e) {
+					e.detail.messages.forEach(function (m) { window.templ.toast.add(m); });
 				});
 				// templ 会拦截字符串形式的 onclick，这里用事件委托。
 				document.addEventListener("click", function (e) {

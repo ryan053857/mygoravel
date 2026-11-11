@@ -10,6 +10,7 @@ require (
 	github.com/Oudwins/tailwind-merge-go v0.2.3
 	github.com/a-h/templ v0.3.1100
 	github.com/alexedwards/scs/v2 v2.9.0
+	github.com/chromedp/chromedp v0.23.0
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/ryan053857/mygoravel v0.0.0-00010101000000-000000000000
 )
@@ -20,7 +21,6 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chromedp/cdproto v0.159.0 // indirect
-	github.com/chromedp/chromedp v0.23.0 // indirect
 	github.com/cli/browser v1.3.0 // indirect
 	github.com/cockroachdb/errors v1.14.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
@@ -61,7 +61,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/term v0.48.0 // indirect

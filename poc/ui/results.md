@@ -94,3 +94,13 @@ shadcn-templ 可以直接用，框架不依赖它：组件代码属于应用。�
    - 组件：shadcn-templ 的安装和对话框约定（问题 C）；
    - 坑：问题 B、D、E；
    - 部署：静态资源，`templ generate`、`tailwindcss`、`shadcn-templ bundle` 三个构建步骤。
+
+## 后续：改用框架 API（#124、#126）
+
+`static/` 原型和 `app/flash.go` 中的 flash、HX-Trigger 原型已经进入框架，演示应用改用 `web.NewStatic`、`web.StaticURL`、`web.Flash`、`web.Flashes`、`web.Trigger`：
+
+- 静态资源挂在 `/static/`，`components.json` 的 `scripts.path` 同步改为 `/static/js`；
+- 保存、删除成功后直接返回 `204`，提示通过 `HX-Trigger` 送达，布局中一行监听器交给 `templ.toast.add`；
+- 新增 F1 场景，验证视图文档「提示消息」一节中的 Alpine 写法。
+
+全部场景通过。

@@ -16,7 +16,6 @@ import (
 	"github.com/ryan053857/mygoravel/poc/ui/components/button"
 	"github.com/ryan053857/mygoravel/poc/ui/components/icon"
 	"github.com/ryan053857/mygoravel/poc/ui/components/toast"
-	"github.com/ryan053857/mygoravel/poc/ui/static"
 	"github.com/ryan053857/mygoravel/web"
 )
 
@@ -46,7 +45,7 @@ func Base(title string, flashes templ.Component) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 21, Col: 17}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 20, Col: 17}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -57,9 +56,9 @@ func Base(title string, flashes templ.Component) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var3 string
-		templ_7745c5c3_Var3, templ_7745c5c3_Err = templruntime.NewAttributeExpression(static.URL(ctx, "css/app.css")).ResolveURL(ctx)
+		templ_7745c5c3_Var3, templ_7745c5c3_Err = templruntime.NewAttributeExpression(web.StaticURL(ctx, "css/app.css")).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 32, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 31, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {
@@ -99,7 +98,7 @@ func Base(title string, flashes templ.Component) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div><script>\n\t\t\t\t// 服务端通过 HX-Trigger: {\"dialog:close\": {\"id\": \"...\"}} 关闭对话框。\n\t\t\t\tdocument.addEventListener(\"dialog:close\", function (e) {\n\t\t\t\t\twindow.templ.dialog.close(e.detail.id);\n\t\t\t\t});\n\t\t\t\t// templ 会拦截字符串形式的 onclick，这里用事件委托。\n\t\t\t\tdocument.addEventListener(\"click\", function (e) {\n\t\t\t\t\tif (!e.target.closest(\"[data-theme-toggle]\")) return;\n\t\t\t\t\tvar dark = document.documentElement.classList.toggle(\"dark\");\n\t\t\t\t\ttry { localStorage.setItem(\"theme\", dark ? \"dark\" : \"light\"); } catch (e) {}\n\t\t\t\t});\n\t\t\t</script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div><script>\n\t\t\t\t// 服务端通过 HX-Trigger: {\"dialog:close\": {\"id\": \"...\"}} 关闭对话框。\n\t\t\t\tdocument.addEventListener(\"dialog:close\", function (e) {\n\t\t\t\t\twindow.templ.dialog.close(e.detail.id);\n\t\t\t\t});\n\t\t\t\t// htmx 请求的提示：web.Flash → HX-Trigger → body 上的 web:flash 事件。\n\t\t\t\tdocument.addEventListener(\"web:flash\", function (e) {\n\t\t\t\t\te.detail.messages.forEach(function (m) { window.templ.toast.add(m); });\n\t\t\t\t});\n\t\t\t\t// templ 会拦截字符串形式的 onclick，这里用事件委托。\n\t\t\t\tdocument.addEventListener(\"click\", function (e) {\n\t\t\t\t\tif (!e.target.closest(\"[data-theme-toggle]\")) return;\n\t\t\t\t\tvar dark = document.documentElement.classList.toggle(\"dark\");\n\t\t\t\t\ttry { localStorage.setItem(\"theme\", dark ? \"dark\" : \"light\"); } catch (e) {}\n\t\t\t\t});\n\t\t\t</script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -205,7 +204,7 @@ func AdminShell(title string, flashes templ.Component) templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 89, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 92, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -277,7 +276,7 @@ func ErrorPage(status int, message string) templ.Component {
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(status))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 104, Col: 96}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 107, Col: 96}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
@@ -290,7 +289,7 @@ func ErrorPage(status int, message string) templ.Component {
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 105, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/views/layout.templ`, Line: 108, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 			if templ_7745c5c3_Err != nil {

@@ -288,3 +288,27 @@ func TestBrowserMobile(t *testing.T) {
 		shot(t, ctx, "mobile"+strings.ReplaceAll(p, "/", "-"))
 	}
 }
+
+// F1：文档「提示消息」一节的 Alpine 提示区域：整页取出的提示与 htmx 带来的提示用同一个区域显示。
+func TestBrowserFlashDocSnippet(t *testing.T) {
+	ctx := tab(t)
+	base := start(t)
+	openPlain := func() {
+		do(t, ctx, chromedp.Navigate(base+"/flashdemo"))
+		waitFor(t, ctx, `document.readyState === "complete" && !!window.htmx && !!window.Alpine`)
+		js[bool](t, ctx, trapErrors)
+	}
+	openPlain()
+	const toasts = `[...document.querySelectorAll("#toasts p.toast.success")].map(p => p.textContent).join("|")`
+	do(t, ctx, chromedp.Click("#ajax-save"))
+	waitFor(t, ctx, toasts+` === "文章已保存"`)
+	do(t, ctx, chromedp.Click("#ajax-save"))
+	waitFor(t, ctx, toasts+` === "文章已保存|文章已保存"`)
+	do(t, ctx, chromedp.Click("#form-save"))
+	waitFor(t, ctx, `document.readyState === "complete" && `+toasts+` === "文章已保存"`)
+	openPlain()
+	if got := js[string](t, ctx, toasts); got != "" {
+		t.Errorf("flash shown again after reload: %q", got)
+	}
+	noErrors(t, ctx)
+}

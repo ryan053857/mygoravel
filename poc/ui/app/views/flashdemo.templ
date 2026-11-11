@@ -1,0 +1,26 @@
+package views
+
+import "github.com/ryan053857/mygoravel/web"
+
+// FlashDemo 验证文档「提示消息」一节中的 Alpine 写法（不使用 shadcn-templ 的 toast）。
+templ FlashDemo() {
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+		<head>
+			<meta charset="utf-8"/>
+			@web.Scripts()
+		</head>
+		<body>
+			<div id="toasts" x-data="{ messages: [] }" x-on:web:flash.window="messages.push(...$event.detail.messages)">
+				for _, m := range web.Flashes(ctx) {
+					<p class={ "toast", m.Type }>{ m.Title }</p>
+				}
+				<template x-for="m in messages">
+					<p :class="'toast ' + m.type" x-text="m.title"></p>
+				</template>
+			</div>
+			<button id="ajax-save" hx-post="/flashdemo/save" hx-swap="none">保存（htmx）</button>
+			<form method="post" action="/flashdemo/save?redirect=1"><button id="form-save">保存（表单）</button></form>
+		</body>
+	</html>
+}

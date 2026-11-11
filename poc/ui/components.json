@@ -1,7 +1,7 @@
 {
   "scripts": {
     "dir": "assets/js",
-    "path": "/assets/js"
+    "path": "/static/js"
   },
   "$schema": "https://shadcn-templ.com/schema/components.json",
   "style": "base-nova",

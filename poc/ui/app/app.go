@@ -7,21 +7,24 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/a-h/templ"
 	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/poc/ui/app/article"
 	"github.com/ryan053857/mygoravel/poc/ui/app/views"
-	"github.com/ryan053857/mygoravel/poc/ui/components/toast"
-	"github.com/ryan053857/mygoravel/poc/ui/static"
 	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 )
 
 // New 组装演示应用。assets 是 assets 目录（css/app.css 与 js/ 下的组件脚本）。
 func New(assets fs.FS, dev bool) (http.Handler, error) {
-	st, err := static.New("/assets/", assets, dev)
+	opts := web.StaticOptions{}
+	if dev {
+		opts.DevDir = "assets"
+	}
+	st, err := web.NewStatic(assets, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -35,18 +38,31 @@ func New(assets fs.FS, dev bool) (http.Handler, error) {
 		ErrorPage:     views.ErrorPage,
 		ErrorFragment: views.ErrorFragment,
 		ErrorTarget:   "#flash",
+		Static:        st,
 	})
 	h := &handlers{store: article.NewStore()}
 
 	r := chi.NewRouter()
-	r.Use(httpx.Locale(nil), st.Middleware, withFlash(sm))
-	r.Handle("/assets/*", st)
+	r.Use(httpx.Locale(nil))
+	r.Handle(web.StaticPath+"*", st)
 	r.Handle(web.AssetsPath+"*", web.Assets())
 	r.NotFound(pages.NotFound)
 
 	public := pages.Routes(r, web.Public)
 	public.Get("/", h.landing)
 	public.Get("/pricing", h.pricing)
+	public.Get("/flashdemo", func(w http.ResponseWriter, r *http.Request) error {
+		return web.Render(w, r, http.StatusOK, views.FlashDemo())
+	})
+	public.Post("/flashdemo/save", func(w http.ResponseWriter, r *http.Request) error {
+		web.Flash(r.Context(), web.Message{Type: "success", Title: "文章已保存"})
+		if r.URL.Query().Has("redirect") {
+			web.Redirect(w, r, "/flashdemo")
+			return nil
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	})
 	public.Post("/subscribe", h.subscribe)
 	// PoC 不做登录，后台也是公开路由。
 	public.Get("/admin/articles", h.list)
@@ -79,7 +95,7 @@ func (h *handlers) subscribe(w http.ResponseWriter, r *http.Request) error {
 	if !f.Valid() {
 		return web.Render(w, r, http.StatusUnprocessableEntity, views.Landing(false, f, Flashes()))
 	}
-	putFlash(r.Context(), toast.Props{Title: "订阅成功", Description: f.Data.Email + " 将收到我们的月刊。", Type: toast.TypeSuccess})
+	web.Flash(r.Context(), web.Message{Type: "success", Title: "订阅成功", Description: f.Data.Email + " 将收到我们的月刊。"})
 	web.Redirect(w, r, "/#subscribe")
 	return nil
 }
@@ -103,7 +119,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request) error {
 	if web.IsPartial(r) {
 		// 表单 GET 会把空字段也写进地址（?q=&status=），由服务端给出规范地址。
 		w.Header().Set("HX-Push-Url", s.URL(func(*views.ListState) {}))
-		return renderPartial(w, r, http.StatusOK, views.ArticlesTable(s, rows), views.ListSync(s))
+		return web.Render(w, r, http.StatusOK, templ.Join(views.ArticlesTable(s, rows), views.ListSync(s)))
 	}
 	return web.Render(w, r, http.StatusOK, views.ArticlesPage(s, rows, Flashes()))
 }
@@ -111,7 +127,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request) error {
 // ---- 后台：新建与编辑（对话框） ----
 
 func (h *handlers) newForm(w http.ResponseWriter, r *http.Request) error {
-	return renderPartial(w, r, http.StatusOK, views.ArticleDialog(0, web.NewForm(article.Changes{Status: "draft"})))
+	return web.Render(w, r, http.StatusOK, views.ArticleDialog(0, web.NewForm(article.Changes{Status: "draft"})))
 }
 
 func (h *handlers) editForm(w http.ResponseWriter, r *http.Request) error {
@@ -119,7 +135,7 @@ func (h *handlers) editForm(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return renderPartial(w, r, http.StatusOK, views.ArticleDialog(a.ID, web.NewForm(article.Changes{Title: a.Title, Slug: a.Slug, Status: a.Status})))
+	return web.Render(w, r, http.StatusOK, views.ArticleDialog(a.ID, web.NewForm(article.Changes{Title: a.Title, Slug: a.Slug, Status: a.Status})))
 }
 
 func (h *handlers) create(w http.ResponseWriter, r *http.Request) error {
@@ -156,12 +172,14 @@ func (h *handlers) save(w http.ResponseWriter, r *http.Request, id int) error {
 			return err
 		default:
 			w.Header().Set("HX-Reswap", "none")
-			trigger(w, map[string]any{"dialog:close": map[string]string{"id": "article-dialog"}, "articles:changed": true})
-			putFlash(r.Context(), toast.Props{Title: "已保存", Description: "「" + a.Title + "」", Type: toast.TypeSuccess})
-			return renderPartial(w, r, http.StatusOK)
+			web.Trigger(w, "dialog:close", map[string]any{"id": "article-dialog"})
+			web.Trigger(w, "articles:changed", nil)
+			web.Flash(r.Context(), web.Message{Type: "success", Title: "已保存", Description: "「" + a.Title + "」"})
+			w.WriteHeader(http.StatusNoContent)
+			return nil
 		}
 	}
-	return renderPartial(w, r, http.StatusUnprocessableEntity, views.ArticleForm(id, f))
+	return web.Render(w, r, http.StatusUnprocessableEntity, views.ArticleForm(id, f))
 }
 
 // ---- 后台：删除 ----
@@ -171,7 +189,7 @@ func (h *handlers) confirmDelete(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return renderPartial(w, r, http.StatusOK, views.DeleteDialog(a))
+	return web.Render(w, r, http.StatusOK, views.DeleteDialog(a))
 }
 
 func (h *handlers) delete(w http.ResponseWriter, r *http.Request) error {
@@ -180,9 +198,11 @@ func (h *handlers) delete(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	h.store.Delete(a.ID)
-	trigger(w, map[string]any{"dialog:close": map[string]string{"id": "delete-dialog"}, "articles:changed": true})
-	putFlash(r.Context(), toast.Props{Title: "已删除", Description: "「" + a.Title + "」", Type: toast.TypeSuccess})
-	return renderPartial(w, r, http.StatusOK)
+	web.Trigger(w, "dialog:close", map[string]any{"id": "delete-dialog"})
+	web.Trigger(w, "articles:changed", nil)
+	web.Flash(r.Context(), web.Message{Type: "success", Title: "已删除", Description: "「" + a.Title + "」"})
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 func (h *handlers) find(r *http.Request) (article.Article, error) {

@@ -35,8 +35,8 @@ func TestStaticProduction(t *testing.T) {
 	base := start(t)
 	c := http.DefaultClient
 	_, page := get(t, c, base+"/admin/articles")
-	css := regexp.MustCompile(`href="(/assets/css/app\.[0-9a-f]{8}\.css)"`).FindStringSubmatch(page)
-	js := regexp.MustCompile(`src="(/assets/js/shadcn-templ-[0-9a-f]{16}\.js)"`).FindStringSubmatch(page)
+	css := regexp.MustCompile(`href="(/static/css/app\.[0-9a-f]{8}\.css)"`).FindStringSubmatch(page)
+	js := regexp.MustCompile(`src="(/static/js/shadcn-templ-[0-9a-f]{16}\.js)"`).FindStringSubmatch(page)
 	if css == nil || js == nil {
 		t.Fatalf("asset URLs not found: css=%v js=%v", css, js)
 	}
@@ -46,15 +46,15 @@ func TestStaticProduction(t *testing.T) {
 			t.Errorf("%s: %d %q", u, res.StatusCode, res.Header.Get("Cache-Control"))
 		}
 	}
-	res, _ := get(t, c, base+"/assets/css/app.css")
+	res, _ := get(t, c, base+"/static/css/app.css")
 	etag := res.Header.Get("ETag")
 	if res.StatusCode != 200 || res.Header.Get("Cache-Control") != "no-cache" || etag == "" {
 		t.Errorf("logical name: %d %q etag=%q", res.StatusCode, res.Header.Get("Cache-Control"), etag)
 	}
-	if res, _ := get(t, c, base+"/assets/css/app.css", "If-None-Match", etag); res.StatusCode != 304 {
+	if res, _ := get(t, c, base+"/static/css/app.css", "If-None-Match", etag); res.StatusCode != 304 {
 		t.Errorf("If-None-Match: %d, want 304", res.StatusCode)
 	}
-	if res, _ := get(t, c, base+"/assets/css/nope.css"); res.StatusCode != 404 {
+	if res, _ := get(t, c, base+"/static/css/nope.css"); res.StatusCode != 404 {
 		t.Errorf("missing file: %d", res.StatusCode)
 	}
 }
@@ -68,10 +68,10 @@ func TestStaticDev(t *testing.T) {
 	s := httptest.NewServer(h)
 	defer s.Close()
 	_, page := get(t, http.DefaultClient, s.URL+"/")
-	if !strings.Contains(page, `href="/assets/css/app.css"`) {
+	if !strings.Contains(page, `href="/static/css/app.css"`) {
 		t.Error("dev mode should not fingerprint")
 	}
-	res, _ := get(t, http.DefaultClient, s.URL+"/assets/css/app.css")
+	res, _ := get(t, http.DefaultClient, s.URL+"/static/css/app.css")
 	if res.Header.Get("Cache-Control") != "no-store" {
 		t.Errorf("dev Cache-Control = %q", res.Header.Get("Cache-Control"))
 	}
