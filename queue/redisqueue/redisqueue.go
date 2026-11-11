@@ -313,12 +313,12 @@ func (c *claimed) Extend(ctx context.Context, lease time.Duration) error {
 func (c *claimed) Ack(ctx context.Context) error { return c.run(ctx, "ack", 0) }
 
 func (c *claimed) Retry(ctx context.Context, at time.Time) error {
-	return c.run(ctx, "retry", ceilMilli(at))
+	return c.run(ctx, "retry", at.UnixMilli())
 }
 
 func (c *claimed) Release(ctx context.Context) error { return c.run(ctx, "release", 0) }
 
-// ceilMilli 把时间向上取整到毫秒，任务不会早于指定的时间被领取。
+// ceilMilli 把时间向上取整到毫秒：延迟发布的任务不会早于指定的时间被领取。
 func ceilMilli(t time.Time) int64 {
 	ms := t.UnixMilli()
 	if t.Sub(time.UnixMilli(ms)) > 0 {
