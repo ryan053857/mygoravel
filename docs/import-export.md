@@ -24,7 +24,7 @@
 
 后台管理系统几乎都要支持用 Excel 批量导入数据，以及把列表导出成表格。`sheet` 包读写 CSV 和 Excel（XLSX）两种格式，导入时按[验证](validation.md)规则检查每一行，规则与 JSON 接口和[页面表单](forms.md)用的是同一个结构体。
 
-本章为博客加上两个功能：从表格批量创建文章，以及把文章列表导出为表格。前两节在一次请求中完成，适合几千行以内的数据；更大的文件放到[后台导入](#background-imports)，进度、断点续跑和失败行的下载由 `imports` 包完成；大量数据同样可以[在后台导出](#background-exports)，由 `exports` 包记录进度，完成后通知用户下载。后台导入和导出都是[后台操作](operations.md)，和应用自己的批量处理出现在同一个任务列表里。
+本章为博客加上两个功能：从表格批量创建文章，以及把文章列表导出为表格。前两节在一次请求中完成，适合几千行以内的数据；更大的文件放到[后台导入](#background-imports)，进度、断点续跑和失败行的下载由 `sheet/imports` 包完成；大量数据同样可以[在后台导出](#background-exports)，由 `exports` 包记录进度，完成后通知用户下载。后台导入和导出都是[后台操作](operations.md)，和应用自己的批量处理出现在同一个任务列表里。
 
 <a id="importing"></a>
 ## 导入
@@ -348,7 +348,7 @@ func download(name string, format sheet.Format, write func(w *sheet.Writer) erro
 <a id="background-imports"></a>
 ## 后台导入
 
-文件有几万行时，一次请求处理不完，用户也不应该一直等着。`imports` 包把导入放到[队列](queue.md)中：用户上传文件后马上得到一个导入 ID，前端用它查询进度；任务每处理 100 行保存一次进度，重试时从中断的地方继续；没有导入的行保存下来，用户可以下载、改正后重新导入；结束时在同一个事务中通知用户。
+文件有几万行时，一次请求处理不完，用户也不应该一直等着。`sheet/imports` 包把导入放到[队列](queue.md)中：用户上传文件后马上得到一个导入 ID，前端用它查询进度；任务每处理 100 行保存一次进度，重试时从中断的地方继续；没有导入的行保存下来，用户可以下载、改正后重新导入；结束时在同一个事务中通知用户。
 
 一次导入是一个[后台操作](operations.md)：状态和进度记在 `operations` 表中，`imports` 表记录上传的文件和处理到的行号，`import_failures` 表记录没有导入的行。和文件、队列的迁移一起[发布](migrations.md#publishing-framework-migrations)，`operation` 排在 `imports` 之前：
 
@@ -383,7 +383,7 @@ import (
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/imports"
+    "github.com/ryan053857/mygoravel/sheet/imports"
     "github.com/ryan053857/mygoravel/notification"
     "github.com/ryan053857/mygoravel/queue"
     "github.com/ryan053857/mygoravel/sheet"
@@ -606,7 +606,7 @@ data: {"id":"0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10","kind":"articles.import","sta
 <a id="background-exports"></a>
 ## 后台导出
 
-导出几十万行要几分钟，同样放到队列中。`exports` 包记录导出的进度，任务把表格写到本地临时文件，完成后上传到[文件存储](filesystem.md)，用户在页面上看到进度，结束后直接下载。
+导出几十万行要几分钟，同样放到队列中。`sheet/exports` 包记录导出的进度，任务把表格写到本地临时文件，完成后上传到[文件存储](filesystem.md)，用户在页面上看到进度，结束后直接下载。
 
 导出同样是一个[后台操作](operations.md)，`exports` 表记录格式和生成的文件。与[后台导入](#background-imports)一样发布迁移、创建服务：
 
@@ -636,7 +636,7 @@ import (
 
     "github.com/ryan053857/mygoravel/broadcast"
     "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/exports"
+    "github.com/ryan053857/mygoravel/sheet/exports"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/identity"

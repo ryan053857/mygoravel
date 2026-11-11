@@ -10,12 +10,10 @@
     - [locales 目录](#the-locales-directory)
 - [命名约定](#naming-conventions)
 - [框架包一览](#framework-packages)
-    - [基础功能](#foundation)
-    - [深入了解](#digging-deeper)
-    - [应用功能](#application-features)
-    - [AI](#ai-packages)
-    - [安全](#security-packages)
-    - [数据库](#database-packages)
+    - [基础](#foundation)
+    - [基础设施](#infrastructure)
+    - [入口](#entry)
+    - [功能](#features)
 
 <a id="introduction"></a>
 ## 简介
@@ -145,102 +143,107 @@ blog/
 <a id="framework-packages"></a>
 ## 框架包一览
 
-mygoravel 的每个包都可以单独使用，按需引入即可。下面按文档目录的分类列出。
+mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包分为四层，包只引用同层或更低层的包：
+
+```text
+功能        apitoken  authz  notification  activity  feature  operation  webhook  sheet/imports  sheet/exports  ai
+入口        httpx  web  session  realtime  command
+基础设施    database  queue  schedule  lock  ratelimit  broadcast  filesystem  mail  pdf  outbound  sheet  document
+基础        errorx  identity  config  cleanup  logging  i18n  page  form  hashing  crypt
+```
+
+分层由[架构测试](contributions.md#architecture-tests)保证，新增的引用违反分层时测试会失败。下面由低到高列出每一层的包。
 
 <a id="foundation"></a>
-### 基础功能
+### 基础
+
+错误、身份、配置、日志等最基本的类型。它们不依赖数据库、HTTP 和命令行组件，可以在任何地方使用。
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `config` | 读取 YAML 配置、展开环境变量、校验 | [配置](configuration.md) |
 | `cleanup` | 按逆序关闭入口打开的资源 | [依赖装配](dependencies.md#closing-resources) |
+| `config` | 读取 YAML 配置、展开环境变量、校验 | [配置](configuration.md) |
 | `errorx` | 定义带稳定错误码和分类的业务错误 | [错误处理](errors.md) |
-| `logging` | 构造 slog 日志器，传递请求关联字段；`logging/logtest` 用于测试 | [日志](logging.md) |
+| `i18n` | 组合 go-i18n 消息目录 | [本地化](localization.md) |
+| `hashing` | 密码的单向哈希与重新哈希 | [哈希](hashing.md) |
 | `identity` | 表示已认证的主体，并在 context 中传递；API、页面和实时频道共用的主体确立规则 | [认证](authentication.md) |
+| `logging` | 构造 slog 日志器，传递请求关联字段；`logging/logtest` 用于测试 | [日志](logging.md) |
 | `page` | 固定分页与游标分页的参数和响应结构 | [分页](responses.md#pagination) |
-| `httpx` | HTTP 中间件、平滑停机 | [中间件](middleware.md)、[请求生命周期](lifecycle.md) |
-| `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
-| `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
+| `crypt` | 用应用密钥加密数据、签名和校验链接 | [加密与签名链接](encryption.md) |
 | `form` | 按 Huma 标签转换、验证文本形式的字段值，页面表单和表格导入共用 | [表单](forms.md#defining-forms) |
-| `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、提示消息、主题、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
-| `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载，提示、对话框与页面的衔接 | [界面组件](components.md) |
-| `web/webtest` | 测试页面：保存会话 cookie，不经过登录页登录，读取 htmx 的响应头 | [页面测试](testing.md#page-tests) |
-| `web/upload` | 页面的上传接口，与 `ui.FileField` 配合：直传 S3 或经服务器上传 | [上传文件](forms.md#file-uploads) |
 
-<a id="digging-deeper"></a>
-### 深入了解
+<a id="infrastructure"></a>
+### 基础设施
+
+数据库、队列、锁、文件、邮件等与外部资源打交道的包。它们与请求从哪里进来无关：HTTP 处理器、队列任务和命令行都可以使用。
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `command` | 根命令、`Run`、`Bind`、`config` 命令、退出码 | [命令行](commands.md) |
-| `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
-| `command/httpcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
-| `command/devcmd` | `dev` 命令：开发页面时监听文件变化、重启应用、刷新浏览器 | [dev 命令](commands.md#dev-command) |
 | `lock` | 带过期时间的原子锁，数据库存储；`lock/redislock` 是 Redis 存储，`lock/locktest` 是测试用的内存存储与存储的契约测试 | [原子锁](locks.md)、[Redis 存储](locks.md#redis-store) |
+| `outbound` | 只能访问公网地址的 HTTP 客户端，防止服务端请求伪造 | [出站请求](outbound.md) |
+| `database` | 用应用选定的驱动打开连接池，`RunInTx` 与提交后回调，查询链路用的 `ChildSpans` | [数据库](database.md)、[数据库的链路](telemetry.md#database-tracing) |
+| `database/postgres`、`database/sqlite`、`database/mysql` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
+| `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
+| `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
 | `ratelimit` | 按 key 限制操作频率，数据库与内存限流器，`Observe` 报告指标；`ratelimit/redislimit` 是 Redis 限流器 | [限流](rate-limiting.md)、[Redis 限流器](rate-limiting.md#redis-limiter) |
+| `document/split` | 把 Markdown 切分为可追溯到原文的分段，供检索和计算向量使用 | [文档转换与切分](documents.md#splitting) |
+| `document/convert` | 把 PDF、Word、PowerPoint、Excel、CSV、HTML 等转换为 Markdown；各格式在子包中，`convert/all` 注册全部 | [文档转换与切分](documents.md#converting) |
+| `pdf` | 把 templ 页面生成为 PDF 的接口 | [生成 PDF](pdf.md) |
+| `pdf/gotenberg`、`pdf/pdftest` | 通过 Gotenberg 生成、测试时只记录 HTML 的生成器 | [启动 Gotenberg](pdf.md#running-gotenberg)、[测试](pdf.md#testing) |
+| `mail` | 邮件消息、发送接口与模板渲染 | [邮件](mail.md) |
+| `mail/smtp`、`mail/resend` | 通过 SMTP 服务器或 Resend API 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend) |
+| `mail/logmail`、`mail/mailtest` | 开发时写进日志、测试时记录在内存中的发送器 | [邮件](mail.md#assembling-mailer)、[测试](mail.md#testing) |
 | `queue` | 持久化的异步任务队列，数据库驱动、重试、失败任务与指标 | [队列](queue.md) |
 | `queue/redisqueue`、`queue/natsqueue` | Redis 与 NATS JetStream 队列驱动 | [Redis 驱动](queue.md#redis-driver)、[NATS 驱动](queue.md#nats-driver) |
 | `queue/queuetest` | 队列驱动的契约测试 | [实现自己的驱动](queue.md#custom-drivers) |
 | `schedule` | 按 cron 表达式定时执行任务，多个实例之间去重 | [定时任务](scheduling.md) |
 | `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端，`broadcast/broadcasttest` 是测试用的内存后端与后端的契约测试 | [广播](broadcasting.md) |
-| `realtime` | 嵌入 Centrifuge 的 WebSocket 实时频道：公开、私有与 presence 频道，频道就是广播的主题；`realtime/redispresence` 是在线成员的 Redis 存储，`realtime/realtimetest` 是存储的契约测试 | [实时频道](realtime.md) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |
 | `filesystem/local`、`filesystem/s3` | 本地与 S3 磁盘 | [文件存储与上传](filesystem.md#disks) |
-| `mail` | 邮件消息、发送接口与模板渲染 | [邮件](mail.md) |
-| `mail/smtp`、`mail/resend` | 通过 SMTP 服务器或 Resend API 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend) |
-| `mail/logmail`、`mail/mailtest` | 开发时写进日志、测试时记录在内存中的发送器 | [邮件](mail.md#assembling-mailer)、[测试](mail.md#testing) |
-| `pdf` | 把 templ 页面生成为 PDF 的接口 | [生成 PDF](pdf.md) |
-| `pdf/gotenberg`、`pdf/pdftest` | 通过 Gotenberg 生成、测试时只记录 HTML 的生成器 | [启动 Gotenberg](pdf.md#running-gotenberg)、[测试](pdf.md#testing) |
-| `outbound` | 只能访问公网地址的 HTTP 客户端，防止服务端请求伪造 | [出站请求](outbound.md) |
-| `i18n` | 组合 go-i18n 消息目录 | [本地化](localization.md) |
-
-<a id="application-features"></a>
-### 应用功能
-
-| 包 | 用途 | 相关文档 |
-| --- | --- | --- |
-| `notification` | 站内通知收件箱，带已读状态 | [通知](notifications.md) |
-| `activity` | 操作日志：在业务事务中记录谁对什么做了什么 | [操作日志](activity.md) |
-| `feature` | 功能开关：代码中声明，按全员、租户、用户或比例开启 | [功能开关](features.md) |
-| `operation` | 后台操作的状态与进度：任务中心、断点续跑、进度推送 | [后台操作](operations.md) |
 | `sheet` | 读写 CSV 和 Excel（XLSX）表格，按结构体解码并验证导入的每一行 | [导入与导出](import-export.md) |
-| `imports` | 在后台导入表格：进度、断点续跑、失败行下载 | [后台导入](import-export.md#background-imports) |
-| `exports` | 在后台导出表格：进度，完成后上传到文件存储 | [后台导出](import-export.md#background-exports) |
-| `webhook` | 向租户的端点推送事件，按 Standard Webhooks 签名与校验 | [Webhook](webhooks.md) |
 
-<a id="ai-packages"></a>
-### AI
+<a id="entry"></a>
+### 入口
+
+请求进入应用的方式：JSON API、服务端渲染页面、实时频道和命令行。
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `ai` | 模型的配置和几种能力的接口：生成图片、合成与识别语音、计算向量、重排、决策 | [媒体](ai.md#media)、[决策](ai.md#decisions) |
-| `ai/chat` | 对话式 agent：后台运行、插话、工具审批、事件推送 | [AI 助手](ai.md) |
-| `ai/chat/postgres`、`ai/chat/sqlite`、`ai/chat/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
-| `ai/openai`、`ai/openrouter` | 生成图片、合成与识别语音、计算向量和重排；`ai/openai` 还能调用决策模型 | [媒体](ai.md#media)、[决策](ai.md#decisions) |
-| `ai/systemone` | 用 System One 格式调用决策模型 | [决策](ai.md#decisions) |
-| `ai/chat/chattest` | 按脚本回复的模型，测试 agent 时不访问真实服务 | [测试](ai.md#testing) |
-| `ai/aitest` | 图片、语音、向量、重排和决策的替身 | [测试](ai.md#testing) |
-| `document/split` | 把 Markdown 切分为可追溯到原文的分段，供检索和计算向量使用 | [文档转换与切分](documents.md#splitting) |
-| `document/convert` | 把 PDF、Word、PowerPoint、Excel、CSV、HTML 等转换为 Markdown；各格式在子包中，`convert/all` 注册全部 | [文档转换与切分](documents.md#converting) |
+| `httpx` | HTTP 中间件、平滑停机 | [中间件](middleware.md)、[请求生命周期](lifecycle.md) |
+| `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
+| `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
+| `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、提示消息、主题、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
+| `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载，提示、对话框与页面的衔接 | [界面组件](components.md) |
+| `web/webtest` | 测试页面：保存会话 cookie，不经过登录页登录，读取 htmx 的响应头 | [页面测试](testing.md#page-tests) |
+| `web/upload` | 页面的上传接口，与 `ui.FileField` 配合：直传 S3 或经服务器上传 | [上传文件](forms.md#file-uploads) |
+| `realtime` | 嵌入 Centrifuge 的 WebSocket 实时频道：公开、私有与 presence 频道，频道就是广播的主题；`realtime/redispresence` 是在线成员的 Redis 存储，`realtime/realtimetest` 是存储的契约测试 | [实时频道](realtime.md) |
+| `command` | 根命令、`Run`、`Bind`、`config` 命令、退出码 | [命令行](commands.md) |
+| `command/devcmd` | `dev` 命令：开发页面时监听文件变化、重启应用、刷新浏览器 | [dev 命令](commands.md#dev-command) |
+| `command/httpcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
+| `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
 
-<a id="security-packages"></a>
-### 安全
+<a id="features"></a>
+### 功能
+
+建立在以上各层之上的应用功能。入口不依赖它们：路由、页面和命令由应用把功能接进来。
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
 | `apitoken` | 存在数据库中的 API 令牌，用作 JSON API 的 Bearer 凭据 | [API 令牌](api-tokens.md) |
 | `authz` | 基于角色的权限：代码中声明的权限目录，角色按租户分配 | [授权](authorization.md)、[多租户](tenancy.md) |
-| `hashing` | 密码的单向哈希与重新哈希 | [哈希](hashing.md) |
-| `crypt` | 用应用密钥加密数据、签名和校验链接 | [加密与签名链接](encryption.md) |
-
-<a id="database-packages"></a>
-### 数据库
-
-| 包 | 用途 | 相关文档 |
-| --- | --- | --- |
-| `database` | 用应用选定的驱动打开连接池，`RunInTx` 与提交后回调，查询链路用的 `ChildSpans` | [数据库](database.md)、[数据库的链路](telemetry.md#database-tracing) |
-| `database/postgres`、`database/sqlite`、`database/mysql` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
-| `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
-| `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
+| `notification` | 站内通知收件箱，带已读状态 | [通知](notifications.md) |
+| `feature` | 功能开关：代码中声明，按全员、租户、用户或比例开启 | [功能开关](features.md) |
+| `activity` | 操作日志：在业务事务中记录谁对什么做了什么 | [操作日志](activity.md) |
+| `operation` | 后台操作的状态与进度：任务中心、断点续跑、进度推送 | [后台操作](operations.md) |
+| `webhook` | 向租户的端点推送事件，按 Standard Webhooks 签名与校验 | [Webhook](webhooks.md) |
+| `sheet/imports` | 在后台导入表格：进度、断点续跑、失败行下载 | [后台导入](import-export.md#background-imports) |
+| `sheet/exports` | 在后台导出表格：进度，完成后上传到文件存储 | [后台导出](import-export.md#background-exports) |
+| `ai` | 模型的配置和几种能力的接口：生成图片、合成与识别语音、计算向量、重排、决策 | [媒体](ai.md#media)、[决策](ai.md#decisions) |
+| `ai/openai`、`ai/openrouter` | 生成图片、合成与识别语音、计算向量和重排；`ai/openai` 还能调用决策模型 | [媒体](ai.md#media)、[决策](ai.md#decisions) |
+| `ai/systemone` | 用 System One 格式调用决策模型 | [决策](ai.md#decisions) |
+| `ai/aitest` | 图片、语音、向量、重排和决策的替身 | [测试](ai.md#testing) |
+| `ai/chat` | 对话式 agent：后台运行、插话、工具审批、事件推送 | [AI 助手](ai.md) |
+| `ai/chat/postgres`、`ai/chat/sqlite`、`ai/chat/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
+| `ai/chat/chattest` | 按脚本回复的模型，测试 agent 时不访问真实服务 | [测试](ai.md#testing) |
 
 缓存不在框架包中，你可以直接使用 [eko/gocache](https://github.com/eko/gocache)，详见[缓存](cache.md)；数据库查询直接使用 Bun 的原生 API，事务用 `database.RunInTx`，见[事务](database.md#transactions)。

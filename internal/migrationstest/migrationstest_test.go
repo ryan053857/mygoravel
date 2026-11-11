@@ -24,10 +24,8 @@ import (
 	"github.com/ryan053857/mygoravel/database/mysql"
 	"github.com/ryan053857/mygoravel/database/postgres"
 	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/exports"
 	"github.com/ryan053857/mygoravel/feature"
 	"github.com/ryan053857/mygoravel/filesystem"
-	"github.com/ryan053857/mygoravel/imports"
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/notification"
 	"github.com/ryan053857/mygoravel/operation"
@@ -35,29 +33,31 @@ import (
 	"github.com/ryan053857/mygoravel/ratelimit"
 	"github.com/ryan053857/mygoravel/realtime"
 	"github.com/ryan053857/mygoravel/session"
+	"github.com/ryan053857/mygoravel/sheet/exports"
+	"github.com/ryan053857/mygoravel/sheet/imports"
 	"github.com/ryan053857/mygoravel/webhook"
 )
 
 // sources 是框架中带迁移的包：键是包相对模块根的目录，Name 是文档中发布它时使用的来源名。
 // 新增带迁移的包时在这里登记，TestEveryPackageIsListed 检查没有遗漏。
 var sources = map[string]migrate.Source{
-	"activity":     {Name: "activity", FS: activity.Migrations()},
-	"ai/chat":      {Name: "ai", FS: chat.Migrations()},
-	"apitoken":     {Name: "apitoken", FS: apitoken.Migrations()},
-	"authz":        {Name: "authz", FS: authz.Migrations()},
-	"broadcast":    {Name: "broadcast", FS: broadcast.Migrations()},
-	"exports":      {Name: "exports", FS: exports.Migrations()},
-	"feature":      {Name: "feature", FS: feature.Migrations()},
-	"filesystem":   {Name: "filesystem", FS: filesystem.Migrations()},
-	"imports":      {Name: "imports", FS: imports.Migrations()},
-	"lock":         {Name: "lock", FS: lock.Migrations()},
-	"notification": {Name: "notification", FS: notification.Migrations()},
-	"operation":    {Name: "operation", FS: operation.Migrations()},
-	"queue":        {Name: "queue", FS: queue.Migrations()},
-	"ratelimit":    {Name: "ratelimit", FS: ratelimit.Migrations()},
-	"realtime":     {Name: "realtime", FS: realtime.Migrations()},
-	"session":      {Name: "session", FS: session.Migrations()},
-	"webhook":      {Name: "webhook", FS: webhook.Migrations()},
+	"activity":      {Name: "activity", FS: activity.Migrations()},
+	"ai/chat":       {Name: "ai", FS: chat.Migrations()},
+	"apitoken":      {Name: "apitoken", FS: apitoken.Migrations()},
+	"authz":         {Name: "authz", FS: authz.Migrations()},
+	"broadcast":     {Name: "broadcast", FS: broadcast.Migrations()},
+	"sheet/exports": {Name: "exports", FS: exports.Migrations()},
+	"feature":       {Name: "feature", FS: feature.Migrations()},
+	"filesystem":    {Name: "filesystem", FS: filesystem.Migrations()},
+	"sheet/imports": {Name: "imports", FS: imports.Migrations()},
+	"lock":          {Name: "lock", FS: lock.Migrations()},
+	"notification":  {Name: "notification", FS: notification.Migrations()},
+	"operation":     {Name: "operation", FS: operation.Migrations()},
+	"queue":         {Name: "queue", FS: queue.Migrations()},
+	"ratelimit":     {Name: "ratelimit", FS: ratelimit.Migrations()},
+	"realtime":      {Name: "realtime", FS: realtime.Migrations()},
+	"session":       {Name: "session", FS: session.Migrations()},
+	"webhook":       {Name: "webhook", FS: webhook.Migrations()},
 }
 
 var drivers = []database.Driver{postgres.Driver, mysql.Driver, sqlite.Driver}

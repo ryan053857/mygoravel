@@ -1,4 +1,4 @@
-// Package archtest 检查框架包的依赖方向与 HTTP API 交付范围。
+// Package archtest 检查框架包的分层、依赖方向与 HTTP API 交付范围。
 package archtest
 
 import (
@@ -10,59 +10,88 @@ import (
 
 const module = "github.com/ryan053857/mygoravel"
 
-// 每个包根可以引用的其他框架包根；同一包树中的引用直接放行。
-// 只列出实际用到的引用，TestDependencyRulesAreUsed 检查没有多余的条目。
-// internal 中是测试辅助包，可以引用任何框架包。
-var dependencies = map[string][]string{
-	"cleanup":      {},
-	"config":       {},
-	"errorx":       {},
-	"logging":      {"errorx"},
-	"i18n":         {},
-	"identity":     {"errorx"},
-	"page":         {"errorx"},
-	"database":     {"errorx"},
-	"filesystem":   {"errorx", "identity"},
-	"mail":         {"i18n"},
-	"ratelimit":    {"errorx"},
-	"httpx":        {"errorx", "identity", "i18n", "logging", "ratelimit"},
-	"session":      {"errorx", "identity"},
-	"apitoken":     {"errorx", "identity"},
-	"authz":        {"errorx", "identity"},
-	"activity":     {"identity", "logging"},
-	"notification": {"errorx", "identity"},
-	"operation":    {"database", "errorx", "i18n", "identity", "queue"},
-	"webhook":      {"errorx", "identity", "outbound", "queue"},
-	"outbound":     {},
-	"document":     {"errorx"},
-	"form":         {"i18n"},
-	"sheet":        {"errorx", "form"},
-	"imports":      {"database", "errorx", "filesystem", "i18n", "identity", "operation", "sheet"},
-	"exports":      {"database", "filesystem", "identity", "operation", "sheet"},
-	"web":          {"errorx", "filesystem", "form", "httpx", "i18n", "identity", "logging", "session"},
-	"lock":         {},
-	"hashing":      {},
-	"crypt":        {"errorx"},
-	"pdf":          {"errorx"},
-	"feature":      {"errorx", "identity"},
-	"queue":        {"logging"},
-	"broadcast":    {"identity", "logging"},
-	"realtime":     {"broadcast", "httpx", "identity", "logging"},
-	"schedule":     {"lock", "logging"},
-	"ai":           {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
-	"command":      {"cleanup", "config", "errorx", "logging", "database", "httpx"},
-	"internal":     nil,
+// layer 是框架包所在的层。包只能引用同层或更低层的包，并且引用必须列在 rules 中。
+type layer int
+
+const (
+	// 基础：错误、身份、配置、日志等，不依赖数据库、传输和命令组件。
+	layerFoundation layer = iota + 1
+	// 基础设施：数据库、队列、锁、文件、邮件等，与入口无关。
+	layerInfrastructure
+	// 入口：HTTP API、页面、实时频道和命令行。
+	layerEntry
+	// 功能：建立在以上各层之上的应用功能。入口不引用它们。
+	layerFeature
+)
+
+// rule 是一棵包树的依赖规则。
+type rule struct {
+	layer layer
+	// imports 是它可以引用的其他包树（rules 的键）。只列出实际用到的引用，
+	// TestDependencyRulesAreUsed 检查没有多余的条目。
+	imports []string
 }
 
-// 基础包不引用传输、数据库和命令组件。
-var foundation = []string{"cleanup", "config", "errorx", "i18n", "identity"}
+// rules 的键是相对模块根的包路径，规则对这个包和它的子包生效；子包另有规则时用子包的（最长的键优先）。
+// 同一条规则内的包可以互相引用。internal 中是测试辅助包，可以引用任何框架包。
+var rules = map[string]rule{
+	"cleanup":  {layerFoundation, nil},
+	"config":   {layerFoundation, nil},
+	"errorx":   {layerFoundation, nil},
+	"i18n":     {layerFoundation, nil},
+	"hashing":  {layerFoundation, nil},
+	"identity": {layerFoundation, []string{"errorx"}},
+	"logging":  {layerFoundation, []string{"errorx"}},
+	"page":     {layerFoundation, []string{"errorx"}},
+	"crypt":    {layerFoundation, []string{"errorx"}},
+	"form":     {layerFoundation, []string{"i18n"}},
 
-// 传输、数据库和命令组件的包前缀。
-var infrastructure = []string{
+	"lock":       {layerInfrastructure, nil},
+	"outbound":   {layerInfrastructure, nil},
+	"database":   {layerInfrastructure, []string{"errorx"}},
+	"ratelimit":  {layerInfrastructure, []string{"errorx"}},
+	"document":   {layerInfrastructure, []string{"errorx"}},
+	"pdf":        {layerInfrastructure, []string{"errorx"}},
+	"mail":       {layerInfrastructure, []string{"i18n"}},
+	"queue":      {layerInfrastructure, []string{"logging"}},
+	"schedule":   {layerInfrastructure, []string{"lock", "logging"}},
+	"broadcast":  {layerInfrastructure, []string{"identity", "logging"}},
+	"filesystem": {layerInfrastructure, []string{"errorx", "identity"}},
+	"sheet":      {layerInfrastructure, []string{"errorx", "form"}},
+
+	"httpx":              {layerEntry, []string{"errorx", "i18n", "identity", "logging", "ratelimit"}},
+	"session":            {layerEntry, []string{"errorx", "identity"}},
+	"web":                {layerEntry, []string{"errorx", "form", "httpx", "i18n", "identity", "logging", "session"}},
+	"web/upload":         {layerEntry, []string{"errorx", "filesystem", "httpx", "identity", "web"}},
+	"realtime":           {layerEntry, []string{"broadcast", "httpx", "identity", "logging"}},
+	"command":            {layerEntry, []string{"cleanup", "config", "errorx", "logging"}},
+	"command/httpcmd":    {layerEntry, []string{"command", "httpx"}},
+	"command/migratecmd": {layerEntry, []string{"command", "database"}},
+
+	"apitoken":      {layerFeature, []string{"errorx", "identity"}},
+	"authz":         {layerFeature, []string{"errorx", "identity"}},
+	"notification":  {layerFeature, []string{"errorx", "identity"}},
+	"feature":       {layerFeature, []string{"errorx", "identity"}},
+	"activity":      {layerFeature, []string{"identity", "logging"}},
+	"operation":     {layerFeature, []string{"database", "errorx", "i18n", "identity", "queue"}},
+	"webhook":       {layerFeature, []string{"errorx", "identity", "outbound", "queue"}},
+	"sheet/imports": {layerFeature, []string{"database", "errorx", "filesystem", "i18n", "identity", "operation", "sheet"}},
+	"sheet/exports": {layerFeature, []string{"database", "filesystem", "identity", "operation", "sheet"}},
+	"ai":            {layerFeature, nil},
+	"ai/chat":       {layerFeature, []string{"ai", "broadcast", "database", "errorx", "httpx", "lock", "logging"}},
+
+	"internal": {},
+}
+
+// 传输、数据库和命令组件的包前缀，基础层不引用它们。
+var components = []string{
 	"net/http", "database/sql", "github.com/danielgtaylor/huma",
 	"github.com/go-chi/chi", "github.com/uptrace/bun", "github.com/jackc/pgx",
 	"github.com/pressly/goose", "github.com/spf13/cobra", "github.com/redis/go-redis",
 }
+
+// 基础层中的例外：form 按 Huma 的标签和校验规则转换字段值。
+var componentExceptions = map[string]string{"form": "github.com/danielgtaylor/huma"}
 
 // 后期应用形态使用的组件，当前 module 保持 HTTP API 依赖范围。
 var laterFormModules = []string{
@@ -73,32 +102,46 @@ func under(pkg, prefix string) bool {
 	return pkg == prefix || strings.HasPrefix(pkg, prefix+"/")
 }
 
-func rootOf(pkg string) (string, bool) {
-	rel, ok := strings.CutPrefix(pkg, module+"/")
-	root, _, _ := strings.Cut(rel, "/")
-	return root, ok
+// ruleOf 返回 pkg 适用的规则的键：rules 中是 pkg 或其上级目录的最长的键。pkg 不在本模块中，或没有规则时 ok 为 false。
+func ruleOf(pkg string) (key string, ok bool) {
+	rel, internal := strings.CutPrefix(pkg, module+"/")
+	if !internal {
+		return "", false
+	}
+	for k := range rules {
+		if under(rel, k) && len(k) > len(key) {
+			key, ok = k, true
+		}
+	}
+	return key, ok
 }
 
 func importViolation(from, to string) string {
-	fromRoot, internal := rootOf(from)
-	if !internal {
+	if !under(from, module) {
 		return "source package is outside the framework module"
 	}
-	allowed, known := dependencies[fromRoot]
+	fromKey, known := ruleOf(from)
 	if !known {
 		return "source package has no dependency rule"
 	}
-	if toRoot, internal := rootOf(to); internal {
-		if _, known := dependencies[toRoot]; !known {
+	fromRule := rules[fromKey]
+	if under(to, module) {
+		toKey, known := ruleOf(to)
+		if !known {
 			return "target package has no dependency rule"
 		}
-		if toRoot != fromRoot && fromRoot != "internal" && !slices.Contains(allowed, toRoot) {
-			return "import reverses the framework dependency direction"
+		if toKey != fromKey && fromKey != "internal" {
+			if rules[toKey].layer > fromRule.layer {
+				return "import goes up a layer"
+			}
+			if !slices.Contains(fromRule.imports, toKey) {
+				return "import reverses the framework dependency direction"
+			}
 		}
 	}
-	if slices.Contains(foundation, fromRoot) {
-		for _, prefix := range infrastructure {
-			if under(to, prefix) {
+	if fromRule.layer == layerFoundation {
+		for _, prefix := range components {
+			if under(to, prefix) && componentExceptions[fromKey] != prefix {
 				return "foundation package imports an infrastructure component"
 			}
 		}
@@ -106,21 +149,29 @@ func importViolation(from, to string) string {
 	return ""
 }
 
-func TestPackageGraph(t *testing.T) {
+// imports 返回模块中每个包直接引用的包。
+func imports(t *testing.T) map[string][]string {
+	t.Helper()
 	cmd := exec.Command("go", "list", "-f", `{{.ImportPath}}{{range .Imports}} {{.}}{{end}}`, module+"/...")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list: %v\n%s", err, out)
 	}
+	graph := map[string][]string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		fields := strings.Fields(line)
-		pkg := fields[0]
-		root, _ := rootOf(pkg)
-		if _, known := dependencies[root]; !known {
+		graph[fields[0]] = fields[1:]
+	}
+	return graph
+}
+
+func TestPackageGraph(t *testing.T) {
+	for pkg, imps := range imports(t) {
+		if _, known := ruleOf(pkg); !known {
 			t.Errorf("%s: package has no dependency rule", pkg)
 			continue
 		}
-		for _, imp := range fields[1:] {
+		for _, imp := range imps {
 			if reason := importViolation(pkg, imp); reason != "" {
 				t.Errorf("%s imports %s: %s", pkg, imp, reason)
 			}
@@ -128,34 +179,46 @@ func TestPackageGraph(t *testing.T) {
 	}
 }
 
-// TestDependencyRulesAreUsed 确保 dependencies 中没有用不到的条目：放行了却没有用到的引用，
+// TestRulesRespectLayers 确保 rules 本身符合分层：每条规则放行的引用都在同层或更低层，并且指向存在的规则。
+func TestRulesRespectLayers(t *testing.T) {
+	for key, r := range rules {
+		if key != "internal" && (r.layer < layerFoundation || r.layer > layerFeature) {
+			t.Errorf("%s: no layer", key)
+		}
+		for _, to := range r.imports {
+			target, known := rules[to]
+			switch {
+			case !known:
+				t.Errorf("%s may import %s, which has no rule", key, to)
+			case target.layer > r.layer:
+				t.Errorf("%s (layer %d) may import %s (layer %d): imports only go to the same or a lower layer", key, r.layer, to, target.layer)
+			}
+		}
+	}
+}
+
+// TestDependencyRulesAreUsed 确保 rules 中没有用不到的条目：放行了却没有用到的引用，
 // 以后被悄悄用上时不会有人注意到。
 func TestDependencyRulesAreUsed(t *testing.T) {
-	cmd := exec.Command("go", "list", "-f", `{{.ImportPath}}{{range .Imports}} {{.}}{{end}}`, module+"/...")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go list: %v\n%s", err, out)
-	}
 	used := map[string]map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		fields := strings.Fields(line)
-		from, _ := rootOf(fields[0])
+	for pkg, imps := range imports(t) {
+		from, _ := ruleOf(pkg)
 		if used[from] == nil {
 			used[from] = map[string]bool{}
 		}
-		for _, imp := range fields[1:] {
-			if to, internal := rootOf(imp); internal {
+		for _, imp := range imps {
+			if to, internal := ruleOf(imp); internal {
 				used[from][to] = true
 			}
 		}
 	}
-	for from, allowed := range dependencies {
+	for from, r := range rules {
 		if used[from] == nil {
 			t.Errorf("%s: dependency rule for a package that does not exist", from)
 		}
-		for _, to := range allowed {
+		for _, to := range r.imports {
 			if !used[from][to] {
-				t.Errorf("%s may import %s but does not: remove it from dependencies", from, to)
+				t.Errorf("%s may import %s but does not: remove it from the rule", from, to)
 			}
 		}
 	}
@@ -198,6 +261,27 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/i18n", "github.com/spf13/cobra", false},
 		{module + "/logging", module + "/identity", false},
 		{module + "/identity", module + "/internal/archtest", false},
+		// 子包有自己的规则，不放宽所在的包树。
+		{module + "/sheet", module + "/operation", false},
+		{module + "/sheet/imports", module + "/operation", true},
+		{module + "/sheet/imports", module + "/sheet", true},
+		{module + "/sheet", module + "/sheet/imports", false},
+		{module + "/command", module + "/httpx", false},
+		{module + "/command/httpcmd", module + "/httpx/rest", true},
+		{module + "/command/devcmd", module + "/command", true},
+		{module + "/ai/openai", module + "/ai", true},
+		{module + "/ai", module + "/httpx", false},
+		{module + "/ai/chat/postgres", module + "/database", true},
+		{module + "/web", module + "/filesystem", false},
+		{module + "/web/upload", module + "/filesystem", true},
+		{module + "/web/ui", module + "/web", true},
+		// 引用只能指向同层或更低层。
+		{module + "/errorx", module + "/database", false},
+		{module + "/queue", module + "/httpx", false},
+		{module + "/httpx", module + "/apitoken", false},
+		{module + "/web", module + "/authz", false},
+		{module + "/form", "github.com/danielgtaylor/huma/v2", true},
+		{module + "/page", "net/http", false},
 	} {
 		t.Run(tc.from+"->"+tc.to, func(t *testing.T) {
 			reason := importViolation(tc.from, tc.to)

@@ -69,7 +69,9 @@ go test -race -count=1 -tags=integration ./...
 <a id="architecture-tests"></a>
 ### 架构测试
 
-`internal/archtest` 检查框架各个包之间的依赖方向。例如 `errorx`、`identity` 等基础包不能依赖 HTTP 或数据库相关的包，`database` 只能依赖 `errorx`。如果你的修改引入了新的包依赖，请先确认它符合分层设计，再相应地更新测试中的规则；不再用到的依赖也要从规则中删除，否则测试会失败。
+`internal/archtest` 检查框架各个包的分层和依赖方向。每个包属于[四层](directory-structure.md#framework-packages)之一：基础、基础设施、入口、功能。包只能引用同层或更低层的包，并且每一个引用都要列在测试的 `rules` 中，例如 `database` 只能引用 `errorx`；基础层还不能引用 HTTP、数据库和命令行组件。
+
+规则的键是包路径，对它的子包同样生效；子包需要更多依赖时单独写一条规则，例如 `sheet` 只引用 `errorx` 和 `form`，`sheet/imports` 另外引用 `operation` 和 `filesystem`。如果你的修改引入了新的包依赖，请先确认它符合分层，再相应地更新规则；不再用到的依赖也要从规则中删除，否则测试会失败。
 
 `internal/migrationstest` 检查各个包内嵌的迁移：三种数据库的迁移文件一一对应，并且能通过 `publish` 命令原样发布。新增带迁移的包时在它的 `sources` 中登记，遗漏时测试会失败。
 
@@ -98,7 +100,7 @@ CI 不运行 `-race`，它让整个流程慢了好几倍。提交之前，请在
 - 代码使用 `gofmt` 格式化；
 - 遵循[目录结构](directory-structure.md#naming-conventions)中的命名约定；
 - 优先暴露社区组件的原生类型（`*bun.DB`、`*slog.Logger`、`*cobra.Command` 等），而不是再包装一层；
-- 数据库句柄有两种约定：存储（`session.NewStore`、`lock.NewDatabase` 等）接收 `bun.IDB`，可以用连接池或业务事务构造；自己开启事务的服务（`operation`、`imports`、`exports`、`filesystem`）接收 `*bun.DB`，要与业务数据一起提交的方法另外接收 `tx bun.IDB` 参数，或提供 `WithDB`；
+- 数据库句柄有两种约定：存储（`session.NewStore`、`lock.NewDatabase` 等）接收 `bun.IDB`，可以用连接池或业务事务构造；自己开启事务的服务（`operation`、`sheet/imports`、`sheet/exports`、`filesystem`）接收 `*bun.DB`，要与业务数据一起提交的方法另外接收 `tx bun.IDB` 参数，或提供 `WithDB`；
 - 不引入全局状态，所有依赖都通过参数显式传递。
 
 <a id="writing-documentation"></a>
