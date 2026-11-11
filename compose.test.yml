@@ -1,0 +1,53 @@
+# 集成测试用的临时服务，用法见 docs/contributions.md#integration-tests。
+# 版本与 CI 一致；数据放在 tmpfs 中，down -v 之后不留任何东西。
+name: mygoravel-test
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - 127.0.0.1:55432:5432
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: pg_isready -U postgres
+      interval: 1s
+      retries: 60
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+    ports:
+      - 127.0.0.1:53306:3306
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      # 只连 TCP：初始化阶段 MySQL 只监听 socket，此时 ping 成功并不代表已就绪。
+      test: mysqladmin ping -h 127.0.0.1 -pmysql --silent
+      interval: 1s
+      retries: 120
+
+  redis:
+    image: redis:8
+    ports:
+      - 127.0.0.1:56379:6379
+    tmpfs:
+      - /data
+    healthcheck:
+      test: redis-cli ping
+      interval: 1s
+      retries: 30
+
+  nats:
+    image: nats:2-alpine
+    # 队列驱动需要 JetStream；-m 开启监控端口供健康检查使用。
+    command: ["-js", "-m", "8222"]
+    ports:
+      - 127.0.0.1:54222:4222
+    healthcheck:
+      test: wget -qO- http://127.0.0.1:8222/healthz
+      interval: 1s
+      retries: 30
