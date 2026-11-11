@@ -30,6 +30,9 @@ var (
 	ErrNotPending = errorx.Define(errorx.NotFound, "ai.not_pending")
 	// ErrFinished 表示运行已经结束，不能再插入消息，应当开始新的运行。
 	ErrFinished = errors.New("ai: run finished")
+	// ErrShuttingDown 表示本实例正在停止，不再开始新的运行（503）。客户端稍后重试，
+	// 多实例部署时会落到其他实例上。
+	ErrShuttingDown = errorx.Define(errorx.Unavailable, "ai.shutting_down")
 )
 
 // steerExtension 是 trpc-agent-go 为已消费的插话消息事件附加的扩展字段。
@@ -49,10 +52,10 @@ type Runs struct {
 	runnerOpts []runner.Option
 	cluster    *cluster // 多实例协作，见 Cluster；nil 表示单实例
 
-	mu     sync.Mutex
-	runs   map[session.Key]*Run
-	wg     sync.WaitGroup
-	closed bool
+	mu       sync.Mutex
+	runs     map[session.Key]*Run
+	wg       sync.WaitGroup
+	draining bool // Shutdown 或 Close 开始后不再开始新的运行
 }
 
 // Option 配置 Runs。
@@ -96,10 +99,47 @@ func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Optio
 	return rs
 }
 
+// Shutdown 平滑停止本实例上的运行：不再开始新的运行（Start、Submit、Approve、Reject 返回 ErrShuttingDown），
+// 进行中的运行继续直到结束；ctx 结束时仍未结束的运行被取消，已经生成的内容保留在对话中。
+// 进行中的运行可以照常插话；多实例部署时，其他实例在此期间仍能镜像和转发它们。
+//
+// 在 HTTP 服务停止之后、Close 之前调用。ctx 结束后取消的运行记录一条 warn 日志，不作为错误返回。
+func (rs *Runs) Shutdown(ctx context.Context) error {
+	rs.mu.Lock()
+	rs.draining = true
+	rs.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		rs.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+	}
+	rs.mu.Lock()
+	canceled := 0
+	for _, r := range rs.runs {
+		if r.remote == nil && !r.isFinished() {
+			r.cancel()
+			canceled++
+		}
+	}
+	rs.mu.Unlock()
+	<-done
+	if canceled > 0 {
+		rs.logger.Warn("canceled unfinished runs on shutdown", "runs", canceled)
+	}
+	return nil
+}
+
 // Close 取消本实例上的所有运行并等待它们结束，然后关闭 runner。会话存储由调用方关闭。
+// 需要等进行中的运行结束时，先调用 Shutdown。
 func (rs *Runs) Close() error {
 	rs.mu.Lock()
-	rs.closed = true
+	rs.draining = true
 	for _, r := range rs.runs {
 		if r.remote != nil {
 			r.remote.close()
@@ -189,8 +229,8 @@ func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, o
 	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	if rs.closed {
-		return nil, errors.New("ai: runs closed")
+	if rs.draining {
+		return nil, ErrShuttingDown.New()
 	}
 	prev, ok := rs.runs[key]
 	if ok && prev.remote == nil && !prev.isFinished() {

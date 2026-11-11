@@ -3,6 +3,7 @@ package ai_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -334,5 +335,63 @@ func TestSteerBeforeApprovalIsDeliveredAfterIt(t *testing.T) {
 	}
 	if got := messagesOf(m.LastRequest()); !strings.HasSuffix(got, "tool:refunded A1 | user:还有 B2") {
 		t.Fatalf("request after approval %s", got)
+	}
+}
+
+func TestShutdownWaitsForRuns(t *testing.T) {
+	m := aitest.NewModel(aitest.Reply{Text: "说完", Delay: 300 * time.Millisecond})
+	rs := newRuns(t, m, nil)
+	ctx := context.Background()
+	r, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- rs.Shutdown(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+	// 停止期间不开始新的运行。
+	if _, err := rs.Start(ctx, "u1", "c2", model.NewUserMessage("hi")); !errors.Is(err, ai.ErrShuttingDown) {
+		t.Fatalf("start during shutdown: %v", err)
+	}
+	select {
+	case err := <-shutdown:
+		t.Fatalf("shutdown returned before the run finished: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := <-shutdown; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-r.Done():
+	default:
+		t.Fatal("shutdown returned before the run finished")
+	}
+	names, events := collect(t, r, "")
+	if done := events[len(events)-1].Data.(ai.Done); done.Canceled || !slices.Contains(names, ai.EventDone) {
+		t.Fatalf("run was canceled: %q", names)
+	}
+}
+
+func TestShutdownCancelsAfterDeadline(t *testing.T) {
+	m := aitest.NewModel(aitest.Reply{Text: "很慢", Delay: 5 * time.Second})
+	rs := newRuns(t, m, nil)
+	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := rs.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("shutdown took %v", elapsed)
+	}
+	_, events := collect(t, r, "")
+	if !events[len(events)-1].Data.(ai.Done).Canceled {
+		t.Fatal("unfinished run was not canceled")
 	}
 }

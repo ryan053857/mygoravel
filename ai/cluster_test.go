@@ -177,3 +177,32 @@ func TestClusterMirrorDetectsSilentInstance(t *testing.T) {
 		t.Fatalf("second mirror %v, %v", again, err)
 	}
 }
+
+// 一个实例停止时，进行中的运行继续直到结束，其他实例照常镜像它。
+func TestClusterShutdownFinishesRunsMirroredElsewhere(t *testing.T) {
+	m := aitest.NewModel(aitest.Reply{Text: "说 完 了", Delay: 400 * time.Millisecond})
+	a, b := twoInstances(t, m, nil)
+	ctx := context.Background()
+	if _, err := a.Start(ctx, "u1", "c1", model.NewUserMessage("hi")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- a.Shutdown(ctx) }()
+
+	mirrored, err := b.Get(ctx, "u1", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, events := collect(t, mirrored, "")
+	if done := events[len(events)-1].Data.(ai.Done); done.Canceled {
+		t.Fatal("run was canceled by shutdown")
+	}
+	if err := <-shutdown; err != nil {
+		t.Fatal(err)
+	}
+	// 运行结束后，对话可以在其他实例上继续。
+	if _, err := b.Start(ctx, "u1", "c1", model.NewUserMessage("还有")); err != nil {
+		t.Fatalf("continue on other instance: %v", err)
+	}
+}

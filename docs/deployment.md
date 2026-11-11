@@ -125,6 +125,7 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 
 - `http.shutdown_timeout` 决定了排空请求的最长时间；`queue.shutdown_timeout` 决定了 worker 等待处理中任务的最长时间；`schedule.shutdown_timeout` 决定了调度器等待执行中任务的最长时间；
 - 一体运行时三者同时开始停止，停机时间取其中最长的一个，而不是相加；
+- 使用 [AI 助手](ai.md#deployment)时，HTTP 服务停止之后，清理资源时还要等进行中的回答说完，这段时间（文档示例中是 1 分钟）与上面的停机时间相加；
 - 部署平台的停止宽限期（例如 Kubernetes 的 `terminationGracePeriodSeconds`）应当大于上面的停机时间加上关闭数据库等资源所需的时间，否则进程可能在清理完成前被强制终止。超时未完成的队列任务会在其他实例上重新执行，定时任务不会补跑。
 
 <a id="reverse-proxies"></a>

@@ -65,15 +65,18 @@ agent := llmagent.New("writer",
     llmagent.WithTools([]tool.Tool{assistant.SearchTool(article.NewSearch(db)), publish}),
 )
 runs := ai.NewRuns("blog", agent, sessions, ai.RequireApproval(publish))
-stack.MustAdd("ai", func(context.Context) error {
-    return errors.Join(runs.Close(), sessions.Close())
+stack.MustAdd("ai", func(ctx context.Context) error {
+    // 等进行中的回答说完，最多 1 分钟，之后取消剩下的
+    drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+    defer cancel()
+    return errors.Join(runs.Shutdown(drain), runs.Close(), sessions.Close())
 })
 ```
 
 - `ai.SetLogger` 让 trpc-agent-go 的日志写进应用的日志，带 `component=ai` 字段，可以[单独设置级别](logging.md#component-levels)。
 - 对话存储按数据库选择包：`ai/postgres`、`ai/mysql` 或 `ai/sqlite`，用法相同，参数都是应用的 `*bun.DB`，和数据库驱动 `database/postgres` 等一一对应，应用只链接自己用的那个。PostgreSQL 和 MySQL 直接使用应用的连接池；SQLite 对同一个数据库文件另开一组连接（trpc-agent-go 关闭存储时会关闭它的连接），不支持内存数据库。`sessions.Close` 不会关闭应用的数据库。
 - `ai.RequireApproval` 列出需要审批的工具，见[审批](#approval)。
-- `runs.Close` 取消还在进行的运行。它登记在数据库之后，所以会先于数据库关闭。
+- `runs.Shutdown` 让进程停止时进行中的回答说完，见[部署](#deployment)；`runs.Close` 取消剩下的运行并关闭 runner。它们登记在数据库之后，所以会先于数据库关闭。
 
 工具是普通的 Go 函数，用 trpc-agent-go 的 `function.NewFunctionTool` 包装，参数和返回值按 JSON 编码，字段说明会告诉模型如何使用它：
 
@@ -421,7 +424,7 @@ decider := systemone.New(ai.ModelConfig{Model: "decision-model-preview", BaseURL
 <a id="deployment"></a>
 ## 部署
 
-- **停机**：进程停止时，进行中的运行被取消，已经生成的消息保留在对话中，用户可以继续对话。
+- **停机**：清理资源时，`runs.Shutdown` 不再开始新的回答（返回 `ai.ErrShuttingDown`，即 `503`），等进行中的回答说完，超过时限的才取消；取消的回答已经生成的部分保留在对话中，用户可以继续对话。等待期间 HTTP 服务已经停止，浏览器的消息流会断开：部署了[多个实例](#multiple-instances)时，浏览器重连到其他实例继续接收这次回答；单实例时，回答说完后保存在对话中，页面重新加载时可以看到。`Shutdown` 用的时间要计入部署平台的停止宽限期，见[平滑停止](deployment.md#graceful-shutdown)。
 - **后台任务**：不需要实时显示的 AI 工作（例如生成摘要、给文章打标签）交给[队列](queue.md)执行，在处理函数中直接调用 trpc-agent-go 的 `runner.Run`。队列任务[至少执行一次](queue.md#introduction)，这些工具需要能安全地重复执行。
 
 <a id="multiple-instances"></a>
