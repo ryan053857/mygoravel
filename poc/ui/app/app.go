@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/a-h/templ"
 	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/ryan053857/mygoravel/page"
 	"github.com/ryan053857/mygoravel/poc/ui/app/article"
 	"github.com/ryan053857/mygoravel/poc/ui/app/views"
 	"github.com/ryan053857/mygoravel/session"
@@ -51,6 +51,20 @@ func New(assets fs.FS, dev bool) (http.Handler, error) {
 	public := pages.Routes(r, web.Public)
 	public.Get("/", h.landing)
 	public.Get("/pricing", h.pricing)
+	public.Get("/listdemo", func(w http.ResponseWriter, r *http.Request) error {
+		q, err := web.ParseQuery[views.ListQuery](r)
+		if err != nil {
+			return err
+		}
+		sort := map[string]string{"-created": "", "title": "title", "-title": "-title"}[q.Sort]
+		items, total := h.store.List(article.Query{Q: q.Q, Status: q.Status, Sort: sort, Page: q.Page, PerPage: q.PerPage})
+		list := page.NewOffset(items, q.OffsetParams, total)
+		if web.IsPartial(r) {
+			web.PushURL(w, views.ListDemoURL(q))
+			return web.Render(w, r, http.StatusOK, views.ArticleTable(q, list))
+		}
+		return web.Render(w, r, http.StatusOK, views.ListDemo(q, list))
+	})
 	public.Get("/flashdemo", func(w http.ResponseWriter, r *http.Request) error {
 		return web.Render(w, r, http.StatusOK, views.FlashDemo())
 	})
@@ -102,26 +116,23 @@ func (h *handlers) subscribe(w http.ResponseWriter, r *http.Request) error {
 
 // ---- 后台：列表 ----
 
-func listState(r *http.Request) views.ListState {
-	q := r.URL.Query()
-	page, _ := strconv.Atoi(q.Get("page"))
-	return views.ListState{Q: q.Get("q"), Status: q.Get("status"), Sort: q.Get("sort"), Page: max(page, 1), PerPage: 10}
-}
-
 func (h *handlers) list(w http.ResponseWriter, r *http.Request) error {
-	s := listState(r)
-	rows, total := h.store.List(article.Query{Q: s.Q, Status: s.Status, Sort: s.Sort, Page: s.Page, PerPage: s.PerPage})
-	s.Total = total
-	if s.Page > s.Pages() { // 删除最后一页的最后一条后回到新的最后一页
-		s.Page = s.Pages()
-		rows, _ = h.store.List(article.Query{Q: s.Q, Status: s.Status, Sort: s.Sort, Page: s.Page, PerPage: s.PerPage})
+	q, err := web.ParseQuery[views.ArticleQuery](r)
+	if err != nil {
+		return err
+	}
+	rows, total := h.store.List(article.Query{Q: q.Q, Status: q.Status, Sort: q.Sort, Page: q.Page, PerPage: q.PerPage})
+	l := views.ArticleList{Query: q, Page: page.NewOffset(rows, q.OffsetParams, total)}
+	if last := l.Page.LastPage(); q.Page > last { // 删除最后一页的最后一条后，回到新的最后一页
+		q.Page = last
+		rows, _ = h.store.List(article.Query{Q: q.Q, Status: q.Status, Sort: q.Sort, Page: q.Page, PerPage: q.PerPage})
+		l = views.ArticleList{Query: q, Page: page.NewOffset(rows, q.OffsetParams, total)}
 	}
 	if web.IsPartial(r) {
-		// 表单 GET 会把空字段也写进地址（?q=&status=），由服务端给出规范地址。
-		w.Header().Set("HX-Push-Url", s.URL(func(*views.ListState) {}))
-		return web.Render(w, r, http.StatusOK, templ.Join(views.ArticlesTable(s, rows), views.ListSync(s)))
+		web.PushURL(w, q.URL())
+		return web.Render(w, r, http.StatusOK, views.ArticlesTable(l))
 	}
-	return web.Render(w, r, http.StatusOK, views.ArticlesPage(s, rows, Flashes()))
+	return web.Render(w, r, http.StatusOK, views.ArticlesPage(l, Flashes()))
 }
 
 // ---- 后台：新建与编辑（对话框） ----

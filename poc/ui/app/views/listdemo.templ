@@ -1,0 +1,76 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/ryan053857/mygoravel/page"
+	"github.com/ryan053857/mygoravel/poc/ui/app/article"
+	"github.com/ryan053857/mygoravel/web"
+)
+
+// ListQuery、listURL、pageURL、sortURL、ArticleTable 逐字取自视图文档「列表页」一节（只改了状态的取值）。
+type ListQuery struct {
+	Q      string `query:"q" json:"q,omitempty"`
+	Status string `query:"status" json:"status,omitempty" enum:"draft,published,archived"`
+	Sort   string `query:"sort" json:"sort,omitempty" default:"-created" enum:"-created,title,-title"`
+	page.OffsetParams
+}
+
+func listURL(q ListQuery) string { return web.QueryURL("/listdemo", q) }
+
+func pageURL(q ListQuery, p int) string {
+	q.Page = p
+	return listURL(q)
+}
+
+func sortURL(q ListQuery, key string) string {
+	if q.Sort == key {
+		key = "-" + key
+	}
+	q.Sort, q.Page = key, 1
+	return listURL(q)
+}
+
+func ListDemoURL(q ListQuery) string { return listURL(q) }
+
+templ ListDemo(q ListQuery, list page.Offset[article.Article]) {
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+		<head>
+			<meta charset="utf-8"/>
+			@web.Scripts()
+		</head>
+		<body>
+			@ArticleTable(q, list)
+		</body>
+	</html>
+}
+
+templ ArticleTable(q ListQuery, list page.Offset[article.Article]) {
+	<section id="articles" hx-target:inherited="this" hx-swap:inherited="outerHTML">
+		<form hx-get="/listdemo" hx-trigger="input delay:300ms from:#q, change from:#status">
+			<input id="q" name="q" type="search" value={ q.Q } hx-preserve/>
+			<select id="status" name="status">
+				<option value="">全部</option>
+				<option value="draft" selected?={ q.Status == "draft" }>草稿</option>
+				<option value="published" selected?={ q.Status == "published" }>已发布</option>
+			</select>
+			<input type="hidden" name="sort" value={ q.Sort }/>
+		</form>
+		<table>
+			<tr><th><a href={ templ.SafeURL(sortURL(q, "title")) } hx-get={ sortURL(q, "title") }>标题</a></th></tr>
+			for _, item := range list.Items {
+				<tr><td>{ item.Title }</td></tr>
+			}
+		</table>
+		<nav>
+			for _, p := range list.Links(1) {
+				if p == 0 {
+					<span>…</span>
+				} else {
+					<a href={ templ.SafeURL(pageURL(q, p)) } hx-get={ pageURL(q, p) } aria-current?={ p == q.Page }>{ strconv.Itoa(p) }</a>
+				}
+			}
+		</nav>
+	</section>
+}

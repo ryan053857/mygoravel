@@ -104,3 +104,12 @@ func TestPublicPageSession(t *testing.T) {
 		t.Error("flash rendered twice")
 	}
 }
+
+// S4：非法的查询参数呈现为 422 错误页，提示按请求语言翻译。
+func TestBadQuery(t *testing.T) {
+	base := start(t)
+	res, body := get(t, http.DefaultClient, base+"/admin/articles?page=0", "Accept-Language", "zh-CN")
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "查询参数 page 不正确：不能小于 1") {
+		t.Errorf("%d %s", res.StatusCode, body)
+	}
+}

@@ -125,8 +125,14 @@ func TestBrowserList(t *testing.T) {
 	shot(t, ctx, "admin-list")
 	js[bool](t, ctx, `document.body.dataset.marker = "kept"; true`) // 整页刷新会丢失这个标记
 
-	do(t, ctx, chromedp.SendKeys("#q", "htmx"))
+	// 输入到一半时列表已经刷新（搜索框 hx-preserve），继续输入不受影响，焦点仍在搜索框。
+	do(t, ctx, chromedp.SendKeys("#q", "ht"))
+	waitFor(t, ctx, `location.search === "?q=ht"`)
+	do(t, ctx, chromedp.SendKeys("#q", "mx"))
 	waitFor(t, ctx, `location.search === "?q=htmx" && `+total+` === "共 5 篇"`)
+	if got := js[string](t, ctx, `document.activeElement.id + ":" + document.querySelector("#q").value`); got != "q:htmx" {
+		t.Errorf("focus/value after swaps = %q", got)
+	}
 
 	do(t, ctx, chromedp.Click(`[data-sort=views]`))
 	waitFor(t, ctx, `location.search === "?q=htmx&sort=views" && document.querySelector("#sort-input").value === "views"`)
@@ -309,6 +315,43 @@ func TestBrowserFlashDocSnippet(t *testing.T) {
 	openPlain()
 	if got := js[string](t, ctx, toasts); got != "" {
 		t.Errorf("flash shown again after reload: %q", got)
+	}
+	noErrors(t, ctx)
+}
+
+// L4：视图文档「列表页」一节的模板原样运行：继承的 hx-target/hx-swap、hx-preserve、排序与翻页、地址栏。
+func TestBrowserListDocSnippet(t *testing.T) {
+	ctx := tab(t)
+	base := start(t)
+	do(t, ctx, chromedp.Navigate(base+"/listdemo"))
+	waitFor(t, ctx, `document.readyState === "complete" && !!window.htmx`)
+	js[bool](t, ctx, trapErrors+`; document.body.dataset.marker = "kept"; true`)
+	const rows = `document.querySelectorAll("#articles td").length`
+	if n := js[int](t, ctx, rows); n != 20 {
+		t.Fatalf("rows = %d", n)
+	}
+	do(t, ctx, chromedp.SendKeys("#q", "ht"))
+	waitFor(t, ctx, `location.search === "?q=ht"`)
+	do(t, ctx, chromedp.SendKeys("#q", "mx"))
+	waitFor(t, ctx, `location.search === "?q=htmx" && `+rows+` === 5`)
+	if got := js[string](t, ctx, `document.activeElement.id + ":" + document.querySelector("#q").value`); got != "q:htmx" {
+		t.Errorf("focus/value = %q", got)
+	}
+	do(t, ctx, chromedp.Click(`#articles th a`))
+	waitFor(t, ctx, `location.search === "?q=htmx&sort=title" && document.querySelector("#articles input[name=sort]").value === "title"`)
+	do(t, ctx, chromedp.Click(`#articles th a`))
+	waitFor(t, ctx, `location.search === "?q=htmx&sort=-title"`)
+	// 换状态：排序保持。
+	js[bool](t, ctx, `const s = document.querySelector("#status"); s.value = "draft"; s.dispatchEvent(new Event("change", {bubbles: true})); true`)
+	waitFor(t, ctx, `location.search === "?q=htmx&status=draft&sort=-title"`)
+	// 翻页。
+	do(t, ctx, chromedp.Navigate(base+"/listdemo"))
+	waitFor(t, ctx, `!!window.htmx`)
+	js[bool](t, ctx, `document.body.dataset.marker = "kept"; true`)
+	do(t, ctx, chromedp.Click(`#articles nav a[href="/listdemo?page=2"]`))
+	waitFor(t, ctx, `location.search === "?page=2" && document.querySelector("#articles nav [aria-current]").textContent === "2"`)
+	if js[string](t, ctx, `document.body.dataset.marker || ""`) != "kept" || js[int](t, ctx, `document.querySelectorAll("#articles").length`) != 1 {
+		t.Error("pagination did not swap just the region")
 	}
 	noErrors(t, ctx)
 }

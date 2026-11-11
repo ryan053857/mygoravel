@@ -104,3 +104,14 @@ shadcn-templ 可以直接用，框架不依赖它：组件代码属于应用。�
 - 新增 F1 场景，验证视图文档「提示消息」一节中的 Alpine 写法。
 
 全部场景通过。
+
+## 后续：列表页改用框架 API（#134）
+
+后台列表页改用 `web.ParseQuery`、`web.QueryURL`、`web.PushURL` 和 `page.Offset.Links`：
+
+- 筛选表单移进列表区域，搜索框带 `hx-preserve`，问题 B 中的 `ListSync` 和 `hx-partial` 都不再需要；
+- 新增两个场景：
+  - L4：视图文档「列表页」的模板原样运行；去掉 `:inherited` 后失败，确认 htmx 4 的属性默认不继承；
+  - S4：非法的查询参数返回 422 页面。
+
+全部场景通过。
