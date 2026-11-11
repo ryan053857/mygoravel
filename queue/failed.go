@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
 )
 
 // ErrFailedJobNotFound 表示失败任务表中没有这个 ID。
@@ -67,6 +68,100 @@ func (f *FailedJobs) Retry(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	return errors.Wrapf(err, "queue: retry failed job %s", id)
+}
+
+// RetryAll 把最多 limit 条 topic 中、before 之前失败的任务放回原来的驱动，返回放回的条数。
+// topic 为空时包括全部 topic。只处理 before 之前失败的任务，重试后马上又失败的任务不会在同一轮中被反复放回：
+// 后台页面上的「全部重试」传入点击时的时间，反复调用直到返回的条数小于 limit。
+//
+// 原来的驱动不在 NewFailedJobs 的 drivers 中的任务被跳过，留在失败任务表中。
+// 每一批在一个事务中删除失败记录并入队，与 Retry 的保证相同。
+func (f *FailedJobs) RetryAll(ctx context.Context, topic string, before time.Time, limit int) (int, error) {
+	if err := checkBulk(before, limit); err != nil {
+		return 0, err
+	}
+	drivers := []string{driverDatabase}
+	for name := range f.drivers {
+		drivers = append(drivers, name)
+	}
+	var n int
+	err := f.db.RunInTx(ctx, txOptions(f.db), func(ctx context.Context, tx bun.Tx) error {
+		var rows []failedJob
+		sel := f.matching(tx.NewSelect().Model(&rows), topic, before).
+			Where("f.driver IN (?)", bun.In(drivers)).Limit(int64(limit))
+		if f.db.Dialect().Name() != dialect.SQLite {
+			sel = sel.For("UPDATE SKIP LOCKED") // 两个管理员同时点「全部重试」时互不重复
+		}
+		if err := sel.Scan(ctx); err != nil || len(rows) == 0 {
+			return err
+		}
+		ids := make([]uuid.UUID, len(rows))
+		byDriver := map[string][]Job{}
+		for i, r := range rows {
+			ids[i] = r.ID
+			byDriver[r.Driver] = append(byDriver[r.Driver], Job{ID: r.ID, Topic: r.Topic, Payload: r.Payload, Metadata: r.Metadata})
+		}
+		if _, err := tx.NewDelete().Model((*failedJob)(nil)).Where("id IN (?)", bun.In(ids)).Exec(ctx); err != nil {
+			return err
+		}
+		for name, jobs := range byDriver {
+			d := f.drivers[name]
+			if name == driverDatabase {
+				d = Database(tx)
+			}
+			if err := d.Enqueue(ctx, jobs...); err != nil {
+				return err
+			}
+		}
+		n = len(rows)
+		return nil
+	})
+	if err != nil {
+		return 0, errors.Wrap(err, "queue: retry failed jobs")
+	}
+	return n, nil
+}
+
+// DeleteAll 删除最多 limit 条 topic 中、before 之前失败的任务，返回删除的条数。topic 为空时包括全部 topic。
+// 用于后台页面上的「全部删除」；按保留时间定期清理用 Cleanup。
+func (f *FailedJobs) DeleteAll(ctx context.Context, topic string, before time.Time, limit int) (int, error) {
+	if err := checkBulk(before, limit); err != nil {
+		return 0, err
+	}
+	n, err := f.delete(ctx, topic, before, limit)
+	return n, errors.Wrap(err, "queue: delete failed jobs")
+}
+
+// checkBulk 检查批量操作的参数。
+func checkBulk(before time.Time, limit int) error {
+	switch {
+	case limit <= 0:
+		return errors.New("queue: limit must be positive")
+	case before.IsZero():
+		return errors.New("queue: before is required")
+	}
+	return nil
+}
+
+// matching 限定 topic（为空时不限）和失败时间，按失败时间从旧到新。
+func (f *FailedJobs) matching(q *bun.SelectQuery, topic string, before time.Time) *bun.SelectQuery {
+	q = q.Where("f.failed_at < ?", before.UTC()).OrderExpr("f.failed_at, f.id")
+	if topic != "" {
+		q = q.Where("f.topic = ?", topic)
+	}
+	return q
+}
+
+// delete 删除最多 limit 条符合条件的失败任务。
+func (f *FailedJobs) delete(ctx context.Context, topic string, before time.Time, limit int) (int, error) {
+	ids := f.matching(f.db.NewSelect().Model((*failedJob)(nil)).Column("f.id"), topic, before).Limit(int64(limit))
+	res, err := f.db.NewDelete().Model((*failedJob)(nil)).
+		Where("id IN (SELECT id FROM (?) AS old)", ids).Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 // FailedJob 是一条失败任务记录。
@@ -165,15 +260,8 @@ func (f *FailedJobs) Cleanup(ctx context.Context, before time.Time, limit int) (
 	if limit <= 0 {
 		return 0, errors.New("queue: cleanup limit must be positive")
 	}
-	old := f.db.NewSelect().Model((*failedJob)(nil)).Column("id").
-		Where("failed_at < ?", before.UTC()).OrderExpr("failed_at").Limit(int64(limit))
-	res, err := f.db.NewDelete().Model((*failedJob)(nil)).
-		Where("id IN (SELECT id FROM (?) AS old)", old).Exec(ctx)
-	if err != nil {
-		return 0, errors.Wrap(err, "queue: cleanup failed jobs")
-	}
-	n, err := res.RowsAffected()
-	return int(n), errors.Wrap(err, "queue: cleanup failed jobs")
+	n, err := f.delete(ctx, "", before, limit)
+	return n, errors.Wrap(err, "queue: cleanup failed jobs")
 }
 
 // record 写入一条失败记录。

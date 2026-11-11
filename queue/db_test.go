@@ -260,3 +260,70 @@ func TestFailedJobsQueries(t *testing.T) {
 		}
 	})
 }
+
+func TestFailedJobsBulk(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := openDB(t, driver)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		insert := func(driver, topic string, age time.Duration) uuid.UUID {
+			id := uuid.New()
+			_, err := db.ExecContext(ctx, `INSERT INTO queue_failed_jobs (id, driver, topic, payload, attempts, error, failed_at)
+				VALUES (?, ?, ?, ?, 3, 'boom', ?)`, id, driver, topic, []byte("{}"), now.Add(-age))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		for i := range 3 {
+			insert("database", "mail", time.Duration(i+2)*time.Hour)
+		}
+		insert("redis", "mail", time.Hour)              // 驱动没有注册，跳过
+		insert("database", "report", time.Hour)         // 其他 topic
+		fresh := insert("database", "mail", -time.Hour) // before 之后失败
+		failed := queue.NewFailedJobs(db)
+
+		for _, bad := range []func() (int, error){
+			func() (int, error) { return failed.RetryAll(ctx, "mail", now, 0) },
+			func() (int, error) { return failed.RetryAll(ctx, "mail", time.Time{}, 10) },
+			func() (int, error) { return failed.DeleteAll(ctx, "mail", now, 0) },
+			func() (int, error) { return failed.DeleteAll(ctx, "mail", time.Time{}, 10) },
+		} {
+			if _, err := bad(); err == nil {
+				t.Fatal("expected an argument error")
+			}
+		}
+
+		if n, err := failed.RetryAll(ctx, "mail", now, 2); n != 2 || err != nil {
+			t.Fatalf("first batch n=%d err=%v", n, err)
+		}
+		if n, err := failed.RetryAll(ctx, "mail", now, 2); n != 1 || err != nil {
+			t.Fatalf("second batch n=%d err=%v", n, err)
+		}
+		if n, err := failed.RetryAll(ctx, "mail", now, 2); n != 0 || err != nil {
+			t.Fatalf("third batch n=%d err=%v", n, err)
+		}
+		var queued []struct {
+			Topic    string `bun:"topic"`
+			Attempts int    `bun:"attempts"`
+		}
+		if err := db.NewSelect().Table("queue_jobs").Column("topic", "attempts").Scan(ctx, &queued); err != nil {
+			t.Fatal(err)
+		}
+		if len(queued) != 3 || queued[0].Topic != "mail" || queued[0].Attempts != 0 {
+			t.Fatalf("queued %+v", queued)
+		}
+		counts, err := failed.Count(ctx)
+		if err != nil || counts["mail"] != 2 || counts["report"] != 1 {
+			t.Fatalf("counts %v err %v", counts, err)
+		}
+
+		// 全部 topic：删除 before 之前的，before 之后失败的保留。
+		if n, err := failed.DeleteAll(ctx, "", now, 10); n != 2 || err != nil {
+			t.Fatalf("delete n=%d err=%v", n, err)
+		}
+		if rows := failedRows(t, db); len(rows) != 1 || rows[0].ID != fresh {
+			t.Fatalf("remaining %+v", rows)
+		}
+	})
+}

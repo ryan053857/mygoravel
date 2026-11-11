@@ -57,6 +57,7 @@ func Run(t *testing.T, b Backend) {
 		{"retry with backoff", retryWithBackoff},
 		{"retry after", retryAfter},
 		{"failed jobs", failedJobs},
+		{"retry all failed jobs", retryAllFailed},
 		{"permanent failures", permanentFailures},
 		{"concurrent failures", concurrentFailures},
 		{"competing subscribers", competingSubscribers},
@@ -306,6 +307,53 @@ func retryAfter(t *testing.T, s *setup) {
 	eventually(t, 5*time.Second, func() bool { return retried.Load() != 0 })
 	if d := time.Unix(0, retried.Load()).Sub(begin); d < 1900*time.Millisecond {
 		t.Fatalf("retried after %v, want about 2s", d)
+	}
+}
+
+// retryAllFailed 检查按 topic 批量重试：失败任务分批放回原来的驱动并重新执行，其他 topic 不受影响。
+func retryAllFailed(t *testing.T, s *setup) {
+	ctx := context.Background()
+	cfg := config()
+	cfg.MaxAttempts = 1
+	var fail atomic.Bool
+	fail.Store(true)
+	var handled sync.Map
+	s.start(t, cfg, func(r *message.Router, sub *queue.Subscriber) {
+		for _, topic := range []string{"jobs", "other"} {
+			queue.Handle(r, sub, topic, func(ctx context.Context, p payload) error {
+				if fail.Load() {
+					return errors.New("down")
+				}
+				handled.Store(p.N, true)
+				return nil
+			})
+		}
+	})
+	for n := 1; n <= 3; n++ {
+		s.publish(t, "jobs", n)
+	}
+	s.publish(t, "other", 4)
+	eventually(t, 10*time.Second, func() bool { return len(s.failedRows(t)) == 4 })
+
+	fail.Store(false)
+	before := time.Now()
+	if n, err := s.failed.RetryAll(ctx, "jobs", before, 2); n != 2 || err != nil {
+		t.Fatalf("first batch n=%d err=%v", n, err)
+	}
+	if n, err := s.failed.RetryAll(ctx, "jobs", before, 2); n != 1 || err != nil {
+		t.Fatalf("second batch n=%d err=%v", n, err)
+	}
+	eventually(t, 10*time.Second, func() bool {
+		_, a := handled.Load(1)
+		_, b := handled.Load(2)
+		_, c := handled.Load(3)
+		return a && b && c
+	})
+	if rows := s.failedRows(t); len(rows) != 1 || rows[0].Topic != "other" {
+		t.Fatalf("remaining failed jobs %+v", rows)
+	}
+	if _, ok := handled.Load(4); ok {
+		t.Fatal("other topic was retried")
 	}
 }
 

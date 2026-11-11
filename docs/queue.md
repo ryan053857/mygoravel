@@ -278,6 +278,21 @@ err = failed.Delete(ctx, id)         // 不再需要的任务直接删除
 err := failed.Retry(ctx, id) // 不存在时返回 queue.ErrFailedJobNotFound
 ```
 
+同一个原因导致的失败往往有很多条，例如邮件服务宕机了一个小时。`RetryAll` 和 `DeleteAll` 按 topic 批量处理，每次最多 `limit` 条，返回处理的条数；topic 为空时包括全部 topic：
+
+```go
+// 后台页面上的「全部重试」：只处理点击之前失败的任务
+before := time.Now()
+for {
+    n, err := failed.RetryAll(ctx, "mail.send", before, 500)
+    if err != nil || n < 500 {
+        return err
+    }
+}
+```
+
+`before` 是必填的：重试后马上又失败的任务失败时间在它之后，不会在同一轮中被反复放回。`DeleteAll(ctx, topic, before, limit)` 的用法相同。原来的驱动不在 `NewFailedJobs` 的 `drivers` 中的任务不会被 `RetryAll` 放回，留在失败任务表中。
+
 失败任务一直保留，用 `Cleanup` 删除一段时间之前的，每次最多删除 `limit` 条：
 
 ```go
