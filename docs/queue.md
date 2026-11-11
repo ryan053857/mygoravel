@@ -13,6 +13,7 @@
 - [任务的租约与停止](#leases-and-shutdown)
 - [日志](#logging)
 - [观测](#observability)
+    - [指标](#metrics)
     - [任务事件](#job-events)
     - [队列状态](#queue-stats)
     - [一个现成的命令](#stats-command)
@@ -268,7 +269,59 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 <a id="observability"></a>
 ## 观测
 
-`queue` 不内置管理页面和监控指标，而是提供观测需要的数据：任务事件、队列状态和失败任务。用它们写命令、做后台页面，或者接入你使用的监控系统。
+观测分两层：接入监控系统用[指标](#metrics)，所有驱动报告同一套指标；写命令、做后台页面、保存执行历史用原始数据：[任务事件](#job-events)、[队列状态](#queue-stats)和[失败任务](#failed-jobs)。两层的状态名称相同。
+
+<a id="metrics"></a>
+### 指标
+
+指标使用 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 的接口，导出到 Prometheus、OTLP 还是其他系统由应用选择。例如导出给 Prometheus 抓取，在 `open` 中创建 `MeterProvider`：
+
+```go
+import (
+    "go.opentelemetry.io/otel/exporters/prometheus"
+    sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+)
+
+exporter, err := prometheus.New()
+if err != nil {
+    return nil, err
+}
+meters := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+stack.MustAdd("metrics", meters.Shutdown)
+```
+
+同样在 `open` 中注册队列中的任务数，并把 `meters` 保存在 `App` 中：
+
+```go
+if _, err := queue.ObserveJobs(meters, queue.Database(db), queue.NewFailedJobs(db)); err != nil {
+    return nil, err
+}
+```
+
+`Worker` 创建订阅者时传入它：
+
+```go
+sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil, queue.WithMeterProvider(a.meters))
+```
+
+Prometheus 通过 `promhttp.Handler()`（`github.com/prometheus/client_golang/prometheus/promhttp`）抓取，把它挂在 `/metrics` 上；不要把这个路径暴露到公网。
+
+| 指标 | 类型 | 属性 | 含义 |
+| --- | --- | --- | --- |
+| `queue.job.wait` | 直方图，秒 | | 任务从可以执行到开始处理等了多久 |
+| `queue.job.duration` | 直方图，秒 | `queue.job.outcome` | 处理耗时；按结果计数就是吞吐和失败率 |
+| `queue.jobs` | gauge | `queue.job.state` | 各状态的任务数：`ready`、`delayed`、`retrying`、`running`、`failed` |
+| `queue.job.oldest_ready_age` | gauge，秒 | | 积压最久的任务已经等了多久，没有积压时为 0 |
+
+所有指标都带有 `queue.driver` 和 `queue.topic` 属性。`queue.job.outcome` 是 `succeeded`、`retrying`、`failed`、`released`、`lease_lost`，与[任务事件](#job-events)对应。导出到 Prometheus 后，点换成下划线，单位成为后缀，例如 `queue_job_wait_seconds`。
+
+前两个由订阅者在处理任务时记录。后两个在采集时读取[队列状态](#queue-stats)和失败任务数，5 秒内的多次采集复用同一次读取；出现过的 topic 在任务清空后报告 0，而不是消失。每个实例读到的都是同一份全局数据，所以汇总多个实例时取最大值，不要求和。例如积压超过 5 分钟时告警：
+
+```promql
+max by (queue_topic) (queue_job_oldest_ready_age_seconds) > 300
+```
+
+[NATS 驱动](#nats-driver)给不出的数据不报告：`queue.jobs` 只有 `ready`、`running` 和 `failed`，没有 `queue.job.oldest_ready_age`，`queue.job.wait` 只记录首次执行。
 
 <a id="job-events"></a>
 ### 任务事件
@@ -302,31 +355,30 @@ sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil,
 | `JobReleased` | 停止等待超时，还回队列 |
 | `JobLeaseLost` | 租约过期，任务可能已被其他实例领取 |
 
-除 `JobStarted` 外，事件都在结果写回队列之后报告，`Duration` 是处理耗时，`Err` 是失败原因。Observer 在处理任务的 goroutine 中同步调用，耗时会占用并发名额：上面的写库很快没有问题，更重的工作请缓冲后批量处理。推送到 Prometheus、OpenTelemetry 等监控系统也在这里完成，框架不绑定具体的监控方案。
+除 `JobStarted` 外，事件都在结果写回队列之后报告，`Duration` 是处理耗时，`Err` 是失败原因。`e.Job.AvailableAt` 是任务本次可以执行的时间，驱动给不出时为零值。Observer 在处理任务的 goroutine 中同步调用，耗时会占用并发名额：上面的写库很快没有问题，更重的工作请缓冲后批量处理。
 
 <a id="queue-stats"></a>
 ### 队列状态
 
-`queue.Stats` 返回每个 topic 当前的任务数：
+驱动的 `Stats` 返回每个还有任务的 topic 中各状态的任务数：
 
 ```go
-stats, err := queue.Stats(ctx, queue.Database(db))
+stats, err := queue.Database(db).Stats(ctx)
 for _, s := range stats {
-    // s.Ready、s.Delayed、s.Retrying、s.Running、s.OldestReadyAt
+    // s.Jobs[queue.StateReady]、s.OldestReadyAt
 }
 ```
 
-| 字段 | 含义 |
+| 状态 | 含义 |
 | --- | --- |
-| `Ready` | 已经到期、等待领取，包括租约过期、等待重新领取的任务 |
-| `Delayed` | 还没到执行时间、从未执行过 |
-| `Retrying` | 失败后等待重试 |
-| `Running` | 正在处理 |
-| `OldestReadyAt` | `Ready` 中最早到期的时间 |
+| `StateReady` | 已经到期、等待领取，包括租约过期、等待重新领取的任务 |
+| `StateDelayed` | 还没到执行时间、从未执行过 |
+| `StateRetrying` | 失败后等待重试 |
+| `StateRunning` | 正在处理 |
 
-最值得关注的是 `time.Since(s.OldestReadyAt)`：积压最久的任务已经等了多久。worker 跟不上时它会持续变大，适合作为告警条件。
+`OldestReadyAt` 是 `StateReady` 中最早到期的时间，`time.Since(s.OldestReadyAt)` 就是积压最久的任务已经等了多久。失败任务数由 `FailedJobs.Count` 给出，对应状态 `StateFailed`。
 
-[NATS 驱动](#nats-driver)只能给出 `Ready` 和 `Running`（`Running` 包括等待重试的任务），`Delayed` 和 `Retrying` 为 `queue.Unknown`，`OldestReadyAt` 为零值。统计会扫描队列中的任务，适合命令和后台页面，不适合每秒抓取；高频的指标请从任务事件中记录。
+驱动给不出的状态不出现在 `s.Jobs` 中，给得出的状态即使为 0 也会出现。[NATS 驱动](#nats-driver)只给出 `StateReady` 和 `StateRunning`（包括等待重试的任务），也给不出 `OldestReadyAt`。统计会扫描队列中的任务，适合命令、后台页面和按分钟级频率采集的指标。
 
 <a id="stats-command"></a>
 ### 一个现成的命令
@@ -340,7 +392,7 @@ func queueCmd(db *bun.DB) *cobra.Command {
         Short: "查看队列中的任务数",
         Args:  command.NoArgs,
         RunE: func(cmd *cobra.Command, _ []string) error {
-            stats, err := queue.Stats(cmd.Context(), queue.Database(db))
+            stats, err := queue.Database(db).Stats(cmd.Context())
             if err != nil {
                 return err
             }
@@ -355,8 +407,9 @@ func queueCmd(db *bun.DB) *cobra.Command {
                 if !s.OldestReadyAt.IsZero() {
                     waiting = time.Since(s.OldestReadyAt).Round(time.Second).String()
                 }
-                fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%s\n",
-                    s.Topic, s.Ready, s.Delayed, s.Retrying, s.Running, failed[s.Topic], waiting)
+                fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%s\n", s.Topic,
+                    s.Jobs[queue.StateReady], s.Jobs[queue.StateDelayed], s.Jobs[queue.StateRetrying],
+                    s.Jobs[queue.StateRunning], failed[s.Topic], waiting)
             }
             return w.Flush()
         },

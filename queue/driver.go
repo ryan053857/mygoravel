@@ -21,6 +21,8 @@ type Driver interface {
 	// 没有到期的任务时一直等待，直到领取到至少一个或 ctx 结束（此时返回 ctx 的错误）；
 	// 需要轮询的驱动按 req.PollInterval 查询。
 	Claim(ctx context.Context, req ClaimRequest) ([]Claim, error)
+	// Stats 返回每个还有任务的 topic 中各状态的任务数，按 topic 排序。
+	Stats(ctx context.Context) ([]TopicStats, error)
 }
 
 // Job 是一个任务。
@@ -29,7 +31,9 @@ type Job struct {
 	Topic    string
 	Payload  []byte
 	Metadata map[string]string
-	// AvailableAt 是任务最早可以被领取的时间，零值表示立即。
+	// AvailableAt 是任务最早可以被领取的时间，零值表示立即。领取到的任务中，它是本次可以被领取的时间：
+	// 首次执行是发布时指定的时间，重试是退避后的时间，租约过期被重新领取是租约到期的时间；
+	// 驱动给不出时为零值。
 	AvailableAt time.Time
 	// Attempt 是领取到的任务本次是第几次执行，从 1 开始。
 	Attempt int

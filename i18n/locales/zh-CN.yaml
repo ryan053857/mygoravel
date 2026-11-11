@@ -11,6 +11,7 @@ authz.not_member: 不存在或没有访问权限
 authz.role_not_found: 角色不存在
 authz.role_exists: 已有同名角色
 authz.invalid: 输入不合法
+notification.not_found: 通知不存在
 web.not_found: 页面不存在
 web.bad_form: 无法解析提交的表单
 web.cross_origin: 跨站请求被拒绝

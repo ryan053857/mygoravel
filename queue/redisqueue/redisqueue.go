@@ -128,7 +128,7 @@ end
 return {ready, delayed, retrying, running, oldest[2] or "-1"}
 `)
 
-// Stats 实现 queue.StatsReporter。每个 topic 一次脚本调用，会遍历未到期的任务。
+// Stats 实现 queue.Driver。每个 topic 一次脚本调用，会遍历未到期的任务。
 func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 	topics, err := d.rdb.SMembers(ctx, d.prefix+":topics").Result()
 	if err != nil {
@@ -141,11 +141,14 @@ func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "redisqueue: stats of %q", topic)
 		}
-		s := queue.TopicStats{Topic: topic, Ready: int(res[0].(int64)), Delayed: int(res[1].(int64)),
-			Retrying: int(res[2].(int64)), Running: int(res[3].(int64))}
-		if s.Ready+s.Delayed+s.Retrying+s.Running == 0 {
+		jobs := map[queue.State]int{
+			queue.StateReady: int(res[0].(int64)), queue.StateDelayed: int(res[1].(int64)),
+			queue.StateRetrying: int(res[2].(int64)), queue.StateRunning: int(res[3].(int64)),
+		}
+		if jobs[queue.StateReady]+jobs[queue.StateDelayed]+jobs[queue.StateRetrying]+jobs[queue.StateRunning] == 0 {
 			continue
 		}
+		s := queue.TopicStats{Topic: topic, Jobs: jobs}
 		if ms, _ := strconv.ParseInt(res[4].(string), 10, 64); ms >= 0 {
 			s.OldestReadyAt = time.UnixMilli(ms).UTC()
 		}
@@ -154,13 +157,14 @@ func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 	return out, nil
 }
 
-// claim 领取最多 ARGV[1] 个到期的任务，租约 ARGV[2] 毫秒；返回 {id, attempts, body, ...}。
+// claim 领取最多 ARGV[1] 个到期的任务，租约 ARGV[2] 毫秒；返回 {id, attempts, body, 领取前的分数, ...}。
 var claim = redis.NewScript(`
 local t = redis.call("TIME")
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
-local ids = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", now, "LIMIT", 0, tonumber(ARGV[1]))
+local due = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", now, "WITHSCORES", "LIMIT", 0, tonumber(ARGV[1]))
 local out = {}
-for _, id in ipairs(ids) do
+for i = 1, #due, 2 do
+	local id = due[i]
 	local data = redis.call("HGET", KEYS[2], id)
 	if data then
 		redis.call("ZADD", KEYS[1], now + tonumber(ARGV[2]), id)
@@ -169,6 +173,7 @@ for _, id in ipairs(ids) do
 		table.insert(out, id)
 		table.insert(out, attempts)
 		table.insert(out, data)
+		table.insert(out, due[i + 1])
 	else
 		redis.call("ZREM", KEYS[1], id)
 	end
@@ -201,8 +206,8 @@ func (d *Driver) claim(req queue.ClaimRequest) ([]queue.Claim, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "redisqueue: claim %q", req.Topic)
 	}
-	claims := make([]queue.Claim, 0, len(res)/3)
-	for i := 0; i+2 < len(res); i += 3 {
+	claims := make([]queue.Claim, 0, len(res)/4)
+	for i := 0; i+3 < len(res); i += 4 {
 		id, err := uuid.Parse(res[i].(string))
 		if err != nil {
 			return claims, errors.Wrapf(err, "redisqueue: job id %v", res[i])
@@ -211,10 +216,11 @@ func (d *Driver) claim(req queue.ClaimRequest) ([]queue.Claim, error) {
 		if err := json.Unmarshal([]byte(res[i+2].(string)), &b); err != nil {
 			return claims, errors.Wrapf(err, "redisqueue: decode job %s", id)
 		}
-		claims = append(claims, &claimed{
-			d: d, keys: d.keys(req.Topic), id: id.String(), attempts: res[i+1].(int64),
-			job: queue.Job{ID: id, Topic: req.Topic, Payload: b.Payload, Metadata: b.Metadata, Attempt: int(res[i+1].(int64))},
-		})
+		job := queue.Job{ID: id, Topic: req.Topic, Payload: b.Payload, Metadata: b.Metadata, Attempt: int(res[i+1].(int64))}
+		if ms, err := strconv.ParseInt(res[i+3].(string), 10, 64); err == nil {
+			job.AvailableAt = time.UnixMilli(ms).UTC()
+		}
+		claims = append(claims, &claimed{d: d, keys: d.keys(req.Topic), id: id.String(), attempts: res[i+1].(int64), job: job})
 	}
 	return claims, nil
 }

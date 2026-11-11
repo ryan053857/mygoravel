@@ -11,6 +11,7 @@ authz.not_member: Not found or no access
 authz.role_not_found: Role not found
 authz.role_exists: A role with this name already exists
 authz.invalid: Invalid input
+notification.not_found: Notification not found
 web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
 web.cross_origin: Cross-origin request rejected

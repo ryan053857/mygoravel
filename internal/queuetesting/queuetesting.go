@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/queue"
@@ -28,8 +32,11 @@ type Backend struct {
 	New func(t *testing.T) (queue.Driver, *bun.DB)
 	// NoFencing 表示驱动无法发现过期的租约：旧领取的确认仍然生效。
 	NoFencing bool
-	// PartialStats 表示驱动只报告 Ready 和 Running，Running 可能包括等待重试的任务。
+	// PartialStats 表示驱动只报告 StateReady 和 StateRunning，StateRunning 可能包括等待重试的任务，
+	// 也给不出 OldestReadyAt。
 	PartialStats bool
+	// NoRedeliveryTime 表示驱动给不出重新领取的任务可以被领取的时间，Job.AvailableAt 为零值。
+	NoRedeliveryTime bool
 }
 
 // Run 运行全部场景。
@@ -52,6 +59,8 @@ func Run(t *testing.T, b Backend) {
 		{"expired lease is reclaimed", expiredLeaseIsReclaimed},
 		{"observer events", observerEvents},
 		{"stats", stats},
+		{"claimed jobs report when they became available", claimedAvailableAt},
+		{"metrics", metrics},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
 			d, db := b.New(t)
@@ -642,26 +651,158 @@ func stats(t *testing.T, s *setup) {
 	var got []queue.TopicStats
 	eventually(t, 5*time.Second, func() bool {
 		var err error
-		got, err = queue.Stats(ctx, s.driver)
+		got, err = s.driver.Stats(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return len(got) == 2 && got[0].Ready == 1 && got[1].Ready == 1
+		return len(got) == 2 && got[0].Jobs[queue.StateReady] == 1 && got[1].Jobs[queue.StateReady] == 1
 	})
 	jobs, other := got[0], got[1]
 	if jobs.Topic != "jobs" || other.Topic != "other" {
 		t.Fatalf("stats %+v", got)
 	}
 	if s.backend.PartialStats {
-		if jobs.Running < 1 || jobs.Delayed != queue.Unknown || jobs.Retrying != queue.Unknown {
-			t.Fatalf("stats %+v", jobs)
+		if len(jobs.Jobs) != 2 || jobs.Jobs[queue.StateRunning] < 1 || len(other.Jobs) != 2 || other.Jobs[queue.StateRunning] != 0 {
+			t.Fatalf("stats %+v", got)
 		}
 		return
 	}
-	if jobs.Delayed != 1 || jobs.Retrying != 1 || jobs.Running != 1 {
-		t.Fatalf("stats %+v", jobs)
+	want := map[queue.State]int{queue.StateReady: 1, queue.StateDelayed: 1, queue.StateRetrying: 1, queue.StateRunning: 1}
+	if !maps.Equal(jobs.Jobs, want) || len(other.Jobs) != 4 || other.Jobs[queue.StateDelayed] != 0 {
+		t.Fatalf("stats %+v", got)
 	}
 	if jobs.OldestReadyAt.Before(before.Add(-time.Second)) || jobs.OldestReadyAt.After(time.Now().Add(time.Second)) {
 		t.Fatalf("oldest ready at %v, published at %v", jobs.OldestReadyAt, before)
 	}
+}
+
+// claimedAvailableAt 检查领取到的任务带有本次可以被领取的时间：首次是发布时指定的时间，重试是退避后的时间。
+func claimedAvailableAt(t *testing.T, s *setup) {
+	ctx := context.Background()
+	at := time.Now().Add(300 * time.Millisecond)
+	s.publish(t, "jobs", 1, queue.At(at))
+	c := s.claim(t, "jobs", time.Minute, 5*time.Second)
+	if len(c) != 1 {
+		t.Fatalf("claimed %d", len(c))
+	}
+	// 各驱动按自己的精度保存时间（NATS 向上取整到秒），允许 1 秒的偏差。
+	near := func(got, want time.Time) bool {
+		return got.After(want.Add(-time.Second)) && got.Before(want.Add(time.Second))
+	}
+	if got := c[0].Job().AvailableAt; !near(got, at) {
+		t.Fatalf("first claim available at %v, want about %v", got, at)
+	}
+
+	retryAt := time.Now().Add(300 * time.Millisecond)
+	if err := c[0].Retry(ctx, retryAt); err != nil {
+		t.Fatal(err)
+	}
+	c = s.claim(t, "jobs", time.Minute, 5*time.Second)
+	if len(c) != 1 {
+		t.Fatalf("claimed %d", len(c))
+	}
+	got := c[0].Job().AvailableAt
+	if s.backend.NoRedeliveryTime {
+		if !got.IsZero() {
+			t.Fatalf("retried job available at %v, want zero", got)
+		}
+		return
+	}
+	if !near(got, retryAt) {
+		t.Fatalf("retried job available at %v, want about %v", got, retryAt)
+	}
+}
+
+// metrics 检查订阅者记录的直方图和 ObserveJobs 报告的任务数。
+func metrics(t *testing.T, s *setup) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	var rec recorder
+	stop := s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
+		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+			if p.N == 2 {
+				return queue.Permanent(errors.New("gone"))
+			}
+			return nil
+		})
+	}, queue.WithMeterProvider(mp), queue.WithObserver(rec.observe))
+	s.publish(t, "jobs", 1)
+	s.publish(t, "jobs", 2)
+	eventually(t, 5*time.Second, func() bool {
+		return strings.Join(rec.kinds(t, 1), " ") == "started succeeded" && strings.Join(rec.kinds(t, 2), " ") == "started failed"
+	})
+	stop()
+
+	topic := attribute.NewSet(attribute.String("queue.driver", s.driver.Name()), attribute.String("queue.topic", "jobs"))
+	got := collect(t, reader)
+	if n := histogramCount(t, got["queue.job.wait"], topic); n != 2 {
+		t.Fatalf("queue.job.wait count %d", n)
+	}
+	for outcome, want := range map[string]uint64{"succeeded": 1, "failed": 1} {
+		attrs := attribute.NewSet(append(topic.ToSlice(), attribute.String("queue.job.outcome", outcome))...)
+		if n := histogramCount(t, got["queue.job.duration"], attrs); n != want {
+			t.Fatalf("queue.job.duration{outcome=%s} count %d", outcome, n)
+		}
+	}
+
+	// 队列中留一个到期的任务，失败任务表中有一个。
+	s.publish(t, "jobs", 3)
+	eventually(t, 5*time.Second, func() bool {
+		reg, err := queue.ObserveJobs(mp, s.driver, s.failed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reg.Unregister()
+		got := collect(t, reader)
+		state := func(st queue.State) attribute.Set {
+			return attribute.NewSet(append(topic.ToSlice(), attribute.String("queue.job.state", string(st)))...)
+		}
+		ready, ok1 := gaugeValue[int64](got["queue.jobs"], state(queue.StateReady))
+		failed, ok2 := gaugeValue[int64](got["queue.jobs"], state(queue.StateFailed))
+		_, hasAge := gaugeValue[float64](got["queue.job.oldest_ready_age"], topic)
+		return ok1 && ok2 && ready == 1 && failed == 1 && hasAge != s.backend.PartialStats
+	})
+}
+
+// collect 读取一次指标，按名称返回。
+func collect(t *testing.T, reader *sdkmetric.ManualReader) map[string]metricdata.Aggregation {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]metricdata.Aggregation{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			out[m.Name] = m.Data
+		}
+	}
+	return out
+}
+
+func histogramCount(t *testing.T, data metricdata.Aggregation, attrs attribute.Set) uint64 {
+	t.Helper()
+	h, ok := data.(metricdata.Histogram[float64])
+	if !ok {
+		t.Fatalf("not a histogram: %T", data)
+	}
+	for _, dp := range h.DataPoints {
+		if dp.Attributes.Equals(&attrs) {
+			return dp.Count
+		}
+	}
+	return 0
+}
+
+func gaugeValue[N int64 | float64](data metricdata.Aggregation, attrs attribute.Set) (N, bool) {
+	g, ok := data.(metricdata.Gauge[N])
+	if !ok {
+		return 0, false
+	}
+	for _, dp := range g.DataPoints {
+		if dp.Attributes.Equals(&attrs) {
+			return dp.Value, true
+		}
+	}
+	return 0, false
 }
