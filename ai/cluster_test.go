@@ -201,8 +201,10 @@ func TestClusterShutdownFinishesRunsMirroredElsewhere(t *testing.T) {
 	if err := <-shutdown; err != nil {
 		t.Fatal(err)
 	}
-	// 运行结束后，对话可以在其他实例上继续。
-	if _, err := b.Start(ctx, "u1", "c1", model.NewUserMessage("还有")); err != nil {
+	// 运行结束后，对话可以在其他实例上继续。等它结束，不留下运行中的 goroutine 影响后面的测试。
+	next, err := b.Start(ctx, "u1", "c1", model.NewUserMessage("还有"))
+	if err != nil {
 		t.Fatalf("continue on other instance: %v", err)
 	}
+	collect(t, next, "")
 }
