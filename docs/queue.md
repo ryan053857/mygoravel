@@ -55,14 +55,14 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 <a id="publishing-jobs"></a>
 ## 发布任务
 
-`queue.Publish` 把任意可以编码为 JSON 的值发布到一个 topic。第二个参数是队列驱动，`queue.Database` 把任务保存在数据库中，它接收 `*bun.DB` 或 `bun.Tx`：传入事务时，任务和业务数据一起提交，事务回滚时任务也不会执行。
+`queue.Publish` 把任意可以编码为 JSON 的值发布到一个 topic。第二个参数是队列驱动，`queue.Database` 把任务保存在数据库中，它接收 `*bun.DB` 或事务：传入事务时，任务和业务数据一起提交，事务回滚时任务也不会执行。
 
 下面是改写后的 `Publish` action：通知邮件在发布文章的同一个事务中渲染并入队，它不再需要发送器：
 
 ```go
 func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         // ... 检查权限并更新文章状态
 
         msg, err := a.emails.Render(ctx, "article_published", map[string]any{
@@ -468,33 +468,35 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 <a id="publish-after-commit"></a>
 ### 事务提交后再发布
 
-在事务中调用 `queue.Publish(ctx, jobs, ...)` 时，任务会立刻进入 Redis：worker 可能在事务提交之前就领到任务、读不到新数据；事务回滚了，任务也照样执行。所以要在事务函数返回之后再发布。改写[发布文章](#publishing-jobs)的例子，`a.jobs` 是上面创建的 Redis 驱动，事务里只准备好邮件：
+在事务中调用 `queue.Publish(ctx, jobs, ...)` 时，任务会立刻进入 Redis：worker 可能在事务提交之前就领到任务、读不到新数据；事务回滚了，任务也照样执行。所以要用 [AfterCommit](database.md#after-commit) 登记发布，等事务提交之后再执行。改写[发布文章](#publishing-jobs)的例子，`a.jobs` 是上面创建的 Redis 驱动：
 
 ```go
 func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    var msg mail.Message
-    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) (err error) {
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         // ... 检查权限并更新文章状态
 
-        msg, err = a.emails.Render(ctx, "article_published", map[string]any{
+        msg, err := a.emails.Render(ctx, "article_published", map[string]any{
             "Title": item.Title,
             "URL":   "https://blog.example.com/" + item.Slug,
         })
-        return err
+        if err != nil {
+            return err
+        }
+        msg.To = []mail.Address{a.editors}
+        tx.AfterCommit(func(ctx context.Context) error {
+            return errors.Wrap(queue.Publish(ctx, a.jobs, "mail.send", msg), "queue article notification")
+        })
+        return nil
     })
     if err != nil {
-        return nil, err
-    }
-    msg.To = []mail.Address{a.editors}
-    if err := queue.Publish(ctx, a.jobs, "mail.send", msg); err != nil {
         return nil, err
     }
     return item, nil
 }
 ```
 
-这样事务回滚时不会发布，worker 领到任务时文章一定已经提交。代价是两步之间不是原子的：提交成功后、发布之前进程崩溃或 Redis 不可用，这封通知就丢了，`Handle` 返回错误时文章也已经发布。能接受偶尔丢失的任务（通知、刷新缓存）这样做即可；不能丢的任务使用 `queue.Database(tx)`。
+这样事务回滚时不会发布，worker 领到任务时文章一定已经提交。代价是提交和发布不是原子的：提交成功后、发布之前进程崩溃或 Redis 不可用，这封通知就丢了，只留下一条错误日志。能接受偶尔丢失的任务（通知、刷新缓存）这样做即可；不能丢的任务使用 `queue.Database(tx)`。
 
 <a id="nats-driver"></a>
 ## 使用 NATS

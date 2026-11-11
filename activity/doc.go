@@ -4,7 +4,7 @@
 // Record 在业务事务中写入记录，与业务修改一起提交或回滚；List 按租户分页查询；
 // Cleanup 删除超过保留期的记录，交给定时任务执行。
 //
-//	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+//	err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
 //	    // ... 修改文章
 //	    return activity.Record(ctx, tx, subject, activity.Activity{
 //	        Event: "article.published", TargetType: "article", TargetID: item.ID.String(),

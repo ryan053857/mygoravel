@@ -313,7 +313,7 @@ article.CoverURL = cover.URL
 希望文件状态和业务数据一起提交时，使用 `WithDB` 在业务事务中确认：
 
 ```go
-err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
     cover, err := fileService.WithDB(tx).Confirm(ctx, owner, input.CoverID, coverImage)
     if err != nil {
         return err
@@ -362,7 +362,7 @@ err := fileService.Delete(ctx, id)
 磁盘上的对象和记录由[清理任务](#cleanup)删除，`Delete` 本身只是一条 `UPDATE`，不访问存储。因此它可以放进业务事务中，与业务数据一起提交：
 
 ```go
-err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
     if _, err := tx.NewDelete().Model(&article).WherePK().Exec(ctx); err != nil {
         return err
     }
@@ -384,7 +384,7 @@ err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 if newCoverID == article.CoverID {
     return nil
 }
-err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
     files := fileService.WithDB(tx)
     cover, err := files.Confirm(ctx, owner, newCoverID, coverImage)
     if err != nil {
@@ -431,7 +431,7 @@ for i := range images {
 需要在上传后处理文件（例如提取元数据、生成视频封面）时，在确认文件的同一个事务中发布一个[队列](queue.md)任务。任务和文件状态一起提交，事务回滚时任务也不会执行：
 
 ```go
-err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
     cover, err := fileService.WithDB(tx).Confirm(ctx, owner, input.CoverID, coverImage)
     if err != nil {
         return err
@@ -819,7 +819,7 @@ type CreateInput struct {
 
 func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes, coverID uuid.UUID) (*Article, error) {
     item := &Article{ /* 与原来相同…… */ }
-    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         cover, err := a.files.WithDB(tx).Confirm(ctx, subject, coverID, coverImage)
         if err != nil {
             return err

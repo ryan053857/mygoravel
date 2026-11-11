@@ -230,7 +230,7 @@ func CanEdit(subject identity.Subject, item *Article) bool {
 ```go
 func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         err := tx.NewSelect().Model(item).Where("id = ?", id).For("UPDATE").Scan(ctx)
         if errors.Is(err, sql.ErrNoRows) {
             return ErrNotFound.New()

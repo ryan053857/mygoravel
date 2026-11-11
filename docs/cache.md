@@ -221,28 +221,19 @@ func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID
 <a id="invalidation"></a>
 ### 失效：提交后删除
 
-文章修改后，删除对应的缓存键，下次读取时重新加载。删除失败只记录日志，数据库的修改仍然成功：
+文章修改后，删除对应的缓存键，下次读取时重新加载。删除要放在**事务提交成功之后**，事务回滚时缓存保持不变。以[发布文章](actions.md#writing-actions)为例，在 `Publish.Handle` 的事务中用 [AfterCommit](database.md#after-commit) 登记删除：
 
 ```go
-func invalidate(ctx context.Context, c cache.CacheInterface[string], id uuid.UUID) {
-    if err := c.Delete(ctx, cacheKey(id)); err != nil {
-        slog.WarnContext(ctx, "invalidate article cache", "article_id", id, "error", err)
-    }
-}
-```
-
-删除要放在**事务提交成功之后**，事务回滚时缓存保持不变。以[发布文章](actions.md#writing-actions)为例，在 `Publish.Handle` 的 `RunInTx` 返回后调用：
-
-```go
-err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
     // 加锁读取、检查权限、更新状态……
+    tx.AfterCommit(func(ctx context.Context) error {
+        return errors.Wrapf(a.cache.Delete(ctx, cacheKey(id)), "invalidate article cache %s", id)
+    })
+    return nil
 })
-if err != nil {
-    return nil, err
-}
-invalidate(ctx, a.cache, id)
-return item, nil
 ```
+
+删除失败时框架记录一条 Error 日志，数据库的修改仍然成功。
 
 这是**最终一致**的缓存：并发的读请求可能在删除之后，又把它之前读到的旧值写回，直到 TTL 到期才会更新。所以缓存应始终设置有限的 TTL；不能接受短暂旧数据的场景，请直接读数据库。
 

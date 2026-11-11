@@ -204,35 +204,34 @@ type Publish struct {
 
 func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         // ...
+        tx.AfterCommit(func(ctx context.Context) error { return a.notifyEditors(ctx, item) })
+        return nil
     })
     if err != nil {
         return nil, err
     }
-    a.notifyEditors(ctx, item)
     return item, nil
 }
 
-func (a *Publish) notifyEditors(ctx context.Context, item *Article) {
+func (a *Publish) notifyEditors(ctx context.Context, item *Article) error {
     msg, err := a.emails.Render(ctx, "article_published", map[string]any{
         "Title": item.Title,
         "URL":   "https://blog.example.com/" + item.Slug,
     })
-    if err == nil {
-        msg.To = []mail.Address{a.editors}
-        err = a.mailer.Send(ctx, msg)
-    }
     if err != nil {
-        slog.ErrorContext(ctx, "notify editors failed", "article_id", item.ID, "error", err)
+        return errors.Wrapf(err, "render notification for article %s", item.ID)
     }
+    msg.To = []mail.Address{a.editors}
+    return errors.Wrapf(a.mailer.Send(ctx, msg), "notify editors of article %s", item.ID)
 }
 ```
 
 `Publish` 的事务部分见[授权](authorization.md#checking-in-transactions)。这里有两点要注意：
 
-- **在事务提交之后发送**。在事务里发送，事务回滚时邮件已经发出去了。
-- **发送失败不影响发布**。文章已经发布成功，通知没发出去只记录日志，不让接口返回错误。
+- **在事务提交之后发送**。在事务里发送，事务回滚时邮件已经发出去了。[AfterCommit](database.md#after-commit) 登记的回调在提交成功之后才执行。
+- **发送失败不影响发布**。文章已经发布成功，回调返回的错误只记录日志，不让接口返回错误。
 
 > [!NOTE]
 > `Send` 是同步的：接口要等邮件服务器响应才返回，发送失败也不会重试。需要可靠送达的邮件可以交给[队列](queue.md#publishing-jobs)发送，`mail.Message` 可以完整地序列化为 JSON。

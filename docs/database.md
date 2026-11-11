@@ -13,6 +13,7 @@
 - [执行查询](#running-queries)
     - [处理“未找到”](#handling-not-found)
 - [事务](#transactions)
+    - [提交后执行](#after-commit)
     - [隔离级别与死锁](#isolation-and-deadlocks)
 - [处理约束错误](#constraint-errors)
 - [测试](#testing)
@@ -358,10 +359,10 @@ if err != nil {
 <a id="transactions"></a>
 ## 事务
 
-使用 Bun 的 `RunInTx` 在事务中执行一组操作。回调返回错误时事务回滚，返回 `nil` 时提交：
+使用 `database.RunInTx` 在事务中执行一组操作。回调返回错误时事务回滚，返回 `nil` 时提交：
 
 ```go
-err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
     if _, err := tx.NewInsert().Model(item).Exec(ctx); err != nil {
         return err
     }
@@ -370,10 +371,37 @@ err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 })
 ```
 
+参数与 Bun 的 `db.RunInTx` 相同，只是数据库作为第二个参数传入；第三个参数是 `*sql.TxOptions`，`nil` 表示默认选项。`database.Tx` 嵌入了 `bun.Tx`，查询的写法完全一样，也可以传给接收 `bun.IDB` 的函数，例如 `activity.Record` 和 `queue.Database`。它比 `bun.Tx` 多了一个 [AfterCommit](#after-commit)。
+
 > [!WARNING]
 > 在回调内部，所有操作都必须使用传入的 `tx`，而不是外层的 `db`。使用 `db` 的操作不属于这个事务，回滚时也不会被撤销。
 
-请避免在事务中执行网络请求或删除缓存等外部操作。缓存失效应当在事务提交成功之后进行，见[缓存](cache.md#invalidation)。如需嵌套事务或保存点，请参阅 Bun 的相关文档。
+把 `tx` 作为第二个参数再调用 `database.RunInTx`，内层会以保存点（savepoint）执行：内层返回错误时只撤销内层的修改，外层可以继续。
+
+<a id="after-commit"></a>
+### 提交后执行
+
+广播事件、删除缓存、调用外部服务这类操作不能随事务回滚，应当在事务提交之后执行：提前广播，浏览器可能收到一条随后被回滚的通知；提前删除缓存，并发的读请求会把还没提交的旧数据重新写进缓存。在事务中用 `tx.AfterCommit` 登记它们。下面在[发布文章](actions.md#writing-actions)的事务中登记一次[广播](broadcasting.md#publishing-events)，`a.hub` 由 action 的构造函数传入：
+
+```go
+err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+    // ……加锁读取、检查权限并更新文章
+    tx.AfterCommit(func(ctx context.Context) error {
+        return a.hub.PublishJSON(ctx, "articles", ArticlePublished{ID: item.ID, Title: item.Title})
+    })
+    return nil
+})
+```
+
+- **提交成功后才执行。** 回调在 `RunInTx` 返回之前按登记顺序执行；事务回滚时全部丢弃。
+- **保存点中登记的回调同样等最外层提交。** 保存点回滚时只丢弃它自己登记的回调。因此接收 `tx database.Tx` 的辅助函数可以直接登记，不用关心自己是否在最外层。
+- **请求结束不会打断回调。** 回调收到的 `ctx` 去掉了取消信号，提交之后客户端断开，回调照常执行。
+- **失败只记录日志。** 回调返回错误或 panic 时记录一条 Error 日志，其余回调继续执行，`RunInTx` 仍然返回 `nil`：数据已经提交，调用方不应以为操作失败。返回错误前用 `errors.Wrap` 写明是哪个操作，日志中才看得出来。
+
+> [!WARNING]
+> 回调只保存在内存中，事务提交之后、回调执行之前进程退出，回调就不会执行。它适合尽力而为的操作；必须完成的工作，例如发送通知邮件，请在事务中用 `queue.Database(tx)` 发布任务，任务与业务数据一起提交，见[队列](queue.md#publishing-jobs)。
+
+回调是同步执行的，会推迟响应，耗时的操作交给队列。
 
 <a id="isolation-and-deadlocks"></a>
 ### 隔离级别与死锁
@@ -382,11 +410,11 @@ err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 
 MySQL 更容易出现死锁：在 REPEATABLE READ 下，范围查询和查询不存在的行会加间隙锁；`INSERT IGNORE` 和唯一键检查遇到已存在的行会加共享锁，之后再 `FOR UPDATE` 要升级为排他锁。多个事务同时这样做，就会互相等待。需要“不存在就插入、存在就锁住”时，用一条 upsert 直接取得排他锁，框架的数据库限流器就是这样做的。
 
-数据库检测到死锁时会中止其中一个事务，`postgres.IsDeadlock` 和 `mysql.IsDeadlock` 可以识别这个错误。被中止的事务已经整体回滚，可以直接重试：
+数据库检测到死锁时会中止其中一个事务，`postgres.IsDeadlock` 和 `mysql.IsDeadlock` 可以识别这个错误。被中止的事务已经整体回滚，登记的提交后回调也一并丢弃，可以直接重试：
 
 ```go
 for attempt := 1; ; attempt++ {
-    err := a.db.RunInTx(ctx, nil, publish)
+    err := database.RunInTx(ctx, a.db, nil, publish)
     if postgres.IsDeadlock(err) && attempt < 3 {
         continue
     }

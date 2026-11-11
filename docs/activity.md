@@ -39,7 +39,7 @@ migratecmd.Publish(postgres.Driver,
 ```go
 func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         // ……读取、检查并更新文章，与原来相同
         _, err = tx.NewUpdate().Model(item).Column("status", "published_at", "updated_at").WherePK().Exec(ctx)
         if err != nil {

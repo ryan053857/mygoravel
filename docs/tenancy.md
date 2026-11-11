@@ -214,7 +214,7 @@ err := PublishAt.Publish(ctx, queue.Database(tx), PublishJob{Tenant: subject.Ten
 var SendDigest = queue.Topic[string]("digest.send")
 
 func (a *ScheduleDigests) Handle(ctx context.Context) error {
-    return a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    return database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         var ids []string
         if err := tx.NewSelect().Table("tenants").Column("id").Scan(ctx, &ids); err != nil {
             return err

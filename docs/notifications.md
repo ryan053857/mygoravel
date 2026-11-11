@@ -39,7 +39,7 @@ migratecmd.Publish(postgres.Driver,
 在[发布文章](actions.md#writing-actions)的事务中调用 `notification.Send`，通知与文章状态一起提交或回滚：
 
 ```go
-err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
     // ……读取、检查并更新文章，与原来相同
     if item.AuthorID == subject.ID {
         return nil // 作者自己发布的，不用通知
@@ -159,23 +159,22 @@ return queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
 <a id="realtime"></a>
 ## 实时推送
 
-让导航栏的角标在收到通知时立即更新：事务提交之后，用[广播](broadcasting.md#publishing-events)通知收件人所在的连接。`Send` 返回的通知要带出事务：
+让导航栏的角标在收到通知时立即更新：用[广播](broadcasting.md#publishing-events)通知收件人所在的连接。广播要等事务提交之后再发，在事务中用 [AfterCommit](database.md#after-commit) 登记：
 
 ```go
-var sent []notification.Notification
-err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
     // ……
-    sent, err = notification.Send(ctx, tx, n, author)
-    return err
-})
-if err != nil {
-    return nil, err
-}
-for _, n := range sent {
-    if err := a.hub.PublishJSON(ctx, inboxTopic(n.Recipient()), n.ID); err != nil {
-        slog.WarnContext(ctx, "broadcast notification", "error", err)
+    sent, err := notification.Send(ctx, tx, n, author)
+    if err != nil {
+        return err
     }
-}
+    for _, n := range sent {
+        tx.AfterCommit(func(ctx context.Context) error {
+            return errors.Wrap(a.hub.PublishJSON(ctx, inboxTopic(n.Recipient()), n.ID), "broadcast notification")
+        })
+    }
+    return nil
+})
 ```
 
 ```go

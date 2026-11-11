@@ -34,7 +34,7 @@ stack.MustAdd("broadcast", func(context.Context) error { return hub.Close() })
 <a id="publishing-events"></a>
 ## 发布事件
 
-文章发布成功后，[Publish](actions.md#writing-actions) action 发布一个事件，`hub` 由它的构造函数传入：
+文章发布成功后，[Publish](actions.md#writing-actions) action 发布一个事件，`hub` 由它的构造函数传入。事件在发布文章的事务中用 [AfterCommit](database.md#after-commit) 登记，事务提交之后才发出：
 
 ```go
 type ArticlePublished struct {
@@ -43,17 +43,18 @@ type ArticlePublished struct {
     Author string    `json:"author"`
 }
 
-// 在 Publish.Handle 中，事务提交之后：
-if err := a.hub.PublishJSON(ctx, "articles", ArticlePublished{ID: item.ID, Title: item.Title, Author: subject.ID}); err != nil {
-    slog.WarnContext(ctx, "broadcast article published", "error", err)
-}
+// 在 Publish.Handle 的事务中：
+tx.AfterCommit(func(ctx context.Context) error {
+    err := a.hub.PublishJSON(ctx, "articles", ArticlePublished{ID: item.ID, Title: item.Title, Author: subject.ID})
+    return errors.Wrap(err, "broadcast article published")
+})
 ```
 
 几点约定：
 
 - **发布领域事件，不发布 HTML。** 每个连接收到后自己渲染：同一条消息，不同的人看到的样式、语言可能不同，以后的 WebSocket 客户端也许需要 JSON。事件应当小，大的内容只带 ID，由收到的一方查询。
 - **在事务提交之后发布。** `Publish` 不参与数据库事务，提交之前发布，浏览器可能收到一条随后被回滚的通知。
-- **发布失败不影响业务结果。** 通知是尽力而为的，文章已经发布成功，发布事件失败时记录日志即可。
+- **发布失败不影响业务结果。** 通知是尽力而为的，文章已经发布成功，发布事件失败时框架记录一条 Error 日志。
 
 主题由字母、数字和 `_ - : .` 组成，最长 200 字节。多租户应用中主题要带上租户，见[缓存、广播与其他资源](tenancy.md#other-resources)。
 

@@ -38,6 +38,7 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
+    "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/identity"
 )
 
@@ -53,7 +54,7 @@ func NewPublish(db *bun.DB) *Publish {
 // Handle 发布一篇草稿：只有作者能发布，不能重复发布。
 func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
     item := new(Article)
-    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         err := tx.NewSelect().Model(item).Where("id = ?", id).For("UPDATE").Scan(ctx)
         if errors.Is(err, sql.ErrNoRows) {
             return ErrNotFound.New()

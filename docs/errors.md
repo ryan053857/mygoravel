@@ -109,7 +109,7 @@ func NewUpdate(db *bun.DB) *Update {
 
 func (a *Update) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID, c Changes) (*Article, error) {
     item := new(Article)
-    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         err := tx.NewSelect().Model(item).Where("id = ?", id).For("UPDATE").Scan(ctx)
         if errors.Is(err, sql.ErrNoRows) {
             return ErrNotFound.New() // ① 可预期：文章不存在
