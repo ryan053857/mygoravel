@@ -89,7 +89,7 @@ Properties: map[string]any{
 <a id="jobs"></a>
 ### 队列与定时任务
 
-队列和定时任务没有登录的用户，传入代表系统的主体即可。[定时发布](actions.md#as-jobs)的 `Job` 调用 `Handle(ctx, system, id)`，记录的操作人就是 `system`。多租户应用中，系统主体还要带上任务所属的租户，否则记录会落到平台本身。
+队列和定时任务没有登录的用户，传入代表系统的主体即可。[定时发布](actions.md#as-jobs)的 `Job` 调用 `Handle(ctx, system, id)`，记录的操作人就是 `system`。多租户应用中，系统主体还要带上任务所属的租户，否则记录会落到平台本身，见[后台任务](tenancy.md#tenant-jobs)。
 
 由 HTTP 请求发布的队列任务，处理时的 context 中带有原请求的请求 ID，任务中写入的记录与发布它的请求可以关联起来。
 

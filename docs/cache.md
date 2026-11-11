@@ -254,7 +254,8 @@ return item, nil
 缓存键建议由命名空间、资源类型、格式版本和资源 ID 组成，例如 `blog:article:v1:<id>`：
 
 - 命名空间区分不同的应用和部署环境，多个环境共用一个 Redis 时不会互相覆盖；
-- 修改缓存内容的结构时，把 `v1` 升为 `v2`，新代码不再读取旧格式，旧键等 TTL 到期后自然消失。
+- 修改缓存内容的结构时，把 `v1` 升为 `v2`，新代码不再读取旧格式，旧键等 TTL 到期后自然消失；
+- 多租户应用中键还要带上租户，例如 `blog:article:v1:<tenant>:<id>`，见[缓存、广播与其他资源](tenancy.md#other-resources)。
 
 上面的例子把文章编码为 JSON 字符串存入 `cache.New[string]`。内存缓存其实可以直接保存结构体，但这样切换到 Redis 时业务代码就要改：Redis store 读出的总是字符串，如果声明为 `cache.New[Article]`，`Get` 会返回零值和 `nil` 错误，而不是报错。统一存 JSON 字符串，两种后端可以无缝替换。
 

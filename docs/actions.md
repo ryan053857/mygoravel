@@ -191,7 +191,7 @@ func (a *Publish) Job(ctx context.Context, id uuid.UUID) error {
 }
 ```
 
-`queue.Topic` 把 topic 名称和 payload 类型绑在一起，发布和处理共用这一个声明。设置定时发布的 action 在写入发布时间的同一个事务中发布任务：
+`queue.Topic` 把 topic 名称和 payload 类型绑在一起，发布和处理共用这一个声明。多租户应用中，payload 还要带上租户，`system` 按租户构造，见[后台任务](tenancy.md#tenant-jobs)。设置定时发布的 action 在写入发布时间的同一个事务中发布任务：
 
 ```go
 err := PublishAt.Publish(ctx, queue.Database(tx), item.ID, queue.At(publishAt))

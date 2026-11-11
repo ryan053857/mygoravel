@@ -7,6 +7,10 @@
     - [成员管理](#managing-members)
     - [切换租户](#switching-tenants)
 - [租户数据隔离](#data-isolation)
+- [后台任务](#background-work)
+    - [队列任务](#tenant-jobs)
+    - [定时任务](#tenant-scheduled-tasks)
+- [缓存、广播与其他资源](#other-resources)
 - [运营后台](#platform)
 - [租户的客户](#customers)
 - [令牌与租户](#tokens)
@@ -22,7 +26,7 @@ SaaS 应用通常有三类用户：
 | 租户成员 | 某个公司的员工 | 在该租户中拥有角色，同一个人可以属于多个租户 |
 | 租户的客户 | 公司的终端客户 | 同样在租户中拥有角色，例如 `customer` |
 
-所有数据存在同一个数据库中，用 `tenant_id` 区分。实现多租户需要三件事：
+所有租户的数据存在同一个数据库中，用 `tenant_id` 区分。框架不提供按租户切换数据库：会话、队列、令牌和角色都只有一份，同一个库就是最简单、也最不容易出错的结构；需要更强的隔离时，用 PostgreSQL 的[行级安全策略](#data-isolation)兜底。实现多租户需要三件事：
 
 1. 从请求中**确定租户**；
 2. 按用户在这个租户中的**角色**加载权限；
@@ -159,6 +163,87 @@ func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes
 - 按 ID 查询时也带上 `tenant_id`，不要先按 ID 查出来再比较；
 - 为每个 action 写一个“其他租户访问不到”的测试，例如用租户 B 的主体读取租户 A 的文章，期望 `404`，见[测试 action](testing.md#testing-actions)；
 - 使用 PostgreSQL 时，可以再加上[行级安全策略](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)作为兜底：在事务开始时 `SET LOCAL app.tenant_id`，由策略限制每个查询只能看到这个租户的行。
+
+<a id="background-work"></a>
+## 后台任务
+
+请求中的租户来自 `Tenant` 选项，队列和定时任务没有请求，租户只能由任务自己带着。worker 不会恢复任何上下文：action 从参数 `subject` 中取租户，所以只要构造出带租户的主体，`Handle` 的写法与请求中完全相同。
+
+<a id="tenant-jobs"></a>
+### 队列任务
+
+[定时发布](actions.md#as-jobs)的任务在单租户应用中只带文章 ID。多租户应用中，`find` 按 `subject.Tenant` 查询，只带 ID 的任务会以平台本身的身份去找文章，结果永远是 `ErrNotFound`。payload 要带上租户，系统主体按租户构造：
+
+```go
+// PublishJob 是定时发布的任务。
+type PublishJob struct {
+    Tenant string    `json:"tenant"`
+    ID     uuid.UUID `json:"id"`
+}
+
+var PublishAt = queue.Topic[PublishJob]("articles.publish")
+
+// system 是队列任务在 tenant 中的调用者，CanEdit 允许它发布这个租户的任何文章。
+func system(tenant string) identity.Subject {
+    return identity.Subject{ID: "system", Type: identity.SubjectService, Tenant: tenant, Permissions: []string{"articles:admin"}}
+}
+
+func (a *Publish) Job(ctx context.Context, job PublishJob) error {
+    _, err := a.Handle(ctx, system(job.Tenant), job.ID)
+    // ……与单租户相同
+}
+```
+
+发布任务时，租户同样取自主体：
+
+```go
+err := PublishAt.Publish(ctx, queue.Database(tx), PublishJob{Tenant: subject.Tenant, ID: item.ID}, queue.At(publishAt))
+```
+
+系统主体的权限只在 `job.Tenant` 中生效，即使 payload 中的文章 ID 属于其他租户，`find` 也找不到它。[操作日志](activity.md)按主体的租户记录，队列中的操作因此也落在正确的租户里。命令行入口同理，用 `--tenant` 参数构造 `system(tenant)`。
+
+<a id="tenant-scheduled-tasks"></a>
+### 定时任务
+
+[发布到期文章](scheduling.md#defining-tasks)的 `PublishScheduled` 用一条 `UPDATE` 处理所有到期的文章，不区分租户，也不需要主体，多租户时不用改。
+
+需要逐个租户执行的任务，例如每天给每个租户发一份摘要，不要在定时任务里循环处理：一个租户出错会中断其他租户，执行时间也随租户数量增长。定时任务只为每个租户发布一个队列任务，由 worker 并行处理，各自重试：
+
+```go
+// SendDigest 是一个租户的每日摘要，payload 是租户 ID。
+var SendDigest = queue.Topic[string]("digest.send")
+
+func (a *ScheduleDigests) Handle(ctx context.Context) error {
+    return a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        var ids []string
+        if err := tx.NewSelect().Table("tenants").Column("id").Scan(ctx, &ids); err != nil {
+            return err
+        }
+        for _, id := range ids {
+            if err := SendDigest.Publish(ctx, queue.Database(tx), id); err != nil {
+                return err
+            }
+        }
+        return nil
+    })
+}
+```
+
+所有任务在一个事务中发布，要么全部发布，要么都不发布。
+
+<a id="other-resources"></a>
+## 缓存、广播与其他资源
+
+数据库之外，凡是按名称共享的东西都要考虑租户。原则只有一条：**名称中带上租户，租户取自 `sub.Tenant`**。
+
+| 资源 | 做法 |
+| --- | --- |
+| [缓存](cache.md) | 键带上租户：`blog:article:v1:<tenant>:<id>`。缓存一章的 `load` 只按 ID 读取，命中后会跳过 `find` 的租户条件，把其他租户的文章返回出去；它要和 `find` 一样接收主体，用 `subject.Tenant` 组成键 |
+| [广播](broadcasting.md) | 主题带上租户：`t:<tenant>:articles`。SSE 处理器用 `sub.Tenant` 订阅，不要从查询参数中取租户 |
+| [限流](rate-limiting.md) | 按用户或 IP 的限流不用改；按租户限额时，key 用 `tenant:<id>` |
+| [锁](locks.md) | 锁名中的 ID 全局唯一（如 UUID）时不用改；按 slug 等租户内唯一的值加锁时，带上租户 |
+| [文件](filesystem.md) | 不用改。文件记录的是上传者，引用文件的业务行（如文章的封面）有 `tenant_id`，读写都经过业务行的租户检查 |
+
 
 <a id="platform"></a>
 ## 运营后台
