@@ -154,15 +154,33 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
 | `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
 | `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、SSE，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[服务端推送](sse.md) |
-| `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端 | [广播](broadcasting.md) |
-| `database` | 用应用选定的驱动打开连接池 | [数据库](database.md) |
+| `apitoken` | 存在数据库中的 API 令牌，用作 JSON API 的 Bearer 凭据 | [API 令牌](api-tokens.md) |
+| `authz` | 基于角色的权限：代码中声明的权限目录，角色按租户分配 | [授权](authorization.md)、[多租户](tenancy.md) |
+| `hashing` | 密码的单向哈希与重新哈希 | [哈希](hashing.md) |
+| `database` | 用应用选定的驱动打开连接池，`RunInTx` 与提交后回调 | [数据库](database.md) |
 | `database/postgres`、`database/sqlite`、`database/mysql` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
+| `lock` | 带过期时间的原子锁，数据库与内存存储；`lock/redislock` 是 Redis 存储 | [原子锁](locks.md)、[Redis 存储](locks.md#redis-store) |
+| `ratelimit` | 按 key 限制操作频率，数据库与内存限流器；`ratelimit/redislimit` 是 Redis 限流器 | [限流](rate-limiting.md)、[Redis 限流器](rate-limiting.md#redis-limiter) |
+| `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端，`broadcast/broadcasttest` 是后端的契约测试 | [广播](broadcasting.md) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |
 | `filesystem/local`、`filesystem/s3` | 本地与 S3 磁盘 | [文件存储与上传](filesystem.md#disks) |
-| `command` | 根命令、`Run`、`config` 命令、退出码 | [命令行](commands.md) |
+| `mail` | 邮件消息、发送接口与模板渲染 | [邮件](mail.md) |
+| `mail/smtp`、`mail/resend` | 通过 SMTP 服务器或 Resend API 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend) |
+| `mail/logmail`、`mail/mailtest` | 开发时写进日志、测试时记录在内存中的发送器 | [邮件](mail.md#assembling-mailer)、[测试](mail.md#testing) |
+| `queue` | 持久化的异步任务队列，数据库驱动、重试、失败任务与指标 | [队列](queue.md) |
+| `queue/redisqueue`、`queue/natsqueue` | Redis 与 NATS JetStream 队列驱动 | [Redis 驱动](queue.md#redis-driver)、[NATS 驱动](queue.md#nats-driver) |
+| `schedule` | 按 cron 表达式定时执行任务，多个实例之间去重 | [定时任务](scheduling.md) |
+| `activity` | 操作日志：在业务事务中记录谁对什么做了什么 | [操作日志](activity.md) |
+| `notification` | 站内通知收件箱，带已读状态 | [通知](notifications.md) |
+| `webhook` | 向租户的端点推送事件，按 Standard Webhooks 签名与校验 | [Webhook](webhooks.md) |
+| `ai` | 对话式 agent：后台运行、插话、工具审批、事件推送 | [AI 助手](ai.md) |
+| `ai/postgres`、`ai/sqlite`、`ai/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
+| `ai/openai`、`ai/openrouter` | 生成图片、合成与识别语音、计算向量和重排 | [媒体](ai.md#media) |
+| `ai/aitest` | 按脚本回复的模型，测试 agent 时不访问真实服务 | [测试](ai.md#testing) |
+| `command` | 根命令、`Run`、`Bind`、`config` 命令、退出码 | [命令行](commands.md) |
 | `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
 | `command/httpcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
 
-缓存不在框架包中，你可以直接使用 [eko/gocache](https://github.com/eko/gocache)，详见[缓存](cache.md)；数据库查询和事务也直接使用 Bun 的原生 API。
+缓存不在框架包中，你可以直接使用 [eko/gocache](https://github.com/eko/gocache)，详见[缓存](cache.md)；数据库查询直接使用 Bun 的原生 API，事务用 `database.RunInTx`，见[事务](database.md#transactions)。
