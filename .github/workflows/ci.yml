@@ -40,11 +40,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      gotenberg:
+        image: gotenberg/gotenberg:9-chromium
+        ports:
+          - 3000:3000
+        options: >-
+          --health-cmd "curl -sf http://localhost:3000/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       MYSQL_TEST_URL: mysql://root:mysql@127.0.0.1:3306/
       POSTGRES_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
       REDIS_TEST_URL: redis://127.0.0.1:6379/0
       NATS_TEST_URL: nats://127.0.0.1:4222
+      GOTENBERG_TEST_URL: http://127.0.0.1:3000
     steps:
       - uses: actions/checkout@v4
 

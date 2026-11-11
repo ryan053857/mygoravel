@@ -44,7 +44,7 @@ go test -race ./...
 <a id="integration-tests"></a>
 ### 集成测试
 
-带有 `integration` 构建标签的测试需要真实的 PostgreSQL、MySQL、Redis 和开启 JetStream 的 NATS（SQLite 的测试不需要外部服务，普通的 `go test` 就会运行）。仓库根目录的 `compose.test.yml` 启动这四个服务，版本与 CI 相同，`--wait` 等到它们全部就绪才返回：
+带有 `integration` 构建标签的测试需要真实的 PostgreSQL、MySQL、Redis、开启 JetStream 的 NATS 和 Gotenberg（SQLite 的测试不需要外部服务，普通的 `go test` 就会运行）。仓库根目录的 `compose.test.yml` 启动这五个服务，版本与 CI 相同，`--wait` 等到它们全部就绪才返回：
 
 ```bash
 docker compose -f compose.test.yml up -d --wait
@@ -52,10 +52,11 @@ export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?
 export MYSQL_TEST_URL='mysql://root:mysql@127.0.0.1:53306/'
 export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
 export NATS_TEST_URL='nats://127.0.0.1:54222'
+export GOTENBERG_TEST_URL='http://127.0.0.1:53000'
 go test -race -count=1 -tags=integration ./...
 ```
 
-没有设置这四个环境变量时，集成测试会失败而不是跳过。每个数据库测试使用自己的临时库，Redis 测试给每个键加随机前缀，NATS 队列测试为每个场景建一个随机命名的流，所以服务可以一直开着反复运行测试。数据放在 tmpfs 中，测试完成后执行 `docker compose -f compose.test.yml down -v` 清理，不会留下任何数据。
+没有设置这五个环境变量时，集成测试会失败而不是跳过。每个数据库测试使用自己的临时库，Redis 测试给每个键加随机前缀，NATS 队列测试为每个场景建一个随机命名的流，所以服务可以一直开着反复运行测试。数据放在 tmpfs 中，测试完成后执行 `docker compose -f compose.test.yml down -v` 清理，不会留下任何数据。
 
 队列驱动共用 `internal/queuetesting` 中的一致性测试：数据库、Redis、NATS 驱动运行同一组场景。新增驱动时让它运行 `queuetesting.Run`。
 
@@ -83,7 +84,7 @@ CI 配置位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，每次
 1. `gofmt` 格式检查；
 2. `go vet ./...`；
 3. `go test ./...`；
-4. `go test -tags=integration ./...`（使用 PostgreSQL 18、MySQL 8.4、Redis 8 和 NATS 服务容器）。
+4. `go test -tags=integration ./...`（使用 PostgreSQL 18、MySQL 8.4、Redis 8、NATS 和 Gotenberg 服务容器）。
 
 CI 不运行 `-race`，它让整个流程慢了好几倍。提交之前，请在本地至少运行前三项；改动涉及并发时，另外用 `go test -race` 运行相关的包，时序敏感的测试还要不带 `-race` 多跑几轮。
 

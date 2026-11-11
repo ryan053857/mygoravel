@@ -51,3 +51,12 @@ services:
       test: wget -qO- http://127.0.0.1:8222/healthz
       interval: 1s
       retries: 30
+
+  gotenberg:
+    image: gotenberg/gotenberg:9-chromium
+    ports:
+      - 127.0.0.1:53000:3000
+    healthcheck:
+      test: curl -sf http://127.0.0.1:3000/health
+      interval: 1s
+      retries: 60

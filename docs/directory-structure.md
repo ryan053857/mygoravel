@@ -187,6 +187,8 @@ mygoravel 的每个包都可以单独使用，按需引入即可。下面按文�
 | `mail` | 邮件消息、发送接口与模板渲染 | [邮件](mail.md) |
 | `mail/smtp`、`mail/resend` | 通过 SMTP 服务器或 Resend API 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend) |
 | `mail/logmail`、`mail/mailtest` | 开发时写进日志、测试时记录在内存中的发送器 | [邮件](mail.md#assembling-mailer)、[测试](mail.md#testing) |
+| `pdf` | 把 templ 页面生成为 PDF 的接口 | [生成 PDF](pdf.md) |
+| `pdf/gotenberg`、`pdf/pdftest` | 通过 Gotenberg 生成、测试时只记录 HTML 的生成器 | [启动 Gotenberg](pdf.md#running-gotenberg)、[测试](pdf.md#testing) |
 | `outbound` | 只能访问公网地址的 HTTP 客户端，防止服务端请求伪造 | [出站请求](outbound.md) |
 | `i18n` | 组合 go-i18n 消息目录 | [本地化](localization.md) |
 

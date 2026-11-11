@@ -300,6 +300,8 @@ services:
 
 容器中不使用 `reload`：镜像不可变，升级就是换一个新容器。需要不中断服务时，让部署平台先启动新容器，等 `/readyz` 返回成功再停止旧容器，例如 [Kamal](https://kamal-deploy.org)、Docker Swarm 的 `update_config.order: start-first`、Kubernetes 的 `maxUnavailable: 0`。新旧容器同时运行时，同样要满足[上一节](#upgrade-overlap)的条件。
 
+应用用到的其他服务也加进同一个 compose 文件，例如[生成 PDF](pdf.md#deployment) 用的 Gotenberg。
+
 <a id="health-checks"></a>
 ## 健康检查
 
