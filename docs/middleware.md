@@ -8,6 +8,7 @@
     - [可信代理](#trusted-proxies)
     - [访问日志](#access-log)
 - [限流](#rate-limiting)
+- [指标](#metrics)
 - [自行组装](#custom-stack)
 - [自定义中间件](#custom-middleware)
     - [全局中间件](#chi-middleware)
@@ -222,6 +223,18 @@ router.Use(httpx.RateLimit(ratelimit.NewMemory(a.cfg.HTTP.RateLimit), httpx.KeyB
 ```
 
 参数来自 `http.rate_limit` 段。限流的 key、配额参数、在处理器中按用户限流以及多实例共享计数，见[限流](rate-limiting.md)。
+
+<a id="metrics"></a>
+## 指标
+
+`httpx.Metrics` 把每个请求的耗时记录为 OpenTelemetry 指标 `http.server.request.duration`，按方法、状态码和路由模板区分。它安装在 `httpx.Defaults` 之前，才能记录 panic 转换成的 `500`：
+
+```go
+router.Use(httpx.Metrics(a.meters))
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+```
+
+`a.meters` 的创建和指标的属性见[指标与链路追踪](telemetry.md#http-metrics)。
 
 <a id="custom-stack"></a>
 ## 自行组装

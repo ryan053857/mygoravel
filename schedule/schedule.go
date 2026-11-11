@@ -34,6 +34,7 @@ type Scheduler struct {
 	locker          *lock.Locker
 	logger          *slog.Logger
 	shutdownTimeout time.Duration
+	metrics         *metrics
 
 	mu      sync.Mutex
 	tasks   []*task
@@ -67,18 +68,22 @@ func In(loc *time.Location) Option { return func(t *task) { t.loc = loc } }
 // New 创建调度器。locker 用于多实例去重和防止重叠：多实例部署时使用数据库或 Redis 存储，
 // 单实例部署使用 lock.NewMemoryStore。logger 为 nil 时使用 slog.Default()。
 // locker 为 nil 或 cfg 不合法时 panic。
-func New(locker *lock.Locker, cfg Config, logger *slog.Logger) *Scheduler {
+func New(locker *lock.Locker, cfg Config, logger *slog.Logger, opts ...SchedulerOption) *Scheduler {
 	if locker == nil {
 		panic("schedule: nil locker")
 	}
 	if err := cfg.Validate(); err != nil {
 		panic(errors.Wrap(err, "schedule"))
 	}
-	return &Scheduler{
+	s := &Scheduler{
 		locker:          locker,
 		logger:          logging.Or(logger).With(logging.AttrComponent, "schedule"),
 		shutdownTimeout: cfg.ShutdownTimeout,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Add 注册任务。name 在调度器中唯一，也用作锁名的一部分，最长 MaxNameLength 字节；expr 支持
@@ -230,6 +235,7 @@ func (s *Scheduler) execute(ctx context.Context, t *task, tick time.Time) error 
 	if !t.allowOverlap {
 		if !t.begin() {
 			s.logger.InfoContext(ctx, "scheduled task skipped, still running")
+			s.metrics.skip(ctx, t.name, skipOverlap)
 			return nil
 		}
 		defer t.end()
@@ -240,15 +246,18 @@ func (s *Scheduler) execute(ctx context.Context, t *task, tick time.Time) error 
 			if errors.Is(err, lock.ErrNotAcquired) {
 				return nil // 其他实例执行这一次触发
 			}
+			s.metrics.skip(ctx, t.name, skipLockFailed)
 			return err
 		}
 		if !t.allowOverlap {
 			running, err := s.locker.Acquire(ctx, "schedule:"+t.name+":running", runningTTL)
 			if errors.Is(err, lock.ErrNotAcquired) {
 				s.logger.InfoContext(ctx, "scheduled task skipped, still running on another instance")
+				s.metrics.skip(ctx, t.name, skipOverlap)
 				return nil
 			}
 			if err != nil {
+				s.metrics.skip(ctx, t.name, skipLockFailed)
 				return err
 			}
 			stop := s.keep(ctx, running)
@@ -257,6 +266,7 @@ func (s *Scheduler) execute(ctx context.Context, t *task, tick time.Time) error 
 	}
 	start := time.Now()
 	err := call(ctx, t.run)
+	s.metrics.ran(ctx, t.name, time.Since(start), err)
 	s.logger.DebugContext(ctx, "scheduled task finished", "duration", time.Since(start), "error", err)
 	return err
 }
