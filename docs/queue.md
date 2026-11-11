@@ -416,11 +416,42 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 
 其余的用法和数据库驱动完全相同：退避重试、失败任务、租约与平滑停止的行为一致，`failed.Retry` 把任务放回 Redis。与数据库驱动的区别：
 
-- **不能在事务中发布。** Redis 不参与数据库事务，发布任务和业务写入不是原子的。需要「业务数据提交，任务就一定在」的场景，仍然使用 `queue.Database(tx)`。
+- **不能在事务中发布。** Redis 不参与数据库事务，发布任务和业务写入不是原子的，在事务提交之后再发布，见[下文](#publish-after-commit)。需要「业务数据提交，任务就一定在」的场景，仍然使用 `queue.Database(tx)`。
 - **失败任务需要数据库。** 用 `WithFailedJobs` 指定，表结构见[准备数据表](#preparing-tables)。
 - **持久性取决于 Redis 的配置。** 只开启 RDB 快照时，Redis 重启会丢失最近一次快照之后发布的任务；需要可靠的队列时开启 AOF（`appendonly yes`）。主从切换同样可能丢失刚写入的任务。
 
 每个 topic 在 Redis 中有四个键，键名以 `blog:queue:{mail.send}:` 开头，花括号让同一个 topic 的键落在同一个集群槽位，因此也可以使用 Redis 集群。任务完成后对应的记录都会删除，不需要清理。租约和延迟按 Redis 服务端的时钟计算，不受各实例时钟偏差影响。
+
+<a id="publish-after-commit"></a>
+### 事务提交后再发布
+
+在事务中调用 `queue.Publish(ctx, jobs, ...)` 时，任务会立刻进入 Redis：worker 可能在事务提交之前就领到任务、读不到新数据；事务回滚了，任务也照样执行。所以要在事务函数返回之后再发布。改写[发布文章](#publishing-jobs)的例子，`a.jobs` 是上面创建的 Redis 驱动，事务里只准备好邮件：
+
+```go
+func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
+    item := new(Article)
+    var msg mail.Message
+    err := a.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) (err error) {
+        // ... 检查权限并更新文章状态
+
+        msg, err = a.emails.Render(ctx, "article_published", map[string]any{
+            "Title": item.Title,
+            "URL":   "https://blog.example.com/" + item.Slug,
+        })
+        return err
+    })
+    if err != nil {
+        return nil, err
+    }
+    msg.To = []mail.Address{a.editors}
+    if err := queue.Publish(ctx, a.jobs, "mail.send", msg); err != nil {
+        return nil, err
+    }
+    return item, nil
+}
+```
+
+这样事务回滚时不会发布，worker 领到任务时文章一定已经提交。代价是两步之间不是原子的：提交成功后、发布之前进程崩溃或 Redis 不可用，这封通知就丢了，`Handle` 返回错误时文章也已经发布。能接受偶尔丢失的任务（通知、刷新缓存）这样做即可；不能丢的任务使用 `queue.Database(tx)`。
 
 <a id="nats-driver"></a>
 ## 使用 NATS
@@ -440,7 +471,7 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 
 服务器需要 NATS 2.12 或更高版本并开启 JetStream（`nats-server -js`），延迟任务使用服务器的定时消息；版本过低时发布和领取任务都会返回错误。驱动在第一次使用时创建名为 `BLOG_QUEUE` 的流，任务确认后即从流中删除；集群部署时用 `natsqueue.Replicas(3)` 设置副本数。每个 topic 对应一个持久消费者，没有任务时拉取请求在服务器上等待，任务到达后立即被领取，不受 `poll_interval` 影响。
 
-和 [Redis](#redis-driver) 一样，NATS 不能在数据库事务中发布，失败任务需要用 `WithFailedJobs` 写入数据库。此外还有几处不同：
+和 [Redis](#redis-driver) 一样，NATS 不能在数据库事务中发布，需要[在事务提交后再发布](#publish-after-commit)，失败任务需要用 `WithFailedJobs` 写入数据库。此外还有几处不同：
 
 - **延迟的精度是秒。** 延迟任务向上取整到秒，最多晚 1 秒执行，不会提前。
 - **租约在启动时确定。** 租约就是消费者的确认等待时间，取自进程启动后第一次领取时的 `lease`，修改配置后重启生效。
