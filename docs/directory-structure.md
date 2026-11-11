@@ -34,9 +34,9 @@ blog/
 │   └── api/
 │       └── main.go          进程入口：执行命令行
 ├── internal/
-│   ├── cli/                 装配命令行：serve、work、schedule、start、routes、openapi、migrate、config、seed
+│   ├── cli/                 装配命令行：serve、work、schedule、start、routes、openapi、migrate、config、seed，以及各模块的命令
 │   ├── settings/            配置结构与加载
-│   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker、调度器等运行部分
+│   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker、调度器等运行部分，以及各模块的命令
 │   ├── auth/                token 校验器；authweb/ 是登录页
 │   ├── web/                 页面布局与错误页组件（templ）
 │   └── article/             文章业务模块
@@ -44,9 +44,10 @@ blog/
 │       ├── create.go        创建文章
 │       ├── get.go           获取文章
 │       ├── update.go        修改文章
-│       ├── publish.go       发布文章：HTTP 接口与队列任务
+│       ├── publish.go       发布文章：HTTP 接口、队列任务与命令行
 │       ├── dto.go           共享的响应结构与转换
 │       ├── routes.go        本模块的路由声明
+│       ├── commands.go      本模块的命令声明
 │       └── articleweb/      编辑后台页面
 │           ├── routes.go    页面路由
 │           ├── handlers.go  页面处理器
@@ -65,6 +66,7 @@ blog/
 | `internal/bootstrap/app.go`、`http.go` | [依赖装配](dependencies.md#assembling-the-application) |
 | `internal/bootstrap/worker.go` | [队列](queue.md#running-workers) |
 | `internal/bootstrap/scheduler.go` | [定时任务](scheduling.md#running-the-scheduler) |
+| `internal/bootstrap/commands.go`、`internal/article/commands.go` | [从命令行运行 action](actions.md#as-commands) |
 | `internal/auth/auth.go` | [认证](authentication.md#token-validators) |
 | `internal/article/article.go` | [数据库](database.md#defining-models)、[模块内共享的代码](actions.md#shared-code) |
 | `internal/article/publish.go` | [编写 action](actions.md#writing-actions)、[授权](authorization.md#checking-in-transactions) |

@@ -62,6 +62,7 @@ func New() *cobra.Command {
         command.Config[settings.Config](),
         seed(),
     )
+    root.AddCommand(bootstrap.Commands()...)
     return root
 }
 
@@ -95,6 +96,7 @@ func main() {
 | `migratecmd.Publish(driver, sources...)` | 显式挂载的 `migrate publish` | 否 |
 | `httpcmd.OpenAPI(opts, register)` | `openapi` | 否 |
 | `httpcmd.Routes(router)` | `routes` | 否 |
+| `command.Bind(open, declare)` | 应用声明的命令，例如 `article publish`，见[从命令行运行 action](actions.md#as-commands) | 是 |
 
 迁移命令和 HTTP 命令分别放在 `command/migratecmd` 和 `command/httpcmd` 两个子包中。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
 
@@ -271,7 +273,9 @@ root.AddCommand(&cobra.Command{
 })
 ```
 
-选项使用 Cobra 原生的 `Flags` 定义。命令的 context 通过 `cmd.Context()` 获取，进程收到停止信号时它会被取消。
+选项使用 Cobra 原生的 `Flags` 定义。命令的 context 通过 `cmd.Context()` 获取，进程收到停止信号时它会被取消。需要恰好 n 个位置参数时，用 `command.ExactArgs(n)`，参数个数不对同样以 `ExitUsage` 失败。
+
+执行某个业务动作的命令不必这样手动加载配置和打开数据库：把它写成 action 的 `Command` 入口，用 `command.Bind` 在执行时装配依赖，见[从命令行运行 action](actions.md#as-commands)。
 
 <a id="input-and-output"></a>
 ## 输入与输出

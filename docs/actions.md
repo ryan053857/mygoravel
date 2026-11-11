@@ -7,7 +7,8 @@
     - [HTTP 接口](#as-http)
     - [队列任务](#as-jobs)
     - [定时任务](#as-scheduled-tasks)
-    - [命令、页面和其他 action](#direct-calls)
+    - [命令行](#as-commands)
+    - [页面、其他 action 和脚本](#direct-calls)
 - [数据对象](#data-objects)
 - [约定](#conventions)
 
@@ -210,10 +211,88 @@ article.PublishAt.Handle(router, sub, article.NewPublish(a.db).Job)
 sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(a.db).Handle)
 ```
 
-<a id="direct-calls"></a>
-### 命令、页面和其他 action
+<a id="as-commands"></a>
+### 命令行
 
-其他地方直接调用 `Handle`。[填充数据](migrations.md#seeding)的命令用 `Create` 和 `Publish` 写入示例文章，[页面处理器](views.md#rendering-pages)持有它用到的 action：
+运维时常常需要手动执行一个动作，例如立即发布一篇文章。命令行入口是 `Command` 方法，签名就是 Cobra 的 `RunE`。它在 `publish.go` 中，和 `Job` 一样以[队列任务](#as-jobs)一节的 `system` 身份调用 `Handle`：
+
+```go
+// Command 处理 article publish <id>，输出发布后的文章 slug。
+func (a *Publish) Command(cmd *cobra.Command, args []string) error {
+    id, err := uuid.Parse(args[0])
+    if err != nil {
+        return command.AsExitError(command.ExitUsage, err)
+    }
+    item, err := a.Handle(cmd.Context(), system, id)
+    if err != nil {
+        return err
+    }
+    _, err = fmt.Fprintln(cmd.OutOrStdout(), item.Slug)
+    return err
+}
+```
+
+`Handle` 返回的业务错误原样返回，框架按错误分类转换为[退出码](commands.md#exit-codes)，例如文章不存在时以 1 退出。
+
+模块的命令在 `internal/article/commands.go` 中声明，它和 `routes.go` 一样只描述入口：命令名、参数和选项。下面是完整的文件：
+
+```go
+package article
+
+import (
+    "github.com/spf13/cobra"
+    "github.com/uptrace/bun"
+
+    "github.com/ryan053857/mygoravel/command"
+)
+
+// Commands 声明 article 模块的命令，bootstrap.Commands 调用它。
+func Commands(db *bun.DB) *cobra.Command {
+    group := &cobra.Command{Use: "article", Short: "管理文章"}
+    group.AddCommand(&cobra.Command{
+        Use:   "publish <id>",
+        Short: "立即发布一篇文章",
+        Args:  command.ExactArgs(1),
+        RunE:  NewPublish(db).Command,
+    })
+    return group
+}
+```
+
+构造命令行时还没有加载配置，也没有打开数据库。`command.Bind` 解决这个问题：它先用零值的依赖调用一次声明函数，得到命令的名称、参数和选项；执行其中一个命令时，再加载配置、调用 `open` 装配依赖，用装配好的依赖重新声明，执行同一个命令的 `RunE`，命令返回后关闭资源。下面是完整的 `internal/bootstrap/commands.go`，`open` 就是[依赖装配](dependencies.md#assembling-the-application)一章中 `serve` 用的那个：
+
+```go
+package bootstrap
+
+import (
+    "github.com/spf13/cobra"
+
+    "example.com/blog/internal/article"
+    "github.com/ryan053857/mygoravel/command"
+)
+
+// Commands 返回各模块的命令，执行时才装配 App。
+func Commands() []*cobra.Command {
+    return command.Bind(open, func(a *App) []*cobra.Command {
+        return []*cobra.Command{
+            article.Commands(a.db),
+        }
+    })
+}
+```
+
+[装配命令行](commands.md#declaring-the-cli)时把它们加到根命令上，之后就可以这样运行：
+
+```bash
+./bin/api article publish 0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10
+```
+
+声明时传入的 `App` 字段都是零值，所以 `Commands` 和 action 的构造函数只能保存依赖、不能使用它们，这与[生成 OpenAPI 文档](routing.md#exporting-openapi)时的约定相同。`--help` 和参数个数错误不会执行 `RunE`，也就不会打开数据库。
+
+<a id="direct-calls"></a>
+### 页面、其他 action 和脚本
+
+其他地方直接调用 `Handle`。[页面处理器](views.md#rendering-pages)持有它用到的 action；[填充数据](migrations.md#seeding)的 `seed` 命令组合了多个动作，它不是某一个 action 的入口，所以直接调用 `Create` 和 `Publish`：
 
 ```go
 item, err := article.NewCreate(db).Handle(ctx, alice, changes)
@@ -252,9 +331,9 @@ Laravel 的 [laravel-data](https://github.com/spatie/laravel-data) 用一个类�
 ## 约定
 
 - **命名**：类型名是动词，包名已经说明了对象，例如 `article.Publish`、`article.Create`；文件名与类型名对应，例如 `publish.go`。
-- **构造函数只保存依赖**。生成 OpenAPI 文档和[查看路由](routing.md#listing-routes)时，路由照常注册，action 会被构造，但传入的依赖都是 `nil`，方法不会被调用。
+- **构造函数只保存依赖**。生成 OpenAPI 文档、[查看路由](routing.md#listing-routes)和[声明命令](#as-commands)时，action 会被构造，但传入的依赖都是零值，方法不会被调用。
 - **字段只保存依赖**。action 被并发调用，请求数据只放在参数和局部变量中。
-- **`Handle` 是唯一的业务入口**。入口方法只做转换：读取参数和主体、调用 `Handle`、转换结果和错误。
+- **`Handle` 是唯一的业务入口**。入口方法只做转换：读取参数和主体、调用 `Handle`、转换结果和错误。入口方法按来源命名：`HTTP`、`Job`、`Command`。
 - **测试 `Handle`**。业务规则直接调用 `Handle` 测试，入口的认证和验证通过 HTTP 测试覆盖，见[测试](testing.md#testing-actions)。
 
 这些是推荐的约定，框架不检查它们。简单的接口可以直接用函数作为处理器，见[基本路由](routing.md#basic-routing)。

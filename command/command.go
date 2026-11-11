@@ -95,3 +95,10 @@ func group(use, short string, children ...*cobra.Command) *cobra.Command {
 func NoArgs(cmd *cobra.Command, args []string) error {
 	return AsExitError(ExitUsage, cobra.NoArgs(cmd, args))
 }
+
+// ExactArgs 是要求恰好 n 个位置参数的 cobra.PositionalArgs，出错时带 ExitUsage 退出码。
+func ExactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		return AsExitError(ExitUsage, cobra.ExactArgs(n)(cmd, args))
+	}
+}

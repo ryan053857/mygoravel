@@ -33,6 +33,8 @@ var blogFiles = []docFile{
 	{"internal/article/get.go", "routing.md"},
 	{"internal/article/routes.go", "routing.md"},
 	{"internal/article/dto.go", "routing.md"},
+	{"internal/article/commands.go", "actions.md"},
+	{"internal/bootstrap/commands.go", "actions.md"},
 }
 
 // blogFragments 是文档中没有 package 和 import 的片段，补上它们后作为文件编译。
@@ -56,6 +58,21 @@ import (
 )
 
 var _ = queueCmd
+`},
+	{"internal/article/publish_command.go", "actions.md", "// Command 处理 article publish", `package article
+
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/spf13/cobra"
+
+	"github.com/ryan053857/mygoravel/command"
+	"github.com/ryan053857/mygoravel/identity"
+)
+
+// system 在文档中与 Job 一起给出。
+var system identity.Subject
 `},
 	{"internal/bootstrap/mailer.go", "mail.md", "func newMailer(", `package bootstrap
 
