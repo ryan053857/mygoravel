@@ -12,6 +12,8 @@ type Media struct {
 	Data []byte
 	// MIME 是内容类型，例如 image/png、audio/mpeg。
 	MIME string
+	// Name 是可选的名称。决策时写在图片前面，问题可以用它指代这张图片，例如“front 中的商品是否有破损”。
+	Name string
 }
 
 // Aspect 是图片的宽高比例。

@@ -10,6 +10,7 @@
 - [审批](#approval)
 - [在页面中使用](#pages)
 - [图片、语音和向量](#media)
+- [决策](#decisions)
 - [部署](#deployment)
     - [多个实例](#multiple-instances)
 - [测试](#testing)
@@ -26,6 +27,7 @@ agent 本身由 [trpc-agent-go](https://github.com/trpc-group/trpc-agent-go) 提
 - **审批**：退款、发布这类操作，模型调用工具后先停下，由人确认后才执行。审批可以在几小时后、在另一个进程中进行。
 - **前端协议**：实现 Vercel AI SDK 的 UI 消息流协议，前端直接使用 `useChat`。
 - **图片、语音和向量**：生成图片、合成和识别语音、计算向量、重排，接口统一，测试时有替身。
+- **决策**：用专门的决策模型做分类、路由和打分，得到概率而不是文本。
 
 本章为博客的编辑后台加一个写作助手：它可以搜索已有文章，帮编辑发布草稿。发布之前需要编辑确认。
 
@@ -356,6 +358,66 @@ posts, err = ai.RerankBy(ctx, openai.New(cfg.Rerank), query, posts, func(p artic
 
 生成图片和语音通常要十几秒到几十秒，不需要立即返回结果时，放进[队列](queue.md)执行。
 
+<a id="decisions"></a>
+## 决策
+
+工单该分给哪个团队、评论是不是垃圾信息、问题有多严重，这类判断交给决策模型。它不生成文本，而是读一份材料，回答你定义的问题，给出概率。与让对话模型输出 JSON 相比，它快得多、便宜得多，结果也稳定，可以按概率设定阈值。
+
+`ai.Decider` 回答三种问题：
+
+| 问题 | 创建 | 回答 |
+| --- | --- | --- |
+| 是非题 | `ai.YesNo(name, instructions)`，可以用 `.Criteria(成立, 不成立)` 写明标准 | `Probability`：条件成立的概率；`Yes(threshold)` |
+| 选择题 | `ai.Choice(name, instructions, options...)`，至少两个选项 | `Choice`：选中的值；`ProbabilityOf(value)` |
+| 打分题 | `ai.Score(name, instructions, levels...)`，从低到高至少两级 | `Score`：按概率加权的级别序号；`Level()`、`Label()`：最可能的一级 |
+
+给工单分流：
+
+```go
+res, err := decider.Decide(ctx, ai.DecisionRequest{
+    Input: ticket, // 字符串按文本发送，结构体和 map 按 JSON 发送
+    Questions: []ai.Question{
+        ai.Choice("team", "应该由哪个团队处理？",
+            ai.ChoiceOption{Value: "billing", Description: "支付、退款和账单"},
+            ai.ChoiceOption{Value: "technical", Description: "产品故障和集成"}),
+        ai.YesNo("page", "是否需要立即通知值班人员？").Criteria("核心功能不可用或资金受影响", "可以等工作时间处理"),
+        ai.Score("severity", "这个问题有多严重？", ai.Levels("轻微", "部分受影响", "核心不可用")...),
+    },
+})
+if err != nil {
+    return err
+}
+team := res.Answers["team"].Choice
+if res.Answers["page"].Yes(0.8) {
+    // 通知值班
+}
+```
+
+- 概率在不同模型之间不可比，阈值要用自己的样本为每个模型确定。
+- 模型可能拒绝回答某个问题，这时回答的 `Refused` 为 true，`Yes` 返回 false，其余问题不受影响。
+- `Images` 一起判断图片；给图片设置 `Name`，问题里就能用名字指代它，例如“front 中的商品是否破损”。
+
+从业务数据中选一项时使用 `ai.DecideBy`，概率低于阈值或模型拒答时返回 false：
+
+```go
+team, ok, err := ai.DecideBy(ctx, decider, "哪个团队负责这个工单？", ticket.Body, teams,
+    func(t Team) ai.ChoiceOption { return ai.ChoiceOption{Value: t.Slug, Description: t.Scope} }, 0.6)
+if err == nil && !ok {
+    team = fallback // 交给人工分配
+}
+```
+
+决策接口有两种格式：
+
+- **OpenAI**：`openai.Client` 调用 `/decisions`，模型是 `gpt-6-luna`。
+- **System One**：`ai/systemone` 调用 `/systemone`。阿里云百炼的 BaseURL 填 `https://<工作空间>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`，TypeSafe 填 `https://api.typesafe.ai/v1`。`ai/openrouter` 也使用这种格式，OpenRouter 上 TypeSafe、Perplexity、Liquid、Cloudflare 等的决策模型，包括 `openai/gpt-6-luna-decisions`，都能直接使用。
+
+```go
+decider := systemone.New(ai.ModelConfig{Model: "decision-model-preview", BaseURL: bailianURL, APIKey: key})
+```
+
+各家模型支持的输入不同：百炼的 `decision-model-preview` 目前只看文本，TypeSafe 的 Jev 要求图片边长不小于 512 像素。
+
 <a id="deployment"></a>
 ## 部署
 
@@ -405,6 +467,7 @@ emb := aitest.NewEmbedder(1024)      // 相同的文本总是得到相同的向�
 sp := aitest.NewSpeaker()            // 把朗读的文字当作音频内容返回
 tr := aitest.NewTranscriber("你好")  // 依次返回预设的文字
 rr := aitest.NewReranker()           // 按查询中的字符在文档中出现的比例排序
+dc := aitest.NewDecider()            // 是非题 0.5，选择题选第一项，打分题最低一级
 ```
 
 传入预设结果时按顺序返回，用完后再收到请求就返回错误；`Requests()` 返回收到的请求，`FailWith(err)` 让之后的请求失败，用于测试出错的处理。

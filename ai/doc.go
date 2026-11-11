@@ -7,8 +7,8 @@
 //   - RequireApproval 让指定的工具停下等待审批，Runs.Approve 和 Runs.Reject 在任意进程中继续；
 //   - UIStream、Submit、UIMessages 实现 Vercel AI SDK 的 UI 消息流协议，前端直接使用 useChat。
 //
-// 此外，Imager、Speaker、Transcriber 和 Embedder 描述生成图片、合成语音、识别语音和计算向量这几种能力，
-// 由 ai/openai、ai/openrouter 等子包实现，测试时使用 ai/aitest 中的替身。
+// 此外，Imager、Speaker、Transcriber、Embedder、Reranker 和 Decider 描述生成图片、合成语音、识别语音、
+// 计算向量、重排和决策这几种能力，由 ai/openai、ai/openrouter、ai/systemone 等子包实现，测试时使用 ai/aitest 中的替身。
 //
 // 运行在启动它的实例上执行；部署多个实例时用 Cluster 让各实例协作，同一个对话的请求可以落在任何实例上。
 package ai

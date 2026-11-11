@@ -1,7 +1,7 @@
-// Package openrouter 通过 OpenRouter 生成图片、合成语音、识别语音、计算向量和重排。
+// Package openrouter 通过 OpenRouter 生成图片、合成语音、识别语音、计算向量、重排和决策。
 //
 // 语音、向量和重排使用与 ai/openai 相同的接口；图片使用 OpenRouter 自己的 /images 接口，
-// 按宽高比例而不是像素尺寸指定大小。
+// 按宽高比例而不是像素尺寸指定大小；决策使用 ai/systemone 的 System One 格式。
 package openrouter
 
 import (
@@ -13,11 +13,12 @@ import (
 
 	"github.com/ryan053857/mygoravel/ai"
 	"github.com/ryan053857/mygoravel/ai/openai"
+	"github.com/ryan053857/mygoravel/ai/systemone"
 )
 
 const defaultBaseURL = "https://openrouter.ai/api/v1"
 
-// Client 是 OpenRouter 上的一个模型，实现 ai.Imager、ai.Speaker、ai.Transcriber、ai.Embedder 和 ai.Reranker。
+// Client 是 OpenRouter 上的一个模型，实现 ai.Imager、ai.Speaker、ai.Transcriber、ai.Embedder、ai.Reranker 和 ai.Decider。
 // 创建 Client 不访问网络，可以每次请求时按当时的配置创建。
 type Client struct {
 	*openai.Client
@@ -29,6 +30,7 @@ var (
 	_ ai.Transcriber = (*Client)(nil)
 	_ ai.Embedder    = (*Client)(nil)
 	_ ai.Reranker    = (*Client)(nil)
+	_ ai.Decider     = (*Client)(nil)
 )
 
 // New 按 cfg 创建 Client，BaseURL 为空时使用 OpenRouter 的地址。opts 与 ai/openai 相同，
@@ -79,7 +81,7 @@ func (c *Client) Image(ctx context.Context, req ai.ImageRequest) (ai.Media, erro
 	for _, ref := range req.References {
 		var r imageRef
 		r.Type = "image_url"
-		r.ImageURL.URL = "data:" + ref.MIME + ";base64," + base64.StdEncoding.EncodeToString(ref.Data)
+		r.ImageURL.URL = openai.DataURL(ref)
 		p.InputReferences = append(p.InputReferences, r)
 	}
 	var resp imageResponse
@@ -98,4 +100,9 @@ func (c *Client) Image(ctx context.Context, req ai.ImageRequest) (ai.Media, erro
 		mime = http.DetectContentType(data)
 	}
 	return ai.Media{Data: data, MIME: mime}, nil
+}
+
+// Decide 实现 ai.Decider，使用 OpenRouter 的 /systemone 接口。
+func (c *Client) Decide(ctx context.Context, req ai.DecisionRequest) (ai.Decision, error) {
+	return systemone.Wrap(c.Client).Decide(ctx, req)
 }

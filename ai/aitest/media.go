@@ -242,3 +242,55 @@ func (f *Reranker) FailWith(err error) { f.s.failWith(err) }
 
 // Requests 返回目前收到的请求。
 func (f *Reranker) Requests() []RerankRequest { return f.s.recorded() }
+
+// Decider 实现 ai.Decider，按顺序使用预设的回答，并记录收到的请求。每份预设按问题名称给出回答，
+// 预设中没有的问题、或没有预设时的所有问题按默认值回答：是非题概率 0.5，选择题选第一个选项，打分题为最低一级。
+// 有预设时用完后返回错误。
+type Decider struct {
+	s script[ai.DecisionRequest, map[string]ai.Answer]
+}
+
+// NewDecider 创建依次使用 results 回答的 Decider。
+func NewDecider(results ...map[string]ai.Answer) *Decider {
+	return &Decider{script[ai.DecisionRequest, map[string]ai.Answer]{name: "decision", results: results, fallback: func(ai.DecisionRequest) map[string]ai.Answer { return nil }}}
+}
+
+// Decide 实现 ai.Decider。
+func (f *Decider) Decide(_ context.Context, req ai.DecisionRequest) (ai.Decision, error) {
+	if err := req.Validate(); err != nil {
+		return ai.Decision{}, err
+	}
+	preset, err := f.s.call(req)
+	if err != nil {
+		return ai.Decision{}, err
+	}
+	out := ai.Decision{Answers: map[string]ai.Answer{}, Model: "aitest"}
+	for _, q := range req.Questions {
+		a, ok := preset[q.Name]
+		if !ok {
+			a = defaultAnswer(q)
+		}
+		out.Answers[q.Name] = ai.NewAnswer(q, a)
+	}
+	return out, nil
+}
+
+func defaultAnswer(q ai.Question) ai.Answer {
+	switch q.Kind {
+	case ai.ChoiceQuestion:
+		p := make([]float64, len(q.Options))
+		p[0] = 1
+		return ai.Answer{Choice: q.Options[0].Value, Probabilities: p, Confidence: 1}
+	case ai.ScoreQuestion:
+		p := make([]float64, len(q.Levels))
+		p[0] = 1
+		return ai.Answer{Probabilities: p, Confidence: 1}
+	}
+	return ai.Answer{Probability: 0.5}
+}
+
+// FailWith 让之后的请求都返回 err，传 nil 恢复。
+func (f *Decider) FailWith(err error) { f.s.failWith(err) }
+
+// Requests 返回目前收到的请求。
+func (f *Decider) Requests() []ai.DecisionRequest { return f.s.recorded() }

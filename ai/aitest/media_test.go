@@ -90,3 +90,30 @@ func TestReranker(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, preset, got)
 }
+
+func TestDecider(t *testing.T) {
+	req := ai.DecisionRequest{Input: "x", Questions: []ai.Question{
+		ai.YesNo("y", "?"),
+		ai.Choice("c", "?", ai.ChoiceOption{Value: "a"}, ai.ChoiceOption{Value: "b"}),
+		ai.Score("s", "?", ai.Levels("低", "高")...),
+	}}
+	d := aitest.NewDecider()
+	res, err := d.Decide(t.Context(), req)
+	require.NoError(t, err)
+	assert.Equal(t, 0.5, res.Answers["y"].Probability)
+	assert.Equal(t, "a", res.Answers["c"].Choice)
+	assert.Equal(t, 1.0, res.Answers["c"].ProbabilityOf("a"))
+	assert.Equal(t, "低", res.Answers["s"].Label())
+
+	d = aitest.NewDecider(map[string]ai.Answer{"y": {Probability: 0.9}})
+	res, err = d.Decide(t.Context(), req)
+	require.NoError(t, err)
+	assert.True(t, res.Answers["y"].Yes(0.8))
+	assert.Equal(t, "a", res.Answers["c"].Choice, "预设中没有的问题用默认值")
+	_, err = d.Decide(t.Context(), req)
+	assert.ErrorContains(t, err, "unexpected decision request 2")
+	assert.Len(t, d.Requests(), 2)
+
+	_, err = d.Decide(t.Context(), ai.DecisionRequest{})
+	assert.ErrorContains(t, err, "input is required")
+}
