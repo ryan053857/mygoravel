@@ -15,6 +15,8 @@ authz.role_not_found: 角色不存在
 authz.role_exists: 已有同名角色
 authz.invalid: 输入不合法
 notification.not_found: 通知不存在
+operation.not_found: 操作不存在
+operation.failed: 操作中断，请重新操作
 exports.not_found: 导出不存在
 exports.failed: 导出中断，请重新导出
 imports.not_found: 导入不存在

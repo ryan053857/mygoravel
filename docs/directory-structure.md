@@ -199,6 +199,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。下面按文�
 | --- | --- | --- |
 | `notification` | 站内通知收件箱，带已读状态 | [通知](notifications.md) |
 | `activity` | 操作日志：在业务事务中记录谁对什么做了什么 | [操作日志](activity.md) |
+| `operation` | 后台操作的状态与进度：任务中心、断点续跑、进度推送 | [后台操作](operations.md) |
 | `sheet` | 读写 CSV 和 Excel（XLSX）表格，按结构体解码并验证导入的每一行 | [导入与导出](import-export.md) |
 | `imports` | 在后台导入表格：进度、断点续跑、失败行下载 | [后台导入](import-export.md#background-imports) |
 | `exports` | 在后台导出表格：进度，完成后上传到文件存储 | [后台导出](import-export.md#background-exports) |

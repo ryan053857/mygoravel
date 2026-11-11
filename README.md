@@ -38,6 +38,7 @@ go get github.com/ryan053857/mygoravel@main
 | 给用户发站内通知 | [通知](docs/notifications.md) |
 | 记录谁改了什么 | [操作日志](docs/activity.md) |
 | 导入导出 Excel 和 CSV | [导入与导出](docs/import-export.md) |
+| 批量处理并显示进度 | [后台操作](docs/operations.md) |
 | 向租户推送事件 | [Webhook](docs/webhooks.md) |
 | 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |
 | 让 AI 引用 PDF、Word 等文档 | [文档转换与切分](docs/documents.md) |

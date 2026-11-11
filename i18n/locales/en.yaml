@@ -15,6 +15,8 @@ authz.role_not_found: Role not found
 authz.role_exists: A role with this name already exists
 authz.invalid: Invalid input
 notification.not_found: Notification not found
+operation.not_found: Operation not found
+operation.failed: The operation was interrupted, please try again
 exports.not_found: Export not found
 exports.failed: The export was interrupted, please export again
 imports.not_found: Import not found
