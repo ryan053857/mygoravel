@@ -76,3 +76,7 @@ func (p prefixed) Refresh(ctx context.Context, name, owner string, ttl time.Dura
 func (p prefixed) Release(ctx context.Context, name, owner string) (bool, error) {
 	return p.Store.Release(ctx, p.prefix+name, owner)
 }
+
+func (p prefixed) Held(ctx context.Context, name string) (bool, error) {
+	return p.Store.Held(ctx, p.prefix+name)
+}

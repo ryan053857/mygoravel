@@ -17,11 +17,12 @@ var (
 
 // Store 保存锁。每个方法都必须是原子的：
 // Acquire 仅在 name 未被持有或已过期时取得锁；Refresh 和 Release 仅在 owner 仍持有锁时生效。
-// 返回值表示操作是否生效。
+// 返回值表示操作是否生效。Held 报告 name 当前是否被持有（未过期）。
 type Store interface {
 	Acquire(ctx context.Context, name, owner string, ttl time.Duration) (bool, error)
 	Refresh(ctx context.Context, name, owner string, ttl time.Duration) (bool, error)
 	Release(ctx context.Context, name, owner string) (bool, error)
+	Held(ctx context.Context, name string) (bool, error)
 }
 
 // Locker 在 Store 之上取得和管理锁。
@@ -98,6 +99,13 @@ func (l *Locker) Do(ctx context.Context, name string, ttl time.Duration, fn func
 	}
 	fnErr := fn(ctx)
 	return errors.Join(fnErr, lk.Release(context.WithoutCancel(ctx)))
+}
+
+// Held 报告 name 上的锁当前是否被持有，不取得也不影响它。结果只反映查询的那一刻，
+// 用于展示状态，不能代替 Acquire 判断能否执行。
+func (l *Locker) Held(ctx context.Context, name string) (bool, error) {
+	ok, err := l.store.Held(ctx, name)
+	return ok, errors.Wrapf(err, "lock: check %q", name)
 }
 
 // Name 返回锁的名称。

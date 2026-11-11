@@ -24,6 +24,7 @@ func (brokenStore) Refresh(context.Context, string, string, time.Duration) (bool
 	return false, nil
 }
 func (brokenStore) Release(context.Context, string, string) (bool, error) { return false, nil }
+func (brokenStore) Held(context.Context, string) (bool, error)            { return false, nil }
 
 func TestMetrics(t *testing.T) {
 	ctx := context.Background()

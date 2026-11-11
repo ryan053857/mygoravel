@@ -8,6 +8,11 @@
 - [多个实例](#multiple-instances)
 - [防止重叠](#preventing-overlaps)
 - [失败与停止](#failures-and-shutdown)
+- [查看任务](#listing-tasks)
+    - [列出任务的命令](#schedules-command)
+    - [执行记录](#run-history)
+    - [后台页面](#admin-pages)
+    - [手动执行](#running-manually)
 - [清理框架数据](#framework-cleanups)
 - [测试](#testing)
 
@@ -28,7 +33,7 @@ sched := schedule.New(locker, cfg.Schedule, nil)
 sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(db).Handle)
 ```
 
-任务通常是 [action](actions.md#as-scheduled-tasks) 的 `Handle` 方法：发布到期文章的 `PublishScheduled` 不需要参数，它的 `Handle` 正好是任务的签名。
+任务通常是 [action](actions.md#as-scheduled-tasks) 的 `Handle` 方法：发布到期文章的 `PublishScheduled` 不需要参数，它的 `Handle` 正好是任务的签名。`schedule.Describe` 为任务加一句说明，在[查看任务](#listing-tasks)时展示。
 
 `locker` 是[原子锁](locks.md)，调度器用它在多个实例之间去重、防止任务重叠，见[多个实例](#multiple-instances)。第二个参数是配置段，见[失败与停止](#failures-and-shutdown)；第三个参数是日志器，`nil` 时使用 `slog.Default()`。
 
@@ -62,7 +67,7 @@ sched.Add("reports:daily", "0 3 * * *", reports.Generate, schedule.In(shanghai))
 <a id="running-the-scheduler"></a>
 ## 运行调度器
 
-调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[数据库锁](locks.md#database-store)：
+调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[数据库锁](locks.md#database-store)。注册任务单独写在 `tasks` 中，调度器运行它，[查看任务](#listing-tasks)的命令和后台页面也用它，任务只定义一次：
 
 ```go
 package bootstrap
@@ -79,17 +84,25 @@ import (
     "github.com/ryan053857/mygoravel/session"
 )
 
-// Scheduler 按时执行定时任务，直到 ctx 被取消。
-func (a *App) Scheduler(ctx context.Context) error {
-    sched := schedule.New(a.locker, a.cfg.Schedule, nil)
-    sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(a.db).Handle)
-    sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000))
-    sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDBStore(a.db).Cleanup, 1000))
+// tasks 创建调度器并注册全部定时任务。
+func (a *App) tasks(opts ...schedule.SchedulerOption) *schedule.Scheduler {
+    sched := schedule.New(a.locker, a.cfg.Schedule, nil, opts...)
+    sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(a.db).Handle,
+        schedule.Describe("发布到了预定时间的文章"))
+    sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000),
+        schedule.Describe("删除过期的会话"))
+    sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDBStore(a.db).Cleanup, 1000),
+        schedule.Describe("删除过期的锁"))
     sched.Add("queue:prune-failed", "@daily", func(ctx context.Context) error {
         _, err := queue.NewFailedJobs(a.db).Cleanup(ctx, time.Now().AddDate(0, 0, -30), 1000)
         return err
-    })
-    return sched.Run(ctx)
+    }, schedule.Describe("删除 30 天前的失败任务"))
+    return sched
+}
+
+// Scheduler 按时执行定时任务，直到 ctx 被取消。
+func (a *App) Scheduler(ctx context.Context) error {
+    return a.tasks().Run(ctx)
 }
 
 // Schedule 只运行调度器，schedule 命令调用它。
@@ -159,6 +172,161 @@ type Config struct {
 schedule:
   shutdown_timeout: 30s # 默认值；为 0 时立即取消执行中的任务
 ```
+
+<a id="listing-tasks"></a>
+## 查看任务
+
+`Tasks` 返回注册的全部任务：名称、说明、表达式、时区和选项。它只读取任务的定义，不需要运行调度器，所以在任何进程中都可以调用：
+
+```go
+for _, t := range a.tasks().Tasks() {
+    t.Name, t.Description, t.Expr  // "reports:daily"、"生成前一天的报表"、"0 3 * * *"
+    t.Next(time.Now())             // 下一次执行的时间
+    t.Prev(time.Now())             // 上一次应当执行的时间
+}
+```
+
+`Next` 和 `Prev` 按表达式计算，结果与调度器实际触发的时刻一致；`@every` 按 Unix 时间对齐，与调度器何时启动无关。
+
+`Running` 报告任务此刻是否正在执行，在任何一个实例上都算。它查询任务执行期间持有的锁 `schedule:<任务名>:running`，所以同样不需要运行调度器，但要和调度器共用锁存储：
+
+```go
+running, err := sched.Running(ctx, "reports:daily")
+```
+
+使用 `EveryInstance` 或 `AllowOverlap` 的任务不在锁存储中登记执行状态，`Running` 返回 `schedule.ErrNotTracked`。
+
+<a id="schedules-command"></a>
+### 列出任务的命令
+
+下面是博客应用的 `internal/bootstrap/schedules.go`，它在 [bootstrap.Commands](actions.md#as-commands) 中声明，执行 `./bin/api schedules`：
+
+```go
+package bootstrap
+
+import (
+    "errors"
+    "fmt"
+    "text/tabwriter"
+    "time"
+
+    "github.com/spf13/cobra"
+
+    "github.com/ryan053857/mygoravel/command"
+    "github.com/ryan053857/mygoravel/schedule"
+)
+
+// schedulesCmd 列出定时任务、下一次执行的时间和是否正在执行。
+func schedulesCmd(a *App) *cobra.Command {
+    return &cobra.Command{
+        Use:   "schedules",
+        Short: "列出定时任务",
+        Args:  command.NoArgs,
+        RunE: func(cmd *cobra.Command, _ []string) error {
+            sched, now := a.tasks(), time.Now()
+            w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+            fmt.Fprintln(w, "TASK\tEXPRESSION\tNEXT RUN\tIN\tRUNNING\tDESCRIPTION")
+            for _, t := range sched.Tasks() {
+                running, err := sched.Running(cmd.Context(), t.Name)
+                state := "no"
+                switch {
+                case errors.Is(err, schedule.ErrNotTracked):
+                    state = "-"
+                case err != nil:
+                    return err
+                case running:
+                    state = "yes"
+                }
+                next := t.Next(now)
+                fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", t.Name, t.Expr, next.Format("2006-01-02 15:04:05"),
+                    next.Sub(now).Round(time.Second), state, t.Description)
+            }
+            return w.Flush()
+        },
+    }
+}
+```
+
+```text
+TASK                        EXPRESSION    NEXT RUN             IN      RUNNING  DESCRIPTION
+articles:publish-scheduled  * * * * *     2026-11-11 17:01:00  42s     no       发布到了预定时间的文章
+sessions:cleanup            */10 * * * *  2026-11-11 17:10:00  9m42s   no       删除过期的会话
+locks:cleanup               @hourly       2026-11-11 18:00:00  59m42s  no       删除过期的锁
+queue:prune-failed          @daily        2026-11-12 00:00:00  6h59m   no       删除 30 天前的失败任务
+```
+
+<a id="run-history"></a>
+### 执行记录
+
+上一次什么时候执行、结果如何，是运行时的数据：部署多个实例时，每次触发在哪个实例上执行并不确定。`schedule.WithObserver` 在每次执行时通知你，把它写进数据库，所有进程就都能看到：
+
+```go
+func (a *App) Scheduler(ctx context.Context) error {
+    return a.tasks(schedule.WithObserver(a.recordRun)).Run(ctx)
+}
+
+func (a *App) recordRun(ctx context.Context, e schedule.Event) {
+    if e.Kind == schedule.TaskStarted {
+        return
+    }
+    _, err := a.db.NewInsert().Model(&ScheduleRun{
+        Task: e.Task, Tick: e.Tick, Status: e.Kind.String(), Duration: e.Duration,
+        SkipReason: string(e.SkipReason), Error: errorText(e.Err),
+    }).Exec(ctx)
+    if err != nil {
+        slog.ErrorContext(ctx, "record schedule run failed", "error", err)
+    }
+}
+```
+
+`ScheduleRun` 是应用自己的 `schedule_runs` 表，保留多久由应用决定，用一个定时任务清理。
+
+| 事件 | 时机 |
+| --- | --- |
+| `TaskStarted` | 本实例开始执行 |
+| `TaskSucceeded` | 执行完成 |
+| `TaskFailed` | 返回错误或 panic，`Err` 是原因 |
+| `TaskSkipped` | 应当在本实例执行却被跳过，`SkipReason` 是 `overlap`（上一次还没结束）或 `lock_failed`（锁存储出错） |
+
+`Tick` 是这次触发的时刻，即任务应当执行的时间；`Started` 是实际开始的时间，两者之差是调度延迟。由其他实例执行的触发不报告。结束事件在释放执行锁之后发出，Observer 收到它时 `Running` 已经返回 `false`。Observer 在执行任务的 goroutine 中同步调用，写一行数据库很快，更重的工作请缓冲后批量处理。
+
+<a id="admin-pages"></a>
+### 后台页面
+
+后台页面由 HTTP 进程提供，它同样调用 `a.tasks()` 拿到任务的定义，再查询执行记录：
+
+```go
+for _, t := range a.tasks().Tasks() {
+    var last ScheduleRun
+    err := a.db.NewSelect().Model(&last).Where("task = ?", t.Name).OrderExpr("tick DESC").Limit(1).Scan(ctx)
+    // ... 没有记录时 err 是 sql.ErrNoRows
+
+    // 应当执行的时间过去了一分钟，却没有这次的记录，也没有正在执行：这次触发丢了，
+    // 例如调度器停止或部署期间。
+    prev := t.Prev(time.Now())
+    running, _ := sched.Running(ctx, t.Name)
+    missed := prev.After(last.Tick) && time.Since(prev) > time.Minute && !running
+}
+```
+
+页面上可以展示每个任务的说明、表达式、下一次执行的时间、上一次的结果和耗时，并把错过的触发标出来。
+
+<a id="running-manually"></a>
+### 手动执行
+
+后台页面上的「立即执行」不要在 HTTP 进程中直接调用任务：耗时的任务会占用请求，HTTP 实例也可能有很多个。把它[发布到队列](queue.md#publishing-jobs)，由 worker 执行：
+
+```go
+// 后台页面：
+err := queue.Publish(ctx, queue.Database(a.db), "articles.publish-scheduled", struct{}{})
+
+// Worker 中：
+queue.Handle(router, sub, "articles.publish-scheduled", func(ctx context.Context, _ struct{}) error {
+    return article.NewPublishScheduled(a.db).Handle(ctx)
+})
+```
+
+任务和队列处理函数调用的是同一个 action，手动执行和定时执行的效果相同。手动执行不受[防止重叠](#preventing-overlaps)的限制，需要互斥的任务在 action 中自己使用[原子锁](locks.md)。
 
 <a id="framework-cleanups"></a>
 ## 清理框架数据

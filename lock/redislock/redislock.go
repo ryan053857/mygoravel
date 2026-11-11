@@ -57,6 +57,12 @@ func (s *Store) Release(ctx context.Context, name, owner string) (bool, error) {
 	return s.run(ctx, release, name, owner)
 }
 
+// Held 实现 lock.Store：键存在即被持有，过期的键已由 Redis 删除。
+func (s *Store) Held(ctx context.Context, name string) (bool, error) {
+	n, err := s.rdb.Exists(ctx, name).Result()
+	return n == 1, err
+}
+
 func (s *Store) run(ctx context.Context, script *redis.Script, name string, args ...any) (bool, error) {
 	n, err := script.Run(ctx, s.rdb, []string{name}, args...).Int64()
 	return n == 1, err

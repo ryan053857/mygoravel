@@ -35,7 +35,7 @@ type Scheduler struct {
 	locker          *lock.Locker
 	logger          *slog.Logger
 	shutdownTimeout time.Duration
-	metrics         *metrics
+	observers       []Observer
 	tracer          trace.Tracer // 为 nil 时不创建 span
 
 	mu      sync.Mutex
@@ -45,6 +45,8 @@ type Scheduler struct {
 
 type task struct {
 	name          string
+	description   string
+	expr          string
 	when          when
 	run           func(ctx context.Context) error
 	loc           *time.Location
@@ -103,7 +105,7 @@ func (s *Scheduler) Add(name, expr string, run func(ctx context.Context) error, 
 	if err != nil {
 		panic(err)
 	}
-	t := &task{name: name, when: w, run: run, loc: time.Local}
+	t := &task{name: name, expr: expr, when: w, run: run, loc: time.Local}
 	for _, opt := range opts {
 		opt(t)
 	}
@@ -234,11 +236,27 @@ func (s *Scheduler) RunDue(ctx context.Context, t time.Time) error {
 // 其他实例已经执行这一次触发、或者任务仍在执行时直接返回 nil。
 func (s *Scheduler) execute(ctx context.Context, t *task, tick time.Time) error {
 	ctx = taskContext(ctx, t)
+	finished, err := s.runLocked(ctx, t, tick)
+	if finished != nil {
+		// 结束事件在释放执行锁之后发出：Observer 收到它时，Running 已经返回 false。
+		s.observe(finished.ctx, finished.Event)
+	}
+	return err
+}
+
+// finishedRun 是一次执行的结束事件，以及发出它时使用的 ctx（带有本次执行的 span）。
+type finishedRun struct {
+	Event
+	ctx context.Context
+}
+
+// runLocked 按去重和防重叠的规则取得锁并执行任务，返回时锁已释放；没有执行时 finished 为 nil。
+func (s *Scheduler) runLocked(ctx context.Context, t *task, tick time.Time) (finished *finishedRun, _ error) {
 	if !t.allowOverlap {
 		if !t.begin() {
 			s.logger.InfoContext(ctx, "scheduled task skipped, still running")
-			s.metrics.skip(ctx, t.name, skipOverlap)
-			return nil
+			s.observe(ctx, Event{Kind: TaskSkipped, Task: t.name, Tick: tick, SkipReason: SkipOverlap})
+			return nil, nil
 		}
 		defer t.end()
 	}
@@ -246,21 +264,21 @@ func (s *Scheduler) execute(ctx context.Context, t *task, tick time.Time) error 
 		key := "schedule:" + t.name + ":" + strconv.FormatInt(tick.Unix(), 10)
 		if _, err := s.locker.Acquire(ctx, key, tickTTL); err != nil {
 			if errors.Is(err, lock.ErrNotAcquired) {
-				return nil // 其他实例执行这一次触发
+				return nil, nil // 其他实例执行这一次触发
 			}
-			s.metrics.skip(ctx, t.name, skipLockFailed)
-			return err
+			s.observe(ctx, Event{Kind: TaskSkipped, Task: t.name, Tick: tick, SkipReason: SkipLockFailed, Err: err})
+			return nil, err
 		}
 		if !t.allowOverlap {
-			running, err := s.locker.Acquire(ctx, "schedule:"+t.name+":running", runningTTL)
+			running, err := s.locker.Acquire(ctx, runningKey(t.name), runningTTL)
 			if errors.Is(err, lock.ErrNotAcquired) {
 				s.logger.InfoContext(ctx, "scheduled task skipped, still running on another instance")
-				s.metrics.skip(ctx, t.name, skipOverlap)
-				return nil
+				s.observe(ctx, Event{Kind: TaskSkipped, Task: t.name, Tick: tick, SkipReason: SkipOverlap})
+				return nil, nil
 			}
 			if err != nil {
-				s.metrics.skip(ctx, t.name, skipLockFailed)
-				return err
+				s.observe(ctx, Event{Kind: TaskSkipped, Task: t.name, Tick: tick, SkipReason: SkipLockFailed, Err: err})
+				return nil, err
 			}
 			stop := s.keep(ctx, running)
 			defer stop()
@@ -268,11 +286,16 @@ func (s *Scheduler) execute(ctx context.Context, t *task, tick time.Time) error 
 	}
 	ctx, end := s.startSpan(ctx, t.name, tick)
 	start := time.Now()
+	s.observe(ctx, Event{Kind: TaskStarted, Task: t.name, Tick: tick, Started: start})
 	err := call(ctx, t.run)
+	elapsed := time.Since(start)
 	end(err)
-	s.metrics.ran(ctx, t.name, time.Since(start), err)
-	s.logger.DebugContext(ctx, "scheduled task finished", "duration", time.Since(start), "error", err)
-	return err
+	s.logger.DebugContext(ctx, "scheduled task finished", "duration", elapsed, "error", err)
+	e := Event{Kind: TaskSucceeded, Task: t.name, Tick: tick, Started: start, Duration: elapsed, Err: err}
+	if err != nil {
+		e.Kind = TaskFailed
+	}
+	return &finishedRun{Event: e, ctx: ctx}, err
 }
 
 func (t *task) begin() bool {

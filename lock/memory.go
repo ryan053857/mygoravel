@@ -64,6 +64,14 @@ func (s *MemoryStore) Release(_ context.Context, name, owner string) (bool, erro
 	return true, nil
 }
 
+// Held 实现 Store。
+func (s *MemoryStore) Held(_ context.Context, name string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h, ok := s.locks[name]
+	return ok && time.Now().Before(h.expires), nil
+}
+
 // sweep 删除已过期的锁，例如定时任务按触发时刻取得、从不释放的锁。
 func (s *MemoryStore) sweep(now time.Time) {
 	for name, h := range s.locks {

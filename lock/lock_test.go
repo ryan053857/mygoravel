@@ -93,6 +93,31 @@ func testStore(t *testing.T, newStore func() lock.Store) {
 		}
 	})
 
+	t.Run("held", func(t *testing.T) {
+		locker := lock.New(newStore())
+		held := func(want bool) {
+			t.Helper()
+			if got, err := locker.Held(ctx, "a"); err != nil || got != want {
+				t.Fatalf("held=%v err=%v, want %v", got, err, want)
+			}
+		}
+		held(false)
+		lk, err := locker.Acquire(ctx, "a", 50*time.Millisecond)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held(true)
+		if err := lk.Release(ctx); err != nil {
+			t.Fatal(err)
+		}
+		held(false)
+		if _, err := locker.Acquire(ctx, "a", 30*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(60 * time.Millisecond)
+		held(false) // 过期
+	})
+
 	t.Run("refresh", func(t *testing.T) {
 		locker := lock.New(newStore())
 		lk, err := locker.Acquire(ctx, "a", 30*time.Millisecond)

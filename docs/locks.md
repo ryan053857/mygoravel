@@ -110,6 +110,8 @@ if err := lk.Refresh(ctx, time.Minute); err != nil {
 
 锁过期并被他人取得后，原持有者的 `Refresh` 和 `Release` 都返回 `lock.ErrNotHeld`，不会影响新的持有者。`Do` 在函数返回后释放锁，此时得到 `ErrNotHeld` 也会一并返回，提示任务超过了有效期。
 
+`locker.Held(ctx, name)` 报告锁此刻是否被持有，不取得也不影响它，适合在后台页面展示状态，例如[定时任务是否正在执行](scheduling.md#listing-tasks)。它的结果只反映查询的那一刻，不能代替 `Acquire` 判断能否执行。
+
 <a id="database-store"></a>
 ## 使用数据库存储
 
@@ -162,13 +164,14 @@ locker := lock.New(redislock.New(rdb))
 <a id="other-stores"></a>
 ## 其他存储
 
-锁存储是一个接口，三个方法都必须是原子的：
+锁存储是一个接口，每个方法都必须是原子的：
 
 ```go
 type Store interface {
     Acquire(ctx context.Context, name, owner string, ttl time.Duration) (bool, error)
     Refresh(ctx context.Context, name, owner string, ttl time.Duration) (bool, error)
     Release(ctx context.Context, name, owner string) (bool, error)
+    Held(ctx context.Context, name string) (bool, error) // 是否被持有且未过期
 }
 ```
 

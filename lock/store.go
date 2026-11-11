@@ -80,6 +80,12 @@ func (s *DBStore) Release(ctx context.Context, name, owner string) (bool, error)
 	return affected(res)
 }
 
+// Held 实现 Store。
+func (s *DBStore) Held(ctx context.Context, name string) (bool, error) {
+	return s.db.NewSelect().Model((*row)(nil)).
+		Where("name = ?", name).Where("expires_at > ?", time.Now().UTC()).Exists(ctx)
+}
+
 // Cleanup 删除最多 limit 条已过期的锁，返回删除的条数。由应用定时调用。
 func (s *DBStore) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {

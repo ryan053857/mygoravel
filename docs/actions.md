@@ -261,7 +261,7 @@ func Commands(db *bun.DB) *cobra.Command {
 }
 ```
 
-构造命令行时还没有加载配置，也没有打开数据库。`command.Bind` 解决这个问题：它先用零值的依赖调用一次声明函数，得到命令的名称、参数和选项；执行其中一个命令时，再加载配置、调用 `open` 装配依赖，用装配好的依赖重新声明，执行同一个命令的 `RunE`，命令返回后关闭资源。下面是完整的 `internal/bootstrap/commands.go`，`open` 就是[依赖装配](dependencies.md#assembling-the-application)一章中 `serve` 用的那个。除了各模块的命令，需要数据库的其他命令也在这里声明，例如[队列状态](queue.md#stats-command)和[填充数据](migrations.md#seeding)：
+构造命令行时还没有加载配置，也没有打开数据库。`command.Bind` 解决这个问题：它先用零值的依赖调用一次声明函数，得到命令的名称、参数和选项；执行其中一个命令时，再加载配置、调用 `open` 装配依赖，用装配好的依赖重新声明，执行同一个命令的 `RunE`，命令返回后关闭资源。下面是完整的 `internal/bootstrap/commands.go`，`open` 就是[依赖装配](dependencies.md#assembling-the-application)一章中 `serve` 用的那个。除了各模块的命令，需要数据库的其他命令也在这里声明，例如[队列状态](queue.md#stats-command)、[定时任务列表](scheduling.md#schedules-command)和[填充数据](migrations.md#seeding)：
 
 ```go
 package bootstrap
@@ -279,6 +279,7 @@ func Commands() []*cobra.Command {
         return []*cobra.Command{
             article.Commands(a.db),
             queueCmd(a.db),
+            schedulesCmd(a),
             seed(a.db),
         }
     })
