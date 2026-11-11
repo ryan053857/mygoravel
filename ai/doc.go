@@ -7,6 +7,9 @@
 //   - RequireApproval 让指定的工具停下等待审批，Runs.Approve 和 Runs.Reject 在任意进程中继续；
 //   - UIStream、Submit、UIMessages 实现 Vercel AI SDK 的 UI 消息流协议，前端直接使用 useChat。
 //
+// 对话默认保存在 trpc-agent-go 的会话存储中。已经有自己消息表的产品（群聊、客服会话、外部渠道）用 UseHistory
+// 让 Runs 从应用的表读取上下文、把产出交给应用保存，用 Runs.Notify 在有新消息时触发运行。
+//
 // 此外，Imager、Speaker、Transcriber、Embedder、Reranker 和 Decider 描述生成图片、合成语音、识别语音、
 // 计算向量、重排和决策这几种能力，由 ai/openai、ai/openrouter、ai/systemone 等子包实现，测试时使用 ai/aitest 中的替身。
 //

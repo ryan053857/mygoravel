@@ -8,8 +8,12 @@ import (
 )
 
 // UIMessages 把对话历史转换为 useChat 的消息，作为页面打开时 useChat 的初始消息。
+// 使用 UseHistory 时不可用（返回 ErrNeedsSessions），页面显示应用自己的消息。
 // 等待审批的工具调用处于 approval-requested 状态，前端照常显示确认按钮。对话不存在时返回空列表。
 func (rs *Runs) UIMessages(ctx context.Context, userID, sessionID string) ([]UIMessage, error) {
+	if rs.history != nil {
+		return nil, ErrNeedsSessions
+	}
 	sess, err := rs.sessions.GetSession(ctx, rs.key(userID, sessionID))
 	if err != nil || sess == nil {
 		return []UIMessage{}, err

@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/runner"
 	"trpc.group/trpc-go/trpc-agent-go/session"
+	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
 	"github.com/ryan053857/mygoravel/errorx"
@@ -42,12 +44,14 @@ const steerExtension = "trpc_agent.steer.queued_user_message"
 //
 // 同一个对话同时只有一个运行；运行结束后保留一段时间（默认 1 分钟），让断线的客户端接上剩余的事件。
 type Runs struct {
-	app      string
-	runner   runner.Runner
-	sessions session.Service
-	approval map[string]tool.CallableTool
-	keep     time.Duration
-	logger   *slog.Logger
+	app       string
+	runner    runner.Runner
+	sessions  session.Service // 对话存储；使用 UseHistory 时为 nil
+	history   HistoryStore
+	ephemeral session.Service // 使用 UseHistory 时，每一轮运行的临时会话
+	approval  map[string]tool.CallableTool
+	keep      time.Duration
+	logger    *slog.Logger
 
 	runnerOpts []runner.Option
 	cluster    *cluster // 多实例协作，见 Cluster；nil 表示单实例
@@ -84,6 +88,7 @@ func RunnerOptions(opts ...runner.Option) Option {
 }
 
 // NewRuns 为 agent 创建 Runs，对话保存在 sessions 中。app 是应用名，用于区分同一个存储中不同应用的对话。
+// 使用 UseHistory 时对话保存在应用自己的存储中，sessions 传 nil。两者都没有或者同时提供时 panic。
 func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Option) *Runs {
 	rs := &Runs{
 		app:      app,
@@ -96,6 +101,15 @@ func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Optio
 	}
 	for _, opt := range opts {
 		opt(rs)
+	}
+	switch {
+	case rs.history == nil && sessions == nil:
+		panic("ai: NewRuns needs a session service or UseHistory")
+	case rs.history != nil && sessions != nil:
+		panic("ai: pass nil sessions with UseHistory")
+	case rs.history != nil:
+		rs.ephemeral = inmemory.NewSessionService()
+		sessions = rs.ephemeral
 	}
 	rs.logger = logging.Or(rs.logger).With(logging.AttrComponent, "ai")
 	rs.runner = runner.NewRunner(app, ag, append([]runner.Option{runner.WithSessionService(sessions)}, rs.runnerOpts...)...)
@@ -159,7 +173,11 @@ func (rs *Runs) Close() error {
 		}
 	}
 	rs.mu.Unlock()
-	return rs.runner.Close()
+	err := rs.runner.Close()
+	if rs.ephemeral != nil {
+		err = errors.Join(err, rs.ephemeral.Close())
+	}
+	return err
 }
 
 func (rs *Runs) key(userID, sessionID string) session.Key {
@@ -209,12 +227,12 @@ func (rs *Runs) Start(ctx context.Context, userID, sessionID string, msg model.M
 			return nil, ErrAwaitingApproval.New()
 		}
 	}
-	return rs.start(ctx, key, msg, opts, nil)
+	return rs.start(ctx, key, &msg, opts, nil)
 }
 
 // start 开始运行。results 非空表示审批之后继续：运行先发出这些调用结果，
-// 上一次运行停下时还没送达的插话消息随之送达。
-func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, opts []agent.RunOption, results []Event) (_ *Run, err error) {
+// 上一次运行停下时还没送达的插话消息随之送达。msg 为 nil 表示使用 UseHistory 时由 Load 读出全部输入。
+func (rs *Runs) start(ctx context.Context, key session.Key, msg *model.Message, opts []agent.RunOption, results []Event) (_ *Run, err error) {
 	if rs.localBusy(key) {
 		return nil, ErrBusy.New()
 	}
@@ -381,7 +399,7 @@ func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opt
 	if rs.localBusy(key) {
 		return nil, ErrBusy.New()
 	}
-	sess, pending, err := rs.pending(ctx, key)
+	t, pending, err := rs.pending(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -399,17 +417,20 @@ func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opt
 	msg := model.NewToolMessage(p.call.ID, p.call.Name, content)
 	if len(pending) > 1 {
 		// 还有其他调用等待决定：结果先写进对话，最后一个决定到来时再继续运行。
+		if rs.history != nil {
+			return nil, rs.save(ctx, key, Entry{Message: msg})
+		}
 		evt := event.NewResponseEvent(p.source.InvocationID, p.source.Author, &model.Response{
 			Object:  model.ObjectTypeToolResponse,
 			Done:    true,
 			Choices: []model.Choice{{Message: msg}},
 		})
 		evt.Branch, evt.FilterKey = p.source.Branch, p.source.FilterKey
-		return nil, rs.sessions.AppendEvent(ctx, sess, evt)
+		return nil, rs.sessions.AppendEvent(ctx, t.sess, evt)
 	}
 	// 继续的运行先发出这一批调用的结果，客户端据此更新审批状态。
 	var results []Event
-	answers := toolAnswers(sess)
+	answers := toolAnswers(t)
 	for _, c := range p.batch {
 		text, ok := answers[c.ID]
 		if c.ID == p.call.ID {
@@ -419,7 +440,7 @@ func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opt
 			results = append(results, Event{Name: EventToolResult, Data: newToolResult(c.ID, c.Name, text)})
 		}
 	}
-	return rs.start(ctx, key, msg, opts, results)
+	return rs.start(ctx, key, &msg, opts, results)
 }
 
 // rejection 是 Reject 写给模型的调用结果。
@@ -434,69 +455,55 @@ func newToolResult(id, name, content string) ToolResult {
 	return ToolResult{ID: id, Name: name, Content: content, Denied: denied}
 }
 
-// toolAnswers 返回会话中各工具调用的结果。
-func toolAnswers(sess *session.Session) map[string]string {
+// toolAnswers 返回对话中各工具调用的结果。
+func toolAnswers(t transcript) map[string]string {
 	out := map[string]string{}
-	for _, ev := range sess.Events {
-		if ev.Response == nil {
-			continue
+	t.each(func(_ *event.Event, m model.Message) {
+		if m.Role == model.RoleTool {
+			out[m.ToolID] = m.Content
 		}
-		for _, c := range ev.Choices {
-			if c.Message.Role == model.RoleTool {
-				out[c.Message.ToolID] = c.Message.Content
-			}
-		}
-	}
+	})
 	return out
 }
 
 type pendingCall struct {
 	call   ToolCall
-	source *event.Event
-	batch  []ToolCall // 同一次模型回复中需要审批的全部调用
+	source *event.Event // 调用所在的会话事件；使用 UseHistory 时为 nil
+	batch  []ToolCall   // 同一次模型回复中需要审批的全部调用
 }
 
 // pending 找出对话中最后一次调用里需要审批、还没有结果的工具调用。
-func (rs *Runs) pending(ctx context.Context, key session.Key) (*session.Session, []pendingCall, error) {
-	sess, err := rs.sessions.GetSession(ctx, key)
+func (rs *Runs) pending(ctx context.Context, key session.Key) (transcript, []pendingCall, error) {
+	t, err := rs.load(ctx, key)
 	if err != nil {
-		return nil, nil, err
-	}
-	if sess == nil {
-		return nil, nil, nil
+		return t, nil, err
 	}
 	var calls []pendingCall
 	answered := map[string]bool{}
-	for i := range sess.Events {
-		ev := &sess.Events[i]
-		if ev.Response == nil {
-			continue
+	t.each(func(ev *event.Event, m model.Message) {
+		if m.Role == model.RoleTool {
+			answered[m.ToolID] = true
 		}
-		for _, c := range ev.Choices {
-			if c.Message.Role == model.RoleTool {
-				answered[c.Message.ToolID] = true
-			}
-			if len(c.Message.ToolCalls) > 0 {
-				calls = nil
-				var batch []ToolCall
-				for _, tc := range c.Message.ToolCalls {
-					if _, ok := rs.approval[tc.Function.Name]; ok {
-						batch = append(batch, toolCall(tc))
-					}
-				}
-				for _, call := range batch {
-					calls = append(calls, pendingCall{call, ev, batch})
+		if len(m.ToolCalls) > 0 {
+			calls = nil
+			var batch []ToolCall
+			for _, tc := range m.ToolCalls {
+				if _, ok := rs.approval[tc.Function.Name]; ok {
+					batch = append(batch, toolCall(tc))
 				}
 			}
+			for _, call := range batch {
+				calls = append(calls, pendingCall{call, ev, batch})
+			}
 		}
-	}
+	})
 	var out []pendingCall
 	for _, c := range calls {
 		if !answered[c.call.ID] {
 			out = append(out, c)
 		}
 	}
-	return sess, out, nil
+	return t, out, nil
 }
 
 func toolCall(tc model.ToolCall) ToolCall {
@@ -521,6 +528,7 @@ type Run struct {
 	finished bool
 	reqID    string          // 当前 trpc-agent-go 请求的 ID
 	steered  []model.Message // 已插入、还没有被 agent 消费的消息
+	notified bool            // Notify 在这一轮读取历史之后到达，结束后再运行一轮
 }
 
 // Steer 在运行中途插入一条用户消息。它在当前这批工具调用结束后、下一次请求模型之前进入对话；
@@ -608,8 +616,8 @@ func (r *Run) emit(name string, data any, raw *event.Event) {
 	r.changed = make(chan struct{})
 }
 
-// loop 运行 agent，直到没有剩余的插话消息。
-func (r *Run) loop(ctx context.Context, msg model.Message, opts []agent.RunOption) {
+// loop 运行 agent，直到没有剩余的插话消息和通知。msg 为 nil 时，输入全部由 UseHistory 的 Load 读出。
+func (r *Run) loop(ctx context.Context, msg *model.Message, opts []agent.RunOption) {
 	defer close(r.done)
 	var failed bool
 	calls := map[string]ToolCall{}
@@ -618,29 +626,40 @@ func (r *Run) loop(ctx context.Context, msg model.Message, opts []agent.RunOptio
 		reqID := uuid.NewString()
 		r.mu.Lock()
 		r.reqID = reqID
+		r.notified = false // 这一轮读取的历史包括此前通知的消息
 		queued := append([]model.Message(nil), r.steered...)
 		r.mu.Unlock()
-		if !first {
+		if !first && msg != nil {
 			r.emit(EventUser, Text{msg.Content}, nil)
 		}
-		ch, err := r.rs.runner.Run(ctx, r.key.UserID, r.key.SessionID, msg, append(opts, agent.WithRequestID(reqID))...)
-		if err != nil {
+		ch, cursor, cleanup, err := r.round(ctx, msg, reqID, opts)
+		switch {
+		case err != nil:
 			r.fail(ctx, err)
 			failed = true
-		} else {
+		case ch != nil:
 			for _, m := range queued {
 				_ = runner.EnqueueUserMessage(r.rs.runner, reqID, m)
 			}
-			failed = r.consume(ctx, ch, calls, answered)
+			failed = r.consume(ctx, ch, cursor, calls, answered)
 		}
+		cleanup()
 
 		r.mu.Lock()
 		r.reqID = ""
-		if !failed && ctx.Err() == nil && len(r.steered) > 0 && len(r.pendingCalls(calls, answered)) == 0 {
-			msg = r.steered[0]
-			r.steered = r.steered[1:]
-			r.mu.Unlock()
-			continue
+		if !failed && ctx.Err() == nil && len(r.pendingCalls(calls, answered)) == 0 {
+			if len(r.steered) > 0 {
+				next := r.steered[0]
+				msg = &next
+				r.steered = r.steered[1:]
+				r.mu.Unlock()
+				continue
+			}
+			if r.notified {
+				msg = nil
+				r.mu.Unlock()
+				continue
+			}
 		}
 		done := Done{Pending: r.pendingCalls(calls, answered), Canceled: ctx.Err() != nil}
 		if done.Pending == nil {
@@ -653,6 +672,37 @@ func (r *Run) loop(ctx context.Context, msg model.Message, opts []agent.RunOptio
 		r.mu.Unlock()
 		return
 	}
+}
+
+// round 开始一轮 agent 运行，返回它的事件、这一轮读取历史的游标和结束后的清理函数。
+//
+// 默认在对话的会话中运行 msg。使用 UseHistory 时先保存 msg，再用 Load 读出的历史填充一个只在这一轮使用的会话，
+// 最后一条作为输入；没有需要回应的消息（历史为空或最后一条是模型的回答）时 ch 为 nil。
+func (r *Run) round(ctx context.Context, msg *model.Message, reqID string, opts []agent.RunOption) (_ <-chan *event.Event, cursor string, cleanup func(), _ error) {
+	rs := r.rs
+	cleanup = func() {}
+	opts = append(opts, agent.WithRequestID(reqID))
+	if rs.history == nil {
+		ch, err := rs.runner.Run(ctx, r.key.UserID, r.key.SessionID, *msg, opts...)
+		return ch, "", cleanup, err
+	}
+	if msg != nil {
+		if err := rs.save(ctx, r.key, Entry{Message: *msg, RunID: r.ID}); err != nil {
+			return nil, "", cleanup, err
+		}
+	}
+	t, err := rs.load(ctx, r.key)
+	if err != nil {
+		return nil, "", cleanup, err
+	}
+	if len(t.msgs) == 0 || t.msgs[len(t.msgs)-1].Role == model.RoleAssistant {
+		return nil, "", cleanup, nil
+	}
+	// 临时会话只在这一轮使用；trpc-agent-go 要求用户 ID 非空，共享的对话可能没有用户。
+	tmp := session.Key{AppName: rs.app, UserID: cmp.Or(r.key.UserID, "-"), SessionID: r.ID + "." + reqID}
+	cleanup = func() { _ = rs.ephemeral.DeleteSession(context.WithoutCancel(ctx), tmp) }
+	ch, err := rs.runner.Run(ctx, tmp.UserID, tmp.SessionID, t.msgs[len(t.msgs)-1], append(opts, agent.WithMessages(t.msgs))...)
+	return ch, t.cursor, cleanup, err
 }
 
 // pendingCalls 返回需要审批、还没有结果的调用。调用方持有 r.mu。
@@ -675,9 +725,23 @@ func (r *Run) fail(ctx context.Context, err error) {
 }
 
 // consume 把 trpc-agent-go 的事件转换为 Event，返回运行是否出错。
-func (r *Run) consume(ctx context.Context, ch <-chan *event.Event, calls map[string]ToolCall, answered map[string]bool) (failed bool) {
+// cursor 是这一轮读取历史的游标，使用 UseHistory 时随产生的消息交给 Save。
+func (r *Run) consume(ctx context.Context, ch <-chan *event.Event, cursor string, calls map[string]ToolCall, answered map[string]bool) (failed bool) {
 	// 当前这条回答的思考过程和正文是否已经以增量发出；已发出的部分不再从完整消息中重复发送。
 	var streamedReasoning, streamedText bool
+	// save 在使用 UseHistory 时保存进入对话的完整消息；保存失败时停止运行，之后的消息不再保存。
+	var saveErr error
+	save := func(m model.Message) {
+		if saveErr != nil {
+			return
+		}
+		if saveErr = r.rs.save(ctx, r.key, Entry{Message: m, RunID: r.ID, After: cursor}); saveErr != nil {
+			failed = true
+			r.rs.logger.ErrorContext(ctx, "agent run failed", "session_id", r.key.SessionID, "error", saveErr)
+			r.emit(EventError, Error{saveErr.Error()}, nil)
+			r.cancel()
+		}
+	}
 	for ev := range ch {
 		if ev == nil || ev.Response == nil {
 			continue
@@ -712,11 +776,16 @@ func (r *Run) consume(ctx context.Context, ch <-chan *event.Event, calls map[str
 					}
 					r.mu.Unlock()
 					r.emit(EventUser, Text{m.Content}, ev)
+					save(m)
 				}
 			case model.RoleTool:
 				answered[m.ToolID] = true
 				r.emit(EventToolResult, newToolResult(m.ToolID, m.ToolName, m.Content), ev)
+				save(m)
 			case model.RoleAssistant:
+				if m.Content != "" || m.ReasoningContent != "" || len(m.ToolCalls) > 0 {
+					save(m)
+				}
 				if !streamedReasoning && m.ReasoningContent != "" {
 					r.emit(EventReasoning, Text{m.ReasoningContent}, ev)
 				}

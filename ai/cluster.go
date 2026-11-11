@@ -79,7 +79,7 @@ type runMsg struct {
 
 // ctlMsg 是其他实例在控制主题上发给运行所在实例的请求。
 type ctlMsg struct {
-	Kind    string         `json:"kind"` // snapshot、steer 或 cancel
+	Kind    string         `json:"kind"` // snapshot、steer、notify 或 cancel
 	Req     string         `json:"req,omitempty"`
 	Message *model.Message `json:"message,omitempty"`
 }
@@ -293,6 +293,14 @@ func (o *owner) control(sub *broadcast.Subscription) {
 				}
 				reply := ""
 				if err := o.run.Steer(context.Background(), *c.Message); errors.Is(err, ErrFinished) {
+					reply = "finished"
+				} else if err != nil {
+					reply = err.Error()
+				}
+				o.send(runMsg{Kind: "ack", Run: o.run.ID, Req: c.Req, Error: reply})
+			case "notify":
+				reply := ""
+				if err := o.run.notify(context.Background()); errors.Is(err, ErrFinished) {
 					reply = "finished"
 				} else if err != nil {
 					reply = err.Error()
@@ -582,6 +590,11 @@ func (m *mirror) close() {
 
 // steer 把插话转发给运行所在的实例，等待它的回执。
 func (m *mirror) steer(ctx context.Context, msg model.Message) error {
+	return m.request(ctx, ctlMsg{Kind: "steer", Message: &msg})
+}
+
+// request 把插话或通知转发给运行所在的实例，等待它的回执。运行已经结束时返回 ErrFinished。
+func (m *mirror) request(ctx context.Context, c ctlMsg) error {
 	if m.run.isFinished() {
 		return ErrFinished
 	}
@@ -595,7 +608,8 @@ func (m *mirror) steer(ctx context.Context, msg model.Message) error {
 		delete(m.acks, req)
 		m.mu.Unlock()
 	}()
-	if err := m.c.publish(m.c.ctlTopic(m.key), ctlMsg{Kind: "steer", Req: req, Message: &msg}); err != nil {
+	c.Req = req
+	if err := m.c.publish(m.c.ctlTopic(m.key), c); err != nil {
 		return err
 	}
 	timer := time.NewTimer(replyTimeout)
@@ -613,7 +627,7 @@ func (m *mirror) steer(ctx context.Context, msg model.Message) error {
 	case <-m.run.done:
 		return ErrFinished
 	case <-timer.C:
-		return errors.New("ai: steer: the running instance did not reply")
+		return errors.Newf("ai: %s: the running instance did not reply", c.Kind)
 	case <-ctx.Done():
 		return ctx.Err()
 	}

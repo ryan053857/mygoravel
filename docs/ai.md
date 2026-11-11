@@ -10,6 +10,9 @@
     - [断线重连](#reconnecting)
     - [加入其他消息](#appending-messages)
 - [审批](#approval)
+- [使用应用自己的消息表](#own-history)
+    - [实现 HistoryStore](#history-store)
+    - [群聊中的 AI](#group-chat)
 - [在页面中使用](#pages)
 - [图片、语音和向量](#media)
 - [决策](#decisions)
@@ -320,6 +323,94 @@ err := runs.Append(ctx, userID, conversationID, "staff:42", model.NewAssistantMe
 待审批的调用保存在对话中，所以审批可以在任何时候、在任何一个实例上进行。页面重新打开时，`Runs.UIMessages` 返回的历史中这些调用仍然处于 `approval-requested` 状态。不使用 `useChat` 时，用 `Runs.Pending` 读出它们，用 `Runs.Approve` 和 `Runs.Reject` 逐个处理。
 
 对话等待审批期间不能发送新消息，`Submit` 返回 `ai.ErrAwaitingApproval`（`409`），因为模型在得到调用结果之前不能回答新问题。等待审批前已经插入、还没有进入对话的消息，在审批之后的运行中送达。
+
+<a id="own-history"></a>
+## 使用应用自己的消息表
+
+上面的对话保存在 `agent_` 开头的会话表中，适合「一个用户和一个助手」的对话。群聊、客服会话、从外部渠道接入的对话，消息往往已经保存在产品自己的消息表里：有多个参与者、消息序号、已读状态、编辑和删除。这时让 `Runs` 直接使用应用的表，不再保存第二份：
+
+```go
+runs := ai.NewRuns("luway", agent, nil, ai.UseHistory(chatHistory{db}))
+```
+
+`sessions` 传 `nil`。每一轮请求模型之前，`Runs` 用 `HistoryStore.Load` 读出上下文；运行中产生的完整消息（模型的回答、工具调用和结果）逐条交给 `HistoryStore.Save`。流式事件、停止、插话、审批、多实例协作和平滑停止的用法都不变，一对一助手同样可以使用：`Start` 和 `Submit` 发来的用户消息也交给 `Save` 保存。
+
+`UIMessages` 和 `Append` 这时不可用（返回 `ai.ErrNeedsSessions`）：页面显示应用自己的消息，其他消息由应用直接写入表中。
+
+<a id="history-store"></a>
+### 实现 HistoryStore
+
+```go
+type HistoryStore interface {
+    Load(ctx context.Context, c ai.Conversation) (ai.History, error)
+    Save(ctx context.Context, c ai.Conversation, e ai.Entry) error
+}
+```
+
+`ai.Conversation` 是 `Runs` 方法传入的 `userID` 和对话 ID。`Load` 返回交给模型的消息和一个游标，游标由应用定义，通常是读到的最大消息序号；这一轮产生的消息交给 `Save` 时，`Entry.After` 就是这个游标。
+
+`Load` 要按**逻辑顺序**返回消息：`Save` 保存的消息排在它的 `After` 之后，而不是按写入时间。原因是模型回答期间，其他人可能还在发言：
+
+| 写入顺序 | 逻辑顺序 |
+| --- | --- |
+| 张三：明天几点开会 | 张三：明天几点开会 |
+| 李四：在哪开（回答期间发出） | AI：上午十点（基于张三之前的上下文） |
+| AI：上午十点 | 李四：在哪开 |
+
+按逻辑顺序，最后一条是李四的问题，下一轮接着回应它；按写入顺序，最后一条是 AI 的回答，李四的问题会被漏掉。页面仍然按写入顺序显示，逻辑顺序只用于交给模型。消息表多存一列 `after_seq` 即可：
+
+```go
+func (h chatHistory) Load(ctx context.Context, c ai.Conversation) (ai.History, error) {
+    var rows []ChatMessage
+    err := h.db.NewSelect().Model(&rows).Where("conversation_id = ?", c.ID).
+        OrderExpr("COALESCE(after_seq, seq), after_seq IS NOT NULL, seq").Scan(ctx)
+    if err != nil {
+        return ai.History{}, err
+    }
+    var out ai.History
+    var last int64
+    for _, r := range rows {
+        out.Messages = append(out.Messages, r.ModelMessage()) // 群成员的发言转为 user 消息，内容前加上名字
+        last = max(last, r.Seq)
+    }
+    out.Cursor = strconv.FormatInt(last, 10)
+    return out, nil
+}
+
+func (h chatHistory) Save(ctx context.Context, c ai.Conversation, e ai.Entry) error {
+    row := NewChatMessage(c.ID, e.Message, e.RunID)
+    if e.After != "" {
+        after, _ := strconv.ParseInt(e.After, 10, 64)
+        row.AfterSeq = &after
+    }
+    return h.insert(ctx, row) // 在事务中锁住会话，分配下一个 seq
+}
+```
+
+几点约定：
+
+- 返回哪些消息、怎样标明发言人、是否包括已编辑或删除的内容，由应用决定。
+- 模型产生的带工具调用的 assistant 消息和工具结果要原样保存、原样返回：等待审批的调用由它们算出，审批之后在任何进程中都能继续。
+- `Load` 的最后一条是模型的回答时，这一轮不请求模型。
+- 多人共享的对话没有单一的用户，`userID` 由应用约定，例如传空字符串或租户 ID；谁能触发、谁能看，由应用在调用之前检查权限。
+
+<a id="group-chat"></a>
+### 群聊中的 AI
+
+群成员的发言由应用照常写入消息表。需要 AI 回应时（例如它被 @ 了），写入之后调用 `Notify`：
+
+```go
+if mentionsAssistant(msg) {
+    run, err := a.runs.Notify(ctx, "", conversationID)
+    // ...
+}
+```
+
+- AI 没有在回答时，`Notify` 开始一次运行，上下文由 `Load` 读出。
+- AI 正在回答时（在任何一个实例上），`Notify` 记下通知，这次回答结束后再运行一轮，期间写入的消息都在新一轮的上下文中。回答期间无论来多少条消息、通知多少次，都只多运行一轮，不会返回 `ErrBusy`。
+- 有等待审批的工具调用时返回 `ai.ErrAwaitingApproval`。
+
+`Notify` 返回处理通知的运行。正在生成的回答用 `ai.UIStream(run)` 推给页面，群里的每个成员都可以用 `runs.Get(ctx, "", conversationID)` 接上它；回答的每条完整消息保存之后，由应用像普通消息一样通过[广播](broadcasting.md)推送。
 
 <a id="pages"></a>
 ## 在页面中使用

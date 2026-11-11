@@ -35,6 +35,9 @@ func (rs *Runs) Append(ctx context.Context, userID, sessionID, author string, ms
 	case msg.Content == "" && len(msg.ContentParts) == 0:
 		return errors.New("ai: cannot append an empty message")
 	}
+	if rs.history != nil {
+		return ErrNeedsSessions
+	}
 	key := rs.key(userID, sessionID)
 
 	// 加入期间不让这个对话开始运行：本实例用 appending 标记，其他实例用对话锁。
@@ -58,10 +61,11 @@ func (rs *Runs) Append(ctx context.Context, userID, sessionID, author string, ms
 		defer own.release()
 	}
 
-	sess, pending, err := rs.pending(ctx, key)
+	t, pending, err := rs.pending(ctx, key)
 	if err != nil {
 		return err
 	}
+	sess := t.sess
 	if len(pending) > 0 {
 		return ErrAwaitingApproval.New()
 	}
