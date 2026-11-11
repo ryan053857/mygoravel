@@ -14,6 +14,7 @@
 - [API 版本](#api-versioning)
 - [OpenAPI 文档](#openapi)
     - [在线查看](#viewing-docs)
+    - [说明与示例](#describing-apis)
     - [离线导出](#exporting-openapi)
 - [使用原生 chi 与 Huma](#native-apis)
     - [注册普通 HTTP 处理器](#plain-handlers)
@@ -292,12 +293,12 @@ package article
 import "time"
 
 type ArticleDTO struct {
-    ID          string     `json:"id"`
-    Title       string     `json:"title"`
-    Slug        string     `json:"slug"`
-    AuthorID    string     `json:"author_id"`
-    Status      string     `json:"status"`
-    PublishedAt *time.Time `json:"published_at,omitempty"`
+    ID          string     `json:"id" example:"0193a5c2-7d1e-7b3a-9f61-2c4e8d0a1b2c"`
+    Title       string     `json:"title" example:"Hello World"`
+    Slug        string     `json:"slug" example:"hello-world"`
+    AuthorID    string     `json:"author_id" example:"alice"`
+    Status      string     `json:"status" enum:"draft,published" example:"published"`
+    PublishedAt *time.Time `json:"published_at,omitempty" doc:"发布时间，草稿没有这个字段" example:"2026-11-10T08:30:00Z"`
 }
 
 type ArticleOutput struct {
@@ -362,6 +363,33 @@ router.Route("/api/v2", func(r chi.Router) {
 
 - `/docs`：可交互的接口文档页面；
 - `/openapi.json`：OpenAPI 3.1 文档。
+
+<a id="describing-apis"></a>
+### 说明与示例
+
+Go 类型只能说明字段的类型和取值规则，字段的含义和示例值需要你自己写进声明：
+
+| 写在哪里 | 写什么 | 在文档中成为 |
+| --- | --- | --- |
+| `huma.Operation` | `Summary` 一句话说明，`Description` 写更长的说明，支持 Markdown | 路由的标题和说明 |
+| 字段的 `doc` 标签 | 字段的含义，以及类型和验证规则看不出来的约定 | 字段的 `description` |
+| 字段的 `example` 标签 | 一个典型的值 | 字段的 `examples` |
+
+不写 `example` 时，文档页只能按类型填 `"string"`、`0` 这样的占位值。给创建文章的请求体加上示例：
+
+```go
+type Changes struct {
+    Title   string `json:"title" minLength:"1" maxLength:"200" example:"Hello World"`
+    Slug    string `json:"slug" maxLength:"100" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$" patternDescription:"小写字母、数字和连字符" doc:"文章地址中的标识，全站唯一；发布后不能修改" example:"hello-world"`
+    Content string `json:"content" example:"这是我的第一篇文章。"`
+}
+```
+
+`/docs` 中这个接口的请求示例就会是 `{"title":"Hello World","slug":"hello-world","content":"这是我的第一篇文章。"}`，调用方可以直接修改后发送。路径参数、查询参数和请求头的写法相同，例如 `` ID uuid.UUID `path:"id" example:"0193a5c2-7d1e-7b3a-9f61-2c4e8d0a1b2c"` ``；响应体的写法见[共享响应结构](#shared-responses)中的 `ArticleDTO`。
+
+`doc` 只写类型和规则看不出来的约定。`minLength`、`pattern`、`enum` 等验证规则本身就会出现在文档中，不需要在 `doc` 里重复。
+
+`example` 的值按字段类型解析：数字写 `example:"50"`，数组和对象写 JSON，例如 `example:"[\"go\",\"api\"]"`。值和类型不符时，`rest.Register` 在注册时 panic，执行 `routes` 或 `openapi` 命令就能发现。这些标签只写入文档，不影响验证和 JSON 编码。
 
 <a id="exporting-openapi"></a>
 ### 离线导出

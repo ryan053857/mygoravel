@@ -20,12 +20,12 @@
 
 ```go
 type ArticleDTO struct {
-    ID          string     `json:"id"`
-    Title       string     `json:"title"`
-    Slug        string     `json:"slug"`
-    AuthorID    string     `json:"author_id"`
-    Status      string     `json:"status"`
-    PublishedAt *time.Time `json:"published_at,omitempty"`
+    ID          string     `json:"id" example:"0193a5c2-7d1e-7b3a-9f61-2c4e8d0a1b2c"`
+    Title       string     `json:"title" example:"Hello World"`
+    Slug        string     `json:"slug" example:"hello-world"`
+    AuthorID    string     `json:"author_id" example:"alice"`
+    Status      string     `json:"status" enum:"draft,published" example:"published"`
+    PublishedAt *time.Time `json:"published_at,omitempty" doc:"发布时间，草稿没有这个字段" example:"2026-11-10T08:30:00Z"`
 }
 
 type ArticleOutput struct {
@@ -43,7 +43,7 @@ return &ArticleOutput{Body: toDTO(item)}, nil
 
 ```json
 {
-  "id": "0f8c2f0e-…",
+  "id": "0193a5c2-7d1e-7b3a-9f61-2c4e8d0a1b2c",
   "title": "Hello World",
   "slug": "hello-world",
   "author_id": "alice",
@@ -52,7 +52,7 @@ return &ArticleOutput{Body: toDTO(item)}, nil
 }
 ```
 
-草稿还没有发布时间，`published_at` 字段会被省略。
+草稿还没有发布时间，`published_at` 字段会被省略。`doc`、`example` 和 `enum` 标签只写入接口文档，不影响编码，见[说明与示例](routing.md#describing-apis)。
 
 > [!TIP]
 > 建议为响应定义专门的 DTO 结构，而不是直接返回数据库模型。这样你可以自由地调整数据库结构，而不会意外地改变 API，也不会把内部字段暴露给客户端。

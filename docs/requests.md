@@ -102,7 +102,7 @@ Authorization: Bearer <token>
 {"title":"Hello World","slug":"hello-world","content":"这是我的第一篇文章。"}
 ```
 
-处理器中通过 `in.Body.Title`、`in.Body.Slug` 等读取字段，或者把 `in.Body` 整个交给 `Handle`。请求体中的字段默认是**必填**的，验证规则的写法见[验证](validation.md)。
+处理器中通过 `in.Body.Title`、`in.Body.Slug` 等读取字段，或者把 `in.Body` 整个交给 `Handle`。请求体中的字段默认是**必填**的，验证规则的写法见[验证](validation.md)。给字段写说明和示例值，让它们出现在接口文档中，见[说明与示例](routing.md#describing-apis)。
 
 一个输入类型可以同时包含路径参数、查询参数、请求头和请求体：
 
