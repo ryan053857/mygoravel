@@ -69,8 +69,8 @@ func AllowOverlap() Option { return func(t *task) { t.allowOverlap = true } }
 // In 按 loc 计算 cron 表达式，默认使用 time.Local（可用 TZ 环境变量设置）。对 @every 没有影响。
 func In(loc *time.Location) Option { return func(t *task) { t.loc = loc } }
 
-// New 创建调度器。locker 用于多实例去重和防止重叠：多实例部署时使用数据库或 Redis 存储，
-// 单实例部署使用 lock.NewMemoryStore。logger 为 nil 时使用 slog.Default()。
+// New 创建调度器。locker 用于多实例去重和防止重叠，所有实例共用数据库或 Redis 锁存储；
+// 测试中可以使用 locktest.NewStore。logger 为 nil 时使用 slog.Default()。
 // locker 为 nil 或 cfg 不合法时 panic。
 func New(locker *lock.Locker, cfg Config, logger *slog.Logger, opts ...SchedulerOption) *Scheduler {
 	if locker == nil {

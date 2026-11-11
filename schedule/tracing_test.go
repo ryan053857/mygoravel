@@ -12,13 +12,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 	"github.com/ryan053857/mygoravel/schedule"
 )
 
 func TestTracing(t *testing.T) {
 	spans := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
-	s := schedule.New(lock.New(lock.NewMemoryStore()), schedule.DefaultConfig(), slog.New(slog.DiscardHandler),
+	s := schedule.New(lock.New(locktest.NewStore()), schedule.DefaultConfig(), slog.New(slog.DiscardHandler),
 		schedule.WithTracerProvider(tp))
 	var inTask trace.SpanContext
 	s.Add("ok", "@everysecond", func(ctx context.Context) error {

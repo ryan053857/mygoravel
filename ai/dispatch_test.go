@@ -16,7 +16,9 @@ import (
 	"github.com/ryan053857/mygoravel/ai"
 	"github.com/ryan053857/mygoravel/ai/aitest"
 	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 )
 
 // deployment 是一个 web 实例（RunOnWorkers）和若干 worker 实例（Serve），共用对话存储、广播和锁。
@@ -30,8 +32,8 @@ type deployment struct {
 func newDeployment(t *testing.T, workerModel *aitest.Model, tools []tool.Tool, workers int, opts ...ai.Option) *deployment {
 	t.Helper()
 	sessions := inmemory.NewSessionService()
-	hub := broadcast.New(broadcast.Memory(), nil)
-	locker := lock.New(lock.NewMemoryStore())
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
+	locker := lock.New(locktest.NewStore())
 	newRuns := func(m *aitest.Model, extra ...ai.Option) *ai.Runs {
 		ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithTools(tools),
 			llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
@@ -178,8 +180,8 @@ func TestWorkersUnavailable(t *testing.T) {
 func TestWorkersNotifyWithHistory(t *testing.T) {
 	m := aitest.NewModel(aitest.Text("十点"))
 	table := newMessageTable()
-	hub := broadcast.New(broadcast.Memory(), nil)
-	locker := lock.New(lock.NewMemoryStore())
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
+	locker := lock.New(locktest.NewStore())
 	newRuns := func(m *aitest.Model, extra ...ai.Option) *ai.Runs {
 		ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
 		return ai.NewRuns("test", ag, nil, append([]ai.Option{ai.UseHistory(table), ai.Cluster(hub, locker)}, extra...)...)

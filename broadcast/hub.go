@@ -18,7 +18,6 @@ const bufferSize = 64
 type Hub struct {
 	backend Backend
 	logger  *slog.Logger
-	local   bool
 
 	mu     sync.Mutex
 	topics map[string]map[*Subscription]struct{}
@@ -42,10 +41,6 @@ func New(backend Backend, logger *slog.Logger) *Hub {
 		cancel:  cancel,
 		done:    make(chan struct{}),
 	}
-	if _, h.local = backend.(memory); h.local {
-		close(h.done)
-		return h
-	}
 	go func() {
 		defer close(h.done)
 		backend.Listen(ctx, h.deliver, h.lost)
@@ -59,12 +54,7 @@ func (h *Hub) Publish(ctx context.Context, topic string, data []byte) error {
 	if err := ValidateTopic(topic); err != nil {
 		return err
 	}
-	msg := Message{Topic: topic, Data: data}
-	if h.local {
-		h.deliver(msg)
-		return nil
-	}
-	return errors.Wrap(h.backend.Publish(ctx, msg), "broadcast: publish")
+	return errors.Wrap(h.backend.Publish(ctx, Message{Topic: topic, Data: data}), "broadcast: publish")
 }
 
 // PublishJSON 把 v 编码为 JSON 后发布。

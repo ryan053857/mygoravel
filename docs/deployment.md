@@ -104,7 +104,7 @@ CONFIG=--config=config/app.yaml,config/prod.yaml
 
 - **HTTP 服务**按常规做法放在负载均衡之后。
 - **队列 worker** 竞争领取任务，每个任务只会被一个实例领取，增减实例不需要协调。
-- **调度器**通过锁保证每次触发只执行一次，前提是所有实例共用同一个锁存储，即数据库或 Redis 存储，见[多个实例](scheduling.md#multiple-instances)。使用 `lock.NewMemoryStore()` 时，多个实例会重复执行每个任务。单独部署 `schedule` 时，运行两个实例可以避免单点。
+- **调度器**通过锁保证每次触发只执行一次，前提是所有实例共用同一个数据库或 Redis 锁存储，见[多个实例](scheduling.md#multiple-instances)。单独部署 `schedule` 时，运行两个实例可以避免单点。
 
 worker 和调度器不监听端口，部署平台按进程是否存活判断它们的状态；它们出错退出时进程以非 0 状态结束，由平台重启。
 
@@ -215,17 +215,17 @@ done
 <a id="upgrade-overlap"></a>
 ### 新旧进程同时运行
 
-新进程就绪之后，旧进程还要排空一段时间：请求最多 `http.shutdown_timeout`，队列任务最多 `queue.shutdown_timeout`，进行中的 [AI 回答](ai.md#deployment)可能更久。这段时间相当于部署了两个实例，各部分要按[多个实例](#process-forms)选择存储：
+新进程就绪之后，旧进程还要排空一段时间：请求最多 `http.shutdown_timeout`，队列任务最多 `queue.shutdown_timeout`，进行中的 [AI 回答](ai.md#deployment)可能更久。这段时间相当于部署了两个实例：
 
 | 部分 | 升级时 | 需要 |
 | --- | --- | --- |
 | HTTP 服务 | 新连接由新进程处理，旧进程排空已有的请求 | 无 |
 | 队列 worker | 新进程开始领取任务，旧进程停止领取并等待处理中的任务，超时的任务交给新进程重新执行 | 处理函数能安全地重复执行，见[队列](queue.md) |
-| 调度器 | 新旧调度器短暂同时运行 | 数据库或 Redis 锁存储。使用 `lock.NewMemoryStore()` 时，同一次触发可能执行两次 |
-| 服务端推送 | 浏览器重连到新进程 | `broadcast.NewDatabase` 等共享后端。使用 `broadcast.Memory()` 时，旧进程中还没结束的请求和任务发布的事件收不到 |
+| 调度器 | 新旧调度器短暂同时运行，锁保证每次触发只执行一次 | 无 |
+| 服务端推送 | 浏览器重连到新进程，旧进程发布的事件经由后端送达 | 无 |
 | AI 回答 | 旧进程等进行中的回答说完 | 配置 `ai.Cluster` 时浏览器重连后继续接收；否则回答说完后保存在对话中 |
 
-数据库存储在 SQLite 上同样可用，应用仍然只需要一个数据库文件。另外，同时运行期间数据库连接数是平时的两倍，`max_open_conns` 的两倍应当在数据库的连接上限之内。
+同时运行期间数据库连接数是平时的两倍，`max_open_conns` 的两倍应当在数据库的连接上限之内。
 
 <a id="upgrade-limits"></a>
 ### 限制

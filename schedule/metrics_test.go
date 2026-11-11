@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 	"github.com/ryan053857/mygoravel/schedule"
 )
 
@@ -35,7 +36,7 @@ func TestMetrics(t *testing.T) {
 		return schedule.New(lock.New(store), schedule.DefaultConfig(), quiet, schedule.WithMeterProvider(mp))
 	}
 
-	s := newScheduler(lock.NewMemoryStore())
+	s := newScheduler(locktest.NewStore())
 	s.Add("ok", "@everysecond", func(context.Context) error { return nil })
 	s.Add("fails", "@everysecond", func(context.Context) error { return errors.New("bad") })
 	for i := range 2 {
@@ -45,7 +46,7 @@ func TestMetrics(t *testing.T) {
 	}
 
 	// 上一次还没结束时被跳过。
-	overlapping := newScheduler(lock.NewMemoryStore())
+	overlapping := newScheduler(locktest.NewStore())
 	release, started := make(chan struct{}), make(chan struct{})
 	overlapping.Add("slow", "@everysecond", func(context.Context) error {
 		close(started)

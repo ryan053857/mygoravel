@@ -16,15 +16,17 @@ import (
 	"github.com/ryan053857/mygoravel/ai"
 	"github.com/ryan053857/mygoravel/ai/aitest"
 	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 )
 
 // twoInstances 创建共用会话存储、广播和锁的两个 Runs，相当于同一个应用的两个实例。
 func twoInstances(t *testing.T, m *aitest.Model, tools []tool.Tool) (*ai.Runs, *ai.Runs) {
 	t.Helper()
-	return twoInstancesOn(t, m, tools, broadcast.Memory(), lock.NewMemoryStore())
+	return twoInstancesOn(t, m, tools, broadcasttest.NewBackend(), locktest.NewStore())
 }
 
 func twoInstancesOn(t *testing.T, m *aitest.Model, tools []tool.Tool, backend broadcast.Backend, store lock.Store) (*ai.Runs, *ai.Runs) {

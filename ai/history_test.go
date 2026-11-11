@@ -18,7 +18,9 @@ import (
 	"github.com/ryan053857/mygoravel/ai"
 	"github.com/ryan053857/mygoravel/ai/aitest"
 	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 )
 
 // messageTable 模拟应用自己的消息表：seq 是写入顺序，after 是 Save 时带回的游标。
@@ -383,8 +385,8 @@ func TestHistoryLateNotify(t *testing.T) {
 func TestClusterHistoryNotifyForwarded(t *testing.T) {
 	m := aitest.NewModel(aitest.Reply{Text: "第一轮", Delay: 300 * time.Millisecond}, aitest.Text("第二轮"))
 	table := newMessageTable()
-	hub := broadcast.New(broadcast.Memory(), nil)
-	locker := lock.New(lock.NewMemoryStore())
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
+	locker := lock.New(locktest.NewStore())
 	newInstance := func() *ai.Runs {
 		ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
 		return ai.NewRuns("test", ag, nil, ai.UseHistory(table), ai.Cluster(hub, locker))

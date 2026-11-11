@@ -11,6 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 	"github.com/ryan053857/mygoravel/schedule"
 )
 
@@ -91,7 +92,7 @@ func TestNextPrevMatchDue(t *testing.T) {
 
 func TestRunning(t *testing.T) {
 	ctx := context.Background()
-	locker := lock.New(lock.NewMemoryStore())
+	locker := lock.New(locktest.NewStore())
 	quiet := slog.New(slog.DiscardHandler)
 	release, started := make(chan struct{}), make(chan struct{})
 	register := func(s *schedule.Scheduler) {
@@ -150,7 +151,7 @@ func TestObserver(t *testing.T) {
 		defer mu.Unlock()
 		events = append(events, e)
 	}
-	s := schedule.New(lock.New(lock.NewMemoryStore()), schedule.DefaultConfig(), slog.New(slog.DiscardHandler),
+	s := schedule.New(lock.New(locktest.NewStore()), schedule.DefaultConfig(), slog.New(slog.DiscardHandler),
 		schedule.WithObserver(record), schedule.WithObserver(func(context.Context, schedule.Event) { panic("ignored") }))
 	boom := errors.New("boom")
 	release, started := make(chan struct{}), make(chan struct{})

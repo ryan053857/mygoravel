@@ -9,6 +9,7 @@
     - [过期清理](#cleanup)
 - [使用 Redis 存储](#redis-store)
 - [其他存储](#other-stores)
+- [测试](#testing)
 
 <a id="introduction"></a>
 ## 简介
@@ -29,11 +30,11 @@
 ```go
 import "github.com/ryan053857/mygoravel/lock"
 
-locker := lock.New(lock.NewMemoryStore())
+locker := lock.New(lock.NewDBStore(db))
 publishScheduled := article.NewPublishScheduled(db, locker)
 ```
 
-`lock.New` 接收锁存储。`MemoryStore` 只在同一进程内互斥，适合开发、测试和单实例部署；多实例部署，以及使用[不停机升级](deployment.md#upgrade-overlap)时，请使用[数据库存储](#database-store)或 [Redis 存储](#redis-store)。
+`lock.New` 接收锁存储：[数据库存储](#database-store)或 [Redis 存储](#redis-store)。所有进程共用同一个存储才能互斥，单机部署也是如此：[不停机升级](deployment.md#upgrade-overlap)时新旧进程会同时运行。
 
 <a id="running-once"></a>
 ## 只让一个实例执行
@@ -115,7 +116,7 @@ if err := lk.Refresh(ctx, time.Minute); err != nil {
 <a id="database-store"></a>
 ## 使用数据库存储
 
-多实例部署时把锁保存在数据库中。`lock.NewDBStore` 接收应用的 `*bun.DB`，支持 PostgreSQL、SQLite 和 MySQL：
+`lock.NewDBStore` 把锁保存在应用的数据库中，接收应用的 `*bun.DB`，支持 PostgreSQL、SQLite 和 MySQL：
 
 ```go
 locker := lock.New(lock.NewDBStore(db))
@@ -175,4 +176,17 @@ type Store interface {
 }
 ```
 
-实现时可以参考 [`lock/redislock`](../lock/redislock/redislock.go)：`Refresh` 和 `Release` 需要先比较 `owner` 再修改，两步必须在一个原子操作中完成。
+实现时可以参考 [`lock/redislock`](../lock/redislock/redislock.go)：`Refresh` 和 `Release` 需要先比较 `owner` 再修改，两步必须在一个原子操作中完成。`locktest.TestStore(t, newStore)` 检查实现是否符合这些约定，框架自己的存储也用它测试。
+
+<a id="testing"></a>
+## 测试
+
+`locktest.NewStore()` 是测试用的内存存储，只在同一个进程内互斥，不需要数据库：
+
+```go
+import "github.com/ryan053857/mygoravel/lock/locktest"
+
+locker := lock.New(locktest.NewStore())
+```
+
+它只用于测试。生产环境中同时运行的进程，包括不停机升级时的新旧进程，必须共用数据库或 Redis 存储。

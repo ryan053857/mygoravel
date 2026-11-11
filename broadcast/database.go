@@ -3,6 +3,7 @@ package broadcast
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -11,9 +12,12 @@ import (
 	"github.com/ryan053857/mygoravel/logging"
 )
 
-// Database 是轮询 broadcasts 表的 Backend，支持 PostgreSQL、MySQL 和 SQLite，Migrations 提供三种数据库的表结构。
+// Database 是使用 broadcasts 表的 Backend，支持 PostgreSQL、MySQL 和 SQLite，Migrations 提供三种数据库的表结构。
 //
-// Publish 插入一行；每个实例每 100 毫秒按 id 读取新行，所以消息最多延迟一个轮询间隔。
+// Publish 插入一行，并立即投递给本进程中的 Hub；每个实例每 100 毫秒按 id 读取新行，投递其他进程发布的消息，
+// 所以它们最多延迟一个轮询间隔。同一个 Database 发布的消息按发布顺序投递；不同进程同时发布的消息没有确定的先后，
+// 本进程的消息可能先于其他进程更早提交的消息到达。
+//
 // 自增 id 的提交顺序可能与分配顺序不同：读到不连续的 id 时，等待缺失的行最多 2 秒，
 // 期间到达就按顺序投递，超时则视为回滚留下的空号跳过。数据库暂时不可用时从上次读到的位置继续，
 // 不会丢消息，所以 Database 不会让订阅因 ErrLost 结束。
@@ -26,6 +30,17 @@ type Database struct {
 	interval   time.Duration
 	gapTimeout time.Duration
 	retention  time.Duration
+
+	// mu 保护 listeners：Publish 的本地投递和轮询投递在它下面去重，每条消息恰好投递一次。
+	mu        sync.Mutex
+	listeners map[*listener]struct{}
+}
+
+// listener 是一次 Listen 的状态。
+type listener struct {
+	deliver func(Message)
+	cursor  int64              // 轮询已经越过的 id
+	local   map[int64]struct{} // 已经由 Publish 投递、轮询还没越过的 id
 }
 
 type row struct {
@@ -52,17 +67,29 @@ func NewDatabase(db bun.IDB, logger *slog.Logger) *Database {
 		interval:   100 * time.Millisecond,
 		gapTimeout: 2 * time.Second,
 		retention:  10 * time.Minute,
+		listeners:  map[*listener]struct{}{},
 	}
 }
 
-// Publish 实现 Backend：插入一行。
+// Publish 实现 Backend：插入一行，然后投递给本进程中正在 Listen 的 Hub。
 func (d *Database) Publish(ctx context.Context, msg Message) error {
 	data := msg.Data
 	if data == nil {
 		data = []byte{}
 	}
-	_, err := d.db.NewInsert().Model(&row{Topic: msg.Topic, Data: data, CreatedAt: time.Now().UTC()}).Exec(ctx)
-	return err
+	r := &row{Topic: msg.Topic, Data: data, CreatedAt: time.Now().UTC()}
+	if _, err := d.db.NewInsert().Model(r).Exec(ctx); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for l := range d.listeners {
+		if r.ID > l.cursor { // 轮询还没读到这一行
+			l.local[r.ID] = struct{}{}
+			l.deliver(msg)
+		}
+	}
+	return nil
 }
 
 // Listen 实现 Backend：从开始监听时的最新一行之后读起。
@@ -77,6 +104,15 @@ func (d *Database) Listen(ctx context.Context, deliver func(Message), _ func(err
 			return
 		}
 	}
+	l := &listener{deliver: deliver, cursor: cursor, local: map[int64]struct{}{}}
+	d.mu.Lock()
+	d.listeners[l] = struct{}{}
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		delete(d.listeners, l)
+		d.mu.Unlock()
+	}()
 	var (
 		failing  bool
 		gapSince time.Time
@@ -96,6 +132,7 @@ func (d *Database) Listen(ctx context.Context, deliver func(Message), _ func(err
 			d.logger.Info("broadcast poll recovered")
 			failing = false
 		}
+		d.mu.Lock()
 		for _, r := range rows {
 			if r.ID != cursor+1 {
 				if gapSince.IsZero() {
@@ -106,9 +143,15 @@ func (d *Database) Listen(ctx context.Context, deliver func(Message), _ func(err
 				}
 			}
 			gapSince = time.Time{}
-			deliver(Message{Topic: r.Topic, Data: r.Data})
+			if _, ok := l.local[r.ID]; ok {
+				delete(l.local, r.ID)
+			} else {
+				deliver(Message{Topic: r.Topic, Data: r.Data})
+			}
 			cursor = r.ID
+			l.cursor = cursor
 		}
+		d.mu.Unlock()
 		if len(rows) == batchSize && gapSince.IsZero() {
 			continue
 		}

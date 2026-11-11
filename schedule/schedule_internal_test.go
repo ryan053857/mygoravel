@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 )
 
 func TestRunWaitsThenCancelsTasks(t *testing.T) {
@@ -20,7 +21,7 @@ func TestRunWaitsThenCancelsTasks(t *testing.T) {
 		{"canceled at once", time.Hour, 0, context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := New(lock.New(lock.NewMemoryStore()), Config{ShutdownTimeout: tc.timeout}, nil)
+			s := New(lock.New(locktest.NewStore()), Config{ShutdownTimeout: tc.timeout}, nil)
 			started := make(chan struct{}, 1)
 			result := make(chan error, 1)
 			s.Add("slow", "@everysecond", func(ctx context.Context) error {

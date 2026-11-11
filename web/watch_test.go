@@ -13,13 +13,14 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/web"
 )
 
 // 设置了 Options.Credentials 时，会话被撤销并发出提醒后 SSE 立即结束，不等 30 秒的定期校验。
 func TestRequireRechecksOnSignal(t *testing.T) {
-	hub := broadcast.New(broadcast.Memory(), nil)
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer hub.Close()
 	creds := broadcast.NewCredentials(hub)
 	store := memstore.New()

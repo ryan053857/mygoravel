@@ -9,6 +9,7 @@ import (
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 )
 
 var _ lock.Store = (*lock.DBStore)(nil)
@@ -17,7 +18,7 @@ func TestDBStore(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := dbtesting.Open(t, driver, lock.Migrations())
 		ctx := context.Background()
-		testStore(t, func() lock.Store {
+		locktest.TestStore(t, func() lock.Store {
 			if _, err := db.NewTruncateTable().Table("locks").Exec(ctx); err != nil {
 				t.Fatal(err)
 			}

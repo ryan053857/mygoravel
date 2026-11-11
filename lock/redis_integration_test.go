@@ -12,12 +12,13 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 	"github.com/ryan053857/mygoravel/lock/redislock"
 )
 
 func TestRedisStore(t *testing.T) {
 	rdb := openRedis(t)
-	testStore(t, func() lock.Store {
+	locktest.TestStore(t, func() lock.Store {
 		return prefixed{redislock.New(rdb), "test:lock:" + rand.Text() + ":"}
 	})
 }

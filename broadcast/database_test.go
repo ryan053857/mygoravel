@@ -2,6 +2,8 @@ package broadcast_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,6 +124,85 @@ func TestDatabaseResumesAfterErrors(t *testing.T) {
 		}
 		if got := broadcasttest.Receive(t, sub); string(got.Data) != "back" || sub.Err() != nil {
 			t.Fatalf("got %q err=%v", got.Data, sub.Err())
+		}
+	})
+}
+
+// 本进程发布的消息不等轮询，立即投递。
+func TestDatabaseDeliversLocalMessagesImmediately(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := dbtesting.Open(t, driver, broadcast.Migrations())
+		d := broadcast.NewDatabase(db, nil)
+		broadcast.SetTimings(d, time.Hour, time.Second, time.Hour) // 开始监听后不再轮询
+		h := broadcast.New(d, nil)
+		defer h.Close()
+		broadcasttest.Ready(t, h)
+		sub := h.Subscribe("room:1")
+		if err := h.Publish(context.Background(), "room:1", []byte("now")); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case m := <-sub.C():
+			if string(m.Data) != "now" {
+				t.Fatalf("got %q", m.Data)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("local message waited for polling")
+		}
+	})
+}
+
+// 并发发布与轮询交错时，本进程和其他进程都恰好收到每条消息一次，同一个发布者的消息保持顺序。
+func TestDatabaseDeliversEachMessageOnce(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := dbtesting.Open(t, driver, broadcast.Migrations())
+		local := broadcast.New(fastDatabase(db, time.Second), nil)
+		defer local.Close()
+		remote := broadcast.New(fastDatabase(db, time.Second), nil)
+		defer remote.Close()
+		subs := map[string]*broadcast.Subscription{"local": local.Subscribe("room:1"), "remote": remote.Subscribe("room:1")}
+		broadcasttest.Ready(t, local, remote)
+
+		const publishers, each = 4, 15 // 一次轮询可能读到全部，总数不超过订阅的缓冲
+		received := make(map[string][]string)
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		for name, sub := range subs {
+			wg.Go(func() {
+				for range publishers * each {
+					m := broadcasttest.Receive(t, sub)
+					mu.Lock()
+					received[name] = append(received[name], string(m.Data))
+					mu.Unlock()
+				}
+			})
+		}
+		var pubs sync.WaitGroup
+		for p := range publishers {
+			pubs.Go(func() {
+				for i := range each {
+					if err := local.Publish(context.Background(), "room:1", []byte(fmt.Sprintf("%d-%03d", p, i))); err != nil {
+						t.Error(err)
+					}
+				}
+			})
+		}
+		pubs.Wait()
+		wg.Wait()
+
+		for name, sub := range subs {
+			select {
+			case m := <-sub.C():
+				t.Fatalf("%s received an extra %q", name, m.Data)
+			case <-time.After(100 * time.Millisecond):
+			}
+			last := map[byte]string{}
+			for _, data := range received[name] {
+				if prev := last[data[0]]; data <= prev {
+					t.Fatalf("%s: %q after %q", name, data, prev)
+				}
+				last[data[0]] = data
+			}
 		}
 	})
 }

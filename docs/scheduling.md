@@ -125,10 +125,7 @@ root.AddCommand(command.Run("schedule", "执行定时任务", bootstrap.Schedule
 
 部署多个实例时，每个实例上的调度器都会在同一时刻触发同一个任务。调度器在执行之前取得一把锁，锁名包含任务名和触发时刻，例如 `schedule:sessions:cleanup:1794366000`，只有取得锁的实例执行这一次触发。锁不会主动释放，一分钟后过期，所以各实例的时钟偏差小于一分钟时就不会重复执行。
 
-去重的范围取决于锁存储：
-
-- 单实例部署可以使用 `lock.NewMemoryStore()`；
-- 多实例部署，以及使用[不停机升级](deployment.md#upgrade-overlap)时，使用 `lock.NewDBStore(db)` 或 [Redis 存储](locks.md#redis-store)，所有进程共用同一个存储。
+所有进程共用 `lock.NewDBStore(db)` 或 [Redis 存储](locks.md#redis-store)，去重就覆盖全部实例。单机部署也一样：[不停机升级](deployment.md#upgrade-overlap)时新旧两个调度器会同时运行。
 
 使用数据库存储时，每次触发都会在 `locks` 表中留下一行，由上面的 `locks:cleanup` 定期删除。秒级任务每秒都会写一次 `locks` 表，这类任务较多时建议改用 Redis 存储，过期的键由 Redis 自动删除。
 
@@ -352,11 +349,11 @@ queue.Handle(router, sub, "articles.publish-scheduled", func(ctx context.Context
 <a id="testing"></a>
 ## 测试
 
-`RunDue` 执行在指定时刻到期的任务，等它们结束后返回合并的错误，用来确定性地验证调度配置：
+`RunDue` 执行在指定时刻到期的任务，等它们结束后返回合并的错误，用来确定性地验证调度配置。[`locktest.NewStore()`](locks.md#testing) 是测试用的内存锁存储：
 
 ```go
 func TestDailyReport(t *testing.T) {
-    sched := schedule.New(lock.New(lock.NewMemoryStore()), schedule.DefaultConfig(), nil)
+    sched := schedule.New(lock.New(locktest.NewStore()), schedule.DefaultConfig(), nil)
     var ran bool
     sched.Add("reports:daily", "0 3 * * *", func(context.Context) error {
         ran = true

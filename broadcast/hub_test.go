@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 )
 
-func TestMemory(t *testing.T) {
-	h := broadcast.New(broadcast.Memory(), nil)
+func TestHubDeliversAcrossInstances(t *testing.T) {
+	backend := broadcasttest.NewBackend()
+	h := broadcast.New(backend, nil)
 	defer h.Close()
 	sub := h.Subscribe("room:1")
 	if err := h.PublishJSON(context.Background(), "room:1", map[string]string{"type": "message"}); err != nil {
@@ -22,21 +22,27 @@ func TestMemory(t *testing.T) {
 	if err := json.Unmarshal(broadcasttest.Receive(t, sub).Data, &ev); err != nil || ev["type"] != "message" {
 		t.Fatalf("event=%v err=%v", ev, err)
 	}
-	// 不同的 Hub 不互通。
-	other := broadcast.New(broadcast.Memory(), nil)
+	// 同一个 Backend 上的另一个 Hub 相当于另一个实例。
+	other := broadcast.New(backend, nil)
 	defer other.Close()
-	otherSub := other.Subscribe("room:1")
-	_ = h.Publish(context.Background(), "room:1", nil)
-	select {
-	case m := <-otherSub.C():
-		t.Fatalf("separate memory hub received %+v", m)
-	case <-time.After(50 * time.Millisecond):
+	otherSub := other.Subscribe("room:2")
+	_ = h.Publish(context.Background(), "room:2", []byte("x"))
+	if got := broadcasttest.Receive(t, otherSub); string(got.Data) != "x" {
+		t.Fatalf("other instance received %+v", got)
 	}
 }
 
+func TestBackendContract(t *testing.T) {
+	broadcasttest.TestBackend(t, func(*testing.T) (broadcast.Backend, broadcast.Backend) {
+		b := broadcasttest.NewBackend()
+		return b, b
+	})
+}
+
 func TestSlowSubscriberEnds(t *testing.T) {
-	h := broadcast.New(broadcast.Memory(), nil)
+	h := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer h.Close()
+	broadcasttest.Ready(t, h) // 之后 Publish 在返回之前投递
 	slow, fast := h.Subscribe("room:1"), h.Subscribe("room:1")
 	ctx := context.Background()
 	for range 100 {
@@ -104,7 +110,7 @@ func TestTopics(t *testing.T) {
 			t.Errorf("%q accepted", topic)
 		}
 	}
-	h := broadcast.New(broadcast.Memory(), nil)
+	h := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer h.Close()
 	if h.Publish(context.Background(), "bad topic", nil) == nil {
 		t.Error("Publish accepted an invalid topic")
@@ -126,7 +132,7 @@ func TestTopics(t *testing.T) {
 }
 
 func TestSubscribeAfterClose(t *testing.T) {
-	h := broadcast.New(broadcast.Memory(), nil)
+	h := broadcast.New(broadcasttest.NewBackend(), nil)
 	_ = h.Close()
 	sub := h.Subscribe("room:1")
 	if _, ok := <-sub.C(); ok || !errors.Is(sub.Err(), broadcast.ErrClosed) {

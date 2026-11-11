@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/httpx/rest"
@@ -20,7 +21,7 @@ import (
 
 // 设置了 Options.Credentials 时，撤销 token 并发出提醒后 SSE 立即结束，不等 30 秒的定期校验。
 func TestRequireBearerRechecksOnSignal(t *testing.T) {
-	hub := broadcast.New(broadcast.Memory(), nil)
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer hub.Close()
 	creds := broadcast.NewCredentials(hub)
 	var revoked atomic.Bool

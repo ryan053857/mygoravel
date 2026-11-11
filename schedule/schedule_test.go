@@ -11,11 +11,12 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/ryan053857/mygoravel/lock"
+	"github.com/ryan053857/mygoravel/lock/locktest"
 	"github.com/ryan053857/mygoravel/schedule"
 )
 
 func newScheduler() *schedule.Scheduler {
-	return schedule.New(lock.New(lock.NewMemoryStore()), schedule.DefaultConfig(), nil)
+	return schedule.New(lock.New(locktest.NewStore()), schedule.DefaultConfig(), nil)
 }
 
 // counter 返回一个记录执行次数的任务。
@@ -108,7 +109,7 @@ func TestLocation(t *testing.T) {
 }
 
 func TestRunsOncePerTickAcrossInstances(t *testing.T) {
-	locker := lock.New(lock.NewMemoryStore())
+	locker := lock.New(locktest.NewStore())
 	var once, every atomic.Int64
 	a, b := schedule.New(locker, schedule.DefaultConfig(), nil), schedule.New(locker, schedule.DefaultConfig(), nil)
 	for _, s := range []*schedule.Scheduler{a, b} {
@@ -147,7 +148,7 @@ func TestOverlap(t *testing.T) {
 		{"allowed", []schedule.Option{schedule.AllowOverlap()}, 1, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			locker := lock.New(lock.NewMemoryStore())
+			locker := lock.New(locktest.NewStore())
 			var runs atomic.Int64
 			started := make(chan struct{}, 2)
 			release := make(chan struct{})
@@ -265,5 +266,5 @@ func TestConfig(t *testing.T) {
 			t.Fatal("New with invalid config did not panic")
 		}
 	}()
-	schedule.New(lock.New(lock.NewMemoryStore()), bad, nil)
+	schedule.New(lock.New(locktest.NewStore()), bad, nil)
 }

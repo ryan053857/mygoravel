@@ -9,6 +9,7 @@
     - [数据库](#database-backend)
     - [Redis 与 NATS](#redis-and-nats)
 - [投递保证](#delivery-guarantees)
+- [测试](#testing)
 
 <a id="introduction"></a>
 ## 简介
@@ -126,17 +127,16 @@ return web.SSE(w, r, func(s *web.Stream) error {
 
 | 后端 | 消息经由 | 适合 |
 | --- | --- | --- |
-| `broadcast.Memory()` | 本进程内 | 单实例部署（包括 SQLite）、开发和测试 |
 | `broadcast.NewDatabase(db, logger)` | `broadcasts` 表，PostgreSQL、MySQL、SQLite 通用 | 多实例部署，不想引入其他组件 |
 | `redisbroadcast.New(rdb, channel)` | Redis Pub/Sub | 已经使用 [Redis](redis.md) |
 | `natsbroadcast.New(nc, prefix)` | NATS 核心发布订阅 | 已经使用 NATS，或者消息量很大 |
 
-单实例部署可以用 `Memory`。使用[不停机升级](deployment.md#upgrade-overlap)或滚动发布时，新旧进程短暂并存，旧进程中还没结束的请求和任务发布的事件只进旧进程的 Hub，已经重连到新进程的浏览器收不到，这时请用 `NewDatabase`，SQLite 也可以使用。
+单机部署也要经由后端传递：[不停机升级](deployment.md#upgrade-overlap)或滚动发布时新旧进程短暂并存，旧进程中还没结束的请求和任务发布的事件，要送到已经重连到新进程的浏览器。数据库后端在 SQLite 上同样可用。
 
 <a id="database-backend"></a>
 ### 数据库
 
-`NewDatabase` 把每条消息插入 `broadcasts` 表，每个实例每 100 毫秒读取新的行，所以消息最多延迟一个轮询间隔。使用前先发布迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
+`NewDatabase` 把每条消息插入 `broadcasts` 表，并立即投递给本进程中的订阅；其他实例每 100 毫秒读取新的行，所以跨进程的消息最多延迟一个轮询间隔。同一个进程发布的消息按发布顺序到达；不同进程同时发布的消息没有确定的先后。使用前先发布迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
 migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
@@ -180,3 +180,19 @@ Redis Pub/Sub 和 NATS 核心发布订阅都不保存消息：订阅连接中断
 订阅结束后，处理器返回、连接结束，浏览器重连并按 `Last-Event-ID` [补发](#replaying-missed-events)，消息因此既不会丢，也不会乱序。一个订阅跟不上，不会影响其他订阅。
 
 每个实例从后端收到全部主题的消息，再在本地按主题分发。消息量很大、主题很多时，用 NATS 并按业务拆分前缀。
+
+<a id="testing"></a>
+## 测试
+
+`broadcasttest.NewBackend()` 是测试用的内存后端，不需要数据库。同一个后端上的多个 Hub 互相收到消息，相当于多个实例；Hub 开始接收时会先收到后端创建以来发布的全部消息，所以刚创建 Hub 就发布的消息也不会错过：
+
+```go
+import "github.com/ryan053857/mygoravel/broadcast/broadcasttest"
+
+hub := broadcast.New(broadcasttest.NewBackend(), nil)
+sub := hub.Subscribe("articles")
+// ... 调用发布事件的 action
+msg := broadcasttest.Receive(t, sub)
+```
+
+它保留全部消息，只用于测试。实现自己的后端时，用 `broadcasttest.TestBackend` 检查它是否符合约定。

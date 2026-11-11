@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/identity"
 )
 
@@ -31,7 +32,7 @@ func signaled(t *testing.T, ch <-chan struct{}, want bool, what string) {
 }
 
 func TestCredentialsWatch(t *testing.T) {
-	hub := broadcast.New(broadcast.Memory(), nil)
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer hub.Close()
 	creds := broadcast.NewCredentials(hub)
 	ctx, cancel := context.WithCancel(identity.WithTenant(context.Background(), "acme"))
@@ -136,7 +137,7 @@ func TestCredentialsWatchResubscribesAfterLoss(t *testing.T) {
 
 // Hub 关闭后 Watch 不再重新订阅。
 func TestCredentialsWatchStopsWhenHubCloses(t *testing.T) {
-	hub := broadcast.New(broadcast.Memory(), nil)
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	creds := broadcast.NewCredentials(hub)
 	ch := creds.Watch(context.Background(), identity.Subject{ID: "alice"})
 	time.Sleep(20 * time.Millisecond)

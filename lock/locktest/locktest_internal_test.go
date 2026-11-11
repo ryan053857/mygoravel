@@ -1,14 +1,20 @@
-package lock
+package locktest
 
 import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/ryan053857/mygoravel/lock"
 )
 
-func TestMemoryStoreSweepsExpiredLocks(t *testing.T) {
+func TestContract(t *testing.T) {
+	TestStore(t, func() lock.Store { return NewStore() })
+}
+
+func TestStoreSweepsExpiredLocks(t *testing.T) {
 	ctx := context.Background()
-	s := NewMemoryStore()
+	s := NewStore()
 	for _, name := range []string{"a", "b"} {
 		if ok, _ := s.Acquire(ctx, name, "o", time.Millisecond); !ok {
 			t.Fatalf("acquire %s", name)
