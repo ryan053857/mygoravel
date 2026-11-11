@@ -6,6 +6,7 @@
     - [HTTP 请求](#http-metrics)
     - [队列](#queue-metrics)
     - [定时任务](#schedule-metrics)
+    - [限流](#ratelimit-metrics)
     - [数据库](#database-metrics)
     - [Redis](#redis-metrics)
     - [NATS](#nats-metrics)
@@ -22,7 +23,7 @@
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路，数据库和 Redis 的指标和链路由 Bun、go-redis 自带的扩展报告，NATS 见[这一节](#nats-metrics)。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
+框架的 HTTP 服务、队列、调度器和限流器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路，数据库和 Redis 的指标和链路由 Bun、go-redis 自带的扩展报告，NATS 见[这一节](#nats-metrics)。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
 
 和其他功能一样，两者都需要显式开启：把同一个 `MeterProvider`、`TracerProvider` 交给需要报告的部分即可，没有传入的部分不报告。
 
@@ -90,6 +91,19 @@ sched := schedule.New(a.locker, a.cfg.Schedule, nil, schedule.WithMeterProvider(
 | `schedule.task.skipped` | 计数器 | `schedule.task`、`schedule.task.skip_reason` | 应当执行却被跳过的次数，原因为 `overlap`（上一次还没结束）或 `lock_failed`（锁存储出错） |
 
 部署多个实例时，每次触发只在执行它的实例上记录；由其他实例执行的触发不算跳过。
+
+<a id="ratelimit-metrics"></a>
+### 限流
+
+```go
+attempts := ratelimit.Observe(a.meters, "login", ratelimit.NewDatabase(a.db, "login", cfg))
+```
+
+| 指标 | 类型 | 属性 | 含义 |
+| --- | --- | --- | --- |
+| `ratelimit.requests` | 计数器 | `ratelimit.name`、`ratelimit.result` | 每次 `Allow` 的结果：`allowed`、`exceeded`（配额用完）或 `error`（存储出错） |
+
+被拒绝的请求同时以 `429` 出现在 HTTP 请求的指标中。用法和查询示例见[限流的指标](rate-limiting.md#metrics)。
 
 <a id="database-metrics"></a>
 ### 数据库
@@ -214,6 +228,13 @@ sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"
 
 # 队列积压超过 5 分钟
 max by (queue_topic) (queue_job_oldest_ready_age_seconds) > 300
+
+# 限流器的存储出错：使用它的请求都在返回 503
+sum by (ratelimit_name) (rate(ratelimit_requests_total{ratelimit_result="error"}[5m])) > 0
+
+# 登录被拒绝的比例超过 20%，可能有人在暴力尝试
+sum(rate(ratelimit_requests_total{ratelimit_name="login", ratelimit_result="exceeded"}[5m]))
+  / sum(rate(ratelimit_requests_total{ratelimit_name="login"}[5m])) > 0.2
 
 # 有请求在排队等数据库连接
 rate(go_sql_connections_wait_count_total[5m]) > 0
