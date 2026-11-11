@@ -74,6 +74,8 @@ if err := rdb.Ping(ctx).Err(); err != nil {
 
 客户端可以并发使用，整个应用共享这一个 `rdb`：把它存进 `App` 的 `rdb` 字段，各个运行部分通过 `a.rdb` 使用。
 
+客户端的连接池指标和每条命令的链路由 go-redis 自带的 redisotel 报告，见 [Redis 的指标](telemetry.md#redis-metrics)和[链路](telemetry.md#redis-tracing)。
+
 <a id="running-commands"></a>
 ## 执行命令
 

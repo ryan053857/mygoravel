@@ -7,6 +7,7 @@
     - [队列](#queue-metrics)
     - [定时任务](#schedule-metrics)
     - [数据库](#database-metrics)
+    - [Redis](#redis-metrics)
     - [告警示例](#alerting)
 - [链路追踪](#tracing)
     - [创建 TracerProvider](#tracer-provider)
@@ -14,12 +15,13 @@
     - [队列](#queue-tracing)
     - [定时任务](#schedule-tracing)
     - [数据库](#database-tracing)
+    - [Redis](#redis-tracing)
     - [日志](#trace-logs)
 
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路，数据库的指标和链路由 Bun 自带的扩展报告。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
+框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路，数据库和 Redis 的指标和链路由 Bun、go-redis 自带的扩展报告。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
 
 和其他功能一样，两者都需要显式开启：把同一个 `MeterProvider`、`TracerProvider` 交给需要报告的部分即可，没有传入的部分不报告。
 
@@ -125,6 +127,40 @@ db.AddQueryHook(bunotel.NewQueryHook(bunotel.WithMeterProvider(meters)))
 
 同一个钩子还可以报告链路，见[数据库的链路](#database-tracing)。
 
+<a id="redis-metrics"></a>
+### Redis
+
+go-redis 自带的 [redisotel](https://pkg.go.dev/github.com/redis/go-redis/extra/redisotel/v9) 报告 [Redis](redis.md) 客户端的指标，版本与 go-redis 相同：
+
+```shell
+go get github.com/redis/go-redis/extra/redisotel/v9
+```
+
+在 `open` 中[创建客户端](redis.md#connecting)之后：
+
+```go
+import "github.com/redis/go-redis/extra/redisotel/v9"
+
+err := redisotel.InstrumentMetrics(rdb,
+    redisotel.WithMeterProvider(meters),
+    redisotel.WithSemConvCompliantMetrics(true),
+)
+```
+
+`WithSemConvCompliantMetrics(true)` 让等待、超时这几个累计值按 OpenTelemetry 的约定报告为计数器。不开启时它们是可增可减的数值，Prometheus 中没有 `_total` 后缀，不能用 `rate` 计算。这个选项默认关闭只是为了兼容已有的用户，新应用直接开启。
+
+指标带有 `db.system=redis` 和 `pool.name`（Redis 的地址）属性：
+
+| 指标 | 类型 | 含义 |
+| --- | --- | --- |
+| `db.client.connections.usage` | 仪表 | 连接数，`state` 为 `used` 或 `idle` |
+| `db.client.connections.max` | 仪表 | 连接池上限，即 go-redis 的 `PoolSize` |
+| `db.client.connections.waits` | 计数器 | 因为没有空闲连接而等待的总次数 |
+| `db.client.connections.timeouts` | 计数器 | 等待超过 `PoolTimeout`、命令因此失败的总次数 |
+| `db.client.connections.use_time` | 直方图，毫秒 | 每条命令或管道的耗时，`status` 为 `ok`、`nil`（键不存在）或 `error` |
+
+和数据库一样，连接池的等待是 Redis 变慢的第一个信号，`timeouts` 增长时已经有命令失败了。`use_time` 以小数毫秒记录，区分成败，比数据库的查询耗时好用；键不存在（`redis.Nil`）记为 `nil`，统计错误率时只看 `error`。
+
 <a id="alerting"></a>
 ### 告警示例
 
@@ -140,6 +176,9 @@ max by (queue_topic) (queue_job_oldest_ready_age_seconds) > 300
 
 # 有请求在排队等数据库连接
 rate(go_sql_connections_wait_count_total[5m]) > 0
+
+# 等不到 Redis 连接，命令已经失败
+rate(db_client_connections_timeouts_total{db_system="redis"}[5m]) > 0
 
 # 每天凌晨的报表任务 25 小时内没有成功过
 increase(schedule_task_duration_seconds_count{schedule_task="reports:daily", schedule_task_outcome="succeeded"}[25h]) == 0
@@ -224,6 +263,21 @@ span 的名称是操作（如 `SELECT`），带有 SQL 语句和发起查询的�
 `database.ChildSpans` 让查询只在已有上级 span 时创建 span。不要直接传入 `tracers`：bunotel 为每条查询都创建 span，不管 `ctx` 中有没有上级 span；而队列轮询、调度器加锁这些后台查询不属于任何请求，每秒都会各自成为一条只有一个 span 的链路，淹没真正有用的数据。
 
 查询要接在请求的链路上，前提是把请求的 `ctx` 一路传给 Bun 的 `Scan`、`Exec`；用 `context.Background()` 发起的查询不会出现在链路中。
+
+<a id="redis-tracing"></a>
+### Redis
+
+```go
+err := redisotel.InstrumentTracing(rdb,
+    redisotel.WithTracerProvider(database.ChildSpans(tracers)),
+    redisotel.WithDBStatement(false),
+)
+```
+
+每条命令是一个 span，名称是命令名，例如 `get`；管道是一个 `redis.pipeline` span。
+
+- 和数据库一样，要套上 `database.ChildSpans`：redisotel 也为每条命令创建 span，而 [Redis 队列](queue.md#redis-driver)按 `poll_interval` 轮询、调度器用 [Redis 锁](locks.md#redis-store)去重这些后台命令不属于任何请求。
+- redisotel 默认把**完整的命令**写进 span，包括值：会话内容、缓存的 JSON、队列任务的 payload 都会进入链路系统，span 也会变得很大。`WithDBStatement(false)` 只保留命令名。
 
 <a id="trace-logs"></a>
 ### 日志
