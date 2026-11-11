@@ -5,6 +5,7 @@ package redisqueue_test
 import (
 	"context"
 	"crypto/rand"
+	"maps"
 	"os"
 	"testing"
 	"time"
@@ -73,8 +74,19 @@ func TestFinishedJobsLeaveNoKeys(t *testing.T) {
 	if err != nil || len(claims) != 1 {
 		t.Fatalf("claims %d err %v", len(claims), err)
 	}
-	if n, _ := rdb.Exists(ctx, prefix+":{jobs}:reserved").Result(); n != 1 {
-		t.Fatal("claimed job not marked reserved")
+	if n, _ := rdb.Exists(ctx, prefix+":{jobs}:leases").Result(); n != 1 {
+		t.Fatal("claimed job not recorded in leases")
+	}
+	// 重试一次再完成，retries 中的记录也要删除。
+	if err := claims[0].Retry(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := rdb.Exists(ctx, prefix+":{jobs}:retries").Result(); n != 1 {
+		t.Fatal("retried job not recorded in retries")
+	}
+	claims, err = d.Claim(ctx, queue.ClaimRequest{Topic: "jobs", Max: 1, Lease: time.Minute, PollInterval: 10 * time.Millisecond})
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claims %d err %v", len(claims), err)
 	}
 	if err := claims[0].Ack(ctx); err != nil {
 		t.Fatal(err)
@@ -82,5 +94,39 @@ func TestFinishedJobsLeaveNoKeys(t *testing.T) {
 	// 只剩记录 topic 的集合。
 	if keys, _ := rdb.Keys(ctx, prefix+"*").Result(); len(keys) != 1 || keys[0] != prefix+":topics" {
 		t.Fatalf("keys left: %v", keys)
+	}
+}
+
+// 租约过期的任务和到期的重试算作 ready，不再算作 running 和 retrying。
+func TestStatsAtBoundaries(t *testing.T) {
+	ctx := context.Background()
+	d, _, _ := newDriver(t)
+	claim := func() queue.Claim {
+		t.Helper()
+		claims, err := d.Claim(ctx, queue.ClaimRequest{Topic: "jobs", Max: 1, Lease: 200 * time.Millisecond, PollInterval: 10 * time.Millisecond})
+		if err != nil || len(claims) != 1 {
+			t.Fatalf("claims %d err %v", len(claims), err)
+		}
+		return claims[0]
+	}
+	for range 2 {
+		if err := d.Enqueue(ctx, queue.Job{ID: uuid.New(), Topic: "jobs", Payload: []byte("{}")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim()                                                                          // 租约 200 毫秒后过期
+	if err := claim().Retry(ctx, time.Now().Add(200*time.Millisecond)); err != nil { // 200 毫秒后重试
+		t.Fatal(err)
+	}
+	stats, err := d.Stats(ctx)
+	if err != nil || len(stats) != 1 || stats[0].Jobs[queue.StateRunning] != 1 || stats[0].Jobs[queue.StateRetrying] != 1 ||
+		stats[0].Jobs[queue.StateDelayed] != 0 || stats[0].Jobs[queue.StateReady] != 0 {
+		t.Fatalf("before expiry: %+v %v", stats, err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	stats, err = d.Stats(ctx)
+	want := map[queue.State]int{queue.StateReady: 2, queue.StateDelayed: 0, queue.StateRetrying: 0, queue.StateRunning: 0}
+	if err != nil || len(stats) != 1 || !maps.Equal(stats[0].Jobs, want) {
+		t.Fatalf("after expiry: %+v %v", stats, err)
 	}
 }

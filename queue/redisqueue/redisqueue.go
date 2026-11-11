@@ -25,15 +25,17 @@ import (
 // Name 是驱动的名称，写入 queue_failed_jobs.driver。
 const Name = "redis"
 
-// Driver 为每个 topic 使用四个键，键名以 prefix:{topic}: 开头（花括号是哈希标签，同一 topic 的键在同一个集群槽位）：
+// Driver 为每个 topic 使用五个键，键名以 prefix:{topic}: 开头（花括号是哈希标签，同一 topic 的键在同一个集群槽位）：
 //
 //   - schedule：有序集合，成员是任务 ID，分数是可以领取的时间（Unix 毫秒）；任务被领取后分数是租约到期时间，
 //     到期没有确认的任务会被重新领取。
 //   - jobs：哈希，任务 ID 到任务内容。
 //   - attempts：哈希，任务 ID 到已领取的次数，也是防护令牌：任务被重新领取后旧的领取不再生效。
-//   - reserved：哈希，处理中的任务 ID 到领取时间。
+//   - leases：有序集合，被领取、还没有确认或放回的任务，分数与 schedule 中相同（租约到期时间）。
+//   - retries：有序集合，等待重试、还没有被再次领取的任务，分数与 schedule 中相同（重试时间）。
 //
-// 每个操作是一次脚本调用，时间取 Redis 服务端时钟。任务完成后四个键中的记录都被删除，不需要清理。
+// leases 和 retries 让 Stats 只做几次计数，不必遍历任务。
+// 每个操作是一次脚本调用，时间取 Redis 服务端时钟。任务完成后各个键中的记录都被删除，不需要清理。
 // 另有一个集合 prefix:topics 记录出现过的 topic，供 Stats 使用。
 type Driver struct {
 	rdb    redis.UniversalClient
@@ -59,7 +61,7 @@ func (d *Driver) Name() string { return Name }
 
 func (d *Driver) keys(topic string) []string {
 	base := d.prefix + ":{" + topic + "}:"
-	return []string{base + "schedule", base + "jobs", base + "attempts", base + "reserved"}
+	return []string{base + "schedule", base + "jobs", base + "attempts", base + "leases", base + "retries"}
 }
 
 // body 是保存在 jobs 哈希中的任务内容。
@@ -110,25 +112,19 @@ func (d *Driver) Enqueue(ctx context.Context, jobs ...queue.Job) error {
 }
 
 // stats 返回 {ready, delayed, retrying, running, 最早到期的分数或 -1}。
+// 未到期的任务中，处理中的在 leases 中、等待重试的在 retries 中，其余是延迟任务；每一项都只是一次计数。
 var stats = redis.NewScript(`
 local t = redis.call("TIME")
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local ready = redis.call("ZCOUNT", KEYS[1], "-inf", now)
+local future = redis.call("ZCOUNT", KEYS[1], "(" .. now, "+inf")
+local running = redis.call("ZCOUNT", KEYS[4], "(" .. now, "+inf")
+local retrying = redis.call("ZCOUNT", KEYS[5], "(" .. now, "+inf")
 local oldest = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", now, "WITHSCORES", "LIMIT", 0, 1)
-local delayed, retrying, running = 0, 0, 0
-for _, id in ipairs(redis.call("ZRANGEBYSCORE", KEYS[1], "(" .. now, "+inf")) do
-	if redis.call("HEXISTS", KEYS[4], id) == 1 then
-		running = running + 1
-	elseif tonumber(redis.call("HGET", KEYS[3], id) or "0") > 0 then
-		retrying = retrying + 1
-	else
-		delayed = delayed + 1
-	end
-end
-return {ready, delayed, retrying, running, oldest[2] or "-1"}
+return {ready, future - running - retrying, retrying, running, oldest[2] or "-1"}
 `)
 
-// Stats 实现 queue.Driver。每个 topic 一次脚本调用，会遍历未到期的任务。
+// Stats 实现 queue.Driver。每个 topic 一次脚本调用，只做计数，不遍历任务。
 func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 	topics, err := d.rdb.SMembers(ctx, d.prefix+":topics").Result()
 	if err != nil {
@@ -167,15 +163,19 @@ for i = 1, #due, 2 do
 	local id = due[i]
 	local data = redis.call("HGET", KEYS[2], id)
 	if data then
-		redis.call("ZADD", KEYS[1], now + tonumber(ARGV[2]), id)
+		local expires = now + tonumber(ARGV[2])
+		redis.call("ZADD", KEYS[1], expires, id)
 		local attempts = redis.call("HINCRBY", KEYS[3], id, 1)
-		redis.call("HSET", KEYS[4], id, now)
+		redis.call("ZADD", KEYS[4], expires, id)
+		redis.call("ZREM", KEYS[5], id)
 		table.insert(out, id)
 		table.insert(out, attempts)
 		table.insert(out, data)
 		table.insert(out, due[i + 1])
 	else
 		redis.call("ZREM", KEYS[1], id)
+		redis.call("ZREM", KEYS[4], id)
+		redis.call("ZREM", KEYS[5], id)
 	end
 end
 return out
@@ -234,42 +234,47 @@ type claimed struct {
 	job      queue.Job
 }
 
-// held 检查 attempts 后按 ARGV[3] 执行：ack 删除任务；schedule 把分数设为 ARGV[4]
-// （0 表示 Redis 当前时间加 ARGV[5] 毫秒），ARGV[6] 为 1 时清除领取标记，ARGV[7] 为 1 时 attempts 减一。
+// held 检查 attempts 后按 ARGV[3] 执行：
+//   - ack：删除任务；
+//   - extend：把租约延长到 Redis 当前时间加 ARGV[4] 毫秒；
+//   - retry：在 ARGV[4]（Unix 毫秒）之后可以再次领取；
+//   - release：立即可以再次领取，attempts 减一（本次不计入次数）。
 var held = redis.NewScript(`
-if redis.call("HGET", KEYS[3], ARGV[1]) ~= ARGV[2] then
+local id = ARGV[1]
+if redis.call("HGET", KEYS[3], id) ~= ARGV[2] then
 	return 0
 end
-if ARGV[3] == "ack" then
-	redis.call("ZREM", KEYS[1], ARGV[1])
-	redis.call("HDEL", KEYS[2], ARGV[1])
-	redis.call("HDEL", KEYS[3], ARGV[1])
-	redis.call("HDEL", KEYS[4], ARGV[1])
+local op = ARGV[3]
+if op == "ack" then
+	redis.call("ZREM", KEYS[1], id)
+	redis.call("HDEL", KEYS[2], id)
+	redis.call("HDEL", KEYS[3], id)
+	redis.call("ZREM", KEYS[4], id)
+	redis.call("ZREM", KEYS[5], id)
 	return 1
 end
-local at = tonumber(ARGV[4])
-if at == 0 then
-	local t = redis.call("TIME")
-	at = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) + tonumber(ARGV[5])
+local t = redis.call("TIME")
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if op == "extend" then
+	local expires = now + tonumber(ARGV[4])
+	redis.call("ZADD", KEYS[1], expires, id)
+	redis.call("ZADD", KEYS[4], expires, id)
+	return 1
 end
-redis.call("ZADD", KEYS[1], at, ARGV[1])
-if ARGV[6] == "1" then
-	redis.call("HDEL", KEYS[4], ARGV[1])
-end
-if ARGV[7] == "1" then
-	redis.call("HINCRBY", KEYS[3], ARGV[1], -1)
+redis.call("ZREM", KEYS[4], id)
+if op == "retry" then
+	local at = tonumber(ARGV[4])
+	redis.call("ZADD", KEYS[1], at, id)
+	redis.call("ZADD", KEYS[5], at, id)
+else -- release
+	redis.call("ZADD", KEYS[1], now, id)
+	redis.call("HINCRBY", KEYS[3], id, -1)
 end
 return 1
 `)
 
-func (c *claimed) run(ctx context.Context, op string, at int64, after time.Duration, unreserve, uncount bool) error {
-	flag := func(b bool) string {
-		if b {
-			return "1"
-		}
-		return "0"
-	}
-	ok, err := held.Run(ctx, c.d.rdb, c.keys, c.id, strconv.FormatInt(c.attempts, 10), op, at, after.Milliseconds(), flag(unreserve), flag(uncount)).Int()
+func (c *claimed) run(ctx context.Context, op string, arg int64) error {
+	ok, err := held.Run(ctx, c.d.rdb, c.keys, c.id, strconv.FormatInt(c.attempts, 10), op, arg).Int()
 	if err != nil {
 		return errors.Wrapf(err, "redisqueue: %s job %s", op, c.id)
 	}
@@ -282,17 +287,13 @@ func (c *claimed) run(ctx context.Context, op string, at int64, after time.Durat
 func (c *claimed) Job() queue.Job { return c.job }
 
 func (c *claimed) Extend(ctx context.Context, lease time.Duration) error {
-	return c.run(ctx, "schedule", 0, lease, false, false)
+	return c.run(ctx, "extend", lease.Milliseconds())
 }
 
-func (c *claimed) Ack(ctx context.Context) error {
-	return c.run(ctx, "ack", 0, 0, false, false)
-}
+func (c *claimed) Ack(ctx context.Context) error { return c.run(ctx, "ack", 0) }
 
 func (c *claimed) Retry(ctx context.Context, at time.Time) error {
-	return c.run(ctx, "schedule", max(at.UnixMilli(), 1), 0, true, false)
+	return c.run(ctx, "retry", at.UnixMilli())
 }
 
-func (c *claimed) Release(ctx context.Context) error {
-	return c.run(ctx, "schedule", 0, 0, true, true)
-}
+func (c *claimed) Release(ctx context.Context) error { return c.run(ctx, "release", 0) }

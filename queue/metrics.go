@@ -73,7 +73,8 @@ var statsMaxAge = 5 * time.Second
 //   - queue.job.oldest_ready_age（gauge，秒）：积压最久的任务已经等了多久，没有积压时为 0。
 //     worker 跟不上时它会持续变大，适合作为告警条件。驱动给不出时不报告。
 //
-// 每个实例读到的都是同一份全局数据：只在一个进程中注册，或者汇总多个实例时取最大值而不是求和。
+// 每次读取都统计整个队列（数据库驱动按 topic 分组统计 queue_jobs 表），每个实例读到的也都是同一份全局数据：
+// 只在实例最少的一种进程中注册，例如调度器；汇总多个实例时取最大值而不是求和。
 // 出现过的 topic 在任务清空后报告 0，而不是消失。5 秒内的多次采集复用同一次读取。
 // 不再需要时调用返回值的 Unregister。
 func ObserveJobs(mp metric.MeterProvider, d Driver, failed *FailedJobs) (metric.Registration, error) {

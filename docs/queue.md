@@ -290,18 +290,23 @@ meters := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
 stack.MustAdd("metrics", meters.Shutdown)
 ```
 
-同样在 `open` 中注册队列中的任务数，并把 `meters` 保存在 `App` 中：
-
-```go
-if _, err := queue.ObserveJobs(meters, queue.Database(db), queue.NewFailedJobs(db)); err != nil {
-    return nil, err
-}
-```
-
-`Worker` 创建订阅者时传入它：
+把 `meters` 保存在 `App` 中。`Worker` 创建订阅者时传入它，记录每个任务的等待时长和处理耗时：
 
 ```go
 sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil, queue.WithMeterProvider(a.meters))
+```
+
+队列中的任务数在采集时读取队列状态，每个注册了它的进程都会定期统计一次 `queue_jobs` 表。只在实例最少的那种进程中注册，通常是调度器：
+
+```go
+func (a *App) Scheduler(ctx context.Context) error {
+    reg, err := queue.ObserveJobs(a.meters, queue.Database(a.db), queue.NewFailedJobs(a.db))
+    if err != nil {
+        return err
+    }
+    defer reg.Unregister()
+    // ... 注册定时任务并运行
+}
 ```
 
 Prometheus 通过 `promhttp.Handler()`（`github.com/prometheus/client_golang/prometheus/promhttp`）抓取，把它挂在 `/metrics` 上；不要把这个路径暴露到公网。
@@ -315,7 +320,7 @@ Prometheus 通过 `promhttp.Handler()`（`github.com/prometheus/client_golang/pr
 
 所有指标都带有 `queue.driver` 和 `queue.topic` 属性。`queue.job.outcome` 是 `succeeded`、`retrying`、`failed`、`released`、`lease_lost`，与[任务事件](#job-events)对应。导出到 Prometheus 后，点换成下划线，单位成为后缀，例如 `queue_job_wait_seconds`。
 
-前两个由订阅者在处理任务时记录。后两个在采集时读取[队列状态](#queue-stats)和失败任务数，5 秒内的多次采集复用同一次读取；出现过的 topic 在任务清空后报告 0，而不是消失。每个实例读到的都是同一份全局数据，所以汇总多个实例时取最大值，不要求和。例如积压超过 5 分钟时告警：
+前两个由订阅者在处理任务时记录。后两个在采集时读取[队列状态](#queue-stats)和失败任务数，5 秒内的多次采集复用同一次读取；出现过的 topic 在任务清空后报告 0，而不是消失。调度器部署了多个实例时，每个实例读到的都是同一份全局数据，所以汇总时取最大值，不要求和。例如积压超过 5 分钟时告警：
 
 ```promql
 max by (queue_topic) (queue_job_oldest_ready_age_seconds) > 300
@@ -463,7 +468,7 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 - **失败任务需要数据库。** 用 `WithFailedJobs` 指定，表结构见[准备数据表](#preparing-tables)。
 - **持久性取决于 Redis 的配置。** 只开启 RDB 快照时，Redis 重启会丢失最近一次快照之后发布的任务；需要可靠的队列时开启 AOF（`appendonly yes`）。主从切换同样可能丢失刚写入的任务。
 
-每个 topic 在 Redis 中有四个键，键名以 `blog:queue:{mail.send}:` 开头，花括号让同一个 topic 的键落在同一个集群槽位，因此也可以使用 Redis 集群。任务完成后对应的记录都会删除，不需要清理。租约和延迟按 Redis 服务端的时钟计算，不受各实例时钟偏差影响。
+每个 topic 在 Redis 中有五个键，键名以 `blog:queue:{mail.send}:` 开头，花括号让同一个 topic 的键落在同一个集群槽位，因此也可以使用 Redis 集群。任务完成后对应的记录都会删除，不需要清理。租约和延迟按 Redis 服务端的时钟计算，不受各实例时钟偏差影响。
 
 <a id="publish-after-commit"></a>
 ### 事务提交后再发布
