@@ -1,6 +1,6 @@
-// Package queuetesting 是队列驱动的一致性测试：数据库、Redis、NATS 驱动运行同一组场景，
-// 保证 Subscriber 在任何驱动上的行为相同。
-package queuetesting
+// Package queuetest 提供 queue.Driver 实现的契约测试：数据库、Redis、NATS 驱动运行同一组场景，
+// 保证 Subscriber 在任何驱动上的行为相同。实现自己的驱动时用 TestDriver 检查它。
+package queuetest
 
 import (
 	"context"
@@ -31,8 +31,9 @@ import (
 	"github.com/ryan053857/mygoravel/queue"
 )
 
-// Backend 描述被测试的驱动。
-type Backend struct {
+// Options 描述被测试的驱动。No 开头和 PartialStats 的字段声明驱动做不到的事，对应的场景按驱动的实际行为检查；
+// 框架的数据库和 Redis 驱动全部留空。
+type Options struct {
 	// New 为一个场景创建空的驱动，以及保存失败任务、已执行队列迁移的数据库。
 	New func(t *testing.T) (queue.Driver, *bun.DB)
 	// NoFencing 表示驱动无法发现过期的租约：旧领取的确认仍然生效。
@@ -46,8 +47,9 @@ type Backend struct {
 	NoUnique bool
 }
 
-// Run 运行全部场景。
-func Run(t *testing.T, b Backend) {
+// TestDriver 检查驱动是否符合 queue.Driver 的约定：每个场景是一个子测试，在 o.New 创建的空驱动上运行。
+// 场景用真实的时间等待任务被领取和重试，全部运行需要几十秒。
+func TestDriver(t *testing.T, o Options) {
 	for _, sc := range []struct {
 		name string
 		run  func(t *testing.T, s *setup)
@@ -78,17 +80,17 @@ func Run(t *testing.T, b Backend) {
 		{"tracing", tracing},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
-			d, db := b.New(t)
-			sc.run(t, &setup{backend: b, driver: d, db: db, failed: queue.NewFailedJobs(db, d)})
+			d, db := o.New(t)
+			sc.run(t, &setup{opts: o, driver: d, db: db, failed: queue.NewFailedJobs(db, d)})
 		})
 	}
 }
 
 type setup struct {
-	backend Backend
-	driver  queue.Driver
-	db      *bun.DB
-	failed  *queue.FailedJobs
+	opts   Options
+	driver queue.Driver
+	db     *bun.DB
+	failed *queue.FailedJobs
 }
 
 type payload struct {
@@ -595,7 +597,7 @@ func shutdownTimeoutReleases(t *testing.T, s *setup) {
 	if len(claims) != 1 {
 		t.Fatalf("released job not claimable: %d", len(claims))
 	}
-	if j := claims[0].Job(); j.Attempt != 1 && !s.backend.NoFencing {
+	if j := claims[0].Job(); j.Attempt != 1 && !s.opts.NoFencing {
 		t.Fatalf("attempt after release = %d, want 1", j.Attempt)
 	}
 }
@@ -622,7 +624,7 @@ func expiredLeaseIsReclaimed(t *testing.T, s *setup) {
 		t.Fatalf("reclaim %d", len(reclaimed))
 	}
 
-	if !s.backend.NoFencing {
+	if !s.opts.NoFencing {
 		if err := crashed[0].Extend(ctx, time.Minute); !errors.Is(err, queue.ErrLeaseLost) {
 			t.Fatalf("stale extend: %v", err)
 		}
@@ -756,7 +758,7 @@ func stats(t *testing.T, s *setup) {
 	if jobs.Topic != "jobs" || other.Topic != "other" {
 		t.Fatalf("stats %+v", got)
 	}
-	if s.backend.PartialStats {
+	if s.opts.PartialStats {
 		if len(jobs.Jobs) != 2 || jobs.Jobs[queue.StateRunning] < 1 || len(other.Jobs) != 2 || other.Jobs[queue.StateRunning] != 0 {
 			t.Fatalf("stats %+v", got)
 		}
@@ -797,7 +799,7 @@ func claimedAvailableAt(t *testing.T, s *setup) {
 		t.Fatalf("claimed %d", len(c))
 	}
 	got := c[0].Job().AvailableAt
-	if s.backend.NoRedeliveryTime {
+	if s.opts.NoRedeliveryTime {
 		if !got.IsZero() {
 			t.Fatalf("retried job available at %v, want zero", got)
 		}
@@ -855,7 +857,7 @@ func metrics(t *testing.T, s *setup) {
 		ready, ok1 := gaugeValue[int64](got["queue.jobs"], state(queue.StateReady))
 		failed, ok2 := gaugeValue[int64](got["queue.jobs"], state(queue.StateFailed))
 		_, hasAge := gaugeValue[float64](got["queue.job.oldest_ready_age"], topic)
-		return ok1 && ok2 && ready == 1 && failed == 1 && hasAge != s.backend.PartialStats
+		return ok1 && ok2 && ready == 1 && failed == 1 && hasAge != s.opts.PartialStats
 	})
 }
 
@@ -979,7 +981,7 @@ func (s *setup) drain(t *testing.T, topic string) []int {
 // unique 检查不支持 Unique 的驱动拒绝带键的发布；返回 true 表示驱动支持，场景继续。
 func (s *setup) unique(t *testing.T) bool {
 	t.Helper()
-	if !s.backend.NoUnique {
+	if !s.opts.NoUnique {
 		return true
 	}
 	if err := queue.Publish(context.Background(), s.driver, "jobs", payload{N: 1}, queue.Unique("a")); err == nil {

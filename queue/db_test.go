@@ -16,8 +16,8 @@ import (
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/sqlite"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
-	"github.com/ryan053857/mygoravel/internal/queuetesting"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 )
 
 type payload struct {
@@ -33,7 +33,7 @@ func openDB(t *testing.T, driver database.Driver) *bun.DB {
 // 数据库驱动在每种数据库上运行驱动一致性测试。
 func TestDatabaseDriver(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		queuetesting.Run(t, queuetesting.Backend{New: func(t *testing.T) (queue.Driver, *bun.DB) {
+		queuetest.TestDriver(t, queuetest.Options{New: func(t *testing.T) (queue.Driver, *bun.DB) {
 			db := openDB(t, driver)
 			return queue.Database(db), db
 		}})

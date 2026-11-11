@@ -22,6 +22,7 @@
 - [测试](#testing)
 - [使用 Redis](#redis-driver)
 - [使用 NATS](#nats-driver)
+- [实现自己的驱动](#custom-drivers)
 - [使用 Watermill](#using-watermill)
 
 <a id="introduction"></a>
@@ -606,6 +607,27 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 - **停止超时释放的任务计入一次执行。** NATS 的投递次数不能回退。
 - **不检查重复的任务 ID。**
 - **不支持[合并重复任务](#unique-jobs)。** JetStream 无法原子地判断一个任务是否还没被领取，带 `queue.Unique` 发布时返回 `natsqueue.ErrUniqueUnsupported`，任务不会入队。
+
+<a id="custom-drivers"></a>
+## 实现自己的驱动
+
+驱动实现 `queue.Driver`：保存任务、按租约领取、报告各状态的任务数。重试、失败任务、并发和平滑停止都由 `Subscriber` 负责，驱动不需要处理。实现时可以参考 [`queue/redisqueue`](../queue/redisqueue/redisqueue.go)。
+
+`queuetest.TestDriver` 检查实现是否符合约定，框架自己的三个驱动也用它测试。`New` 为每个场景返回一个空的驱动，以及保存失败任务的数据库：
+
+```go
+import "github.com/ryan053857/mygoravel/queue/queuetest"
+
+func TestDriver(t *testing.T) {
+    queuetest.TestDriver(t, queuetest.Options{
+        New: func(t *testing.T) (queue.Driver, *bun.DB) {
+            return mydriver.New(connect(t)), dbtest.Open(t, sqlite.Driver, migrations.FS) // 包含已发布的 queue 迁移
+        },
+    })
+}
+```
+
+存储做不到的约定在 `Options` 中声明，例如 NATS 驱动的 `NoFencing` 和 `NoUnique`，对应的场景按驱动的实际行为检查。
 
 <a id="using-watermill"></a>
 ## 使用 Watermill

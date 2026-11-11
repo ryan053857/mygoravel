@@ -13,9 +13,9 @@ import (
 
 	"github.com/ryan053857/mygoravel/database/sqlite"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
-	"github.com/ryan053857/mygoravel/internal/queuetesting"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/queue/natsqueue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 )
 
 func connect(t *testing.T) *nats.Conn {
@@ -33,7 +33,7 @@ func connect(t *testing.T) *nats.Conn {
 }
 
 func TestDriver(t *testing.T) {
-	queuetesting.Run(t, queuetesting.Backend{
+	queuetest.TestDriver(t, queuetest.Options{
 		New: func(t *testing.T) (queue.Driver, *bun.DB) {
 			// 每个场景使用独立的流，测试之间互不影响。
 			stream := "TEST_QUEUE_" + strings.ToUpper(rand.Text())
