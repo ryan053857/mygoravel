@@ -95,12 +95,13 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) error {
     if _, err := h.update.Handle(r.Context(), sub, id, f.Data); err != nil {
         return err
     }
+    web.Flash(r.Context(), web.Message{Type: "success", Title: "文章已保存"})
     web.Redirect(w, r, "/admin/articles")
     return nil
 }
 ```
 
-只有请求体无法解析时，`ParseForm` 才返回错误（`web.ErrBadForm`，响应 `422`）。保存成功后，`web.Redirect` 让浏览器跳转到列表页，见[跳转](views.md#redirects)。
+只有请求体无法解析时，`ParseForm` 才返回错误（`web.ErrBadForm`，响应 `422`）。保存成功后，`web.Redirect` 让浏览器跳转到列表页，见[跳转](views.md#redirects)；`web.Flash` 让列表页显示一次「文章已保存」，见[提示消息](views.md#flash-messages)。
 
 <a id="redisplaying-forms"></a>
 ## 验证失败后重新显示

@@ -10,6 +10,8 @@
 - [局部更新](#partial-updates)
 - [错误页](#error-pages)
 - [跳转](#redirects)
+- [提示消息](#flash-messages)
+- [触发事件](#triggering-events)
 - [前端状态](#client-state)
 
 <a id="introduction"></a>
@@ -341,6 +343,56 @@ web.Redirect(w, r, "/admin/articles")
 ```go
 web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
 ```
+
+<a id="flash-messages"></a>
+## 提示消息
+
+保存文章后跳转到列表页，并在列表页提示「文章已保存」。处理器用 `web.Flash` 把提示存入会话：
+
+```go
+web.Flash(r.Context(), web.Message{Type: "success", Title: "文章已保存"})
+web.Redirect(w, r, "/admin/articles")
+```
+
+`Message` 有 `Type`、`Title`、`Description` 三个字段，`Type` 惯例取 `success`、`info`、`warning`、`error`。提示只显示一次，由之后的响应负责送达：
+
+| 之后的响应 | 提示 |
+| --- | --- |
+| 跳转（`303` 或 `HX-Redirect`） | 留在会话里，由跳转后的页面显示 |
+| 整页 | 布局用 `web.Flashes(ctx)` 取出并渲染 |
+| htmx 请求的其他响应，包括片段、`204` 和错误片段 | 放进 `HX-Trigger` 响应头，htmx 在 `body` 上派发 `web:flash` 事件，`event.detail.messages` 是提示列表 |
+
+布局中放一个提示区域，同时处理两种情况：服务端渲染整页时取出的提示，以及 htmx 请求带来的提示。
+
+```templ
+<div id="toasts" x-data="{ messages: [] }" x-on:web:flash.window="messages.push(...$event.detail.messages)">
+	for _, m := range web.Flashes(ctx) {
+		<p class={ "toast", m.Type }>{ m.Title }</p>
+	}
+	<template x-for="m in messages">
+		<p :class="'toast ' + m.type" x-text="m.title"></p>
+	</template>
+</div>
+```
+
+这个区域不要用作 `ErrorTarget`：错误片段会替换掉 `ErrorTarget` 的全部内容。`web.Flash` 只能在页面路由中、写出响应之前调用。
+
+<a id="triggering-events"></a>
+## 触发事件
+
+一次请求改变的数据，常常需要更新页面上的其他区域。例如在编辑页用 htmx 保存后，侧栏的修订记录也要刷新。处理器用 `web.Trigger` 通知页面：
+
+```go
+web.Trigger(w, "article:saved", map[string]any{"id": item.ID})
+```
+
+htmx 处理完响应后，在 `body` 上派发 `article:saved` 事件，第三个参数的各项成为 `event.detail` 的字段。需要刷新的区域监听它：
+
+```templ
+<ul id="revisions" hx-get={ "/admin/articles/" + id.String() + "/revisions" } hx-trigger="article:saved from:body"></ul>
+```
+
+`web.Trigger` 可以多次调用，事件按调用顺序派发。事件派发在 `body` 上，而不是发起请求的元素上，所以即使这个元素在本次替换中被移除，事件也能送达。
 
 <a id="client-state"></a>
 ## 前端状态

@@ -231,9 +231,10 @@ func returnTo(r *http.Request) string {
 // fn 返回的错误交给 Error 呈现；响应已经开始写出时（例如 SSE 中途出错）只记录日志。
 // htmx 请求收到 3xx 跳转时（例如 fn 调用了 http.Redirect），改写为 HX-Redirect：
 // fetch 会自动跟随 3xx，跳转后的整页会被当作片段放进目标元素。
+// htmx 请求的其他响应带上会话中的提示，见 Flash。
 func (p *Pages) handle(fn HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rw := &responseWriter{ResponseWriter: w, htmx: IsHTMX(r)}
+		rw := &responseWriter{ResponseWriter: w, r: r}
 		err := fn(rw, r)
 		if err == nil {
 			return
@@ -242,7 +243,7 @@ func (p *Pages) handle(fn HandlerFunc) http.HandlerFunc {
 			p.logger.ErrorContext(r.Context(), "page handler failed after response started", "error", err)
 			return
 		}
-		p.Error(w, r, err)
+		p.Error(rw, r, err)
 	}
 }
 
@@ -276,10 +277,11 @@ func (p *Pages) NotFound(w http.ResponseWriter, r *http.Request) {
 	p.Error(w, r, ErrNotFound.New())
 }
 
-// responseWriter 记录响应是否已经开始，并把 htmx 请求的 3xx 改写为 HX-Redirect。
+// responseWriter 记录响应是否已经开始，把 htmx 请求的 3xx 改写为 HX-Redirect，
+// 并在写出状态码之前把会话中的提示交给 htmx。它位于会话中间件之内，取出提示的修改随会话一起保存。
 type responseWriter struct {
 	http.ResponseWriter
-	htmx  bool
+	r     *http.Request
 	wrote bool
 }
 
@@ -288,7 +290,8 @@ func (w *responseWriter) WriteHeader(status int) {
 		return
 	}
 	w.wrote = true
-	if w.htmx && status >= 300 && status < 400 {
+	deliverFlashes(w, w.r, status)
+	if IsHTMX(w.r) && status >= 300 && status < 400 {
 		if loc := w.Header().Get("Location"); loc != "" {
 			w.Header().Del("Location")
 			w.Header().Set("HX-Redirect", loc)

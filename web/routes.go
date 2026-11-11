@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"slices"
 
@@ -81,7 +82,7 @@ func (p *Pages) route(access Access, h HandlerFunc) http.Handler {
 	}
 	handler := p.cop.Handler(p.opts.Sessions.LoadAndSave(p.authorize(access, p.handle(h))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := withStatic(r.Context(), p.opts.Static)
+		ctx := context.WithValue(withStatic(r.Context(), p.opts.Static), sessionsKey{}, p.opts.Sessions)
 		if tenant := p.opts.Tenant; tenant != nil {
 			ctx = identity.WithTenant(ctx, tenant(r))
 		}
