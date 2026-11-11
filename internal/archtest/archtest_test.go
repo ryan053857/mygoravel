@@ -180,6 +180,35 @@ func TestLocalFilesDoesNotLinkS3(t *testing.T) {
 	}
 }
 
+// TestDocumentCoreIsLight 确保只切分 Markdown 或只用文本转换器的应用不会链接 PDF、Excel 和 HTML 的依赖，
+// 它们分别在 document/convert/pdf、xlsx 和 html 中；只用 PDF 转换器时也不会链接 Excel 和 HTML 的依赖。
+func TestDocumentCoreIsLight(t *testing.T) {
+	heavy := []string{"github.com/klippa-app/go-pdfium", "github.com/tetratelabs/wazero", "github.com/xuri/excelize", "github.com/JohannesKaufmann/html-to-markdown"}
+	for pkg, allowed := range map[string][]string{
+		"/document/split":        nil,
+		"/document/convert":      nil,
+		"/document/convert/text": nil,
+		"/document/convert/csv":  nil,
+		"/document/convert/docx": nil,
+		"/document/convert/pptx": nil,
+		"/document/convert/pdf":  {"github.com/klippa-app/go-pdfium", "github.com/tetratelabs/wazero"},
+		"/document/convert/xlsx": {"github.com/xuri/excelize"},
+		"/document/convert/html": {"github.com/JohannesKaufmann/html-to-markdown"},
+	} {
+		out, err := exec.Command("go", "list", "-deps", module+pkg).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			for _, h := range heavy {
+				if under(dep, h) && !slices.Contains(allowed, h) {
+					t.Errorf("%s depends on %s", pkg, dep)
+				}
+			}
+		}
+	}
+}
+
 // TestMailCoreDoesNotLinkDrivers 确保只用 mail 核心包（例如在测试中用 mailtest）不会链接各驱动的 SDK。
 func TestMailCoreDoesNotLinkDrivers(t *testing.T) {
 	for _, pkg := range []string{module + "/mail", module + "/mail/mailtest", module + "/mail/logmail"} {

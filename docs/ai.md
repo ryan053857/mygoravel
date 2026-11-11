@@ -377,7 +377,7 @@ text, err := openai.New(cfg.Dictation).Transcribe(ctx, ai.TranscriptionRequest{
 })
 ```
 
-计算向量时一次传入多段文本。有的厂商限制每批的数量，用 `openai.WithBatchSize` 让它分批请求；支持缩减维度的模型用 `openai.WithDimensions` 指定维度：
+计算向量时一次传入多段文本。长文档先转换并切分为分段，见[文档转换与切分](documents.md)。有的厂商限制每批的数量，用 `openai.WithBatchSize` 让它分批请求；支持缩减维度的模型用 `openai.WithDimensions` 指定维度：
 
 ```go
 vecs, err := openai.New(cfg.Embedding, openai.WithBatchSize(10)).Embed(ctx, []string{post.Title, post.Body})

@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	code.dny.dev/ssrf v0.3.0
+	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/ThreeDotsLabs/watermill v1.5.3
 	github.com/a-h/templ v0.3.1100
 	github.com/adhocore/gronx v1.20.6
@@ -27,6 +28,7 @@ require (
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
+	github.com/klippa-app/go-pdfium v1.21.1
 	github.com/lmittmann/tint v1.2.1
 	github.com/nats-io/nats.go v1.55.0
 	github.com/nicksnyder/go-i18n/v2 v2.7.0
@@ -54,6 +56,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.yaml.in/yaml/v4 v4.0.0
 	golang.org/x/crypto v0.58.0
+	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.38.0
 	golang.org/x/term v0.48.0
 	golang.org/x/text v0.43.0
@@ -68,6 +71,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/JohannesKaufmann/dom v0.3.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.25 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.11 // indirect
@@ -82,7 +86,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.44.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.9 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -100,6 +104,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
@@ -128,6 +133,7 @@ require (
 	github.com/sethvargo/go-retry v0.5.0 // indirect
 	github.com/sony/gobreaker v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
@@ -153,7 +159,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20261011100332-faecfb24eb49 // indirect
 	golang.org/x/mod v0.42.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect

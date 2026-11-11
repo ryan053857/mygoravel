@@ -184,6 +184,8 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `ai/postgres`、`ai/sqlite`、`ai/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
 | `ai/openai`、`ai/openrouter` | 生成图片、合成与识别语音、计算向量和重排；`ai/openai` 还能调用决策模型 | [媒体](ai.md#media)、[决策](ai.md#decisions) |
 | `ai/systemone` | 用 System One 格式调用决策模型 | [决策](ai.md#decisions) |
+| `document/split` | 把 Markdown 切分为可追溯到原文的分段，供检索和计算向量使用 | [文档转换与切分](documents.md#splitting) |
+| `document/convert` | 把 PDF、Word、PowerPoint、Excel、CSV、HTML 等转换为 Markdown；各格式在子包中，`convert/all` 注册全部 | [文档转换与切分](documents.md#converting) |
 | `ai/aitest` | 按脚本回复的模型，测试 agent 时不访问真实服务 | [测试](ai.md#testing) |
 | `command` | 根命令、`Run`、`Bind`、`config` 命令、退出码 | [命令行](commands.md) |
 | `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
