@@ -3,6 +3,7 @@ package ui
 import (
 	"strconv"
 
+	"github.com/axadrn/shadcn-templ/v2/components/alertdialog"
 	"github.com/axadrn/shadcn-templ/v2/components/toast"
 	"github.com/ryan053857/mygoravel/web"
 )
@@ -10,7 +11,7 @@ import (
 // PageProps 配置 Page。
 type PageProps struct {
 	Title string
-	// Lang 是 <html lang>，默认 zh-CN。
+	// Lang 是 <html lang>，默认是请求的语言（i18n.Locale），没有时为 zh-CN。
 	Lang string
 	// Head 是追加在 <head> 末尾的内容，例如应用自己的脚本。
 	Head templ.Component
@@ -22,7 +23,7 @@ type PageProps struct {
 // 需要完全控制文档结构时不用 Page，自己写 <html class={ ui.Class(ctx) }> 并调用 Head。
 templ Page(p PageProps) {
 	<!DOCTYPE html>
-	<html lang={ orDefault(p.Lang, "zh-CN") } class={ Class(ctx) }>
+	<html lang={ lang(ctx, p) } class={ Class(ctx) }>
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -54,6 +55,36 @@ const ModalTarget = "#modal"
 // Modal 是放置服务端渲染的对话框的位置，放在布局的 <body> 中。
 templ Modal() {
 	<div id="modal"></div>
+}
+
+// ConfirmID 是 Confirm 渲染的确认对话框的 ID。
+const ConfirmID = "web-ui-confirm"
+
+// Confirm 用确认对话框代替 hx-confirm 的浏览器原生确认框，放在布局的 <body> 中：
+//
+//	<button hx-delete="/admin/articles/1" hx-confirm="删除这篇文章？" data-confirm-description="删除后无法恢复。"
+//		data-confirm-action="删除" data-confirm-variant="destructive">删除</button>
+//
+// hx-confirm 是对话框的标题；元素上可选的 data-confirm-description 是说明，data-confirm-action 是确认按钮的文字，
+// data-confirm-variant="destructive" 让确认按钮显示为危险操作。点击确认后才发出请求；取消、按 Esc 或点击遮罩时放弃。
+// 页面中没有 Confirm 时，hx-confirm 仍然使用浏览器的确认框。
+templ Confirm() {
+	@alertdialog.AlertDialog(alertdialog.Props{ID: ConfirmID}) {
+		@alertdialog.Content() {
+			@alertdialog.Header() {
+				@alertdialog.Title(alertdialog.TitleProps{Attributes: templ.Attributes{"data-web-ui-confirm-title": "true"}})
+				@alertdialog.Description(alertdialog.DescriptionProps{Attributes: templ.Attributes{"data-web-ui-confirm-description": "true"}})
+			}
+			@alertdialog.Footer() {
+				@alertdialog.Cancel() {
+					{ text(ctx, "ui.confirm.cancel", "Cancel") }
+				}
+				@alertdialog.Action(alertdialog.ActionProps{Attributes: templ.Attributes{"data-web-ui-confirm-action": text(ctx, "ui.confirm.action", "Confirm")}}) {
+					{ text(ctx, "ui.confirm.action", "Confirm") }
+				}
+			}
+		}
+	}
 }
 
 // ErrorPage 用当前主题渲染整页错误，可以直接作为 web.Options.ErrorPage。

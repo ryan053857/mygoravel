@@ -30,6 +30,10 @@ web.not_found: 页面不存在
 web.bad_form: 无法解析提交的表单
 web.bad_query: 查询参数 {{.field}} 不正确：{{.message}}
 web.cross_origin: 跨站请求被拒绝
+ui.pagination.previous: 上一页
+ui.pagination.next: 下一页
+ui.confirm.action: 确定
+ui.confirm.cancel: 取消
 validation.required: 必填
 validation.filled: 不能为空
 validation.min_length: 至少 {{.Min}} 个字符

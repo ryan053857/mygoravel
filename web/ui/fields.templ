@@ -175,7 +175,7 @@ templ Pagination(pg Pager, p PaginationProps) {
 		@pagination.Pagination() {
 			@pagination.Content() {
 				@pagination.Item() {
-					@pagination.Previous(pagination.PreviousProps{Href: prev, Disabled: current <= 1, Text: orDefault(p.Previous, "上一页"), Attributes: prevAttrs})
+					@pagination.Previous(pagination.PreviousProps{Href: prev, Disabled: current <= 1, Text: orDefault(p.Previous, text(ctx, "ui.pagination.previous", "Previous")), Attributes: prevAttrs})
 				}
 				for _, n := range pg.Links(max(p.OnEachSide, 1)) {
 					@pagination.Item() {
@@ -190,7 +190,7 @@ templ Pagination(pg Pager, p PaginationProps) {
 					}
 				}
 				@pagination.Item() {
-					@pagination.Next(pagination.NextProps{Href: next, Disabled: current >= last, Text: orDefault(p.Next, "下一页"), Attributes: nextAttrs})
+					@pagination.Next(pagination.NextProps{Href: next, Disabled: current >= last, Text: orDefault(p.Next, text(ctx, "ui.pagination.next", "Next")), Attributes: nextAttrs})
 				}
 			}
 		}

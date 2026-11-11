@@ -95,7 +95,7 @@ type PaginationProps struct {
 	HTMX bool
 	// OnEachSide 是当前页两侧显示的页数，默认 1。
 	OnEachSide int
-	// Previous、Next 是上一页、下一页的文字，默认「上一页」「下一页」。
+	// Previous、Next 是上一页、下一页的文字，默认按请求的语言显示「上一页」「下一页」。
 	Previous, Next string
 }
 

@@ -9,6 +9,7 @@
     - [打开对话框](#opening-dialogs)
     - [提交与关闭](#submitting-dialogs)
     - [确认删除](#confirming)
+- [请求进行中](#busy-buttons)
 - [按需加载的组件](#extra-components)
 - [不同区域的界面](#areas)
 - [升级组件](#upgrading)
@@ -27,7 +28,7 @@
 
 这些衔接都可以不用，换成应用自己的写法，见[不同区域的界面](#areas)。
 
-本章给博客的编辑后台加上组件：在对话框中编辑文章、确认删除，保存后弹出提示。
+本章给博客的编辑后台加上组件：在对话框中编辑文章、确认删除，保存后弹出提示。组件中的文字（分页的「上一页」、确认框的「取消」等）按请求的语言显示，见[本地化](localization.md#built-in-messages)。
 
 <a id="themes"></a>
 ## 主题
@@ -91,13 +92,14 @@ templ Layout(title string) {
 			{ children... }
 		</main>
 		@ui.Modal()
+		@ui.Confirm()
 		@ui.Toaster()
 	}
 }
 ```
 
 - `ui.Page` 给 `<html>` 加上风格的 class，在 `<head>` 中输出 `ui.Head()`：样式表、主题变量、htmx、Alpine 和组件脚本。需要额外的 `<head>` 内容时放进 `PageProps.Head`。
-- `ui.Modal()` 是放置对话框的位置，见[打开对话框](#opening-dialogs)。
+- `ui.Modal()` 是放置对话框的位置，见[打开对话框](#opening-dialogs)；`ui.Confirm()` 是 `hx-confirm` 的确认对话框，见[确认删除](#confirming)。
 - `ui.Toaster()` 显示[提示消息](#toasts)。
 
 需要完全控制文档结构时，不用 `ui.Page`，自己写 `<html class={ ui.Class(ctx) }>`，在 `<head>` 中调用 `@ui.Head()`。
@@ -189,37 +191,35 @@ return nil
 <a id="confirming"></a>
 ### 确认删除
 
-确认框用 `alert-dialog`，同样加载进 `ui.Modal()`。「删除」按钮直接发出 `hx-delete`：
+只需要一句确认时，不必渲染对话框。布局中有 `ui.Confirm()` 时，按钮上的 `hx-confirm` 会弹出确认对话框，点击确认后才发出请求：
 
 ```templ
-templ DeleteDialog(item *article.Article) {
-	@alertdialog.AlertDialog(alertdialog.Props{ID: "delete-dialog", DefaultOpen: true}) {
-		@alertdialog.Content() {
-			@alertdialog.Header() {
-				@alertdialog.Title() {
-					删除「{ item.Title }」？
-				}
-				@alertdialog.Description() {
-					删除后无法恢复。
-				}
-			}
-			@alertdialog.Footer() {
-				@alertdialog.Cancel() {
-					取消
-				}
-				@alertdialog.Action(alertdialog.ActionProps{
-					Variant:    button.VariantDestructive,
-					Attributes: templ.Attributes{"hx-delete": "/admin/articles/" + item.ID.String()},
-				}) {
-					删除
-				}
-			}
-		}
-	}
+@button.Button(button.Props{
+	Variant: button.VariantGhost,
+	Attributes: templ.Attributes{
+		"hx-delete":                "/admin/articles/" + item.ID.String(),
+		"hx-confirm":               "删除「" + item.Title + "」？",
+		"data-confirm-description": "删除后无法恢复。",
+		"data-confirm-action":      "删除",
+		"data-confirm-variant":     "destructive",
+	},
+}) {
+	删除
 }
 ```
 
-删除的处理器与保存相同：`web.CloseDialog(w, "delete-dialog")`，触发 `articles:changed`，存入提示，返回 `204`。文章已经不存在等错误以 toast 弹出，确认框保持打开。
+`hx-confirm` 是对话框的标题。`data-confirm-description` 是说明，`data-confirm-action` 是确认按钮的文字，默认按请求的语言显示「确定」。`data-confirm-variant="destructive"` 让确认按钮显示为危险操作。取消、按 Esc 或点击遮罩时不发请求。
+
+删除的处理器与保存相同，只是没有对话框要关闭：触发 `articles:changed`，存入提示，返回 `204`。
+
+确认时需要显示服务端的数据（例如「这篇文章有 12 条评论」）或填写内容时，像[打开对话框](#opening-dialogs)一样，用 `hx-get` 把 `alert-dialog` 加载进 `ui.Modal()`。
+
+<a id="busy-buttons"></a>
+## 请求进行中
+
+按钮发出的 htmx 请求、以及提交按钮提交的表单，在请求结束之前，按钮会被禁用并带上 `aria-busy="true"`，图标换成旋转的圈。用户不会重复提交，应用也不用写任何代码。由输入自动触发的请求（例如列表页的搜索框）不受影响。
+
+元素上写了 htmx 的 `hx-disable` 时，按它指定的元素禁用，不再自动处理。
 
 <a id="extra-components"></a>
 ## 按需加载的组件

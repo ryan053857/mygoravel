@@ -952,7 +952,7 @@ func Pagination(pg Pager, p PaginationProps) templ.Component {
 							}()
 						}
 						ctx = templ.InitializeContext(ctx)
-						templ_7745c5c3_Err = pagination.Previous(pagination.PreviousProps{Href: prev, Disabled: current <= 1, Text: orDefault(p.Previous, "上一页"), Attributes: prevAttrs}).Render(ctx, templ_7745c5c3_Buffer)
+						templ_7745c5c3_Err = pagination.Previous(pagination.PreviousProps{Href: prev, Disabled: current <= 1, Text: orDefault(p.Previous, text(ctx, "ui.pagination.previous", "Previous")), Attributes: prevAttrs}).Render(ctx, templ_7745c5c3_Buffer)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -1033,7 +1033,7 @@ func Pagination(pg Pager, p PaginationProps) templ.Component {
 							}()
 						}
 						ctx = templ.InitializeContext(ctx)
-						templ_7745c5c3_Err = pagination.Next(pagination.NextProps{Href: next, Disabled: current >= last, Text: orDefault(p.Next, "下一页"), Attributes: nextAttrs}).Render(ctx, templ_7745c5c3_Buffer)
+						templ_7745c5c3_Err = pagination.Next(pagination.NextProps{Href: next, Disabled: current >= last, Text: orDefault(p.Next, text(ctx, "ui.pagination.next", "Next")), Attributes: nextAttrs}).Render(ctx, templ_7745c5c3_Buffer)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/a-h/templ"
 
+	"github.com/ryan053857/mygoravel/i18n"
 	"github.com/ryan053857/mygoravel/page"
 	"github.com/ryan053857/mygoravel/web"
 	"github.com/ryan053857/mygoravel/web/ui"
@@ -49,8 +50,22 @@ func submitted(t *testing.T) *web.Form[articleForm] {
 
 func render(t *testing.T, c templ.Component) string {
 	t.Helper()
+	return renderIn(t, "", c)
+}
+
+// renderIn 用 locale 语言渲染 c；locale 为空时 context 中没有语言。
+func renderIn(t *testing.T, locale string, c templ.Component) string {
+	t.Helper()
+	ctx := t.Context()
+	if locale != "" {
+		b, err := i18n.New(locale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = i18n.WithLocale(ctx, b, locale)
+	}
 	var b bytes.Buffer
-	if err := c.Render(t.Context(), &b); err != nil {
+	if err := c.Render(ctx, &b); err != nil {
 		t.Fatal(err)
 	}
 	return b.String()
@@ -169,8 +184,10 @@ func TestPagination(t *testing.T) {
 	url := func(n int) string { return "/admin/articles?page=" + string(rune('0'+n)) }
 	list := page.NewOffset([]int{}, page.OffsetParams{Page: 2, PerPage: 20}, 57) // 共 3 页
 
-	html := render(t, ui.Pagination(list, ui.PaginationProps{URL: url, HTMX: true}))
+	html := renderIn(t, "zh-CN", ui.Pagination(list, ui.PaginationProps{URL: url, HTMX: true}))
 	contains(t, html, `aria-current="page"`, `hx-get="/admin/articles?page=3"`, "上一页", "下一页")
+	contains(t, renderIn(t, "en", ui.Pagination(list, ui.PaginationProps{URL: url})), ">Previous<", ">Next<")
+	contains(t, render(t, ui.Pagination(list, ui.PaginationProps{URL: url})), ">Previous<") // 没有语言时为英文
 	if m := regexp.MustCompile(`<a [^>]*aria-current="page"[^>]*>`).FindString(html); !strings.Contains(m, `href="/admin/articles?page=2"`) {
 		t.Errorf("current page link: %s", m)
 	}
@@ -190,4 +207,17 @@ func TestPagination(t *testing.T) {
 	if html := render(t, ui.Pagination(page.NewOffset([]int{1}, page.OffsetParams{Page: 1, PerPage: 20}, 1), ui.PaginationProps{URL: url})); html != "" {
 		t.Errorf("single page rendered %q", html)
 	}
+}
+
+func TestConfirm(t *testing.T) {
+	html := renderIn(t, "zh-CN", ui.Confirm())
+	contains(t, html, `id="`+ui.ConfirmID+`"`, "data-web-ui-confirm-title", "data-web-ui-confirm-description", `data-web-ui-confirm-action="确定"`, ">取消<", `data-templ-dialog-close="`+ui.ConfirmID+`"`)
+	contains(t, renderIn(t, "en", ui.Confirm()), `data-web-ui-confirm-action="Confirm"`, ">Cancel<")
+}
+
+func TestPageLang(t *testing.T) {
+	for locale, want := range map[string]string{"": `lang="zh-CN"`, "en": `lang="en"`} {
+		contains(t, renderIn(t, locale, ui.Page(ui.PageProps{})), want)
+	}
+	contains(t, renderIn(t, "en", ui.Page(ui.PageProps{Lang: "ja"})), `lang="ja"`)
 }

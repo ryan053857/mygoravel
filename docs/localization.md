@@ -45,6 +45,8 @@ api := rest.New(rest.Options{Router: router})
 | `auth.forbidden` | Permission denied | 没有访问权限 |
 | `page.invalid_cursor` | Invalid pagination cursor | 分页游标无效 |
 
+[界面组件](components.md)中的文字同样是内置消息，以 `ui.` 开头，例如 `ui.pagination.previous`（上一页）、`ui.confirm.cancel`（取消），完整列表见框架的 `i18n/locales`。`ui.Page` 的 `<html lang>` 也取请求的语言。
+
 <a id="determining-the-locale"></a>
 ## 确定请求语言
 

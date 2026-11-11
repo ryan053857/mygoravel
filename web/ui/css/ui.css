@@ -152,3 +152,34 @@
     @apply font-heading;
   }
 }
+
+/* 请求进行中的按钮（衔接脚本设置 aria-busy）：图标换成旋转的圈。 */
+@layer components {
+  [data-slot="button"][aria-busy="true"] {
+    cursor: progress;
+  }
+  [data-slot="button"][aria-busy="true"] > svg {
+    display: none;
+  }
+  [data-slot="button"][aria-busy="true"]::before {
+    content: "";
+    flex-shrink: 0;
+    width: 1em;
+    height: 1em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 9999px;
+    animation: web-ui-spin 0.7s linear infinite;
+  }
+  a[data-slot="button"][aria-busy="true"] {
+    pointer-events: none;
+    opacity: 0.5;
+  }
+}
+
+@keyframes web-ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
