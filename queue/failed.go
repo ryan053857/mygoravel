@@ -88,7 +88,7 @@ func (f *FailedJobs) RetryAll(ctx context.Context, topic string, before time.Tim
 	err := f.db.RunInTx(ctx, txOptions(f.db), func(ctx context.Context, tx bun.Tx) error {
 		var rows []failedJob
 		sel := f.matching(tx.NewSelect().Model(&rows), topic, before).
-			Where("f.driver IN (?)", bun.In(drivers)).Limit(int64(limit))
+			Where("f.driver IN (?)", bun.List(drivers)).Limit(int64(limit))
 		if f.db.Dialect().Name() != dialect.SQLite {
 			sel = sel.For("UPDATE SKIP LOCKED") // 两个管理员同时点「全部重试」时互不重复
 		}
@@ -101,7 +101,7 @@ func (f *FailedJobs) RetryAll(ctx context.Context, topic string, before time.Tim
 			ids[i] = r.ID
 			byDriver[r.Driver] = append(byDriver[r.Driver], Job{ID: r.ID, Topic: r.Topic, Payload: r.Payload, Metadata: r.Metadata})
 		}
-		if _, err := tx.NewDelete().Model((*failedJob)(nil)).Where("id IN (?)", bun.In(ids)).Exec(ctx); err != nil {
+		if _, err := tx.NewDelete().Model((*failedJob)(nil)).Where("id IN (?)", bun.List(ids)).Exec(ctx); err != nil {
 			return err
 		}
 		for name, jobs := range byDriver {
@@ -255,13 +255,20 @@ func (f *FailedJobs) Count(ctx context.Context) (map[string]int, error) {
 	return counts, nil
 }
 
-// Cleanup 删除最多 limit 条在 before 之前失败的任务，返回删除的条数。由应用定时调用。
-func (f *FailedJobs) Cleanup(ctx context.Context, before time.Time, limit int) (int, error) {
-	if limit <= 0 {
-		return 0, errors.New("queue: cleanup limit must be positive")
+// Cleanup 返回删除 keep 以前失败的任务的清理函数，每次调用最多删除 limit 条，返回删除的条数，交给 schedule.Cleanup：
+//
+//	sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(failed.Cleanup(30*24*time.Hour), 1000))
+func (f *FailedJobs) Cleanup(keep time.Duration) func(ctx context.Context, limit int) (int, error) {
+	if keep <= 0 {
+		panic("queue: keep must be positive")
 	}
-	n, err := f.delete(ctx, "", before, limit)
-	return n, errors.Wrap(err, "queue: cleanup failed jobs")
+	return func(ctx context.Context, limit int) (int, error) {
+		if limit <= 0 {
+			return 0, errors.New("queue: cleanup limit must be positive")
+		}
+		n, err := f.delete(ctx, "", time.Now().Add(-keep), limit)
+		return n, errors.Wrap(err, "queue: cleanup failed jobs")
+	}
 }
 
 // record 写入一条失败记录。

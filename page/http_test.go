@@ -55,7 +55,7 @@ func newAPI() *rest.API {
 			tail = all[after.ID:]
 		}
 		tail = tail[:min(in.Limit(), len(tail))]
-		return &listCursorOut{Body: page.NewCursor(tail, in.CursorParams, func(d itemDTO) any { return key{d.ID} })}, nil
+		return &listCursorOut{Body: page.NewCursor(tail, in.CursorParams, func(d itemDTO) any { return key(d) })}, nil
 	})
 	return api
 }

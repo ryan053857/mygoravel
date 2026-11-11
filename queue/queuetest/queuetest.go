@@ -849,7 +849,7 @@ func metrics(t *testing.T, s *setup) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer reg.Unregister()
+		defer func() { _ = reg.Unregister() }()
 		got := collect(t, reader)
 		state := func(st queue.State) attribute.Set {
 			return attribute.NewSet(append(topic.ToSlice(), attribute.String("queue.job.state", string(st)))...)

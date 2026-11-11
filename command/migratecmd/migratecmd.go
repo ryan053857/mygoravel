@@ -85,7 +85,7 @@ func printResults(out io.Writer, results []*goose.MigrationResult) {
 			fmt.Fprintf(tw, "%s\t%s\t%s\n", r.Direction, path.Base(r.Source.Path), r.Duration.Round(time.Millisecond))
 		}
 	}
-	tw.Flush()
+	_ = tw.Flush() // 写的是命令的输出，与 Fprintf 一样不处理错误
 }
 
 // leaf 构造不接受位置参数的命令。

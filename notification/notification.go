@@ -181,7 +181,7 @@ func markRead(ctx context.Context, db bun.IDB, r Recipient, ids []uuid.UUID) err
 	upd := of(db.NewUpdate().Model((*Notification)(nil)), r).
 		Set("read_at = ?", time.Now().UTC()).Where("read_at IS NULL")
 	if ids != nil {
-		upd = upd.Where("id IN (?)", bun.In(ids))
+		upd = upd.Where("id IN (?)", bun.List(ids))
 	}
 	_, err := upd.Exec(ctx)
 	return errors.Wrap(err, "notification: mark read")
@@ -192,7 +192,7 @@ func Delete(ctx context.Context, db bun.IDB, r Recipient, ids ...uuid.UUID) erro
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := of(db.NewDelete().Model((*Notification)(nil)), r).Where("id IN (?)", bun.In(ids)).Exec(ctx)
+	_, err := of(db.NewDelete().Model((*Notification)(nil)), r).Where("id IN (?)", bun.List(ids)).Exec(ctx)
 	return errors.Wrap(err, "notification: delete")
 }
 

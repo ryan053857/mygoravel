@@ -129,7 +129,7 @@ func (d *dbDriver) claim(req ClaimRequest) ([]job, error) {
 			Set("reserved_at = ?", now).
 			Set("unique_key = NULL").
 			Set("attempts = j.attempts + 1").
-			Where("j.id IN (?)", bun.In(ids)).
+			Where("j.id IN (?)", bun.List(ids)).
 			Exec(ctx)
 		for i := range jobs {
 			jobs[i].Attempts++

@@ -1,0 +1,34 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      # 关闭资源和向命令的输出写入时的错误没有可行的处理方式。
+      exclude-functions:
+        - (io.Closer).Close
+        - (io/fs.File).Close
+        - (*os.File).Close
+        - (*database/sql.Rows).Close
+        - (*github.com/uptrace/bun.DB).Close
+        - os.Remove
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    staticcheck:
+      checks:
+        - all
+        # 以下是写法偏好，不是缺陷。
+        - -QF1001 # De Morgan
+        - -QF1008 # 省略内嵌字段
+        - -ST1000 # 包注释的句式
+        - -ST1003 # 命名中的缩写
+  exclusions:
+    generated: lax
+    rules:
+      # 测试中的清理调用不检查错误。
+      - path: _test\.go
+        linters: [errcheck]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

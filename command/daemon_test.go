@@ -142,7 +142,7 @@ func TestDaemonUpgrade(t *testing.T) {
 	h.notify.expectPrefix(t, "READY=1\nSTATUS=upgrade failed: ")
 
 	time.Sleep(300 * time.Millisecond)
-	ok, failed, versions := load.stop()
+	ok, versions, failed := load.stop()
 	if failed != nil {
 		t.Fatalf("%d requests ok, then failed: %v", ok, failed)
 	}
@@ -370,10 +370,10 @@ func startLoad(addr string) *load {
 	return l
 }
 
-func (l *load) stop() (int, error, map[string]int) {
+func (l *load) stop() (int, map[string]int, error) {
 	l.cancel()
 	l.wg.Wait()
-	return l.ok, l.failed, l.served
+	return l.ok, l.served, l.failed
 }
 
 func get(client *http.Client, url string) (string, error) {

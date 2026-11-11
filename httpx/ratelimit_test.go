@@ -63,8 +63,10 @@ func TestRateLimitCustomKey(t *testing.T) {
 	if req("a") != 200 || req("a") != 429 || req("b") != 200 {
 		t.Fatal("tenants must be limited separately")
 	}
-	if req("") != 200 || req("") != 200 {
-		t.Fatal("empty key must not be limited")
+	for range 2 {
+		if req("") != 200 {
+			t.Fatal("empty key must not be limited")
+		}
 	}
 }
 

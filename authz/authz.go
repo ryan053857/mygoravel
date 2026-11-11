@@ -141,7 +141,7 @@ func (s *Store) Permissions(ctx context.Context, subjectID, tenant string) ([]st
 	err := s.db.NewSelect().TableExpr("authz_assignments AS a").
 		Join("LEFT JOIN authz_role_permissions AS p ON p.role_id = a.role_id").
 		ColumnExpr("a.role_id, p.permission").
-		Where("a.subject_id = ?", subjectID).Where("a.tenant IN (?)", bun.In(domains(tenant))).
+		Where("a.subject_id = ?", subjectID).Where("a.tenant IN (?)", bun.List(domains(tenant))).
 		Scan(ctx, &rows)
 	if err != nil {
 		return nil, false, errors.Wrap(err, "authz: permissions")
@@ -264,7 +264,7 @@ func (s *Store) Role(ctx context.Context, id, tenant string) (Role, error) {
 	}
 	q := s.db.NewSelect().Model((*roleRow)(nil)).Where("id = ?", rid)
 	if tenant != "" {
-		q = q.Where("tenant IN (?)", bun.In([]string{"", tenant}))
+		q = q.Where("tenant IN (?)", bun.List([]string{"", tenant}))
 	}
 	roles, err := s.loadRoles(ctx, q)
 	if err != nil {
@@ -279,7 +279,7 @@ func (s *Store) Role(ctx context.Context, id, tenant string) (Role, error) {
 // Roles 返回 tenant 中可以分配的角色：全局角色，以及 tenant 自定义的角色（tenant 为空时只有全局角色），
 // 全局角色在前，各自按名称排序。
 func (s *Store) Roles(ctx context.Context, tenant string) ([]Role, error) {
-	q := s.db.NewSelect().Model((*roleRow)(nil)).Where("tenant IN (?)", bun.In([]string{"", tenant}))
+	q := s.db.NewSelect().Model((*roleRow)(nil)).Where("tenant IN (?)", bun.List([]string{"", tenant}))
 	return s.loadRoles(ctx, q)
 }
 
@@ -297,7 +297,7 @@ func (s *Store) loadRoles(ctx context.Context, q *bun.SelectQuery) ([]Role, erro
 		ids[i] = r.ID
 	}
 	var perms []permissionRow
-	err := s.db.NewSelect().Model(&perms).Where("role_id IN (?)", bun.In(ids)).OrderExpr("permission").Scan(ctx)
+	err := s.db.NewSelect().Model(&perms).Where("role_id IN (?)", bun.List(ids)).OrderExpr("permission").Scan(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "authz: load permissions")
 	}
@@ -403,7 +403,7 @@ func (s *Store) members(ctx context.Context, tenant, subjectID string) ([]Member
 	for i, r := range rows {
 		ids[i] = r.RoleID
 	}
-	roles, err := s.loadRoles(ctx, s.db.NewSelect().Model((*roleRow)(nil)).Where("id IN (?)", bun.In(ids)))
+	roles, err := s.loadRoles(ctx, s.db.NewSelect().Model((*roleRow)(nil)).Where("id IN (?)", bun.List(ids)))
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +428,7 @@ func (s *Store) members(ctx context.Context, tenant, subjectID string) ([]Member
 func (s *Store) Tenants(ctx context.Context, subjectID string) ([]string, error) {
 	var tenants []string
 	err := s.db.NewSelect().Model((*assignmentRow)(nil)).Distinct().Column("tenant").
-		Where("subject_id = ?", subjectID).Where("tenant NOT IN (?)", bun.In([]string{"", AllTenants})).
+		Where("subject_id = ?", subjectID).Where("tenant NOT IN (?)", bun.List([]string{"", AllTenants})).
 		OrderExpr("tenant").Scan(ctx, &tenants)
 	return tenants, errors.Wrap(err, "authz: tenants")
 }

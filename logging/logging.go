@@ -129,7 +129,7 @@ func New(cfg Config, opts ...Option) *slog.Logger {
 	}
 	loc, _ := cfg.location()
 
-	var h slog.Handler = baseHandler(cfg, loc)
+	h := baseHandler(cfg, loc)
 	if len(o.handlers) > 0 {
 		h = slog.NewMultiHandler(append([]slog.Handler{h}, o.handlers...)...)
 	}
@@ -178,7 +178,7 @@ func baseHandler(cfg Config, loc *time.Location) slog.Handler {
 		}
 	}
 	if cfg.Format == FormatText {
-		return tint.NewHandler(w, &tint.Options{
+		return tint.NewTextHandler(w, &tint.Options{
 			AddSource:   hopts.AddSource,
 			Level:       hopts.Level,
 			ReplaceAttr: hopts.ReplaceAttr,

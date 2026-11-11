@@ -1,3 +1,5 @@
+// Package dbtest 为测试创建隔离的真实数据库：SQLite 在临时目录中建文件，
+// PostgreSQL 和 MySQL 在测试服务器上建一个临时库，测试结束时删除。
 package dbtest
 
 import (

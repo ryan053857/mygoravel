@@ -194,7 +194,7 @@ func TestStore(t *testing.T, newStore func() lock.Store) {
 		if _, err := locker.Wait(ctx, "a", time.Minute, 50*time.Millisecond); !errors.Is(err, lock.ErrNotAcquired) {
 			t.Fatalf("wait timeout err=%v", err)
 		}
-		time.AfterFunc(50*time.Millisecond, func() { lk.Release(ctx) })
+		time.AfterFunc(50*time.Millisecond, func() { _ = lk.Release(ctx) })
 		if _, err := locker.Wait(ctx, "a", time.Minute, 5*time.Second); err != nil {
 			t.Fatalf("wait after release err=%v", err)
 		}

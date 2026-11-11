@@ -145,10 +145,10 @@ func (r *recorder) row(_ context.Context, imp *imports.Import, rec *sheet.Record
 	if o := imp.Owner(); o.ID != "u1" || o.Type != identity.SubjectUser || o.Tenant != "acme" {
 		return errors.New("wrong owner")
 	}
-	switch {
-	case rec.Data.Slug == "taken":
+	switch rec.Data.Slug {
+	case "taken":
 		return errTaken.New()
-	case rec.Data.Slug == "dup":
+	case "dup":
 		rec.SetError("slug", "重复")
 	}
 	return nil

@@ -72,8 +72,18 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
-        run: go test ./...
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15.0
 
-      - name: Integration
+      # 提交的 templ 代码必须是最新生成的。
+      - name: Generated code
+        run: cd web/ui && go tool templ generate && git diff --exit-code -- .
+
+      # 不带 integration 标签时只确认能编译：下一步带标签运行全部测试，包括 SQLite 上的。
+      - name: Build tests
+        run: go test -run '^$' ./...
+
+      - name: Test
         run: go test -tags=integration ./...

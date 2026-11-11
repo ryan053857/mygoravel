@@ -85,10 +85,12 @@ CI 配置位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，每次
 
 1. `gofmt` 格式检查；
 2. `go vet ./...`；
-3. `go test ./...`；
-4. `go test -tags=integration ./...`（使用 PostgreSQL 18、MySQL 8.4、Redis 8、NATS 和 Gotenberg 服务容器）。
+3. `golangci-lint run`，配置在 [.golangci.yml](../.golangci.yml)；
+4. 在 `web/ui` 中重新运行 `go tool templ generate`，确认提交的 `_templ.go` 是最新的；
+5. 不带标签编译全部测试；
+6. `go test -tags=integration ./...`（使用 PostgreSQL 18、MySQL 8.4、Redis 8、NATS 和 Gotenberg 服务容器），其中包括不需要外部服务的测试。
 
-CI 不运行 `-race`，它让整个流程慢了好几倍。提交之前，请在本地至少运行前三项；改动涉及并发时，另外用 `go test -race` 运行相关的包，时序敏感的测试还要不带 `-race` 多跑几轮。
+CI 不运行 `-race`，它让整个流程慢了好几倍。提交之前，请在本地至少运行前三项和 `go test ./...`；改动涉及并发时，另外用 `go test -race` 运行相关的包，时序敏感的测试还要不带 `-race` 多跑几轮。
 
 <a id="coding-style"></a>
 ## 编码风格

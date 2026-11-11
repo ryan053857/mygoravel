@@ -344,7 +344,7 @@ func (s *Store) Prune(ctx context.Context) (int, error) {
 		for n := range s.names {
 			names = append(names, n)
 		}
-		q = q.Where("name NOT IN (?)", bun.In(names))
+		q = q.Where("name NOT IN (?)", bun.List(names))
 	}
 	res, err := q.Exec(ctx)
 	if err != nil {

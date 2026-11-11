@@ -324,19 +324,10 @@ for {
 
 `before` 是必填的：重试后马上又失败的任务失败时间在它之后，不会在同一轮中被反复放回。`DeleteAll(ctx, topic, before, limit)` 的用法相同。原来的驱动不在 `NewFailedJobs` 的 `drivers` 中的任务不会被 `RetryAll` 放回，留在失败任务表中。
 
-失败任务一直保留，用 `Cleanup` 删除一段时间之前的，每次最多删除 `limit` 条：
+失败任务一直保留。`Cleanup` 返回删除保留期以前失败的任务的清理函数，交给[定时任务](scheduling.md#framework-cleanups)每天执行一次：
 
 ```go
-n, err := failed.Cleanup(ctx, time.Now().AddDate(0, 0, -30), 1000)
-```
-
-用[定时任务](scheduling.md#framework-cleanups)每天执行一次：
-
-```go
-sched.Add("queue:prune-failed", "@daily", func(ctx context.Context) error {
-    _, err := failed.Cleanup(ctx, time.Now().AddDate(0, 0, -30), 1000)
-    return err
-})
+sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(failed.Cleanup(30*24*time.Hour), 1000))
 ```
 
 <a id="leases-and-shutdown"></a>

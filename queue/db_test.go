@@ -198,14 +198,14 @@ func TestCleanupFailedJobs(t *testing.T) {
 			}
 		}
 		failed := queue.NewFailedJobs(db)
-		if _, err := failed.Cleanup(ctx, now, 0); err == nil {
+		cleanup := failed.Cleanup(24 * time.Hour)
+		if _, err := cleanup(ctx, 0); err == nil {
 			t.Fatal("expected error for non-positive limit")
 		}
-		before := now.Add(-24 * time.Hour)
-		if n, err := failed.Cleanup(ctx, before, 2); n != 2 || err != nil {
+		if n, err := cleanup(ctx, 2); n != 2 || err != nil {
 			t.Fatalf("first cleanup n=%d err=%v", n, err)
 		}
-		if n, err := failed.Cleanup(ctx, before, 10); n != 1 || err != nil {
+		if n, err := cleanup(ctx, 10); n != 1 || err != nil {
 			t.Fatalf("second cleanup n=%d err=%v", n, err)
 		}
 		if rows := failedRows(t, db); len(rows) != 1 || rows[0].Attempts != 4 {

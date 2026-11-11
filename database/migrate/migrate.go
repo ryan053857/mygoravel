@@ -1,3 +1,5 @@
+// Package migrate 管理 SQL 迁移：构造 goose 迁移器、新建迁移文件、
+// 把框架各包内嵌的迁移发布到应用的迁移目录，并检查已发布的迁移没有被改动。
 package migrate
 
 import (

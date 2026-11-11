@@ -42,7 +42,7 @@ func installBuilder() {
 		}
 		for _, x := range o.ExtraOptions {
 			if s, ok := x.(shared); ok {
-				return client{s.db}, nil
+				return client(s), nil
 			}
 		}
 		return prev(ctx, opts...)

@@ -89,7 +89,7 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 	// 旧进程直到这一刻都在接收连接。
 	if !returned {
 		_ = ln.Close()
-		serveErr, returned = <-errc, true
+		serveErr = <-errc
 		if errors.Is(serveErr, net.ErrClosed) {
 			serveErr = nil
 		}

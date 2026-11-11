@@ -94,10 +94,8 @@ func (a *App) tasks(opts ...schedule.SchedulerOption) *schedule.Scheduler {
         schedule.Describe("删除过期的会话"))
     sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDatabase(a.db).Cleanup, 1000),
         schedule.Describe("删除过期的锁"))
-    sched.Add("queue:prune-failed", "@daily", func(ctx context.Context) error {
-        _, err := queue.NewFailedJobs(a.db).Cleanup(ctx, time.Now().AddDate(0, 0, -30), 1000)
-        return err
-    }, schedule.Describe("删除 30 天前的失败任务"))
+    sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(queue.NewFailedJobs(a.db).Cleanup(30*24*time.Hour), 1000),
+        schedule.Describe("删除 30 天前的失败任务"))
     return sched
 }
 
@@ -329,7 +327,7 @@ queue.Handle(router, sub, "articles.publish-scheduled", func(ctx context.Context
 <a id="framework-cleanups"></a>
 ## 清理框架数据
 
-框架中保存在数据库里的数据都提供 `Cleanup(ctx, limit)` 方法，每次最多删除 `limit` 条过期的行。`schedule.Cleanup` 把它包装成任务：反复调用，直到一次删除的数量少于 `limit`。
+框架中保存在数据库里的数据都提供 `func(ctx, limit)` 形式的清理函数，每次最多删除 `limit` 条过期的行：有固定过期时间的是 `Cleanup` 方法本身，按保留期删除的由 `Cleanup(保留期)` 返回。`schedule.Cleanup` 把它包装成任务：反复调用，直到一次删除的数量少于 `limit`。
 
 | 数据 | 清理方法 | 建议频率 |
 | --- | --- | --- |
@@ -342,7 +340,8 @@ queue.Handle(router, sub, "articles.publish-scheduled", func(ctx context.Context
 | [操作日志](activity.md#retention) | `activity.Cleanup(db, 保留期)` | 每天 |
 | [通知](notifications.md#retention) | `notification.Cleanup(db, 保留期)` | 每天 |
 | [后台操作](operations.md#cleanup)（包括导入和导出） | `operation.New(db)` 的 `Cleanup(保留期)` | 每天 |
-| [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(ctx, before, limit)` | 每天 |
+| [Webhook 投递记录](webhooks.md#retention) | `webhook.Cleanup(db, 保留期)` | 每天 |
+| [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(保留期)` | 每天 |
 
 使用 Redis 存储时过期的数据由 Redis 自动删除，不需要注册清理任务。
 

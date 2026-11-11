@@ -29,8 +29,7 @@ import (
 )
 
 var (
-	acme   = identity.Subject{ID: "u1", Type: identity.SubjectUser, Tenant: "acme"}
-	globex = identity.Subject{ID: "u1", Type: identity.SubjectUser, Tenant: "globex"}
+	acme = identity.Subject{ID: "u1", Type: identity.SubjectUser, Tenant: "acme"}
 )
 
 // migrations 合并队列和 webhook 的迁移，队列的版本号在前。
@@ -491,7 +490,7 @@ func TestCleanup(t *testing.T) {
 		old := deliveries(t, db, webhook.DeliveryQuery{Tenant: "acme"})[1:]
 		ids := []uuid.UUID{old[0].ID, old[1].ID}
 		if _, err := db.NewUpdate().Model((*webhook.Delivery)(nil)).Set("created_at = ?", time.Now().Add(-48*time.Hour).UTC()).
-			Where("id IN (?)", bun.In(ids)).Exec(ctx); err != nil {
+			Where("id IN (?)", bun.List(ids)).Exec(ctx); err != nil {
 			t.Fatal(err)
 		}
 		cleanup := webhook.Cleanup(db, 24*time.Hour)

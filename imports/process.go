@@ -141,7 +141,7 @@ func (p *processor[T]) open(ctx context.Context, fn func(r *sheet.Reader) error)
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	return fn(r)
 }
 
