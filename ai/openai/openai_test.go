@@ -241,3 +241,34 @@ func ExampleNew() {
 	fmt.Printf("%T\n", ai.Imager(img))
 	// Output: *openai.Client
 }
+
+func TestRerank(t *testing.T) {
+	s := newServer(t, func(w http.ResponseWriter, r request) {
+		// 故意乱序返回，检查按分数排序。
+		writeJSON(w, map[string]any{"results": []map[string]any{
+			{"index": 0, "relevance_score": 0.2},
+			{"index": 1, "relevance_score": 0.9},
+		}})
+	})
+	c := s.client("bge-reranker")
+
+	got, err := c.Rerank(t.Context(), "PHP 框架", []string{"Django", "Laravel", "React"}, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []ai.Ranked{{Index: 1, Score: 0.9}, {Index: 0, Score: 0.2}}, got)
+	r := s.last()
+	assert.Equal(t, "/v1/rerank", r.Path)
+	assert.Equal(t, map[string]any{"model": "bge-reranker", "query": "PHP 框架", "documents": []any{"Django", "Laravel", "React"}, "top_n": float64(2)}, r.JSON)
+
+	// limit 不小于文档数时不发 top_n。
+	_, err = c.Rerank(t.Context(), "q", []string{"a", "b"}, 5)
+	require.NoError(t, err)
+	assert.NotContains(t, s.last().JSON, "top_n")
+
+	got, err = c.Rerank(t.Context(), "q", nil, 1)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+	assert.Len(t, s.requests, 2)
+
+	_, err = c.Rerank(t.Context(), "q", []string{"a"}, 0)
+	assert.ErrorContains(t, err, "rerank index 1 out of range")
+}

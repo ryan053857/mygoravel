@@ -72,3 +72,21 @@ func dot(a, b []float32) float32 {
 	}
 	return s
 }
+
+func TestReranker(t *testing.T) {
+	docs := []string{"Django 框架", "Laravel 是 PHP 框架", "React 前端库"}
+	rr := aitest.NewReranker()
+	got, err := rr.Rerank(t.Context(), "PHP 框架", docs, 2)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, 1, got[0].Index)
+	assert.Equal(t, 1.0, got[0].Score)
+	assert.Equal(t, ai.Ranked{Index: 0, Score: 0.5}, got[1])
+	assert.Equal(t, []aitest.RerankRequest{{Query: "PHP 框架", Docs: docs, Limit: 2}}, rr.Requests())
+
+	preset := []ai.Ranked{{Index: 2, Score: 0.9}}
+	rr = aitest.NewReranker(preset)
+	got, err = rr.Rerank(t.Context(), "q", docs, 0)
+	require.NoError(t, err)
+	assert.Equal(t, preset, got)
+}

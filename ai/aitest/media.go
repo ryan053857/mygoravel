@@ -7,7 +7,10 @@ import (
 	"hash/fnv"
 	"math"
 	"math/rand/v2"
+	"sort"
+	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/ryan053857/mygoravel/ai"
 )
@@ -182,3 +185,60 @@ func Vector(text string, dims int) []float32 {
 	}
 	return v
 }
+
+// RerankRequest 是 Reranker 收到的一次请求。
+type RerankRequest struct {
+	Query string
+	Docs  []string
+	Limit int
+}
+
+// Reranker 实现 ai.Reranker，按顺序返回预设的结果，并记录收到的请求。
+// 没有预设结果时，按查询中的字符在文档中出现的比例打分，分数相同的保持原来的顺序；有预设时用完后返回错误。
+type Reranker struct {
+	s script[RerankRequest, []ai.Ranked]
+}
+
+// NewReranker 创建依次返回 results 的 Reranker。
+func NewReranker(results ...[]ai.Ranked) *Reranker {
+	return &Reranker{script[RerankRequest, []ai.Ranked]{name: "rerank", results: results, fallback: overlap}}
+}
+
+func overlap(req RerankRequest) []ai.Ranked {
+	chars := map[rune]bool{}
+	for _, r := range req.Query {
+		if !unicode.IsSpace(r) {
+			chars[unicode.ToLower(r)] = true
+		}
+	}
+	out := make([]ai.Ranked, len(req.Docs))
+	for i, d := range req.Docs {
+		hits := 0
+		lower := strings.ToLower(d)
+		for r := range chars {
+			if strings.ContainsRune(lower, r) {
+				hits++
+			}
+		}
+		out[i] = ai.Ranked{Index: i}
+		if len(chars) > 0 {
+			out[i].Score = float64(hits) / float64(len(chars))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	if req.Limit > 0 && req.Limit < len(out) {
+		out = out[:req.Limit]
+	}
+	return out
+}
+
+// Rerank 实现 ai.Reranker。
+func (f *Reranker) Rerank(_ context.Context, query string, docs []string, limit int) ([]ai.Ranked, error) {
+	return f.s.call(RerankRequest{Query: query, Docs: append([]string(nil), docs...), Limit: limit})
+}
+
+// FailWith 让之后的请求都返回 err，传 nil 恢复。
+func (f *Reranker) FailWith(err error) { f.s.failWith(err) }
+
+// Requests 返回目前收到的请求。
+func (f *Reranker) Requests() []RerankRequest { return f.s.recorded() }

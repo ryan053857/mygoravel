@@ -1,4 +1,7 @@
-// Package openai 通过 OpenAI 兼容接口生成图片、合成语音、识别语音和计算向量。
+// Package openai 通过 OpenAI 兼容接口生成图片、合成语音、识别语音、计算向量和重排。
+//
+// 重排不是 OpenAI 的接口，而是 Cohere、Jina 定义、被广泛沿用的 POST {BaseURL}/rerank，
+// 硅基流动、OpenRouter、vLLM 等都提供；Cohere 自己的地址是 https://api.cohere.com/v2。
 //
 // OpenAI、火山方舟、硅基流动、通义千问的兼容模式、Ollama 等都提供这类接口，但每家支持的能力不同，以厂商文档为准。
 package openai
@@ -10,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -21,7 +25,7 @@ import (
 
 const defaultBaseURL = "https://api.openai.com/v1/"
 
-// Client 是 OpenAI 兼容接口上的一个模型。它实现 ai.Imager、ai.Speaker、ai.Transcriber 和 ai.Embedder，
+// Client 是 OpenAI 兼容接口上的一个模型。它实现 ai.Imager、ai.Speaker、ai.Transcriber、ai.Embedder 和 ai.Reranker，
 // 能用哪一种取决于模型本身。创建 Client 不访问网络，可以每次请求时按当时的配置创建。
 type Client struct {
 	model     string
@@ -38,6 +42,7 @@ var (
 	_ ai.Speaker     = (*Client)(nil)
 	_ ai.Transcriber = (*Client)(nil)
 	_ ai.Embedder    = (*Client)(nil)
+	_ ai.Reranker    = (*Client)(nil)
 )
 
 // Option 调整 Client。
@@ -291,6 +296,47 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error)
 		if v == nil {
 			return nil, errors.Newf("ai/openai: no embedding returned for text %d", i)
 		}
+	}
+	return out, nil
+}
+
+type rerankParams struct {
+	Model     string   `json:"model"`
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
+	TopN      int      `json:"top_n,omitempty"`
+}
+
+type rerankResponse struct {
+	Results []struct {
+		Index          int     `json:"index"`
+		RelevanceScore float64 `json:"relevance_score"`
+	} `json:"results"`
+}
+
+// Rerank 实现 ai.Reranker，调用 POST {BaseURL}/rerank。
+func (c *Client) Rerank(ctx context.Context, query string, docs []string, limit int) ([]ai.Ranked, error) {
+	if len(docs) == 0 {
+		return nil, nil
+	}
+	p := rerankParams{Model: c.model, Query: query, Documents: docs}
+	if limit > 0 && limit < len(docs) {
+		p.TopN = limit
+	}
+	var resp rerankResponse
+	if err := c.client.Post(ctx, "rerank", p, &resp); err != nil {
+		return nil, errors.Wrap(err, "ai/openai: rerank")
+	}
+	out := make([]ai.Ranked, 0, len(resp.Results))
+	for _, r := range resp.Results {
+		if r.Index < 0 || r.Index >= len(docs) {
+			return nil, errors.Newf("ai/openai: rerank index %d out of range", r.Index)
+		}
+		out = append(out, ai.Ranked{Index: r.Index, Score: r.RelevanceScore})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	if p.TopN > 0 && len(out) > p.TopN {
+		out = out[:p.TopN]
 	}
 	return out, nil
 }

@@ -25,7 +25,7 @@ agent 本身由 [trpc-agent-go](https://github.com/trpc-group/trpc-agent-go) 提
 - **中途插话**：模型还在查资料时，用户可以继续发消息，不需要等它答完，也不会打断它。
 - **审批**：退款、发布这类操作，模型调用工具后先停下，由人确认后才执行。审批可以在几小时后、在另一个进程中进行。
 - **前端协议**：实现 Vercel AI SDK 的 UI 消息流协议，前端直接使用 `useChat`。
-- **图片、语音和向量**：生成图片、合成和识别语音、计算向量，接口统一，测试时有替身。
+- **图片、语音和向量**：生成图片、合成和识别语音、计算向量、重排，接口统一，测试时有替身。
 
 本章为博客的编辑后台加一个写作助手：它可以搜索已有文章，帮编辑发布草稿。发布之前需要编辑确认。
 
@@ -289,7 +289,7 @@ return web.SSE(w, r, func(s *web.Stream) error {
 <a id="media"></a>
 ## 图片、语音和向量
 
-除了对话，`ai` 包还定义了四种能力，每种是一个只有一个方法的接口：
+除了对话，`ai` 包还定义了五种能力，每种是一个只有一个方法的接口：
 
 | 接口 | 方法 | 用途 |
 | --- | --- | --- |
@@ -297,10 +297,11 @@ return web.SSE(w, r, func(s *web.Stream) error {
 | `ai.Speaker` | `Speak(ctx, ai.SpeechRequest) (ai.Media, error)` | 把文字合成为语音 |
 | `ai.Transcriber` | `Transcribe(ctx, ai.TranscriptionRequest) (string, error)` | 把语音识别为文字 |
 | `ai.Embedder` | `Embed(ctx, texts []string) ([][]float32, error)` | 把文本转换为向量 |
+| `ai.Reranker` | `Rerank(ctx, query string, docs []string, limit int) ([]ai.Ranked, error)` | 按与查询的相关度给文档排序 |
 
 `ai.Media` 是图片或音频的内容和 MIME 类型。
 
-`ai/openai` 通过 OpenAI 兼容接口实现这四种能力。`openai.New` 和 `ai.NewModel` 一样接收 `ai.ModelConfig`，不访问网络，可以在每次使用时按当时的配置创建。OpenAI、火山方舟、硅基流动、通义千问的兼容模式等都提供这类接口，但每家支持的能力不同，以厂商文档为准。
+`ai/openai` 通过 OpenAI 兼容接口实现这五种能力。`openai.New` 和 `ai.NewModel` 一样接收 `ai.ModelConfig`，不访问网络，可以在每次使用时按当时的配置创建。OpenAI、火山方舟、硅基流动、通义千问的兼容模式等都提供这类接口，但每家支持的能力不同，以厂商文档为准。
 
 [OpenRouter](https://openrouter.ai) 使用 `ai/openrouter`，用法与 `ai/openai` 相同。它的语音和向量是 OpenAI 兼容接口，图片则使用 OpenRouter 自己的接口，所以单独提供一个包；`BaseURL` 可以不填。
 
@@ -342,6 +343,16 @@ text, err := openai.New(cfg.Dictation).Transcribe(ctx, ai.TranscriptionRequest{
 ```go
 vecs, err := openai.New(cfg.Embedding, openai.WithBatchSize(10)).Embed(ctx, []string{post.Title, post.Body})
 ```
+
+关键词搜索找到的候选，可以用重排模型按语义重新排序，只把最相关的几篇交给模型或用户。`ai.RerankBy` 直接对任意类型的列表排序：
+
+```go
+posts, err = ai.RerankBy(ctx, openai.New(cfg.Rerank), query, posts, func(p article.Summary) string {
+    return p.Title
+}, 5)
+```
+
+重排不是 OpenAI 定义的接口，而是 Cohere 和 Jina 的 `POST {BaseURL}/rerank`，硅基流动、OpenRouter、vLLM 等都沿用了它，`ai/openai` 和 `ai/openrouter` 都按这个格式调用。Cohere 自己的地址填 `https://api.cohere.com/v2`。
 
 生成图片和语音通常要十几秒到几十秒，不需要立即返回结果时，放进[队列](queue.md)执行。
 
@@ -393,6 +404,7 @@ img := aitest.NewImager()            // 每次返回 aitest.PNG
 emb := aitest.NewEmbedder(1024)      // 相同的文本总是得到相同的向量
 sp := aitest.NewSpeaker()            // 把朗读的文字当作音频内容返回
 tr := aitest.NewTranscriber("你好")  // 依次返回预设的文字
+rr := aitest.NewReranker()           // 按查询中的字符在文档中出现的比例排序
 ```
 
 传入预设结果时按顺序返回，用完后再收到请求就返回错误；`Requests()` 返回收到的请求，`FailWith(err)` 让之后的请求失败，用于测试出错的处理。

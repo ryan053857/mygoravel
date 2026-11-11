@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+
+	"github.com/cockroachdb/errors"
 )
 
 // Media 是一段图片或音频。
@@ -74,4 +76,40 @@ type Transcriber interface {
 // Embedder 把文本转换为向量，返回的向量与 texts 一一对应。
 type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+// Ranked 是重排后的一项。
+type Ranked struct {
+	// Index 是它在传入的文档中的位置。
+	Index int
+	// Score 是与查询的相关度，越大越相关，取值范围由模型决定。
+	Score float64
+}
+
+// Reranker 按与 query 的相关度给 docs 排序，返回最相关的 limit 项，按相关度从高到低排列；limit 不大于 0 时返回全部。
+type Reranker interface {
+	Rerank(ctx context.Context, query string, docs []string, limit int) ([]Ranked, error)
+}
+
+// RerankBy 用 r 给 items 排序，text 取出每一项用于比较的文本，返回最相关的 limit 项。
+func RerankBy[T any](ctx context.Context, r Reranker, query string, items []T, text func(T) string, limit int) ([]T, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	docs := make([]string, len(items))
+	for i, it := range items {
+		docs[i] = text(it)
+	}
+	ranked, err := r.Rerank(ctx, query, docs, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]T, 0, len(ranked))
+	for _, rk := range ranked {
+		if rk.Index < 0 || rk.Index >= len(items) {
+			return nil, errors.Newf("ai: rerank index %d out of range", rk.Index)
+		}
+		out = append(out, items[rk.Index])
+	}
+	return out, nil
 }
