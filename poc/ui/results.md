@@ -126,3 +126,11 @@ shadcn-templ 可以直接用，框架不依赖它：组件代码属于应用。�
 - 组件脚本恢复为提交的版本，样式表与全新的 `--minify` 构建一致。
 
 还发现 `shadcn-templ bundle --watch` 输出的是未压缩的脚本，文件名却不变，因此框架用 `devcmd.Tool{Watch, Build}` 在停止后重新生成正式版本。
+
+## 后续：CSP nonce（#144）
+
+演示应用加上了与视图文档「内容安全策略」相同的 CSP，另加 `report-uri /csp-report` 收集违规，每个浏览器场景结束时检查：
+
+- 全部场景通过，没有违规。修复前，后退时 htmx 重建 body 中的脚本，这些脚本没有 nonce，被拦截了；
+- 布局中的应用脚本移到 `assets/js/app.js`，在 head 中加载。此前它写在 body 里，后退时会再执行一次，暗色切换会被切换两次；
+- `POC_CSP_NO_EVAL=1` 去掉 `'unsafe-eval'` 后，Alpine 的提示区域失效，shadcn-templ 组件和普通的 htmx 属性不受影响。

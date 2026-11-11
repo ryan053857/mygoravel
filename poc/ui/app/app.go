@@ -43,7 +43,8 @@ func New(assets fs.FS, dev bool) (http.Handler, error) {
 	h := &handlers{store: article.NewStore()}
 
 	r := chi.NewRouter()
-	r.Use(httpx.Locale(nil))
+	r.Use(httpx.Locale(nil), csp)
+	r.Post("/csp-report", cspReport)
 	r.Handle(web.StaticPath+"*", st)
 	r.Handle(web.AssetsPath+"*", web.Assets())
 	r.NotFound(pages.NotFound)

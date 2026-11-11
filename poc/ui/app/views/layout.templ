@@ -19,7 +19,7 @@ templ Base(title string, flashes templ.Component) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title }</title>
 			// 在首次绘制前决定暗色模式，避免闪烁。
-			<script>
+			<script nonce={ templ.GetNonce(ctx) }>
 				(function () {
 					var t = null;
 					try { t = localStorage.getItem("theme"); } catch (e) {}
@@ -31,6 +31,8 @@ templ Base(title string, flashes templ.Component) {
 			<link rel="stylesheet" href={ web.StaticURL(ctx, "css/app.css") }/>
 			@web.Scripts()
 			@components.Scripts()
+			// 应用自己的脚本放在静态文件中，在 head 里加载：htmx 后退时恢复整页 body，body 中的脚本会再执行一次。
+			<script defer src={ web.StaticURL(ctx, "js/app.js") }></script>
 		</head>
 		<body class="min-h-screen bg-background text-foreground antialiased">
 			<div id="flash"></div>
@@ -41,22 +43,6 @@ templ Base(title string, flashes templ.Component) {
 					@flashes
 				}
 			</div>
-			<script>
-				// 服务端通过 HX-Trigger: {"dialog:close": {"id": "..."}} 关闭对话框。
-				document.addEventListener("dialog:close", function (e) {
-					window.templ.dialog.close(e.detail.id);
-				});
-				// htmx 请求的提示：web.Flash → HX-Trigger → body 上的 web:flash 事件。
-				document.addEventListener("web:flash", function (e) {
-					e.detail.messages.forEach(function (m) { window.templ.toast.add(m); });
-				});
-				// templ 会拦截字符串形式的 onclick，这里用事件委托。
-				document.addEventListener("click", function (e) {
-					if (!e.target.closest("[data-theme-toggle]")) return;
-					var dark = document.documentElement.classList.toggle("dark");
-					try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch (e) {}
-				});
-			</script>
 		</body>
 	</html>
 }

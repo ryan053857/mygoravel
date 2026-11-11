@@ -98,6 +98,10 @@ func noErrors(t *testing.T, ctx context.Context) {
 	if errs := js[[]string](t, ctx, `window.__errors || []`); len(errs) > 0 {
 		t.Errorf("page errors: %v", errs)
 	}
+	time.Sleep(300 * time.Millisecond) // 浏览器异步上报 CSP 违规
+	if v := app.CSPViolations(); len(v) > 0 {
+		t.Errorf("CSP violations: %v", v)
+	}
 }
 
 func open(t *testing.T, ctx context.Context, url string) {
@@ -152,6 +156,15 @@ func TestBrowserList(t *testing.T) {
 	}
 	do(t, ctx, chromedp.NavigateBack())
 	waitFor(t, ctx, `location.search === "" && document.querySelector("[data-slot=pagination-link][aria-current=page]")?.textContent.trim() === "1"`)
+	if n := js[int](t, ctx, `window.__bodyScriptRuns`); n != 1 {
+		t.Errorf("app script ran %d times after back", n)
+	}
+	// 后退之后，主题切换仍然只切换一次。
+	before := js[bool](t, ctx, `document.documentElement.classList.contains("dark")`)
+	js[bool](t, ctx, `document.querySelector("#theme-toggle").click(); true`) // 页面已滚动，按钮在可视区之外
+	if after := js[bool](t, ctx, `document.documentElement.classList.contains("dark")`); after == before {
+		t.Error("theme toggle toggled twice after back")
+	}
 	noErrors(t, ctx)
 }
 
