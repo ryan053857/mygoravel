@@ -142,8 +142,9 @@ func PageRoutes(r chi.Router, pages *web.Pages, db *bun.DB, hasher *hashing.Hash
 package articleweb
 
 func Register(r chi.Router, pages *web.Pages, db *bun.DB) {
-    h := &Handlers{get: article.NewGet(db), update: article.NewUpdate(db)}
+    h := &Handlers{list: article.NewList(db), get: article.NewGet(db), update: article.NewUpdate(db)}
     editor := pages.Routes(r, web.Require("articles"))
+    editor.Get("/admin/articles", h.List)
     editor.Get("/admin/articles/{id}/edit", h.Edit)
     editor.Put("/admin/articles/{id}", h.Update)
     editor.Post("/admin/articles/preview", h.Preview)

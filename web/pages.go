@@ -199,6 +199,9 @@ func (p *Pages) Login(r *http.Request, sub identity.Subject) error {
 	return session.Login(r.Context(), p.opts.Sessions, sub, session.Device{IP: ip, UserAgent: r.UserAgent()})
 }
 
+// Sessions 返回 Options.Sessions，供测试等需要直接操作会话的场景使用，见 webtest.Client.Login。
+func (p *Pages) Sessions() *scs.SessionManager { return p.opts.Sessions }
+
 // Logout 销毁当前会话，见 session.Logout。
 func (p *Pages) Logout(ctx context.Context) error {
 	return session.Logout(ctx, p.opts.Sessions)
