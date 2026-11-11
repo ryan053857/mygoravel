@@ -124,7 +124,7 @@ static_dir: internal/web/static
 }
 ```
 
-`@theme` 定义设计令牌，即应用自己的颜色、字体等。之后就可以在 class 中使用 `bg-brand-500`、`font-display` 这样的工具类，见 [Tailwind 文档](https://tailwindcss.com/docs/theme)。
+`@theme` 定义设计令牌，即应用自己的颜色、字体等。使用[界面组件](components.md)时，初始化会在这个文件中导入组件的主题变量，组件和你自己的页面共用同一套令牌。之后就可以在 class 中使用 `bg-brand-500`、`font-display` 这样的工具类，见 [Tailwind 文档](https://tailwindcss.com/docs/theme)。
 
 生成样式表：
 

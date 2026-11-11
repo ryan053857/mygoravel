@@ -38,7 +38,7 @@ blog/
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker、调度器等运行部分，以及需要 App 的命令（各模块命令、seed、queue）
 │   ├── auth/                token 校验器；authweb/ 是登录页
-│   ├── web/                 页面布局与错误页组件（templ）、样式入口 app.css；static/ 是嵌入的静态文件
+│   ├── web/                 页面布局与错误页组件（templ）、样式入口 app.css；static/ 是嵌入的静态文件，ui/ 是界面组件
 │   └── article/             文章业务模块
 │       ├── article.go       模型、业务错误与共享的规则
 │       ├── create.go        创建文章
@@ -72,7 +72,7 @@ blog/
 | `internal/article/publish.go` | [编写 action](actions.md#writing-actions)、[授权](authorization.md#checking-in-transactions) |
 | `internal/article/create.go`、`get.go`、`update.go` | [数据库](database.md#constraint-errors)、[action 的 HTTP 入口](routing.md#http-actions)、[错误处理](errors.md#example) |
 | `internal/article/routes.go`、`dto.go` | [模块内注册](routing.md#module-registration)、[共享响应结构](routing.md#shared-responses) |
-| `internal/web/`、`internal/article/articleweb/` | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md) |
+| `internal/web/`、`internal/article/articleweb/` | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[界面组件](components.md) |
 | `internal/auth/authweb/` | [登录](views.md#login) |
 | `migrations/` | [迁移](migrations.md#embedding-migrations) |
 

@@ -14,6 +14,7 @@
 - [提示消息](#flash-messages)
 - [触发事件](#triggering-events)
 - [前端状态](#client-state)
+- [内容安全策略](#content-security-policy)
 
 <a id="introduction"></a>
 ## 简介
@@ -22,7 +23,9 @@
 
 - [templ](https://templ.guide) 把 `.templ` 文件编译成带类型参数的 Go 函数，相当于 Blade 组件，错误在编译期就能发现；
 - [htmx 4](https://four.htmx.org) 用 HTML 属性声明「点这里就请求某个地址，把返回的片段放到某个位置」，服务端只管返回 HTML；
-- [Alpine.js](https://alpinejs.dev) 处理下拉、弹窗这类纯前端的小交互。
+- [Alpine.js](https://alpinejs.dev) 处理纯前端的小交互，例如折叠区、计数。
+
+按钮、表格、下拉菜单、对话框这些现成的组件，见[界面组件](components.md)。
 
 `web` 包负责把它们接到框架上：渲染 templ 组件、加载会话和检查登录、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。
 
@@ -513,3 +516,30 @@ htmx 用 `outerMorph` 或 `innerMorph` 替换内容时，内嵌的 hx-alpine-com
 
 > [!WARNING]
 > htmx 的事件会冒泡。在表单上监听 `htmx:after:request` 时，表单内其他元素发出的请求也会触发它。只处理表单自己的请求时，加上 Alpine 的 `.self` 修饰符：`x-on:htmx:after:request.self="$el.reset()"`。
+
+<a id="content-security-policy"></a>
+## 内容安全策略
+
+内容安全策略（CSP）告诉浏览器只执行带有正确 nonce 的脚本，即使页面中被注入了 `<script>`，它也不会执行。每个请求生成一个随机的 nonce，同时写进 CSP 响应头和 templ 的 context：
+
+```go
+func csp(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        nonce := rand.Text()
+        w.Header().Set("Content-Security-Policy",
+            "script-src 'self' 'nonce-"+nonce+"' 'unsafe-eval'; object-src 'none'; base-uri 'none'")
+        next.ServeHTTP(w, r.WithContext(templ.WithNonce(r.Context(), nonce)))
+    })
+}
+```
+
+`rand` 是 `crypto/rand`。在页面路由之前安装它，例如 `router.Use(csp)`。
+
+- `web.Scripts()` 读取 context 中的 nonce，给 htmx 和 Alpine 的 `<script>` 带上它；同时设置 htmx 的 `inlineScriptNonce`，htmx 执行交换进来的脚本时也使用这个 nonce。
+- 布局中自己写的内联脚本，要加上 `nonce={ templ.GetNonce(ctx) }`。
+- `'self'` 允许加载本站的脚本文件，包括[静态文件](assets.md)。
+
+Alpine 的表达式（`x-data`、`x-on` 等）和 htmx 的 `hx-on` 在运行时编译执行，需要 `'unsafe-eval'`。去掉它之后，这两类属性都会失效。只用 htmx 属性、不写 Alpine 表达式的页面可以去掉它；也可以改用 Alpine 的 [CSP 版本](https://alpinejs.dev/advanced/csp)。
+
+> [!WARNING]
+> 不要把应用的脚本写在 `<body>` 里。用户点后退时，htmx 会重新请求整页并替换 `body`，其中的脚本会再执行一次，事件监听器就注册了两遍。应用的脚本放进静态文件，在 `<head>` 中加载：`<script defer src={ web.StaticURL(ctx, "js/app.js") }></script>`。

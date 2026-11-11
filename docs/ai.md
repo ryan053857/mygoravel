@@ -5,6 +5,7 @@
 - [装配](#assembling)
     - [配置模型](#configuring-models)
 - [对话接口](#conversation-api)
+    - [停止回答](#stopping)
     - [中途插话](#steering)
     - [断线重连](#reconnecting)
 - [审批](#approval)
@@ -139,7 +140,7 @@ Claude、Gemini 等其他接口的模型直接使用 trpc-agent-go 的对应包�
 
 每个对话用一个 ID 标识，由 `useChat` 生成。对话属于当前登录的编辑，`Runs` 的方法都以主体 ID 和对话 ID 定位它，一个编辑无法读取其他人的对话。
 
-服务端提供四个接口：
+服务端提供五个接口：
 
 ```go
 type ChatInput struct {
@@ -187,6 +188,17 @@ func (h *Handlers) Steer(ctx context.Context, in *SteerInput) (*struct{}, error)
     return nil, h.runs.Steer(ctx, sub.ID, in.ID, model.NewUserMessage(in.Body.Text))
 }
 
+// POST /assistant/chat/{id}/stop：停止进行中的回答。
+func (h *Handlers) Stop(ctx context.Context, in *ConversationInput) (*struct{}, error) {
+    sub, _ := identity.FromContext(ctx)
+    run, err := h.runs.Get(ctx, sub.ID, in.ID)
+    if err != nil || run == nil {
+        return nil, err // 没有进行中的回答时什么也不做
+    }
+    run.Cancel()
+    return nil, nil
+}
+
 // GET /assistant/chat/{id}/messages：打开页面时加载对话历史。
 func (h *Handlers) History(ctx context.Context, in *ConversationInput) (*HistoryOutput, error) {
     sub, _ := identity.FromContext(ctx)
@@ -201,7 +213,7 @@ func (h *Handlers) History(ctx context.Context, in *ConversationInput) (*History
 rest.RegisterSSE(api, op, ai.UIEvents, h.Chat)
 ```
 
-前端按这四个接口配置 `useChat`：
+前端按这些接口配置 `useChat`：
 
 ```tsx
 const { messages, sendMessage, addToolApprovalResponse } = useChat({
@@ -220,7 +232,29 @@ const { messages, sendMessage, addToolApprovalResponse } = useChat({
 
 `Runs.Submit` 在后台开始一次运行后立即返回，运行不会因为请求结束而停止。它也不受 [`httpx.Timeout`](middleware.md#request-timeout) 的影响，助手的路由和其他 API 装在同一组中间件下即可。对话正在回答时再次提交，`Submit` 返回 `ai.ErrBusy`（`409`）。
 
-需要停止生成时，调用 `run.Cancel()`。已经生成的内容保留在对话中，消息流以 `abort` 结束。
+<a id="stopping"></a>
+### 停止回答
+
+用户点击「停止」时，前端调用停止接口，不要只调用 `useChat` 的 `stop()`：
+
+```tsx
+const { status } = useChat({ /* 同上 */ });
+
+async function stopAnswer() {
+  await fetch(`/api/v1/assistant/chat/${conversationId}/stop`, { method: 'POST', headers });
+}
+
+{(status === 'submitted' || status === 'streaming') && <button onClick={stopAnswer}>停止</button>}
+```
+
+`stop()` 只断开浏览器的连接。回答在服务端后台运行，不随连接断开而停止：模型继续生成、继续调用工具、继续消耗 token，刷新页面后回答又接着出现。停止接口在服务端取消这次运行，消息流以 `abort` 结束，`useChat` 随之回到空闲状态，不需要再调用 `stop()`。
+
+停止之后：
+
+- 已经生成的内容保留在对话中，用户可以接着发消息；
+- 模型的请求和正在执行的工具收到取消的 `ctx`，工具应当把它传给数据库查询和外部调用，才能尽快停下；已经完成的工具调用（例如已经发出的邮件）不会撤销；
+- 部署了[多个实例](#multiple-instances)时，停止请求落在哪个实例上都可以，`Cancel` 转发给运行所在的实例，立即生效；
+- 回答已经结束时调用停止接口什么也不做，前端不需要判断竞态。
 
 <a id="steering"></a>
 ### 中途插话
