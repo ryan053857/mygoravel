@@ -111,6 +111,15 @@ func partCount(size int64) int {
 	return int((size + part - 1) / part)
 }
 
+// SupportsDirect 报告磁盘 disk（为空时是默认磁盘）是否支持客户端直传，即 SignPut 等方法是否可用。
+func (s *Service) SupportsDirect(disk string) bool {
+	if disk == "" {
+		disk = s.cfg.DefaultDisk
+	}
+	_, ok := s.disks[disk].(DirectUploader)
+	return ok
+}
+
 // direct 返回 owner 尚未确认的临时文件及其磁盘的直传能力。
 func (s *Service) direct(ctx context.Context, owner identity.Subject, id uuid.UUID) (File, DirectUploader, error) {
 	r, err := s.owned(ctx, owner, id)

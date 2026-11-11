@@ -18,6 +18,7 @@
     - [多个有序文件](#ordered-files)
     - [确认后异步处理](#processing-files)
     - [图片缩略图](#thumbnails)
+- [在页面中上传](#pages)
 - [在 REST 接口中使用](#rest)
     - [路由](#rest-routes)
     - [服务端上传接口](#rest-upload)
@@ -453,6 +454,11 @@ https://img.example.com/<签名>/rs:fill:300:200/plain/https://cdn.example.com/2
 ```
 
 地址由应用在返回数据时拼出。请开启 imgproxy 的 URL 签名，避免它被用来处理任意图片。
+
+<a id="pages"></a>
+## 在页面中上传
+
+服务端渲染的页面用 `web/upload` 和 `ui.FileField`：用户选择文件后立即上传为临时文件，磁盘支持时直传到 S3，表单只提交文件 ID，保存时确认。见[表单的上传文件](forms.md#file-uploads)。
 
 <a id="rest"></a>
 ## 在 REST 接口中使用

@@ -165,6 +165,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。下面按文�
 | `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、提示消息、主题、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
 | `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载，提示、对话框与页面的衔接 | [界面组件](components.md) |
 | `web/webtest` | 测试页面：保存会话 cookie，不经过登录页登录，读取 htmx 的响应头 | [页面测试](testing.md#page-tests) |
+| `web/upload` | 页面的上传接口，与 `ui.FileField` 配合：直传 S3 或经服务器上传 | [上传文件](forms.md#file-uploads) |
 
 <a id="digging-deeper"></a>
 ### 深入了解

@@ -31,12 +31,16 @@ web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
 web.bad_query: "Invalid query parameter {{.field}}: {{.message}}"
 web.cross_origin: Cross-origin request rejected
+upload.bad_request: Invalid upload request
 ui.pagination.previous: Previous
 ui.pagination.next: Next
 ui.confirm.action: Confirm
 ui.confirm.cancel: Cancel
 ui.sidebar.toggle: Toggle sidebar
 ui.theme.toggle: Toggle dark mode
+ui.file.remove: Remove
+ui.file.failed: Upload failed
+ui.file.too_large: The file must not be larger than
 validation.required: This field is required
 validation.filled: This field must not be empty
 validation.min_length: Must be at least {{.Min}} characters

@@ -7,7 +7,7 @@ const ShadcnTemplVersion = "v2.0.0"
 
 const scriptFile = "shadcn-templ-44b085018d0ae9e8.js"
 
-const glueFile = "glue-287fcc4a3a8acd92.js"
+const glueFile = "glue-1bd25c9cf6fabc8a.js"
 
 // extraScripts 是按需加载的组件脚本：页面出现选择器匹配的元素时，衔接脚本加载对应文件。
 var extraScripts = map[string]string{
@@ -23,12 +23,12 @@ var extraScripts = map[string]string{
 
 // stylesheets 是每套风格预编译的样式表。
 var stylesheets = map[string]string{
-	"luma": "style-luma-2b0dc4a4d0b2f974.css",
-	"lyra": "style-lyra-b72936e94e360d5a.css",
-	"maia": "style-maia-e7723567f5169d3d.css",
-	"mira": "style-mira-04477f6477084bbf.css",
-	"nova": "style-nova-391b7d40b2cc4211.css",
-	"rhea": "style-rhea-c55620fc4d3653cb.css",
-	"sera": "style-sera-a55e7e3fce455dbf.css",
-	"vega": "style-vega-22d1db8c20fc5297.css",
+	"luma": "style-luma-eb627224bdb9e25f.css",
+	"lyra": "style-lyra-657a496bc6bb1610.css",
+	"maia": "style-maia-1f1123d0f2b255f1.css",
+	"mira": "style-mira-871d7fbd5392289d.css",
+	"nova": "style-nova-6087e74c19ee6f1c.css",
+	"rhea": "style-rhea-dea159d782f9f5f3.css",
+	"sera": "style-sera-a47016f35ee1838f.css",
+	"vega": "style-vega-f3c0eaa945ef6883.css",
 }

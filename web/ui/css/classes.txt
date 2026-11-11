@@ -3795,6 +3795,7 @@ ${width}px
 /hidden|clip/.test(win.getComputedStyle(getViewportScroller(html,
 /paint|layout|strict|content/;
 /transform|translate|scale|rotate|perspective|filter/;
+/uploads
 0
 0${week.weekNumber}
 0%
@@ -8224,6 +8225,7 @@ ${width}px
 20v1
 20v1a1
 20v2
+20})
 21
 21,
 21-1.9-1.9
@@ -11110,6 +11112,7 @@ ${width}px
 </thead>
 </tr>
 </ul>
+<<
 <=
 <ChevronRight/>
 <ComponentExample
@@ -11348,6 +11351,7 @@ ${width}px
 @field.Content()
 @field.Description()
 @field.Error()
+@field.Error(field.ErrorProps{Attributes:
 @field.Field()
 @field.Field(field.Props{Class:
 @field.Field(field.Props{Orientation:
@@ -11358,6 +11362,7 @@ ${width}px
 @field.Set(field.SetProps{Class:
 @field.Set(field.SetProps{ID:
 @fieldHint(p.Description,
+@fileItem(name,
 @floating-ui/core
 @floating-ui/dom
 @floating-ui/react
@@ -11523,6 +11528,7 @@ ${width}px
 @tooltip.Content(tooltip.ContentProps{Side:
 @tooltip.Tooltip()
 @ui.AppShell(ui.AppShellProps{Brand:
+@ui.FileField(f,
 @ui.Page(ui.PageProps{Title:
 @ui.Pagination(list,
 @ui.TextField(f,
@@ -11582,6 +11588,7 @@ AXIS_LOCK_SLOP)
 AbortController();
 Absorb
 Accept
+Accept:
 Accessibility
 AccessibilityLayer
 AccessibilityLayer:
@@ -12990,9 +12997,14 @@ FileDiff
 FileDigit
 FileDown
 FileExclamationPoint
+FileField
+FileField(f
+FileFieldProps)
 FileHeadphone
 FileHeart
 FileImage
+FileInfo)
+FileInfo{})
 FileInput
 FileKey
 FileLock
@@ -13364,6 +13376,7 @@ IDFromContext(ctx
 IDFromContext(ctx)
 IDL
 ID。
+ID（同名的隐藏字段），业务保存时用
 IFrame
 IGNORE_SELECTOR
 IME
@@ -14514,6 +14527,7 @@ Math.trunc(originalSize);
 Max
 MaxLength
 MaxSize
+MaxSize:
 Maximize
 Maximize2
 Maximum
@@ -15347,6 +15361,7 @@ RegexpOnlyDigits
 RegexpOnlyDigitsAndChars
 Regular
 Release
+Remove
 RemoveFormatting
 Render
 Render,
@@ -17058,6 +17073,7 @@ _
 _,
 _await$platform$isEle
 _await$platform$isEle;
+_blank
 _c:
 _changeListener
 _core:
@@ -17193,6 +17209,7 @@ absolutely
 absorbs
 acc
 acc.concat(side,
+accept
 accept={
 accepted
 accepted,
@@ -21067,6 +21084,7 @@ counts
 counts,
 counts.
 cover
+cover_id
 covering
 covers
 cpu
@@ -21637,6 +21655,7 @@ data-expanded:data-ending-style:data-[swipe-direction=right]:[transform:translat
 data-expanded:data-ending-style:data-[swipe-direction=up]:[transform:translateY(calc(var(--toast-swipe-movement-y)-150%))]
 data-expanded:h-(--toast-height)
 data-expanded:opacity-100
+data-filename>
 data-filled
 data-filled?={
 data-first
@@ -21684,6 +21703,7 @@ data-last
 data-last?={
 data-limited
 data-limited:opacity-0
+data-max-size={
 data-message-id.
 data-message-id={
 data-message-scroller-spacer
@@ -21694,9 +21714,13 @@ data-modal={
 data-mode
 data-mode={
 data-month
+data-msg-failed={
+data-msg-too-large={
 data-multiple
 data-multiple-months=
+data-multiple=
 data-multiple?={
+data-name={
 data-nested
 data-nested-dialog-open
 data-nested-drawer-open
@@ -21741,6 +21765,9 @@ data-precedence
 data-pressed
 data-pressed),
 data-pressed:bg-transparent
+data-preview
+data-progress
+data-progress-bar></div>
 data-progressing
 data-range-end
 data-range-middle
@@ -21772,6 +21799,7 @@ data-sidebar
 data-sidebar=
 data-size
 data-size={
+data-size>{
 data-slot
 data-slot,
 data-slot.
@@ -22011,6 +22039,12 @@ data-visible?={
 data-web-ui-confirm-action
 data-web-ui-confirm-description
 data-web-ui-confirm-title
+data-web-ui-file-error
+data-web-ui-file-item>
+data-web-ui-file-list>
+data-web-ui-file-remove
+data-web-ui-file-template>
+data-web-ui-file={
 data-web-ui-theme-toggle
 data-web-ui-toaster></template>
 data-week-numbers
@@ -23216,6 +23250,7 @@ empty-icon
 empty-title
 empty.
 empty.hidden
+empty:hidden
 emptyLines
 en-US
 enUS
@@ -23613,6 +23648,11 @@ feeds
 fence
 ferris-wheel
 fetches
+fi
+fi)
+fi.Filename
+fi.ID
+fi.URL
 field
 field-content
 field-description
@@ -23697,7 +23737,10 @@ file:bg-transparent
 file:border-0
 file:inline-flex
 file:text-foreground
+fileItem(name
+fileItems(f,
 files
+filesystem.Service.Confirm
 fill
 fill,
 fill,omitempty
@@ -25180,6 +25223,7 @@ h-(--drawer-content-height)
 h-(--height)
 h-(--popup-height)
 h-(--positioner-height)
+h-1
 h-1.5
 h-14
 h-2
@@ -25640,6 +25684,7 @@ hover:bg-muted
 hover:group-data-[collapsible=offcanvas]:bg-sidebar
 hover:text-accent-foreground
 hover:text-foreground
+hover:underline
 hoverEnabled
 hoverEnabled()
 hoverEnabled,
@@ -25725,9 +25770,12 @@ https://github.com/recharts/recharts-scale/blob/v0.4.5/src/getNiceTickValues.js
 https://github.com/recharts/recharts/blob/v2.15.4/src/util/ChartUtils.ts
 https://images.unsplash.com/photo-1604076850742-4c7221f3101b?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D
 https://samthor.au/2021/observing-dom/
+humanSize(fi.Size)
+humanSize(p.MaxSize)
 hx-confirm
 hx-confirm=
 hx-delete=
+hx-preserve=
 hx-target
 hyperlinks
 i
@@ -25858,6 +25906,7 @@ image-plus
 image-up
 image-upscale
 image.
+image/*
 images
 img
 img.hidden
@@ -26559,6 +26608,7 @@ isHoverOpen
 isHoverOpenEvent(context.openEventType());
 isHoverOpenEvent(openEventType)
 isIOS
+isImage(fi)
 isInClosingTransition
 isIndexOutOfListBounds
 isIndexOutOfListBounds(list,
@@ -27278,6 +27328,7 @@ laptop
 laptop-minimal
 laptop-minimal-check
 large
+larger
 largestPossiblePadding
 largestPossiblePadding);
 lasso
@@ -28650,6 +28701,7 @@ menus,
 menus.
 merge
 merge(invalid(
+merge(merge(invalid(
 merge(requiredAttr(p.Required),
 merge,
 merged
@@ -29098,6 +29150,7 @@ mt-auto
 much
 multiple
 multiple:
+multipleAttr(p.Multiple))})
 music
 music-2
 music-3
@@ -29618,6 +29671,7 @@ none.
 none:
 none;
 none\
+noopener
 nor
 normal
 normal;
@@ -30186,6 +30240,7 @@ opts.scroll
 or
 or,
 orDefault(p.Home,
+orDefault(p.ID,
 orDefault(p.Next,
 orDefault(p.Previous,
 orDefault(p.Type,
@@ -30447,6 +30502,7 @@ p-4
 p-6
 p-px
 p.Accept
+p.Accept}),
 p.AccessibilityLayer}
 p.Actions
 p.ActivateOnFocus
@@ -30527,6 +30583,7 @@ p.Disabled,
 p.Disabled}
 p.Disabled})
 p.EndAngle,
+p.Files)
 p.Fill,
 p.FixedWeeks
 p.Footer
@@ -30647,6 +30704,8 @@ p.Tooltip
 p.TooltipHidden
 p.Type
 p.Type,
+p.Upload
+p.Upload（upload.Handler），显示进度、文件名、大小，
 p.User
 p.Value
 p.Value)
@@ -32772,6 +32831,7 @@ registration:
 registry
 regular
 rel
+rel=
 relVelX
 relVelX,
 relVelY
@@ -34605,6 +34665,7 @@ size,
 size,omitempty
 size-
 size-(--cell-size)
+size-10
 size-3
 size-4
 size-6
@@ -35721,6 +35782,7 @@ strconv.FormatBool(pressed)
 strconv.FormatBool(s.open)
 strconv.FormatFloat(math.Floor(v*1000+0.5)/1000,
 strconv.FormatFloat(v,
+strconv.FormatInt(p.MaxSize,
 strconv.Itoa(*p.ScrollEdgeThreshold)
 strconv.Itoa(*p.ScrollPreviousItemPeek)
 strconv.Itoa(alignOffset)
@@ -36358,6 +36420,7 @@ target.x,
 target.y,
 target:
 target;
+target=
 target={
 target?.closest(
 targetElement
@@ -36450,6 +36513,7 @@ templ.GetChildren(ctx);
 templ.JSONString(p.Value)
 templ.JSONString(s.values)
 templ.NopComponent
+templ.SafeURL(fi.URL)
 templ.SafeURL(orDefault(p.Home,
 templ.SafeURL(p.Href)
 templ.ToGoHTML(ctx,
@@ -37162,6 +37226,7 @@ transition-[opacity,transform,width,height,scale,translate]
 transition-[top,left,right,bottom]
 transition-[transform,height,opacity,filter]
 transition-[translate,scale,opacity]
+transition-[width]
 transition-all
 transition-colors
 transition-none
@@ -37370,6 +37435,7 @@ true],
 true}
 true})
 true},
+true}})
 truncate
 truncateByDomain
 truncateByDomain(value,
@@ -37451,9 +37517,13 @@ u;
 ui
 ui.Class(ctx)
 ui.FieldProps{Type:
+ui.FileFieldProps{Upload:
 ui.PaginationProps{URL:
 ui.confirm.action
 ui.confirm.cancel
+ui.file.failed
+ui.file.remove
+ui.file.too_large
 ui.pagination.next
 ui.pagination.previous
 ui.sidebar.toggle
@@ -38899,7 +38969,9 @@ zooming
 })[c]);
 },
 }.
+}/>
 };
+}</a>
 }</div>
 }</h1>
 }</label>
@@ -38984,6 +39056,7 @@ zooming
 ⇧⌘Q
 ⌘N
 ⌘S
+上传期间表单不能提交；超过
 下方是
 中。
 中使用。
@@ -39001,7 +39074,10 @@ zooming
 取出的提示，
 右侧是顶栏（收起按钮、页面标题、Actions）和
 后台
+图片显示缩略图，可以移除。表单提交的是文件
+字段在
 导航按当前主体的权限过滤（NavItem.Permission），当前页面（web.CurrentPath）对应的项高亮。
+封面
 带当前主题的风格，<head>
 并调用
 或点击遮罩时放弃。
@@ -39016,6 +39092,7 @@ zooming
 是一个完整的
 是一组单选项，对应表单结构体中的字符串字段。每个选项的
 是一组复选框，对应表单结构体中的字符串切片字段：选中的每一项提交一个同名的值。
+是上传文件的字段：用户选择文件后立即上传到
 是切换暗色模式的按钮，选择记在浏览器中。放在
 是原生的下拉选择。Placeholder
 是后台常用的外壳：左侧是可以收起成图标的侧边栏（名称、分组导航、当前用户），
@@ -39031,6 +39108,7 @@ zooming
 是追加在
 显示提示：整页渲染时
 显示错误提示，没有错误时显示说明。
+替换中保留（hx-preserve）：验证失败重新渲染表单时，已上传的文件仍然显示。
 末尾的内容，例如应用自己的脚本。
 标题
 渲染的确认对话框的
@@ -39041,8 +39119,10 @@ zooming
 由
 的
 的内容。
+的文件在浏览器中直接提示。
 的浏览器原生确认框，放在布局的
 的选择器。打开对话框的元素用
+确认。
 让确认按钮显示为危险操作。点击确认后才发出请求；取消、按
 请求带来的
 邮箱

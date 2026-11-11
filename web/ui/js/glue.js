@@ -93,6 +93,133 @@
     if (el.tagName === "BUTTON") el.disabled = false;
   });
 
+  // 文件字段（ui.FileField）：选择后立即上传，表单提交文件 ID。
+  // 先把文件信息发给上传接口：磁盘支持直传时按签名直接传到存储，否则以 multipart 表单传给接口。
+  function fileError(box, message) {
+    var el = box.parentElement.querySelector("[data-web-ui-file-error]");
+    if (el) {
+      el.textContent = message || "";
+      el.hidden = !message;
+    }
+    var field = box.closest("[data-slot=field]");
+    field.toggleAttribute("data-invalid", !!message);
+    var description = field.querySelector("[data-slot=field-description]");
+    if (description) description.hidden = !!message; // 与服务端一致：有错误时显示错误，不显示说明
+  }
+  // humanSize 与服务端的 humanSize 相同：1.5 MB。
+  function humanSize(n) {
+    if (!n) return "";
+    var units = ["B", "KB", "MB", "GB", "TB"];
+    var i = 0;
+    while (n >= 1024 && i < units.length - 1) {
+      n /= 1024;
+      i++;
+    }
+    return (i === 0 ? n : parseFloat(n.toFixed(1))) + " " + units[i];
+  }
+  function sendFile(item, method, url, headers, body, done, fail) {
+    var xhr = new XMLHttpRequest();
+    item._webUIUpload = xhr;
+    xhr.open(method, url);
+    Object.keys(headers || {}).forEach(function (k) {
+      [].concat(headers[k]).forEach(function (v) {
+        xhr.setRequestHeader(k, v);
+      });
+    });
+    var bar = item.querySelector("[data-progress-bar]");
+    xhr.upload.onprogress = function (e) {
+      if (e.lengthComputable) bar.style.width = Math.round((e.loaded / e.total) * 100) + "%";
+    };
+    xhr.onload = function () {
+      var res = null;
+      try {
+        res = JSON.parse(xhr.responseText);
+      } catch (err) {}
+      if (xhr.status >= 200 && xhr.status < 300) done(res);
+      else fail(res && res.error);
+    };
+    xhr.onerror = function () {
+      fail();
+    };
+    xhr.send(body);
+  }
+  function uploadFile(box, file) {
+    var max = parseInt(box.getAttribute("data-max-size") || "0", 10);
+    if (max && file.size > max) return fileError(box, box.getAttribute("data-msg-too-large"));
+    fileError(box, "");
+    var list = box.querySelector("[data-web-ui-file-list]");
+    if (!box.hasAttribute("data-multiple")) {
+      list.querySelectorAll("[data-web-ui-file-item]").forEach(function (old) {
+        if (old._webUIUpload) old._webUIUpload.abort();
+        old.remove();
+      });
+    }
+    var item = box.querySelector("template[data-web-ui-file-template]").content.firstElementChild.cloneNode(true);
+    item.querySelector("[data-filename]").textContent = file.name;
+    item.querySelector("[data-size]").textContent = humanSize(file.size);
+    item.querySelector("[data-progress]").hidden = false;
+    item.setAttribute("data-uploading", "true");
+    if (/^image\//.test(file.type)) {
+      var img = item.querySelector("[data-preview]");
+      img.src = URL.createObjectURL(file);
+      img.hidden = false;
+    }
+    list.appendChild(item);
+    var endpoint = box.getAttribute("data-web-ui-file");
+    function done(info) {
+      item.querySelector("input[type=hidden]").value = info.id;
+      item.querySelector("[data-progress]").hidden = true;
+      item.removeAttribute("data-uploading");
+      item._webUIUpload = null;
+    }
+    function fail(message) {
+      if (!item.isConnected) return; // 已被移除
+      item.remove();
+      fileError(box, message || box.getAttribute("data-msg-failed"));
+    }
+    var meta = JSON.stringify({ filename: file.name, content_type: file.type || "application/octet-stream", size: file.size });
+    sendFile(item, "POST", endpoint, { "Content-Type": "application/json" }, meta, function (res) {
+      if (res && res.direct && res.put) {
+        sendFile(item, res.put.method, res.put.url, res.put.headers, file, function () {
+          done(res.file);
+        }, fail);
+        return;
+      }
+      var form = new FormData();
+      form.append("file", file);
+      sendFile(item, "POST", endpoint, null, form, function (r) {
+        done(r.file);
+      }, fail);
+    }, fail);
+  }
+  document.addEventListener("change", function (e) {
+    var input = e.target;
+    if (!input.matches || !input.matches("[data-web-ui-file] input[type=file]")) return;
+    var box = input.closest("[data-web-ui-file]");
+    Array.prototype.forEach.call(input.files, function (file) {
+      uploadFile(box, file);
+    });
+    input.value = "";
+  });
+  document.addEventListener("click", function (e) {
+    var remove = e.target.closest && e.target.closest("[data-web-ui-file-remove]");
+    if (!remove) return;
+    var item = remove.closest("[data-web-ui-file-item]");
+    if (item._webUIUpload) item._webUIUpload.abort();
+    item.remove();
+  });
+  // 上传期间不能提交表单。
+  document.addEventListener(
+    "submit",
+    function (e) {
+      if (e.target.querySelector && e.target.querySelector("[data-web-ui-file-item][data-uploading]")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    true,
+  );
+
   // 扩展组件：页面出现选择器匹配的元素时加载对应脚本，每个只加载一次。
   var extras = JSON.parse((script && script.getAttribute("data-extras")) || "{}");
   function load() {

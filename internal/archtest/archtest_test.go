@@ -37,7 +37,7 @@ var dependencies = map[string][]string{
 	"sheet":        {"errorx", "form"},
 	"imports":      {"database", "errorx", "filesystem", "i18n", "identity", "operation", "sheet"},
 	"exports":      {"database", "filesystem", "identity", "operation", "sheet"},
-	"web":          {"errorx", "form", "httpx", "i18n", "identity", "logging", "session"},
+	"web":          {"errorx", "filesystem", "form", "httpx", "i18n", "identity", "logging", "session"},
 	"lock":         {},
 	"hashing":      {},
 	"crypt":        {"errorx"},

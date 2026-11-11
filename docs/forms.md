@@ -158,12 +158,47 @@ if _, err := h.update.Handle(r.Context(), sub, id, f.Data); errors.Is(err, artic
 <a id="file-uploads"></a>
 ## 上传文件
 
-表单设置 `enctype="multipart/form-data"` 后，`ParseForm` 同样能解析其中的普通字段，文件用标准库读取：
+文件不随表单一起提交，而是在用户选择后立即上传为[临时文件](filesystem.md#introduction)，表单只提交文件 ID；保存时业务代码确认它。这样大文件可以显示进度、直传到 S3，表单验证失败也不用重新上传。
+
+先注册上传接口。`upload.Handler` 是一个页面处理器，上传者就是当前登录的主体：
 
 ```go
-f, err := web.ParseForm[article.Changes](r)
-// ……
-file, header, err := r.FormFile("cover")
+pages.Routes(r, web.Require()).Post("/admin/uploads", upload.Handler(files, upload.Options{}))
 ```
 
-存储和校验上传的文件，见[文件存储与上传](filesystem.md)。请求体的大小受 `httpx.BodyLimit` 限制，见[请求体大小](requests.md#body-size)。
+`files` 是[文件服务](filesystem.md#assembling-files)，`upload` 是 `github.com/ryan053857/mygoravel/web/upload`。磁盘支持直传（S3）时，浏览器拿到签名后把文件直接传到存储；本地磁盘则通过这个接口上传，请求体受 [`httpx.BodyLimit`](requests.md#body-size) 限制。`Options.Disk` 指定磁盘，为空时是默认磁盘。
+
+给文章加上封面，表单结构体中是文件 ID：
+
+```go
+type Changes struct {
+    // ……
+    CoverID string `json:"cover_id,omitempty"`
+}
+```
+
+表单中用 `ui.FileField`：
+
+```templ
+@ui.FileField(f, "cover_id", "封面", ui.FileFieldProps{
+	Upload:  "/admin/uploads",
+	Accept:  "image/*",
+	MaxSize: 5 << 20,
+})
+```
+
+- 选择文件后立即上传，显示进度、文件名和大小，图片显示缩略图，可以移除；上传期间表单不能提交。
+- `Accept` 只用于筛选文件选择框，`MaxSize` 让超过大小的文件在浏览器中直接提示。文件的真实类型和大小由确认时的 `Accept` 检查。
+- `Multiple` 允许选择多个文件，字段对应字符串切片。
+- 博客的表单是 htmx 表单，验证失败重新渲染时，字段保留浏览器中已上传的文件。编辑页要显示已有的封面，或者整页表单验证失败后要显示已上传的文件时，用 `Files` 传入文件信息：`upload.Files(ctx, files, f.Values("cover_id")...)`。
+
+保存时，`Update` action 在事务中确认封面，见[确认文件](filesystem.md#confirming-files)。确认失败（例如不是图片）时把错误放到字段旁：
+
+```go
+if errors.Is(err, filesystem.ErrNotAccepted) {
+    f.SetError("cover_id", httpx.ErrorDetail(r.Context(), err))
+    return web.Render(w, r, http.StatusUnprocessableEntity, views.ArticleForm(id, f))
+}
+```
+
+用户移除了文件时，表单不再提交它的 ID；更换封面时删除旧文件，见[替换文件](filesystem.md#replacing-files)。
