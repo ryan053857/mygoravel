@@ -35,13 +35,16 @@ var errMoved = errors.New("imports: progress changed by another run")
 //
 // 全部行处理完时导入变为 completed。文件无法读取、缺少必需的列等整个文件的问题使导入变为 failed，
 // Error 是错误码；队列的最后一次执行仍然出错时，导入同样变为 failed，Error 是 imports.failed，
-// 错误照常返回给队列。变为 completed 或 failed 时，在同一个事务中调用 done（可以为 nil），
-// 例如发送通知；事务提交后 done 不会再被调用。
+// 错误照常返回给队列。
+//
+// 每次保存进度（变为 running、每 100 行、结束）都在同一个事务中调用 saved（可以为 nil），imp 是保存后的导入。
+// 用 tx.AfterCommit 广播进度，供 SSE 推送给正在查看的用户；imp.Status 是 completed 或 failed 时导入已经结束，
+// 例如在这个事务中发送通知。结束的事务提交后 saved 不会再被调用，所以通知不会重复，也不会漏发。
 //
 // 导入不存在（例如已被 Cleanup 删除）或者已经结束时，Process 什么也不做，返回 nil。
 func Process[T any](ctx context.Context, s *Service, id uuid.UUID,
 	row func(ctx context.Context, imp *Import, rec *sheet.Record[T]) error,
-	done func(ctx context.Context, tx database.Tx, imp *Import) error,
+	saved func(ctx context.Context, tx database.Tx, imp *Import) error,
 ) error {
 	imp := new(Import)
 	err := s.db.NewSelect().Model(imp).Where("id = ?", id).Scan(ctx)
@@ -57,7 +60,7 @@ func Process[T any](ctx context.Context, s *Service, id uuid.UUID,
 	if s.languages != nil && imp.Locale != "" {
 		ctx = i18n.WithLocale(ctx, s.languages, imp.Locale)
 	}
-	p := &processor[T]{s: s, imp: imp, row: row, done: done, lastLine: imp.LastLine}
+	p := &processor[T]{s: s, imp: imp, row: row, saved: saved, lastLine: imp.LastLine}
 	err = p.run(ctx)
 	switch {
 	case err == nil:
@@ -84,7 +87,7 @@ type processor[T any] struct {
 	s        *Service
 	imp      *Import
 	row      func(ctx context.Context, imp *Import, rec *sheet.Record[T]) error
-	done     func(ctx context.Context, tx database.Tx, imp *Import) error
+	saved    func(ctx context.Context, tx database.Tx, imp *Import) error
 	pending  []Failure // 上次保存之后没有导入的行
 	lastLine int       // 处理到的行号，保存后写入 imp.LastLine
 	rows     int       // 上次保存之后处理的行数
@@ -172,18 +175,34 @@ func (p *processor[T]) begin(ctx context.Context) error {
 		return err
 	}
 	imp.Status, imp.UpdatedAt = StatusRunning, time.Now().UTC()
-	res, err := p.s.db.NewUpdate().Model(&imp).Column("status", "header", "total_rows", "updated_at").
-		WherePK().Where("status = ?", StatusPending).Exec(ctx)
-	if err := moved(res, err); err != nil {
+	err = database.RunInTx(ctx, p.s.db, nil, func(ctx context.Context, tx database.Tx) error {
+		res, err := tx.NewUpdate().Model(&imp).Column("status", "header", "total_rows", "updated_at").
+			WherePK().Where("status = ?", StatusPending).Exec(ctx)
+		if err := moved(res, err); err != nil {
+			return err
+		}
+		return p.callSaved(ctx, tx, &imp)
+	})
+	if err != nil {
 		return err
 	}
 	*p.imp = imp
 	return nil
 }
 
-// commit 保存进度：写入上次保存之后没有导入的行，更新计数。status 不是 running 时同时结束导入并调用 done；
+func (p *processor[T]) callSaved(ctx context.Context, tx database.Tx, imp *Import) error {
+	if p.saved == nil {
+		return nil
+	}
+	return p.saved(ctx, tx, imp)
+}
+
+// commit 保存进度：写入上次保存之后没有导入的行，更新计数，并调用 saved。status 不是 running 时同时结束导入；
 // cause 是 failed 的原因。进度已被另一次执行改变时返回 errMoved。
 func (p *processor[T]) commit(ctx context.Context, status Status, cause error) error {
+	if status == StatusRunning && p.rows == 0 {
+		return nil // 上次保存之后没有处理任何行
+	}
 	imp := *p.imp
 	imp.ProcessedRows += p.rows
 	imp.FailedRows += len(p.pending)
@@ -216,10 +235,7 @@ func (p *processor[T]) commit(ctx context.Context, status Status, cause error) e
 		if err := moved(res, err); err != nil {
 			return err
 		}
-		if status != StatusRunning && p.done != nil {
-			return p.done(ctx, tx, &imp)
-		}
-		return nil
+		return p.callSaved(ctx, tx, &imp)
 	})
 	if err != nil {
 		return err

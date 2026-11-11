@@ -369,7 +369,10 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
+    "github.com/ryan053857/mygoravel/broadcast"
     "github.com/ryan053857/mygoravel/database"
+    "github.com/ryan053857/mygoravel/httpx"
+    "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/identity"
     "github.com/ryan053857/mygoravel/imports"
     "github.com/ryan053857/mygoravel/notification"
@@ -383,12 +386,13 @@ var ImportJob = queue.Topic[uuid.UUID]("articles.import")
 // QueueImport 在后台导入文章。
 type QueueImport struct {
     db       *bun.DB
+    hub      *broadcast.Hub
     importer *imports.Service
     rows     *Import
 }
 
-func NewQueueImport(db *bun.DB, importer *imports.Service, rows *Import) *QueueImport {
-    return &QueueImport{db: db, importer: importer, rows: rows}
+func NewQueueImport(db *bun.DB, hub *broadcast.Hub, importer *imports.Service, rows *Import) *QueueImport {
+    return &QueueImport{db: db, hub: hub, importer: importer, rows: rows}
 }
 
 // Handle 登记 subject 上传的文件 fileID 的导入，并发布处理它的任务。
@@ -410,39 +414,50 @@ type QueueImportInput struct {
     }
 }
 
-// ImportStatusOutput 是导入的进度，ErrorMessage 是导入失败的原因。
-type ImportStatusOutput struct {
-    Body struct {
-        *imports.Import
-        ErrorMessage string `json:"error_message,omitempty"`
-    }
+// ImportProgress 是导入的进度，ErrorMessage 是导入失败的原因。
+type ImportProgress struct {
+    *imports.Import
+    ErrorMessage string `json:"error_message,omitempty"`
 }
 
-func importStatus(ctx context.Context, imp *imports.Import) *ImportStatusOutput {
-    out := &ImportStatusOutput{}
-    out.Body.Import, out.Body.ErrorMessage = imp, imp.ErrorMessage(ctx)
-    return out
+func progressOf(ctx context.Context, imp *imports.Import) ImportProgress {
+    return ImportProgress{Import: imp, ErrorMessage: imp.ErrorMessage(ctx)}
+}
+
+type ImportProgressOutput struct {
+    Body ImportProgress
 }
 
 // HTTP 处理 POST /articles/imports。
-func (a *QueueImport) HTTP(ctx context.Context, in *QueueImportInput) (*ImportStatusOutput, error) {
+func (a *QueueImport) HTTP(ctx context.Context, in *QueueImportInput) (*ImportProgressOutput, error) {
     subject, _ := identity.FromContext(ctx)
     imp, err := a.Handle(ctx, subject, in.Body.FileID)
     if err != nil {
         return nil, err
     }
-    return importStatus(ctx, imp), nil
+    return &ImportProgressOutput{Body: progressOf(ctx, imp)}, nil
 }
 
 // Job 处理后台导入的任务。
 func (a *QueueImport) Job(ctx context.Context, id uuid.UUID) error {
     return imports.Process(ctx, a.importer, id, func(ctx context.Context, imp *imports.Import, rec *sheet.Record[Changes]) error {
         return a.rows.row(ctx, imp.Owner(), rec)
-    }, a.notify)
+    }, a.saved)
 }
 
-// notify 在导入结束的事务中通知发起导入的人。
-func (a *QueueImport) notify(ctx context.Context, tx database.Tx, imp *imports.Import) error {
+// importTopic 是一次导入的广播主题。每次保存进度后发布一条空消息，提醒正在查看的连接重新读取进度。
+func importTopic(id uuid.UUID) string {
+    return "import:" + id.String()
+}
+
+// saved 在每次保存进度的事务中调用：提交后广播进度；导入结束时在同一个事务中通知发起导入的人。
+func (a *QueueImport) saved(ctx context.Context, tx database.Tx, imp *imports.Import) error {
+    tx.AfterCommit(func(ctx context.Context) error {
+        return a.hub.Publish(ctx, importTopic(imp.ID), nil)
+    })
+    if imp.Status == imports.StatusRunning {
+        return nil
+    }
     _, err := notification.Send(ctx, tx, notification.Notification{
         Event: "articles.imported",
         Data: map[string]any{
@@ -457,14 +472,37 @@ type ImportIDInput struct {
     ID uuid.UUID `path:"id"`
 }
 
-// Status 处理 GET /articles/imports/{id}，前端轮询它显示进度。
-func (a *QueueImport) Status(ctx context.Context, in *ImportIDInput) (*ImportStatusOutput, error) {
+// Progress 处理 GET /articles/imports/{id}/progress：连接后先推送当前进度，之后每次保存进度时推送一次，
+// 导入结束后关闭连接。
+func (a *QueueImport) Progress(ctx context.Context, in *ImportIDInput) (*huma.StreamResponse, error) {
     subject, _ := identity.FromContext(ctx)
-    imp, err := a.importer.Get(ctx, subject, in.ID)
-    if err != nil {
-        return nil, err
+    if _, err := a.importer.Get(ctx, subject, in.ID); err != nil {
+        return nil, err // 还没有开始推送，客户端照常收到 404
     }
-    return importStatus(ctx, imp), nil
+    return rest.SSE(func(s *httpx.Stream) error {
+        events := a.hub.Subscribe(importTopic(in.ID)) // 先订阅，再查询，中间保存的进度不会漏掉
+        defer events.Close()
+        for {
+            imp, err := a.importer.Get(s.Context(), subject, in.ID)
+            if err != nil {
+                return err
+            }
+            if err := s.SendJSON(httpx.Event{Name: "progress"}, progressOf(s.Context(), imp)); err != nil {
+                return nil // 客户端已经离开
+            }
+            if imp.Status == imports.StatusCompleted || imp.Status == imports.StatusFailed {
+                return nil
+            }
+            select {
+            case <-s.Done():
+                return nil
+            case _, ok := <-events.C():
+                if !ok {
+                    return nil // 订阅已结束，客户端重连后先收到当前进度
+                }
+            }
+        }
+    }), nil
 }
 
 type ImportFailuresInput struct {
@@ -493,7 +531,7 @@ func (a *QueueImport) Failures(ctx context.Context, in *ImportFailuresInput) (*h
 worker 注册任务，见[启动 worker](queue.md#running-workers)：
 
 ```go
-article.ImportJob.Handle(router, sub, article.NewQueueImport(a.db, a.importer, article.NewImport(article.NewCreate(a.db))).Job)
+article.ImportJob.Handle(router, sub, article.NewQueueImport(a.db, a.hub, a.importer, article.NewImport(article.NewCreate(a.db))).Job)
 ```
 
 `imports.Process` 第一次执行时检查表头、统计行数，导入变为 `running`；然后逐行解码，验证通过的行交给回调。回调与同步导入共用 `row`，发起人由 `imp.Owner()` 得到，它只有 ID、类型和租户；`Create` 需要检查权限时，按 ID 重新加载权限；多租户应用中 `Owner` 已经带着租户，见[队列任务](tenancy.md#tenant-jobs)。
@@ -508,7 +546,7 @@ article.ImportJob.Handle(router, sub, article.NewQueueImport(a.db, a.importer, a
 
 验证提示和错误的译文使用登记导入时请求的语言。缺少必需的列、文件损坏等整个文件的问题，导入直接变为 `failed`，`Error` 是错误码；队列的最后一次重试仍然出错时，导入同样变为 `failed`。
 
-导入变为 `completed` 或 `failed` 时，`Process` 在同一个事务中调用 `notify`，所以通知和状态一起提交，不会重复发送，也不会漏发。`notification.Send` 的用法见[通知](notifications.md)。
+`Process` 每次保存进度时都在同一个事务中调用 `saved`：导入变为 `running` 时一次，之后每 100 行一次，结束时再一次。`saved` 用 [AfterCommit](database.md#after-commit) 在提交之后发布广播，提醒正在查看进度的连接，见[进度与失败的行](#progress-and-failures)。导入变为 `completed` 或 `failed` 时，`saved` 在这个事务中发送通知，通知和状态一起提交，不会重复发送，也不会漏发。`notification.Send` 的用法见[通知](notifications.md)。
 
 > [!WARNING]
 > 进度每 100 行保存一次。worker 在两次保存之间崩溃时，这些行会在重试时再次交给回调，所以回调要能重复执行。博客的 `row` 遇到已被占用的 slug 会把这一行记为失败，不会重复创建文章；没有唯一字段的数据，可以先按业务字段查找，存在时更新。
@@ -516,10 +554,10 @@ article.ImportJob.Handle(router, sub, article.NewQueueImport(a.db, a.importer, a
 <a id="progress-and-failures"></a>
 ### 进度与失败的行
 
-在 `routes.go` 中注册路由：
+在 `routes.go` 中注册路由。`Progress` 用 [`rest.RegisterSSE`](sse.md#json-api) 注册，事件表描述推送的数据：
 
 ```go
-queueImport := NewQueueImport(db, importer, NewImport(NewCreate(db)))
+queueImport := NewQueueImport(db, hub, importer, NewImport(NewCreate(db)))
 
 start := huma.Operation{
     OperationID:   "article-import-start",
@@ -530,25 +568,29 @@ start := huma.Operation{
 }
 requireArticles(&start)
 rest.Register(api, start, queueImport.HTTP)
-```
 
-`Status` 和 `Failures` 的注册方式相同。`GET /articles/imports/{id}` 返回的进度类似：
-
-```json
-{
-  "id": "0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10",
-  "kind": "articles",
-  "filename": "articles.xlsx",
-  "status": "running",
-  "total_rows": 52000,
-  "processed_rows": 18300,
-  "failed_rows": 12,
-  "created_at": "2026-11-11T08:00:00Z",
-  "updated_at": "2026-11-11T08:00:41Z"
+progress := huma.Operation{
+    OperationID: "article-import-progress",
+    Method:      http.MethodGet,
+    Path:        "/articles/imports/{id}/progress",
+    Summary:     "导入进度",
 }
+requireArticles(&progress)
+rest.RegisterSSE(api, progress, map[string]any{"progress": ImportProgress{}}, queueImport.Progress)
 ```
 
-前端每隔几秒查询一次，用 `processed_rows / total_rows` 显示进度条；也可以在 `notify` 中用[广播](broadcasting.md)推送结束的消息。`Get` 只返回当前主体发起的导入，其他人的导入返回 `imports.ErrNotFound`。
+`Failures` 的注册方式与 `start` 相同。连接 `GET /articles/imports/{id}/progress` 后，每次保存进度都会收到一个 `progress` 事件：
+
+```text
+event: progress
+data: {"id":"0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10","kind":"articles","filename":"articles.xlsx","status":"running","total_rows":52000,"processed_rows":18300,"failed_rows":12,"created_at":"2026-11-11T08:00:00Z","updated_at":"2026-11-11T08:00:41Z"}
+```
+
+前端用 `processed_rows / total_rows` 显示进度条，收到 `completed` 或 `failed` 后连接关闭，再显示结果和下载失败行的链接。
+
+进度是状态而不是事件：广播只提醒连接重新读取，连接（包括断线重连）时先推送一次当前进度，所以中间漏掉的广播没有影响，也不需要按 `Last-Event-ID` 补发，与[通知角标](notifications.md#realtime)的做法相同。worker 和 SSE 连接在不同的实例上时，广播由 Hub 的后端送达，见[广播](broadcasting.md)。每次读取都经过 `Get`，只有发起导入的人能看到进度，其他人收到 `imports.ErrNotFound`。
+
+浏览器的 `EventSource` 不能设置 `Authorization` 请求头，使用 Bearer 令牌的前端用 `fetch` 读取事件流，见 [JSON API](sse.md#json-api)。
 
 `WriteFailures` 写出的表格是原来的表头加上一列“错误”，每一行是原始单元格和这一行的错误，例如 `标题: 不能为空`。用户在这个文件里改正后可以直接重新导入，多出的错误列会被忽略。需要在页面上直接显示失败的行时，用 `Failures` 读取前几行。
 

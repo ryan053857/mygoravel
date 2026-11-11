@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -116,11 +117,11 @@ func (e env) get(t *testing.T, owner identity.Subject, id uuid.UUID) *imports.Im
 	return imp
 }
 
-// recorder 记录每一行被处理的次数和 done 的调用。
+// recorder 记录每一行被处理的次数，以及每次保存进度时 saved 收到的导入。
 type recorder struct {
 	mu    sync.Mutex
 	seen  map[int]int
-	done  []imports.Import
+	saves []imports.Import
 	fail  func(line int) error
 	slugs map[string]bool
 }
@@ -150,11 +151,22 @@ func (r *recorder) row(_ context.Context, imp *imports.Import, rec *sheet.Record
 	return nil
 }
 
-func (r *recorder) finish(_ context.Context, tx database.Tx, imp *imports.Import) error {
+func (r *recorder) saved(_ context.Context, tx database.Tx, imp *imports.Import) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.done = append(r.done, *imp)
+	r.saves = append(r.saves, *imp)
 	return nil
+}
+
+// progress 返回每次保存时的状态和已处理的行数，例如 running:100。
+func (r *recorder) progress() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list := make([]string, len(r.saves))
+	for i, imp := range r.saves {
+		list[i] = fmt.Sprintf("%s:%d", imp.Status, imp.ProcessedRows)
+	}
+	return list
 }
 
 func csv(lines int) string {
@@ -192,7 +204,7 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 			}
 			return nil
 		}
-		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.finish); !errors.Is(err, boom) {
+		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.saved); !errors.Is(err, boom) {
 			t.Fatalf("first run: %v", err)
 		}
 		got := e.get(t, alice, imp.ID)
@@ -201,7 +213,7 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 		}
 
 		rec.fail = nil
-		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.finish); err != nil {
+		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.saved); err != nil {
 			t.Fatal(err)
 		}
 		got = e.get(t, alice, imp.ID)
@@ -217,13 +229,18 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 				t.Fatalf("line %d handled %d times", line, rec.seen[line])
 			}
 		}
-		if len(rec.done) != 1 || rec.done[0].Status != imports.StatusCompleted || rec.done[0].ProcessedRows != 250 {
-			t.Fatalf("done: %+v", rec.done)
+		// 开始、每 100 行、出错前、结束各保存一次，每次都调用 saved。
+		want := []string{"running:0", "running:100", "running:148", "running:248", "completed:250"}
+		if got := rec.progress(); !slices.Equal(got, want) {
+			t.Fatalf("saves: %v", got)
+		}
+		if rec.saves[0].TotalRows != 250 || rec.saves[4].FailedRows != 3 {
+			t.Fatalf("saves: %+v", rec.saves)
 		}
 
 		// 已经结束的导入再处理一次什么也不做。
-		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.finish); err != nil || len(rec.done) != 1 {
-			t.Fatalf("again: %v %d", err, len(rec.done))
+		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.saved); err != nil || len(rec.saves) != 5 {
+			t.Fatalf("again: %v %d", err, len(rec.saves))
 		}
 
 		failures, err := e.imports.Failures(ctx, got, 10)
@@ -233,9 +250,9 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 		if len(failures) != 3 {
 			t.Fatalf("failures: %+v", failures)
 		}
-		want := []string{"标题: 不能为空", "已被占用", "Slug: 重复"}
+		messages := []string{"标题: 不能为空", "已被占用", "Slug: 重复"}
 		for i, f := range failures {
-			if f.Message != want[i] {
+			if f.Message != messages[i] {
 				t.Fatalf("failure %d: %+v", i, f)
 			}
 		}
@@ -265,7 +282,7 @@ func TestProcessRejectsFile(t *testing.T) {
 		e := newEnv(t, driver)
 		imp := e.start(t, alice, "articles.csv", "备注\nx\n")
 		rec := newRecorder()
-		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.finish); err != nil {
+		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.saved); err != nil {
 			t.Fatal(err)
 		}
 		got := e.get(t, alice, imp.ID)
@@ -273,8 +290,8 @@ func TestProcessRejectsFile(t *testing.T) {
 		if got.Status != imports.StatusFailed || got.Error != "sheet.missing_columns" || got.ErrorMessage(zh) != "缺少必需的列：标题、Slug" {
 			t.Fatalf("failed: %+v %q", got, got.ErrorMessage(zh))
 		}
-		if len(rec.done) != 1 || rec.done[0].Status != imports.StatusFailed {
-			t.Fatalf("done: %+v", rec.done)
+		if got := rec.progress(); !slices.Equal(got, []string{"failed:0"}) {
+			t.Fatalf("saves: %v", got)
 		}
 	})
 }
@@ -316,7 +333,7 @@ func TestFinalAttemptFailsImport(t *testing.T) {
 		r := queue.NewRouter(logger)
 		sub := queue.NewSubscriber(queue.Database(e.db), cfg, logger)
 		topic.Handle(r, sub, func(ctx context.Context, id uuid.UUID) error {
-			return imports.Process(ctx, e.imports, id, rec.row, rec.finish)
+			return imports.Process(ctx, e.imports, id, rec.row, rec.saved)
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		stopped := make(chan error, 1)
@@ -345,10 +362,8 @@ func TestFinalAttemptFailsImport(t *testing.T) {
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		rec.mu.Lock()
-		defer rec.mu.Unlock()
-		if len(rec.done) != 1 || rec.done[0].Status != imports.StatusFailed {
-			t.Fatalf("done: %+v", rec.done)
+		if got := rec.progress(); !slices.Equal(got, []string{"running:0", "failed:0"}) {
+			t.Fatalf("saves: %v", got)
 		}
 	})
 }
