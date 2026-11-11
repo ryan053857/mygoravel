@@ -23,7 +23,11 @@ type Record[T any] struct {
 	Values []string
 	// Errors 以字段名（json 标签）为键，是验证失败的提示；全部有效时为 nil。
 	Errors map[string]string
+	labels []label // 有对应字段的列，按表头的顺序
 }
+
+// label 是一个字段在表格中的列名。
+type label struct{ field, header string }
 
 // Valid 报告这一行没有任何字段错误。
 func (r *Record[T]) Valid() bool { return len(r.Errors) == 0 }
@@ -34,6 +38,34 @@ func (r *Record[T]) SetError(field, message string) {
 		r.Errors = map[string]string{}
 	}
 	r.Errors[field] = message
+}
+
+// Message 把 Errors 合成一段文本，按列的顺序用表格中的列名指出字段，例如 "标题: 不能为空; Slug: 格式不正确"。
+// 不对应任何列的字段用字段名，字段名为空的错误只写提示。没有错误时返回空字符串。
+func (r *Record[T]) Message() string {
+	parts := make([]string, 0, len(r.Errors))
+	seen := make(map[string]bool, len(r.Errors))
+	for _, l := range r.labels {
+		if msg, ok := r.Errors[l.field]; ok && !seen[l.field] {
+			parts = append(parts, l.header+": "+msg)
+			seen[l.field] = true
+		}
+	}
+	rest := make([]string, 0, len(r.Errors))
+	for field := range r.Errors {
+		if !seen[field] {
+			rest = append(rest, field)
+		}
+	}
+	slices.Sort(rest)
+	for _, field := range rest {
+		if field == "" {
+			parts = append(parts, r.Errors[field])
+		} else {
+			parts = append(parts, field+": "+r.Errors[field])
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Decode 按 T 的字段找到各自的列，返回逐行解码并验证的迭代器。
@@ -68,6 +100,12 @@ func Decode[T any](ctx context.Context, r *Reader) (iter.Seq2[Record[T], error],
 	if len(missing) > 0 {
 		return nil, ErrMissingColumns.New(errorx.Public("columns", strings.Join(missing, "、")))
 	}
+	var labels []label
+	for i, j := range columns {
+		if j >= 0 {
+			labels = append(labels, label{fs[j].name, r.header[i]})
+		}
+	}
 
 	return func(yield func(Record[T], error) bool) {
 		for row, err := range r.Rows() {
@@ -92,7 +130,7 @@ func Decode[T any](ctx context.Context, r *Reader) (iter.Seq2[Record[T], error],
 				}
 			}
 			data, errs := form.Decode[T](ctx, values)
-			if !yield(Record[T]{Line: row.Line, Data: data, Values: row.Values, Errors: errs}, nil) {
+			if !yield(Record[T]{Line: row.Line, Data: data, Values: row.Values, Errors: errs, labels: labels}, nil) {
 				return
 			}
 		}

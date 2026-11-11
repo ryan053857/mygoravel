@@ -186,6 +186,18 @@ func TestDecode(t *testing.T) {
 		t.Fatalf("invalid record: %+v", bad)
 	}
 
+	if msg := bad.Message(); msg != "文章标题: 不能为空; SLUG: 必须是小写字母、数字或连字符; 优先级: 不能大于 10; 标签: 最多选择 3 项" {
+		t.Fatalf("message: %q", msg)
+	}
+	bad.SetError("", "整行无效")
+	bad.SetError("other", "x")
+	if msg := bad.Message(); !strings.HasSuffix(msg, "; 整行无效; other: x") {
+		t.Fatalf("message: %q", msg)
+	}
+	if ok.Message() != "" {
+		t.Fatalf("valid message: %q", ok.Message())
+	}
+
 	ok.SetError("slug", "已被占用")
 	if ok.Valid() || ok.Errors["slug"] != "已被占用" {
 		t.Fatalf("set error: %+v", ok.Errors)

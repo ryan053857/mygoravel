@@ -12,6 +12,9 @@ authz.role_not_found: Role not found
 authz.role_exists: A role with this name already exists
 authz.invalid: Invalid input
 notification.not_found: Notification not found
+imports.not_found: Import not found
+imports.failed: The import was interrupted, please import again
+imports.errors_column: Errors
 sheet.unsupported_format: Only CSV and XLSX files are supported
 sheet.bad_file: The spreadsheet could not be read
 sheet.no_header: The spreadsheet has no header row

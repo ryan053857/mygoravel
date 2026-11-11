@@ -174,6 +174,7 @@ schedule:
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
 | [操作日志](activity.md#retention) | `activity.Cleanup(db, 保留期)` | 每天 |
 | [通知](notifications.md#retention) | `notification.Cleanup(db, 保留期)` | 每天 |
+| [导入](import-export.md#cleanup) | `imports.New(...)` 的 `Cleanup(保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(ctx, before, limit)` | 每天 |
 
 使用 Redis 存储时过期的数据由 Redis 自动删除，不需要注册清理任务。
