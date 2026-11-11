@@ -15,7 +15,7 @@ import (
 // 命令因此以 command.ExitUnavailable 退出，部署脚本可以据此重试。
 var ErrUnavailable = errorx.Define(errorx.Unavailable, "database.unavailable")
 
-// Driver 是一种数据库的驱动，由子包 database/postgres 和 database/sqlite 提供。
+// Driver 是一种数据库的驱动，由子包 database/postgres、database/mysql 和 database/sqlite 提供。
 // 应用只链接自己 import 的驱动；迁移是按数据库写的，因此数据库类型在代码中选定，而不是在配置中。
 type Driver interface {
 	// Name 是数据库类型，也是框架迁移的目录名，例如 "postgres"、"sqlite"。

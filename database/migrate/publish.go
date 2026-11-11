@@ -21,7 +21,7 @@ const sourceMarker = "-- mygoravel: "
 
 var sourceName = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
-// Source 是一个迁移来源。Name 是稳定标识；FS 根目录下按数据库类型分目录（postgres、sqlite），
+// Source 是一个迁移来源。Name 是稳定标识；FS 根目录下按数据库类型分目录（postgres、mysql、sqlite），
 // 每个目录直接包含带数字版本前缀的 SQL，例如 postgres/0001_create_files.sql。
 // 各数据库的同名文件描述同一次变更，因此共用一个来源标记。已发布的源文件不改名，升级只追加更高版本。
 type Source struct {
