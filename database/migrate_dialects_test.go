@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"io/fs"
 	"sync"
 	"testing"
 	"testing/fstest"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -169,15 +169,15 @@ func TestTxRollbackUniqueAndCancel(t *testing.T) {
 			t.Fatalf("rolled back row visible: n=%d err=%v", n, err)
 		}
 
-		cctx, cancel := context.WithTimeout(ctx, time.Millisecond)
-		defer cancel()
-		time.Sleep(2 * time.Millisecond)
+		// 事先取消的 ctx：超时的 ctx 要等计时器关闭 Done，机器繁忙时事务可能照常执行。
+		cctx, cancel := context.WithCancel(ctx)
+		cancel()
 		err = db.RunInTx(cctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
 			_, err := tx.NewInsert().Model(&item{ID: uuid.Must(uuid.NewV7()), Name: "d", SKU: "s3"}).Exec(ctx)
 			return err
 		})
-		if err == nil {
-			t.Fatal("expected cancel error")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected cancel error, got %v", err)
 		}
 	})
 }
