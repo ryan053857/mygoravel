@@ -1,0 +1,115 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/ryan053857/mygoravel/poc/ui/components"
+	"github.com/ryan053857/mygoravel/poc/ui/components/button"
+	"github.com/ryan053857/mygoravel/poc/ui/components/icon"
+	"github.com/ryan053857/mygoravel/poc/ui/components/toast"
+	"github.com/ryan053857/mygoravel/poc/ui/static"
+	"github.com/ryan053857/mygoravel/web"
+)
+
+// Base 是所有页面的 HTML 骨架。flashes 是会话中待显示的提示（app.Flashes）。
+templ Base(title string, flashes templ.Component) {
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			// 在首次绘制前决定暗色模式，避免闪烁。
+			<script>
+				(function () {
+					var t = null;
+					try { t = localStorage.getItem("theme"); } catch (e) {}
+					if (t === "dark" || (!t && matchMedia("(prefers-color-scheme: dark)").matches)) {
+						document.documentElement.classList.add("dark");
+					}
+				})();
+			</script>
+			<link rel="stylesheet" href={ static.URL(ctx, "css/app.css") }/>
+			@web.Scripts()
+			@components.Scripts()
+		</head>
+		<body class="min-h-screen bg-background text-foreground antialiased">
+			<div id="flash"></div>
+			{ children... }
+			@toast.Toaster()
+			<div id="toasts" hidden>
+				if flashes != nil {
+					@flashes
+				}
+			</div>
+			<script>
+				// 服务端通过 HX-Trigger: {"dialog:close": {"id": "..."}} 关闭对话框。
+				document.addEventListener("dialog:close", function (e) {
+					window.templ.dialog.close(e.detail.id);
+				});
+				// templ 会拦截字符串形式的 onclick，这里用事件委托。
+				document.addEventListener("click", function (e) {
+					if (!e.target.closest("[data-theme-toggle]")) return;
+					var dark = document.documentElement.classList.toggle("dark");
+					try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch (e) {}
+				});
+			</script>
+		</body>
+	</html>
+}
+
+templ ThemeToggle() {
+	@button.Button(button.Props{
+		ID:         "theme-toggle",
+		Variant:    button.VariantGhost,
+		Size:       button.SizeIcon,
+		Attributes: templ.Attributes{"data-theme-toggle": true, "aria-label": "切换暗色模式"},
+	}) {
+		@icon.Sun(icon.Props{Class: "dark:hidden"})
+		@icon.Moon(icon.Props{Class: "hidden dark:block"})
+	}
+}
+
+// AdminShell 是后台页面的外壳：侧边导航 + 主区域。
+templ AdminShell(title string, flashes templ.Component) {
+	@Base(title+" · 后台", flashes) {
+		<div class="flex min-h-screen">
+			<aside class="hidden w-56 shrink-0 border-r bg-sidebar p-4 text-sidebar-foreground md:block">
+				<a href="/" class="mb-6 flex items-center gap-2 font-semibold">
+					@icon.Zap(icon.Props{Class: "size-5 text-brand-500"})
+					Lumen
+				</a>
+				<nav class="grid gap-1 text-sm">
+					<a href="/admin/articles" class="rounded-md bg-sidebar-accent px-3 py-2 font-medium text-sidebar-accent-foreground">文章</a>
+					<a href="/admin/articles?status=draft" class="rounded-md px-3 py-2 hover:bg-sidebar-accent">草稿</a>
+				</nav>
+			</aside>
+			<main id="main" class="min-w-0 flex-1 p-6 md:p-10">
+				<div class="mb-6 flex items-center justify-between gap-4">
+					<h1 class="text-2xl font-semibold tracking-tight">{ title }</h1>
+					<div class="flex items-center gap-2">
+						@ThemeToggle()
+					</div>
+				</div>
+				{ children... }
+			</main>
+		</div>
+	}
+}
+
+templ ErrorPage(status int, message string) {
+	@Base(message, nil) {
+		<main class="grid min-h-screen place-items-center p-6">
+			<div class="text-center">
+				<p id="error-status" class="text-6xl font-bold text-muted-foreground">{ strconv.Itoa(status) }</p>
+				<p id="error-message" class="mt-4 text-lg">{ message }</p>
+				<a href="/" class="mt-6 inline-block text-sm underline">回到首页</a>
+			</div>
+		</main>
+	}
+}
+
+// ErrorFragment 把局部请求的错误显示为 toast：替换进 #flash 后由 toast.js 接管。
+templ ErrorFragment(status int, message string) {
+	@toast.Toast(toast.Props{Title: message, Type: toast.TypeError})
+}

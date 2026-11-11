@@ -1,0 +1,148 @@
+package views
+
+import (
+	"github.com/ryan053857/mygoravel/poc/ui/components/button"
+	"github.com/ryan053857/mygoravel/poc/ui/components/field"
+	"github.com/ryan053857/mygoravel/poc/ui/components/icon"
+	"github.com/ryan053857/mygoravel/poc/ui/components/input"
+	"github.com/ryan053857/mygoravel/web"
+)
+
+// Subscribe 是落地页的订阅表单。
+type Subscribe struct {
+	Email string `json:"email" format:"email"`
+}
+
+// Landing 是面向用户、强调设计感的页面：只用设计令牌和 Tailwind 工具类，组件只借用按钮和输入框。
+templ Landing(yearly bool, f *web.Form[Subscribe], flashes templ.Component) {
+	@Base("Lumen — 写作者的发布平台", flashes) {
+		<div class="relative isolate overflow-hidden">
+			// 背景光晕：纯 CSS，颜色取自品牌令牌，暗色模式自动切换。
+			<div aria-hidden="true" class="pointer-events-none absolute inset-x-0 -top-40 -z-10 flex justify-center blur-3xl">
+				<div class="aspect-[1155/678] w-[72rem] bg-gradient-to-tr from-brand-300 via-brand-500 to-fuchsia-400 opacity-30 [clip-path:polygon(74%_44%,100%_61%,97%_26%,85%_0%,80%_2%,72%_32%,60%_62%,52%_68%,47%_58%,45%_34%,27%_76%,0%_64%,17%_100%,27%_76%,76%_97%,74%_44%)] dark:opacity-20"></div>
+			</div>
+			<header class="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
+				<a href="/" class="flex items-center gap-2 font-display text-xl font-semibold">
+					@icon.Zap(icon.Props{Class: "size-6 text-brand-500"})
+					Lumen
+				</a>
+				<nav class="flex items-center gap-2 text-sm">
+					<a href="#pricing" class="hidden px-3 py-2 text-muted-foreground hover:text-foreground sm:block">价格</a>
+					<a href="/admin/articles" class="hidden px-3 py-2 text-muted-foreground hover:text-foreground sm:block">后台</a>
+					@ThemeToggle()
+				</nav>
+			</header>
+			<section class="mx-auto max-w-4xl px-6 pt-16 pb-24 text-center sm:pt-28">
+				<p class="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-medium text-brand-700 dark:text-brand-300">
+					@icon.Sparkles(icon.Props{Class: "size-3.5"})
+					全新的写作体验
+				</p>
+				<h1 class="font-display text-5xl leading-[1.05] font-semibold tracking-tight text-balance sm:text-7xl">
+					把想法变成
+					<span class="bg-gradient-to-r from-brand-500 to-fuchsia-500 bg-clip-text text-transparent">值得一读</span>
+					的文章
+				</h1>
+				<p class="mx-auto mt-6 max-w-xl text-lg text-pretty text-muted-foreground">
+					Lumen 帮你写作、排版、发布和衡量影响力。没有广告，没有算法，只有你和读者。
+				</p>
+				<div class="mt-10 flex justify-center gap-3">
+					@button.Button(button.Props{Size: button.SizeLg, Href: "#subscribe", Class: "bg-brand-600 text-white hover:bg-brand-700 rounded-full px-6"}) {
+						免费开始
+						@icon.ArrowRight()
+					}
+					@button.Button(button.Props{Size: button.SizeLg, Variant: button.VariantOutline, Href: "/admin/articles", Class: "rounded-full px-6"}) {
+						查看后台演示
+					}
+				</div>
+			</section>
+		</div>
+		<section class="mx-auto grid max-w-6xl gap-6 px-6 pb-24 sm:grid-cols-3">
+			@feature(icon.Gauge(icon.Props{Class: "size-5"}), "极速", "服务端渲染，首屏即内容。")
+			@feature(icon.ShieldCheck(icon.Props{Class: "size-5"}), "可靠", "数据属于你，随时导出。")
+			@feature(icon.Sparkles(icon.Props{Class: "size-5"}), "好看", "排版由设计师打磨，暗色模式开箱即用。")
+		</section>
+		<section id="pricing" class="mx-auto max-w-6xl px-6 pb-24">
+			<h2 class="text-center font-display text-3xl font-semibold tracking-tight">简单透明的价格</h2>
+			@Pricing(yearly)
+		</section>
+		<section id="subscribe" class="mx-auto max-w-xl px-6 pb-32">
+			<div class="rounded-3xl border bg-card p-8 shadow-sm">
+				<h2 class="font-display text-2xl font-semibold">订阅更新</h2>
+				<p class="mt-2 text-sm text-muted-foreground">每月一封，介绍新功能。</p>
+				// 普通表单提交（没有 htmx）：验证失败返回 422 整页，成功后 303 跳回并显示提示。
+				<form id="subscribe-form" method="post" action="/subscribe" class="mt-6 flex items-start gap-3" novalidate>
+					@field.Field(field.Props{Class: "flex-1", Attributes: invalid(f.Error("email"))}) {
+						@input.Input(input.Props{ID: "email", Name: "email", Type: "email", Value: f.Value("email"), Placeholder: "you@example.com", Attributes: ariaInvalid(f.Error("email"))})
+						if msg := f.Error("email"); msg != "" {
+							@field.Error(field.ErrorProps{ID: "email-error"}) {
+								{ msg }
+							}
+						}
+					}
+					@button.Button(button.Props{ID: "subscribe-submit", Type: button.TypeSubmit, Class: "bg-brand-600 text-white hover:bg-brand-700"}) {
+						订阅
+					}
+				</form>
+			</div>
+		</section>
+	}
+}
+
+templ feature(ic templ.Component, title, body string) {
+	<div class="rounded-2xl border bg-card/60 p-6 backdrop-blur transition hover:-translate-y-0.5 hover:shadow-md">
+		<div class="mb-4 inline-flex size-10 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600 dark:text-brand-300">
+			@ic
+		</div>
+		<h3 class="font-semibold">{ title }</h3>
+		<p class="mt-1 text-sm text-muted-foreground">{ body }</p>
+	</div>
+}
+
+// Pricing 是可以单独刷新的价格区域：切换月付/年付时整块替换，并用 View Transitions 过渡。
+templ Pricing(yearly bool) {
+	<div id="pricing-plans" class="mt-10" style="view-transition-name: pricing">
+		<div class="mb-8 flex justify-center">
+			<div class="inline-flex rounded-full border p-1 text-sm">
+				@periodTab("月付", "/pricing?period=monthly", !yearly)
+				@periodTab("年付（省 20%）", "/pricing?period=yearly", yearly)
+			</div>
+		</div>
+		<div class="grid gap-6 sm:grid-cols-2">
+			@plan("个人", "0", "永久免费", false)
+			if yearly {
+				@plan("专业", "¥ 38", "每月，按年付", true)
+			} else {
+				@plan("专业", "¥ 48", "每月", true)
+			}
+		</div>
+	</div>
+}
+
+templ periodTab(label, href string, active bool) {
+	<button
+		type="button"
+		hx-get={ href }
+		hx-target="#pricing-plans"
+		hx-swap="outerHTML transition:true"
+		class={ "rounded-full px-4 py-1.5 transition", templ.KV("bg-foreground text-background", active), templ.KV("text-muted-foreground", !active) }
+		data-active?={ active }
+	>{ label }</button>
+}
+
+templ plan(name, price, note string, featured bool) {
+	<div class={ "rounded-3xl border p-8", templ.KV("border-brand-500 ring-2 ring-brand-500/20", featured) }>
+		<h3 class="font-semibold">{ name }</h3>
+		<p class="mt-4"><span class="plan-price font-display text-4xl font-semibold">{ price }</span></p>
+		<p class="text-sm text-muted-foreground">{ note }</p>
+		<ul class="mt-6 grid gap-2 text-sm">
+			<li class="flex items-center gap-2">
+				@icon.Check(icon.Props{Class: "size-4 text-brand-500"})
+				无限文章
+			</li>
+			<li class="flex items-center gap-2">
+				@icon.Check(icon.Props{Class: "size-4 text-brand-500"})
+				自定义域名
+			</li>
+		</ul>
+	</div>
+}

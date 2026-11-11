@@ -1,0 +1,431 @@
+package views
+
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+
+	"github.com/ryan053857/mygoravel/poc/ui/app/article"
+	"github.com/ryan053857/mygoravel/poc/ui/components/alertdialog"
+	"github.com/ryan053857/mygoravel/poc/ui/components/badge"
+	"github.com/ryan053857/mygoravel/poc/ui/components/button"
+	"github.com/ryan053857/mygoravel/poc/ui/components/dialog"
+	"github.com/ryan053857/mygoravel/poc/ui/components/dropdownmenu"
+	"github.com/ryan053857/mygoravel/poc/ui/components/empty"
+	"github.com/ryan053857/mygoravel/poc/ui/components/field"
+	"github.com/ryan053857/mygoravel/poc/ui/components/icon"
+	"github.com/ryan053857/mygoravel/poc/ui/components/input"
+	"github.com/ryan053857/mygoravel/poc/ui/components/nativeselect"
+	"github.com/ryan053857/mygoravel/poc/ui/components/pagination"
+	"github.com/ryan053857/mygoravel/poc/ui/components/table"
+	"github.com/ryan053857/mygoravel/web"
+)
+
+// ListState 是列表的筛选、排序与分页状态，用来生成链接。
+type ListState struct {
+	Q       string
+	Status  string
+	Sort    string
+	Page    int
+	PerPage int
+	Total   int
+}
+
+func (s ListState) Pages() int { return max(1, (s.Total+s.PerPage-1)/s.PerPage) }
+
+// URL 返回在当前状态上修改部分参数后的列表地址。
+func (s ListState) URL(change func(*ListState)) string {
+	n := s
+	change(&n)
+	v := url.Values{}
+	if n.Q != "" {
+		v.Set("q", n.Q)
+	}
+	if n.Status != "" {
+		v.Set("status", n.Status)
+	}
+	if n.Sort != "" {
+		v.Set("sort", n.Sort)
+	}
+	if n.Page > 1 {
+		v.Set("page", strconv.Itoa(n.Page))
+	}
+	if len(v) == 0 {
+		return "/admin/articles"
+	}
+	return "/admin/articles?" + v.Encode()
+}
+
+func (s ListState) current() string { return s.URL(func(*ListState) {}) }
+
+var statusLabels = map[string]string{"draft": "草稿", "published": "已发布", "archived": "已归档"}
+
+func statusVariant(s string) badge.Variant {
+	switch s {
+	case "published":
+		return badge.VariantDefault
+	case "draft":
+		return badge.VariantSecondary
+	default:
+		return badge.VariantOutline
+	}
+}
+
+templ ArticlesPage(s ListState, rows []article.Article, flashes templ.Component) {
+	@AdminShell("文章", flashes) {
+		<div class="mb-4 flex flex-wrap items-center gap-3">
+			<form
+				id="filters"
+				class="flex min-w-0 flex-1 basis-full flex-wrap items-center gap-3 sm:basis-0"
+				hx-get="/admin/articles"
+				hx-target="#articles"
+				hx-swap="outerHTML"
+				hx-push-url="true"
+				hx-trigger="input delay:300ms from:#q, change from:#status"
+			>
+				<div class="relative w-full max-w-xs">
+					@icon.Search(icon.Props{Class: "absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"})
+					@input.Input(input.Props{ID: "q", Name: "q", Value: s.Q, Placeholder: "搜索标题或 slug", Type: "search", Class: "pl-8"})
+				</div>
+				@nativeselect.NativeSelect(nativeselect.Props{ID: "status", Name: "status"}) {
+					@nativeselect.Option(nativeselect.OptionProps{Value: "", Selected: s.Status == ""}) {
+						全部状态
+					}
+					for _, st := range []string{"draft", "published", "archived"} {
+						@nativeselect.Option(nativeselect.OptionProps{Value: st, Selected: s.Status == st}) {
+							{ statusLabels[st] }
+						}
+					}
+				}
+				@SortInput(s)
+			</form>
+			@button.Button(button.Props{
+				ID:         "new-article",
+				Attributes: templ.Attributes{"hx-get": "/admin/articles/new", "hx-target": "#modal"},
+			}) {
+				@icon.Plus()
+				新建文章
+			}
+		</div>
+		@ArticlesTable(s, rows)
+		<div id="modal"></div>
+	}
+}
+
+// SortInput 是筛选表单中的排序字段。排序链接在列表区域里，点击后由局部响应同步它（ListSync）。
+templ SortInput(s ListState) {
+	<input type="hidden" id="sort-input" name="sort" value={ s.Sort }/>
+}
+
+// ListSync 附在列表的局部响应后面，把列表区域之外的状态（排序字段）同步为当前状态。
+templ ListSync(s ListState) {
+	<hx-partial hx-target="#sort-input" hx-swap="outerHTML">
+		@SortInput(s)
+	</hx-partial>
+}
+
+// ArticlesTable 是可以单独刷新的列表区域：筛选、排序、翻页都只替换它；
+// 收到 articles:changed 事件时按当前状态重新加载自己。
+templ ArticlesTable(s ListState, rows []article.Article) {
+	<section
+		id="articles"
+		hx-get={ s.current() }
+		hx-trigger="articles:changed from:body"
+		hx-swap="outerHTML"
+		class="rounded-xl border"
+	>
+		if len(rows) == 0 {
+			@empty.Empty() {
+				@empty.Header() {
+					@empty.Title() {
+						没有找到文章
+					}
+					@empty.Description() {
+						换个关键词，或者新建一篇。
+					}
+				}
+			}
+		} else {
+			@table.Table() {
+				@table.Header() {
+					@table.Row() {
+						@table.Head() {
+							@sortLink(s, "title", "标题")
+						}
+						@table.Head() {
+							状态
+						}
+						@table.Head(table.HeadProps{Class: "text-right"}) {
+							@sortLink(s, "views", "阅读")
+						}
+						@table.Head() {
+							创建时间
+						}
+						@table.Head(table.HeadProps{Class: "w-12"})
+					}
+				}
+				@table.Body() {
+					for _, r := range rows {
+						@table.Row(table.RowProps{ID: fmt.Sprintf("article-%d", r.ID)}) {
+							@table.Cell(table.CellProps{Class: "font-medium"}) {
+								<div>{ r.Title }</div>
+								<div class="text-xs text-muted-foreground">{ r.Slug }</div>
+							}
+							@table.Cell() {
+								@badge.Badge(badge.Props{Variant: statusVariant(r.Status)}) {
+									{ statusLabels[r.Status] }
+								}
+							}
+							@table.Cell(table.CellProps{Class: "text-right tabular-nums"}) {
+								{ strconv.Itoa(r.Views) }
+							}
+							@table.Cell(table.CellProps{Class: "text-muted-foreground"}) {
+								{ r.CreatedAt.Format("2006-01-02 15:04") }
+							}
+							@table.Cell() {
+								@rowActions(r)
+							}
+						}
+					}
+				}
+			}
+		}
+		<div class="flex items-center justify-between border-t px-4 py-3 text-sm text-muted-foreground">
+			<span id="total">共 { strconv.Itoa(s.Total) } 篇</span>
+			@pager(s)
+		</div>
+	</section>
+}
+
+templ sortLink(s ListState, key, label string) {
+	{{
+		next := key
+		mark := ""
+		switch s.Sort {
+		case key:
+			next, mark = "-"+key, " ↑"
+		case "-" + key:
+			mark = " ↓"
+		}
+		href := s.URL(func(n *ListState) { n.Sort, n.Page = next, 1 })
+	}}
+	<a
+		href={ templ.SafeURL(href) }
+		hx-get={ href }
+		hx-target="#articles"
+		hx-swap="outerHTML"
+		hx-push-url="true"
+		class="hover:text-foreground"
+		data-sort={ key }
+	>{ label }{ mark }</a>
+}
+
+templ pager(s ListState) {
+	@pagination.Pagination(pagination.Props{Class: "mx-0 w-auto justify-end"}) {
+		@pagination.Content() {
+			@pagination.Item() {
+				@pagination.Previous(pagination.PreviousProps{
+					Href:       s.URL(func(n *ListState) { n.Page-- }),
+					Disabled:   s.Page <= 1,
+					Text:       "上一页",
+					Attributes: pageNav(s.URL(func(n *ListState) { n.Page-- })),
+				})
+			}
+			for p := 1; p <= s.Pages(); p++ {
+				if p == 1 || p == s.Pages() || (p >= s.Page-1 && p <= s.Page+1) {
+					@pagination.Item() {
+						@pagination.Link(pagination.LinkProps{
+							Href:       s.URL(func(n *ListState) { n.Page = p }),
+							IsActive:   p == s.Page,
+							Attributes: pageNav(s.URL(func(n *ListState) { n.Page = p })),
+						}) {
+							{ strconv.Itoa(p) }
+						}
+					}
+				} else if p == s.Page-2 || p == s.Page+2 {
+					@pagination.Item() {
+						@pagination.Ellipsis()
+					}
+				}
+			}
+			@pagination.Item() {
+				@pagination.Next(pagination.NextProps{
+					Href:       s.URL(func(n *ListState) { n.Page++ }),
+					Disabled:   s.Page >= s.Pages(),
+					Text:       "下一页",
+					Attributes: pageNav(s.URL(func(n *ListState) { n.Page++ })),
+				})
+			}
+		}
+	}
+}
+
+func pageNav(href string) templ.Attributes {
+	return templ.Attributes{"hx-get": href, "hx-target": "#articles", "hx-swap": "outerHTML transition:true", "hx-push-url": "true"}
+}
+
+templ rowActions(r article.Article) {
+	@dropdownmenu.DropdownMenu(dropdownmenu.Props{ID: fmt.Sprintf("actions-%d", r.ID)}) {
+		@button.Button(button.Props{
+			Variant:    button.VariantGhost,
+			Size:       button.SizeIconSm,
+			Attributes: mergeAttrs(dropdownmenu.Trigger(ctx), templ.Attributes{"aria-label": "操作"}),
+		}) {
+			@icon.Ellipsis()
+		}
+		@dropdownmenu.Content(dropdownmenu.ContentProps{Align: dropdownmenu.AlignEnd}) {
+			@dropdownmenu.Item(dropdownmenu.ItemProps{
+				ID:         fmt.Sprintf("edit-%d", r.ID),
+				Attributes: templ.Attributes{"hx-get": fmt.Sprintf("/admin/articles/%d/edit", r.ID), "hx-target": "#modal"},
+			}) {
+				@icon.Pencil()
+				编辑
+			}
+			@dropdownmenu.Item(dropdownmenu.ItemProps{
+				ID:         fmt.Sprintf("delete-%d", r.ID),
+				Variant:    dropdownmenu.ItemVariantDestructive,
+				Attributes: templ.Attributes{"hx-get": fmt.Sprintf("/admin/articles/%d/delete", r.ID), "hx-target": "#modal"},
+			}) {
+				@icon.Trash2()
+				删除
+			}
+		}
+	}
+}
+
+func mergeAttrs(as ...templ.Attributes) templ.Attributes {
+	out := templ.Attributes{}
+	for _, a := range as {
+		for k, v := range a {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// ArticleDialog 是新建或编辑文章的对话框：由按钮 hx-get 加载到 #modal，加载后立即打开。
+templ ArticleDialog(id int, f *web.Form[article.Changes]) {
+	@dialog.Dialog(dialog.Props{ID: "article-dialog", DefaultOpen: true}) {
+		@dialog.Content(dialog.ContentProps{Class: "sm:max-w-md"}) {
+			@dialog.Header() {
+				@dialog.Title() {
+					if id == 0 {
+						新建文章
+					} else {
+						编辑文章
+					}
+				}
+				@dialog.Description() {
+					标题和 slug 必填，slug 只能包含小写字母、数字和连字符。
+				}
+			}
+			@ArticleForm(id, f)
+		}
+	}
+}
+
+templ ArticleForm(id int, f *web.Form[article.Changes]) {
+	<form
+		id="article-form"
+		if id == 0 {
+			hx-post="/admin/articles"
+		} else {
+			hx-put={ fmt.Sprintf("/admin/articles/%d", id) }
+		}
+		hx-target="this"
+		hx-swap="outerMorph"
+		class="grid gap-4"
+	>
+		@field.Group() {
+			@textField(f, "title", "标题", "")
+			@textField(f, "slug", "Slug", "my-first-post")
+			@field.Field(field.Props{Attributes: invalid(f.Error("status"))}) {
+				@field.Label(field.LabelProps{For: "status-input"}) {
+					状态
+				}
+				@nativeselect.NativeSelect(nativeselect.Props{ID: "status-input", Name: "status", Class: "w-full"}) {
+					for _, st := range []string{"draft", "published", "archived"} {
+						@nativeselect.Option(nativeselect.OptionProps{Value: st, Selected: f.Value("status") == st}) {
+							{ statusLabels[st] }
+						}
+					}
+				}
+				if msg := f.Error("status"); msg != "" {
+					@field.Error() {
+						{ msg }
+					}
+				}
+			}
+		}
+		@dialog.Footer() {
+			@button.Button(button.Props{Variant: button.VariantOutline, Attributes: dialog.CloseFor("article-dialog")}) {
+				取消
+			}
+			@button.Button(button.Props{ID: "save-article", Type: button.TypeSubmit}) {
+				保存
+			}
+		}
+	</form>
+}
+
+templ textField(f *web.Form[article.Changes], name, label, placeholder string) {
+	@field.Field(field.Props{Attributes: invalid(f.Error(name))}) {
+		@field.Label(field.LabelProps{For: name + "-input"}) {
+			{ label }
+		}
+		@input.Input(input.Props{
+			ID:          name + "-input",
+			Name:        name,
+			Value:       f.Value(name),
+			Placeholder: placeholder,
+			Attributes:  ariaInvalid(f.Error(name)),
+		})
+		if msg := f.Error(name); msg != "" {
+			@field.Error(field.ErrorProps{ID: name + "-error"}) {
+				{ msg }
+			}
+		}
+	}
+}
+
+func invalid(msg string) templ.Attributes {
+	if msg == "" {
+		return nil
+	}
+	return templ.Attributes{"data-invalid": "true"}
+}
+
+func ariaInvalid(msg string) templ.Attributes {
+	if msg == "" {
+		return nil
+	}
+	return templ.Attributes{"aria-invalid": "true"}
+}
+
+// DeleteDialog 是删除确认框。确认按钮直接 hx-delete，成功后由 HX-Trigger 关闭。
+templ DeleteDialog(r article.Article) {
+	@alertdialog.AlertDialog(alertdialog.Props{ID: "delete-dialog", DefaultOpen: true}) {
+		@alertdialog.Content() {
+			@alertdialog.Header() {
+				@alertdialog.Title() {
+					删除「{ r.Title }」？
+				}
+				@alertdialog.Description() {
+					删除后无法恢复。
+				}
+			}
+			@alertdialog.Footer() {
+				@alertdialog.Cancel() {
+					取消
+				}
+				@alertdialog.Action(alertdialog.ActionProps{
+					ID:         "confirm-delete",
+					Variant:    button.VariantDestructive,
+					Attributes: templ.Attributes{"hx-delete": fmt.Sprintf("/admin/articles/%d", r.ID), "hx-swap": "none"},
+				}) {
+					删除
+				}
+			}
+		}
+	}
+}
