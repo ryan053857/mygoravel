@@ -53,6 +53,7 @@
 - [操作日志](activity.md)
 - [通知](notifications.md)
 - [Webhook](webhooks.md)
+- [出站请求](outbound.md)
 - [本地化](localization.md)
 
 ## 安全

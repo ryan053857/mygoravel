@@ -174,29 +174,19 @@ webhook.NewDeliverer(a.db, webhook.Options{}).Handle(router, hooks)
 <a id="private-addresses"></a>
 ### 拒绝内网地址
 
-端点地址由租户填写。部署在云上时，有人可能填 `http://169.254.169.254/` 或内网服务的地址，借你的 worker 访问它们。需要防范时，传入一个在连接前检查地址的客户端：
+端点地址由租户填写。部署在云上时，有人可能填 `http://169.254.169.254/` 或内网服务的地址，借你的 worker 访问它们。`Deliverer` 默认使用 [outbound](outbound.md) 的客户端：内网、回环等地址在建立连接之前就被拒绝，端口不限。被拒绝的投递不再重试，直接标记为失败，`last_error` 中写明原因。
+
+本地开发时接收方往往运行在本机，传入放行回环地址的客户端：
 
 ```go
-dialer := &net.Dialer{
-    Timeout: 5 * time.Second,
-    Control: func(_, address string, _ syscall.RawConn) error {
-        host, _, _ := net.SplitHostPort(address)
-        ip, err := netip.ParseAddr(host)
-        ip = ip.Unmap() // ::ffff:10.0.0.1 按 IPv4 检查
-        if err != nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
-            return fmt.Errorf("webhook: refusing to connect to %s", address)
-        }
-        return nil
-    },
-}
-client := &http.Client{
-    Transport:     &http.Transport{DialContext: dialer.DialContext},
-    CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-}
+client := outbound.New(outbound.Options{
+    AnyPort: true,
+    Allow:   []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32"), netip.MustParsePrefix("::1/128")},
+})
 webhook.NewDeliverer(a.db, webhook.Options{Client: client}).Handle(router, hooks)
 ```
 
-`Control` 在域名解析之后、建立连接之前执行，检查的是真正要连接的 IP，域名临时解析到内网地址也会被拒绝。自己传入客户端时，记得保留 `CheckRedirect`，否则重定向可以绕过地址检查。
+无论传入什么客户端，投递都不跟随重定向，`3xx` 视为失败。
 
 <a id="receiving"></a>
 ## 接收 webhook

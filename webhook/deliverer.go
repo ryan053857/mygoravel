@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
+	"github.com/ryan053857/mygoravel/outbound"
 	"github.com/ryan053857/mygoravel/queue"
 )
 
@@ -25,8 +26,9 @@ const maxError = 1024
 
 // Options 是 Deliverer 的选项，零值可用。
 type Options struct {
-	// Client 发送请求，nil 时使用不跟随重定向的默认客户端：3xx 响应视为失败。
-	// 需要拒绝内网地址时，在它的 Transport 中检查要连接的地址。
+	// Client 发送请求。nil 时使用 outbound.New(outbound.Options{AnyPort: true})：端点地址由租户填写，
+	// 默认拒绝内网、回环等地址，端口不限。本地开发时传入用 outbound.Options.Allow 放行本机的客户端。
+	// 投递不跟随重定向，3xx 响应视为失败，Client 的 CheckRedirect 被忽略。
 	Client *http.Client
 	// Timeout 是每次请求的超时，包括读取响应；不大于 0 时为 DefaultTimeout。
 	Timeout time.Duration
@@ -44,10 +46,13 @@ func NewDeliverer(db bun.IDB, opts Options) *Deliverer {
 	if db == nil {
 		panic("webhook: nil database")
 	}
-	d := &Deliverer{db: db, client: opts.Client, timeout: opts.Timeout}
-	if d.client == nil {
-		d.client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := opts.Client
+	if client == nil {
+		client = outbound.New(outbound.Options{AnyPort: true, Timeout: -1})
 	}
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	d := &Deliverer{db: db, client: &noRedirect, timeout: opts.Timeout}
 	if d.timeout <= 0 {
 		d.timeout = DefaultTimeout
 	}
@@ -57,7 +62,8 @@ func NewDeliverer(db bun.IDB, opts Options) *Deliverer {
 // Handle 把 Deliver 的处理函数注册到 Router。sub 必须从数据库队列领取任务，
 // 它的 MaxAttempts 决定重试多久，见 queue.Config。
 //
-// 端点返回 2xx 时投递成功；其他状态码、超时和网络错误按队列的退避重试，
+// 端点返回 2xx 时投递成功；其他状态码、超时和网络错误按队列的退避重试；
+// 端点地址被 outbound 拒绝（内网地址）时不再重试，投递记录直接标记为失败。
 // 429 和 503 带有 Retry-After 时按它等待。最后一次仍然失败时投递记录标记为失败，任务正常结束，
 // 不进入失败任务表：端点出错是接收方的问题，投递记录就是它的处理结果，需要时用 Resend 重发。
 func (d *Deliverer) Handle(r *message.Router, sub message.Subscriber) *message.Handler {
@@ -91,7 +97,7 @@ func (d *Deliverer) deliver(ctx context.Context, id uuid.UUID) error {
 	status := StatusSucceeded
 	if sendErr != nil {
 		status = StatusPending
-		if _, final := queue.AttemptFromContext(ctx); final {
+		if _, final := queue.AttemptFromContext(ctx); final || errors.Is(sendErr, outbound.ErrForbidden) {
 			status = StatusFailed
 		}
 	}

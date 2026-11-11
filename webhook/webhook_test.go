@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"path"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/outbound"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/webhook"
 )
@@ -302,8 +304,19 @@ func (r *receiver) count() int {
 	return len(r.requests)
 }
 
-// startWorker 运行处理投递任务的 worker，第一次失败后约 1 秒重试。
+// local 是放行本机测试接收方的投递客户端。
+func local() *http.Client {
+	return outbound.New(outbound.Options{AnyPort: true, Allow: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}})
+}
+
+// startWorker 运行处理投递任务的 worker，可以投递到本机的测试接收方，第一次失败后约 1 秒重试。
 func startWorker(t *testing.T, db *bun.DB, maxAttempts int) {
+	t.Helper()
+	runWorker(t, db, maxAttempts, webhook.Options{Client: local(), Timeout: 2 * time.Second})
+}
+
+// runWorker 用 opts 运行处理投递任务的 worker。
+func runWorker(t *testing.T, db *bun.DB, maxAttempts int, opts webhook.Options) {
 	t.Helper()
 	cfg := queue.DefaultConfig()
 	cfg.PollInterval = 20 * time.Millisecond
@@ -311,7 +324,7 @@ func startWorker(t *testing.T, db *bun.DB, maxAttempts int) {
 	logger := slog.New(slog.DiscardHandler)
 	r := queue.NewRouter(logger)
 	sub := queue.NewSubscriber(queue.Database(db), cfg, logger)
-	webhook.NewDeliverer(db, webhook.Options{Timeout: 2 * time.Second}).Handle(r, sub)
+	webhook.NewDeliverer(db, opts).Handle(r, sub)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
@@ -403,6 +416,23 @@ func TestDeliver(t *testing.T) {
 			t.Fatalf("other tenant resend: %v", err)
 		}
 	})
+}
+
+// 默认客户端拒绝内网地址：投递直接标记为失败，不再重试，接收方收不到请求。
+func TestDeliverRefusesPrivateAddresses(t *testing.T) {
+	db := openDB(t, dbtesting.Drivers()[0])
+	ctx := context.Background()
+	rcv := newReceiver(t)
+	create(t, db, "acme", rcv.srv.URL, "*")
+	runWorker(t, db, 5, webhook.Options{})
+	if err := webhook.Send(ctx, db, acme, webhook.Event{Type: "article.published", Data: map[string]string{"title": "hi"}}); err != nil {
+		t.Fatal(err)
+	}
+	list := deliveries(t, db, webhook.DeliveryQuery{Tenant: "acme"})
+	d := waitFor(t, db, "acme", list[0].ID, webhook.StatusFailed)
+	if d.Attempts != 1 || d.ResponseStatus != 0 || !strings.Contains(d.LastError, "destination not allowed") || rcv.count() != 0 {
+		t.Fatalf("delivery %+v, %d requests", d, rcv.count())
+	}
 }
 
 func TestDeliverRotatedAndDisabled(t *testing.T) {

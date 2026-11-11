@@ -269,16 +269,4 @@ n, err := tokens.Cleanup(ctx, 1000)
 
 独立部署的单页应用（例如 React）和 App 一样使用登录 token：登录后保存 token，之后的请求都带上 `Authorization: Bearer <token>`，收到 `401` 时跳转到登录页。token 通常保存在 `localStorage` 中，这样刷新页面和打开新标签页后仍保持登录。页面上的脚本都能读到它，所以要防范 XSS；有效期和撤销可以限制 token 泄露后造成的影响。
 
-单页应用与 API 不在同一个源时，浏览器要求 API 返回 CORS 响应头。Bearer token 不是 cookie，不需要允许携带凭据。例如用 [go-chi/cors](https://github.com/go-chi/cors) 只为 `/api` 开启：
-
-```go
-router.Route("/api", func(r chi.Router) {
-    r.Use(cors.Handler(cors.Options{
-        AllowedOrigins: []string{"https://app.example.com"},
-        AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE"},
-        AllowedHeaders: []string{"Authorization", "Content-Type"},
-        MaxAge:         300,
-    }))
-    // ...
-})
-```
+单页应用与 API 不在同一个源时，浏览器要求 API 返回 CORS 响应头，在 `/api` 的路由组上安装 [httpx.CORS](middleware.md#cors)。Bearer token 不是 cookie，不需要允许携带凭据。

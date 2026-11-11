@@ -178,6 +178,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `activity` | 操作日志：在业务事务中记录谁对什么做了什么 | [操作日志](activity.md) |
 | `notification` | 站内通知收件箱，带已读状态 | [通知](notifications.md) |
 | `webhook` | 向租户的端点推送事件，按 Standard Webhooks 签名与校验 | [Webhook](webhooks.md) |
+| `outbound` | 只能访问公网地址的 HTTP 客户端，防止服务端请求伪造 | [出站请求](outbound.md) |
 | `ai` | 对话式 agent：后台运行、插话、工具审批、事件推送 | [AI 助手](ai.md) |
 | `ai/postgres`、`ai/sqlite`、`ai/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
 | `ai/openai`、`ai/openrouter` | 生成图片、合成与识别语音、计算向量和重排；`ai/openai` 还能调用决策模型 | [媒体](ai.md#media)、[决策](ai.md#decisions) |

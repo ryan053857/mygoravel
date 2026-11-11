@@ -8,6 +8,7 @@
     - [可信代理](#trusted-proxies)
     - [访问日志](#access-log)
 - [限流](#rate-limiting)
+- [跨域请求](#cors)
 - [指标](#metrics)
 - [自行组装](#custom-stack)
 - [自定义中间件](#custom-middleware)
@@ -114,6 +115,7 @@ http:
 | `timeout.duration` | `Timeout` | 每个请求 context 的超时 | `30s` |
 | `body_limit.max_bytes` | `BodyLimit` | 请求体的最大字节数 | 1 MiB |
 | `rate_limit.*` | `RateLimit` | 见[限流](rate-limiting.md) | 每秒 10 个，突发 20 个 |
+| `cors.*` | `CORS` | 见[跨域请求](#cors) | 允许任何来源，预检结果缓存 2 小时 |
 
 没有写出的字段使用默认值。所有超时和数值都必须为正数，写 `0` 或负数会在加载配置时报错；不需要某个中间件时，不安装它即可。
 
@@ -224,6 +226,38 @@ router.Use(httpx.RateLimit(ratelimit.NewMemory(a.cfg.HTTP.RateLimit), httpx.KeyB
 ```
 
 参数来自 `http.rate_limit` 段。限流的 key、配额参数、在处理器中按用户限流以及多实例共享计数，见[限流](rate-limiting.md)。
+
+<a id="cors"></a>
+## 跨域请求
+
+独立部署的单页应用、桌面或移动端的 WebView 与 API 不在同一个源时，浏览器要求 API 返回 CORS 响应头。`httpx.CORS` 只安装在 API 的路由组上，页面路由使用会话 cookie，不开放跨域：
+
+```go
+router.Route("/api", func(r chi.Router) {
+    r.Use(httpx.CORS(a.cfg.HTTP.CORS))
+    // ...
+})
+```
+
+参数来自 `http.cors` 段：
+
+```yaml
+http:
+  cors:
+    allowed_origins: ["https://app.example.com", "https://*.example.com", "capacitor://localhost"]
+    expose_headers: [X-Total-Count]
+    max_age: 2h
+```
+
+| 字段 | 说明 | 默认值 |
+| --- | --- | --- |
+| `allowed_origins` | 允许的来源，`scheme://host[:port]`，可以有一个 `*` 通配；单独的 `*` 允许任何来源 | `["*"]` |
+| `expose_headers` | 还要让前端读取的响应头，`X-Request-ID`、`Content-Language`、`Retry-After`、`Location`、`Content-Disposition` 总是暴露 | 空 |
+| `max_age` | 浏览器缓存预检结果的时间，Chrome 最多缓存 2 小时 | `2h` |
+
+API 只用 [Bearer token](api-tokens.md) 认证，不使用 cookie，所以 `CORS` 从不允许携带凭据：其他网站的网页拿不到用户的 token，允许任何来源也是安全的。请求头按预检请求声明的原样允许，`Authorization` 不需要单独配置。
+
+预检请求（`OPTIONS`）直接以 `204` 应答，不进入路由、认证和限流，所以要把 `CORS` 安装在它们之前。`401`、`429` 等错误响应同样带有 CORS 头，前端能读到错误内容。
 
 <a id="metrics"></a>
 ## 指标

@@ -3,6 +3,7 @@ module github.com/ryan053857/mygoravel
 go 1.27.3
 
 require (
+	code.dny.dev/ssrf v0.3.0
 	github.com/ThreeDotsLabs/watermill v1.5.3
 	github.com/a-h/templ v0.3.1100
 	github.com/adhocore/gronx v1.20.6
@@ -34,6 +35,7 @@ require (
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/resend/resend-go/v3 v3.17.0
+	github.com/rs/cors v1.11.1
 	github.com/samber/slog-chi v1.19.1
 	github.com/samber/slog-formatter v1.3.0
 	github.com/samber/slog-multi v1.9.0

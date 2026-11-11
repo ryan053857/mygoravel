@@ -33,6 +33,7 @@ type Config struct {
 	BodyLimit BodyLimitConfig `yaml:"body_limit"`
 	// RateLimit 是全局限流的参数，通常传给 ratelimit.NewMemory 后安装 RateLimit 中间件。
 	RateLimit ratelimit.Config `yaml:"rate_limit"`
+	CORS      CORSConfig       `yaml:"cors"`
 }
 
 // DefaultConfig 返回默认 HTTP 配置。
@@ -50,6 +51,7 @@ func DefaultConfig() Config {
 		Timeout:           DefaultTimeoutConfig(),
 		BodyLimit:         DefaultBodyLimitConfig(),
 		RateLimit:         ratelimit.Config{Rate: 10, Interval: time.Second, Burst: 20},
+		CORS:              DefaultCORSConfig(),
 	}
 }
 
