@@ -83,7 +83,7 @@ key, err := a.crypt.Decrypt(p.APIKey)
 if err != nil {
     return errors.Wrapf(err, "decrypt api key of provider %s", p.ID)
 }
-model := ai.NewModel(ai.ModelConfig{Model: p.Model, BaseURL: p.BaseURL, APIKey: key})
+model := chat.NewModel(ai.ModelConfig{Model: p.Model, BaseURL: p.BaseURL, APIKey: key})
 ```
 
 密文被改过，或者加密它的密钥已经不在配置中时，`Decrypt` 返回 `crypt.ErrDecrypt`。它不是业务错误，接口返回 500 并记录日志。

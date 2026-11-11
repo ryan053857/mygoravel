@@ -1,3 +1,5 @@
+// Package aitest 提供 ai 包各项能力的替身：生成图片、合成与识别语音、计算向量、重排和决策，
+// 用于测试，不访问真实的模型服务。
 package aitest
 
 import (

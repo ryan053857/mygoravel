@@ -1,4 +1,4 @@
-// Package sqlite 把对话保存在 SQLite 中，表由 ai.Migrations 创建。
+// Package sqlite 把对话保存在 SQLite 中，表由 chat.Migrations 创建。
 package sqlite
 
 import (
@@ -23,10 +23,10 @@ func NewSessions(db *bun.DB, opts ...tsqlite.ServiceOpt) (session.Service, error
 	var seq int
 	var name, file string
 	if err := db.QueryRowContext(ctx, "PRAGMA database_list").Scan(&seq, &name, &file); err != nil {
-		return nil, errors.Wrap(err, "ai/sqlite: locate database file")
+		return nil, errors.Wrap(err, "chat/sqlite: locate database file")
 	}
 	if file == "" {
-		return nil, errors.New("ai/sqlite: in-memory databases are not supported")
+		return nil, errors.New("chat/sqlite: in-memory databases are not supported")
 	}
 	own, err := database.Open(ctx, sqlite.Driver, database.Config{DSN: file})
 	if err != nil {

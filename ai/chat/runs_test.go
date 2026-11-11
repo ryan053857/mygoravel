@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 	"trpc.group/trpc-go/trpc-agent-go/tool/function"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/aitest"
+	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/ryan053857/mygoravel/ai/chat/chattest"
 )
 
 type orderArgs struct {
@@ -43,7 +43,7 @@ func (r *refunds) tool() tool.CallableTool {
 	}, function.WithName("refund_order"), function.WithDescription("退款"))
 }
 
-func newRuns(t *testing.T, m *aitest.Model, tools []tool.Tool, opts ...ai.Option) *ai.Runs {
+func newRuns(t *testing.T, m *chattest.Model, tools []tool.Tool, opts ...chat.Option) *chat.Runs {
 	t.Helper()
 	ag := llmagent.New("support",
 		llmagent.WithModel(m),
@@ -51,7 +51,7 @@ func newRuns(t *testing.T, m *aitest.Model, tools []tool.Tool, opts ...ai.Option
 		llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}),
 	)
 	sessions := inmemory.NewSessionService()
-	rs := ai.NewRuns("test", ag, sessions, opts...)
+	rs := chat.NewRuns("test", ag, sessions, opts...)
 	t.Cleanup(func() {
 		_ = rs.Close()
 		_ = sessions.Close()
@@ -60,21 +60,21 @@ func newRuns(t *testing.T, m *aitest.Model, tools []tool.Tool, opts ...ai.Option
 }
 
 // collect 读完运行的事件，返回 "name:摘要" 列表。
-func collect(t *testing.T, r *ai.Run, lastEventID string) ([]string, []ai.Event) {
+func collect(t *testing.T, r *chat.Run, lastEventID string) ([]string, []chat.Event) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var names []string
-	var events []ai.Event
+	var events []chat.Event
 	for ev := range r.Events(ctx, lastEventID) {
 		events = append(events, ev)
 		s := ev.Name
 		switch d := ev.Data.(type) {
-		case ai.Text:
+		case chat.Text:
 			s += ":" + d.Text
-		case ai.ToolCall:
+		case chat.ToolCall:
 			s += ":" + d.Name
-		case ai.ToolResult:
+		case chat.ToolResult:
 			s += ":" + d.Name
 		}
 		names = append(names, s)
@@ -101,7 +101,7 @@ func messagesOf(req []model.Message) string {
 }
 
 func TestStartStreamsAnswer(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Reasoning: "想一想", Text: "你好 世界"})
+	m := chattest.NewModel(chattest.Reply{Reasoning: "想一想", Text: "你好 世界"})
 	rs := newRuns(t, m, nil)
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
 	if err != nil {
@@ -111,7 +111,7 @@ func TestStartStreamsAnswer(t *testing.T) {
 	if got := strings.Join(names, ","); got != "reasoning:想一想,text:你好 ,text:世界,done" {
 		t.Fatalf("events %s", got)
 	}
-	if d := events[len(events)-1].Data.(ai.Done); len(d.Pending) != 0 || d.Canceled {
+	if d := events[len(events)-1].Data.(chat.Done); len(d.Pending) != 0 || d.Canceled {
 		t.Fatalf("done %+v", d)
 	}
 
@@ -126,17 +126,17 @@ func TestStartStreamsAnswer(t *testing.T) {
 }
 
 func TestToolCallsAndBusy(t *testing.T) {
-	m := aitest.NewModel(
+	m := chattest.NewModel(
 		// 只有思考过程、没有正文的回复：流式发出的思考过程不应从完整消息中重复发送。
-		aitest.Reply{Reasoning: "查一下", Calls: []aitest.Call{{Name: "get_order", Args: orderArgs{"A1"}}}},
-		aitest.Text("已签收"),
+		chattest.Reply{Reasoning: "查一下", Calls: []chattest.Call{{Name: "get_order", Args: orderArgs{"A1"}}}},
+		chattest.Text("已签收"),
 	)
 	rs := newRuns(t, m, []tool.Tool{getOrder(200 * time.Millisecond)})
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("查 A1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("again")); !errors.Is(err, ai.ErrBusy) {
+	if _, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("again")); !errors.Is(err, chat.ErrBusy) {
 		t.Fatalf("second start: %v", err)
 	}
 	names, _ := collect(t, r, "")
@@ -149,9 +149,9 @@ func TestToolCallsAndBusy(t *testing.T) {
 }
 
 func TestSteerDuringToolCall(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Calls(aitest.Call{Name: "get_order", Args: orderArgs{"A1"}}),
-		aitest.Text("都查好了"),
+	m := chattest.NewModel(
+		chattest.Calls(chattest.Call{Name: "get_order", Args: orderArgs{"A1"}}),
+		chattest.Text("都查好了"),
 	)
 	rs := newRuns(t, m, []tool.Tool{getOrder(300 * time.Millisecond)})
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("查 A1"))
@@ -172,9 +172,9 @@ func TestSteerDuringToolCall(t *testing.T) {
 }
 
 func TestSteerDuringFinalAnswerContinues(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Reply{Text: "第一个回答", Delay: 300 * time.Millisecond},
-		aitest.Text("第二个回答"),
+	m := chattest.NewModel(
+		chattest.Reply{Text: "第一个回答", Delay: 300 * time.Millisecond},
+		chattest.Text("第二个回答"),
 	)
 	rs := newRuns(t, m, nil)
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("问题一"))
@@ -192,30 +192,30 @@ func TestSteerDuringFinalAnswerContinues(t *testing.T) {
 	if got := messagesOf(m.LastRequest()); !strings.HasSuffix(got, "user:问题一 | assistant:第一个回答 | user:问题二") {
 		t.Fatalf("second request %s", got)
 	}
-	if err := r.Steer(context.Background(), model.NewUserMessage("太晚了")); !errors.Is(err, ai.ErrFinished) {
+	if err := r.Steer(context.Background(), model.NewUserMessage("太晚了")); !errors.Is(err, chat.ErrFinished) {
 		t.Fatalf("steer after finish: %v", err)
 	}
 }
 
 func TestApprovalAcrossRuns(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Calls(
-			aitest.Call{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}},
-			aitest.Call{ID: "r2", Name: "refund_order", Args: orderArgs{"B2"}},
-			aitest.Call{ID: "g1", Name: "get_order", Args: orderArgs{"C3"}},
+	m := chattest.NewModel(
+		chattest.Calls(
+			chattest.Call{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}},
+			chattest.Call{ID: "r2", Name: "refund_order", Args: orderArgs{"B2"}},
+			chattest.Call{ID: "g1", Name: "get_order", Args: orderArgs{"C3"}},
 		),
-		aitest.Text("A1 已退款，B2 被拒绝。"),
+		chattest.Text("A1 已退款，B2 被拒绝。"),
 	)
 	var refunded refunds
 	refund := refunded.tool()
-	rs := newRuns(t, m, []tool.Tool{refund, getOrder(0)}, ai.RequireApproval(refund))
+	rs := newRuns(t, m, []tool.Tool{refund, getOrder(0)}, chat.RequireApproval(refund))
 	ctx := context.Background()
 	r, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("退款 A1 和 B2，再查 C3"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	names, events := collect(t, r, "")
-	done := events[len(events)-1].Data.(ai.Done)
+	done := events[len(events)-1].Data.(chat.Done)
 	if len(done.Pending) != 2 || len(refunded.done) != 0 {
 		t.Fatalf("events %q, done %+v, refunded %v", names, done, refunded.done)
 	}
@@ -227,7 +227,7 @@ func TestApprovalAcrossRuns(t *testing.T) {
 	if err != nil || len(pending) != 2 {
 		t.Fatalf("pending %+v, %v", pending, err)
 	}
-	if _, err := rs.Approve(ctx, "u1", "c1", "nope"); !errors.Is(err, ai.ErrNotPending) {
+	if _, err := rs.Approve(ctx, "u1", "c1", "nope"); !errors.Is(err, chat.ErrNotPending) {
 		t.Fatalf("approve unknown call: %v", err)
 	}
 	next, err := rs.Approve(ctx, "u1", "c1", "r1")
@@ -246,7 +246,7 @@ func TestApprovalAcrossRuns(t *testing.T) {
 		t.Fatalf("events after approval %s", got)
 	}
 	// 继续的运行先发出这一批调用的结果，被拒绝的标记为 Denied。
-	if r1, r2 := events[0].Data.(ai.ToolResult), events[1].Data.(ai.ToolResult); r1.ID != "r1" || r1.Denied || r2.ID != "r2" || !r2.Denied {
+	if r1, r2 := events[0].Data.(chat.ToolResult), events[1].Data.(chat.ToolResult); r1.ID != "r1" || r1.Denied || r2.ID != "r2" || !r2.Denied {
 		t.Fatalf("results %+v %+v", r1, r2)
 	}
 	req := m.LastRequest()
@@ -266,7 +266,7 @@ func TestApprovalAcrossRuns(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "slow", Delay: 5 * time.Second})
+	m := chattest.NewModel(chattest.Reply{Text: "slow", Delay: 5 * time.Second})
 	rs := newRuns(t, m, nil)
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
 	if err != nil {
@@ -275,15 +275,15 @@ func TestCancel(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	r.Cancel()
 	names, events := collect(t, r, "")
-	if len(names) != 1 || !events[0].Data.(ai.Done).Canceled {
+	if len(names) != 1 || !events[0].Data.(chat.Done).Canceled {
 		t.Fatalf("events %q", names)
 	}
 }
 
 func TestSendStartsOrSteers(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Calls(aitest.Call{Name: "get_order", Args: orderArgs{"A1"}}),
-		aitest.Text("好的"),
+	m := chattest.NewModel(
+		chattest.Calls(chattest.Call{Name: "get_order", Args: orderArgs{"A1"}}),
+		chattest.Text("好的"),
 	)
 	rs := newRuns(t, m, []tool.Tool{getOrder(300 * time.Millisecond)})
 	ctx := context.Background()
@@ -303,13 +303,13 @@ func TestSendStartsOrSteers(t *testing.T) {
 }
 
 func TestSteerBeforeApprovalIsDeliveredAfterIt(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Reply{Calls: []aitest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}, Delay: 300 * time.Millisecond},
-		aitest.Text("已退款，B2 也查好了"),
+	m := chattest.NewModel(
+		chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}, Delay: 300 * time.Millisecond},
+		chattest.Text("已退款，B2 也查好了"),
 	)
 	var refunded refunds
 	refund := refunded.tool()
-	rs := newRuns(t, m, []tool.Tool{refund}, ai.RequireApproval(refund), ai.KeepFinished(time.Millisecond))
+	rs := newRuns(t, m, []tool.Tool{refund}, chat.RequireApproval(refund), chat.KeepFinished(time.Millisecond))
 	ctx := context.Background()
 	r, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("退款 A1"))
 	if err != nil {
@@ -322,7 +322,7 @@ func TestSteerBeforeApprovalIsDeliveredAfterIt(t *testing.T) {
 	<-r.Done()
 	time.Sleep(20 * time.Millisecond) // 超过保留期
 
-	if _, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("新问题")); !errors.Is(err, ai.ErrAwaitingApproval) {
+	if _, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("新问题")); !errors.Is(err, chat.ErrAwaitingApproval) {
 		t.Fatalf("start while awaiting approval: %v", err)
 	}
 	next, err := rs.Approve(ctx, "u1", "c1", "r1")
@@ -339,7 +339,7 @@ func TestSteerBeforeApprovalIsDeliveredAfterIt(t *testing.T) {
 }
 
 func TestShutdownWaitsForRuns(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "说完", Delay: 300 * time.Millisecond})
+	m := chattest.NewModel(chattest.Reply{Text: "说完", Delay: 300 * time.Millisecond})
 	rs := newRuns(t, m, nil)
 	ctx := context.Background()
 	r, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("hi"))
@@ -352,7 +352,7 @@ func TestShutdownWaitsForRuns(t *testing.T) {
 	go func() { shutdown <- rs.Shutdown(ctx) }()
 	time.Sleep(50 * time.Millisecond)
 	// 停止期间不开始新的运行。
-	if _, err := rs.Start(ctx, "u1", "c2", model.NewUserMessage("hi")); !errors.Is(err, ai.ErrShuttingDown) {
+	if _, err := rs.Start(ctx, "u1", "c2", model.NewUserMessage("hi")); !errors.Is(err, chat.ErrShuttingDown) {
 		t.Fatalf("start during shutdown: %v", err)
 	}
 	select {
@@ -369,13 +369,13 @@ func TestShutdownWaitsForRuns(t *testing.T) {
 		t.Fatal("shutdown returned before the run finished")
 	}
 	names, events := collect(t, r, "")
-	if done := events[len(events)-1].Data.(ai.Done); done.Canceled || !slices.Contains(names, ai.EventDone) {
+	if done := events[len(events)-1].Data.(chat.Done); done.Canceled || !slices.Contains(names, chat.EventDone) {
 		t.Fatalf("run was canceled: %q", names)
 	}
 }
 
 func TestShutdownCancelsAfterDeadline(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "很慢", Delay: 5 * time.Second})
+	m := chattest.NewModel(chattest.Reply{Text: "很慢", Delay: 5 * time.Second})
 	rs := newRuns(t, m, nil)
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
 	if err != nil {
@@ -391,7 +391,7 @@ func TestShutdownCancelsAfterDeadline(t *testing.T) {
 		t.Fatalf("shutdown took %v", elapsed)
 	}
 	_, events := collect(t, r, "")
-	if !events[len(events)-1].Data.(ai.Done).Canceled {
+	if !events[len(events)-1].Data.(chat.Done).Canceled {
 		t.Fatal("unfinished run was not canceled")
 	}
 }

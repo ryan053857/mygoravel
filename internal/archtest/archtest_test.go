@@ -224,7 +224,7 @@ func TestLocalFilesDoesNotLinkS3(t *testing.T) {
 // TestOnlyRealtimeLinksCentrifuge 确保不使用 WebSocket 实时频道的应用不会链接 Centrifuge：
 // 广播、SSE 和 AI 的集群协作都只依赖 broadcast。
 func TestOnlyRealtimeLinksCentrifuge(t *testing.T) {
-	for _, pkg := range []string{"/broadcast", "/broadcast/redisbroadcast", "/broadcast/natsbroadcast", "/httpx/rest", "/web", "/ai"} {
+	for _, pkg := range []string{"/broadcast", "/broadcast/redisbroadcast", "/broadcast/natsbroadcast", "/httpx/rest", "/web", "/ai", "/ai/chat"} {
 		out, err := exec.Command("go", "list", "-deps", module+pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)
@@ -259,6 +259,25 @@ func TestDocumentCoreIsLight(t *testing.T) {
 		for _, dep := range strings.Fields(string(out)) {
 			for _, h := range heavy {
 				if under(dep, h) && !slices.Contains(allowed, h) {
+					t.Errorf("%s depends on %s", pkg, dep)
+				}
+			}
+		}
+	}
+}
+
+// TestAICoreIsLight 确保只用到模型能力（图片、语音、向量、重排、决策）的应用不会链接对话式 agent 的依赖：
+// trpc-agent-go 及其带来的 gRPC、Huma 和数据库组件都只由 ai/chat 引入。
+func TestAICoreIsLight(t *testing.T) {
+	heavy := []string{module + "/ai/chat", "trpc.group/trpc-go", "google.golang.org/grpc", "github.com/danielgtaylor/huma", "github.com/uptrace/bun", module + "/httpx", module + "/broadcast", module + "/lock"}
+	for _, pkg := range []string{"/ai", "/ai/openai", "/ai/openrouter", "/ai/systemone", "/ai/aitest"} {
+		out, err := exec.Command("go", "list", "-deps", module+pkg).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			for _, h := range heavy {
+				if under(dep, h) {
 					t.Errorf("%s depends on %s", pkg, dep)
 				}
 			}
@@ -372,13 +391,13 @@ func TestDatabaseCoreDoesNotLinkDrivers(t *testing.T) {
 		module + "/database/migrate":   all,
 		module + "/database/dbtest":    all,
 		module + "/command/migratecmd": all,
-		module + "/ai":                 all,
+		module + "/ai/chat":            all,
 	}
 	// 各驱动子包和 AI 对话存储的同名子包只链接自己的驱动。
 	for name, own := range drivers {
 		for _, other := range all {
 			if other != own {
-				for _, pkg := range []string{module + "/database/" + name, module + "/ai/" + name} {
+				for _, pkg := range []string{module + "/database/" + name, module + "/ai/chat/" + name} {
 					checks[pkg] = append(checks[pkg], other)
 				}
 			}

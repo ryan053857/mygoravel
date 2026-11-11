@@ -1,4 +1,4 @@
-package ai
+package chat
 
 import (
 	"context"
@@ -60,16 +60,16 @@ type Conversation struct {
 // 这时 UIMessages 和 Append 不可用：页面显示应用自己的消息，其他消息由应用直接写入，再调用 Notify。
 func UseHistory(store HistoryStore) Option {
 	if store == nil {
-		panic("ai: nil history store")
+		panic("chat: nil history store")
 	}
 	return func(rs *Runs) { rs.history = store }
 }
 
 // ErrNeedsSessions 表示方法需要 trpc-agent-go 的会话存储，在使用 UseHistory 时不可用。
-var ErrNeedsSessions = errors.New("ai: not available with UseHistory; the application stores the messages")
+var ErrNeedsSessions = errors.New("chat: not available with UseHistory; the application stores the messages")
 
 // ErrNeedsHistory 表示方法需要 UseHistory。
-var ErrNeedsHistory = errors.New("ai: Notify needs UseHistory")
+var ErrNeedsHistory = errors.New("chat: Notify needs UseHistory")
 
 // Notify 告诉对话有新的消息需要回应，只能与 UseHistory 一起使用：应用先把消息写入自己的存储，再调用它。
 //
@@ -147,7 +147,7 @@ func (rs *Runs) save(ctx context.Context, key session.Key, e Entry) error {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), saveTimeout)
 	defer cancel()
-	return errors.Wrap(rs.history.Save(ctx, rs.conversation(key), e), "ai: save message")
+	return errors.Wrap(rs.history.Save(ctx, rs.conversation(key), e), "chat: save message")
 }
 
 // transcript 是对话的历史：默认来自 trpc-agent-go 的会话，使用 UseHistory 时来自 store.Load。
@@ -161,7 +161,7 @@ type transcript struct {
 func (rs *Runs) load(ctx context.Context, key session.Key) (transcript, error) {
 	if rs.history != nil {
 		h, err := rs.history.Load(ctx, rs.conversation(key))
-		return transcript{msgs: h.Messages, cursor: h.Cursor}, errors.Wrap(err, "ai: load history")
+		return transcript{msgs: h.Messages, cursor: h.Cursor}, errors.Wrap(err, "chat: load history")
 	}
 	sess, err := rs.sessions.GetSession(ctx, key)
 	return transcript{sess: sess}, err

@@ -1,4 +1,4 @@
-// Package mysql 把对话保存在 MySQL 中，表由 ai.Migrations 创建。
+// Package mysql 把对话保存在 MySQL 中，表由 chat.Migrations 创建。
 package mysql
 
 import (
@@ -31,7 +31,7 @@ type shared struct{ db *sql.DB }
 
 var install sync.Once
 
-// installBuilder 包装 trpc-agent-go 的全局 client builder，见 ai/postgres 中的同名函数。
+// installBuilder 包装 trpc-agent-go 的全局 client builder，见 ai/chat/postgres 中的同名函数。
 func installBuilder() {
 	prev := storage.GetClientBuilder()
 	storage.SetClientBuilder(func(opts ...storage.ClientBuilderOpt) (storage.Client, error) {

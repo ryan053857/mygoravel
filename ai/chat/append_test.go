@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"context"
@@ -12,16 +12,16 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/aitest"
+	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/ryan053857/mygoravel/ai/chat/chattest"
 )
 
 func TestAppend(t *testing.T) {
-	m := aitest.NewModel(aitest.Text("你好，我是助手"), aitest.Text("不客气"))
+	m := chattest.NewModel(chattest.Text("你好，我是助手"), chattest.Text("不客气"))
 	ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithAddContextPrefix(true),
 		llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
 	sessions := inmemory.NewSessionService()
-	rs := ai.NewRuns("test", ag, sessions)
+	rs := chat.NewRuns("test", ag, sessions)
 	t.Cleanup(func() {
 		_ = rs.Close()
 		_ = sessions.Close()
@@ -84,7 +84,7 @@ func TestAppend(t *testing.T) {
 }
 
 func TestAppendCreatesConversation(t *testing.T) {
-	rs := newRuns(t, aitest.NewModel(), nil)
+	rs := newRuns(t, chattest.NewModel(), nil)
 	ctx := context.Background()
 	// trpc-agent-go 丢弃第一条用户消息之前的内容：拒绝，而不是悄悄丢掉。
 	if err := rs.Append(ctx, "u1", "new", "system", model.NewAssistantMessage("欢迎")); err == nil {
@@ -102,7 +102,7 @@ func TestAppendCreatesConversation(t *testing.T) {
 func TestAppendRejects(t *testing.T) {
 	ctx := context.Background()
 	t.Run("invalid", func(t *testing.T) {
-		rs := newRuns(t, aitest.NewModel(), nil)
+		rs := newRuns(t, chattest.NewModel(), nil)
 		for _, tc := range []struct {
 			author string
 			msg    model.Message
@@ -117,27 +117,27 @@ func TestAppendRejects(t *testing.T) {
 		}
 	})
 	t.Run("while running", func(t *testing.T) {
-		rs := newRuns(t, aitest.NewModel(aitest.Reply{Text: "慢", Delay: 300 * time.Millisecond}), nil)
+		rs := newRuns(t, chattest.NewModel(chattest.Reply{Text: "慢", Delay: 300 * time.Millisecond}), nil)
 		r, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("hi"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := rs.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, ai.ErrBusy) {
+		if err := rs.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, chat.ErrBusy) {
 			t.Fatalf("append while running: %v", err)
 		}
 		<-r.Done()
 	})
 	t.Run("awaiting approval", func(t *testing.T) {
-		m := aitest.NewModel(aitest.Reply{Calls: []aitest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}})
+		m := chattest.NewModel(chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}})
 		var refunded refunds
 		refund := refunded.tool()
-		rs := newRuns(t, m, []tool.Tool{refund}, ai.RequireApproval(refund))
+		rs := newRuns(t, m, []tool.Tool{refund}, chat.RequireApproval(refund))
 		r, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("退款 A1"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		<-r.Done()
-		if err := rs.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, ai.ErrAwaitingApproval) {
+		if err := rs.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, chat.ErrAwaitingApproval) {
 			t.Fatalf("append while awaiting approval: %v", err)
 		}
 	})

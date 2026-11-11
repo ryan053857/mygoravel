@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"bufio"
@@ -15,13 +15,13 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/aitest"
+	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/ryan053857/mygoravel/ai/chat/chattest"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 )
 
 type chatInput struct {
-	Body ai.UIRequest
+	Body chat.UIRequest
 }
 
 type resumeInput struct {
@@ -29,26 +29,26 @@ type resumeInput struct {
 }
 
 // chatServer 按 useChat 的约定注册 POST /chat 和 GET /chat/{id}/stream。
-func chatServer(t *testing.T, rs *ai.Runs) string {
+func chatServer(t *testing.T, rs *chat.Runs) string {
 	t.Helper()
 	api := rest.New(rest.Options{})
 	post := huma.Operation{OperationID: "chat", Method: http.MethodPost, Path: "/chat"}
 	rest.Public()(&post)
-	rest.RegisterSSE(api, post, ai.UIEvents, func(ctx context.Context, in *chatInput) (*huma.StreamResponse, error) {
+	rest.RegisterSSE(api, post, chat.UIEvents, func(ctx context.Context, in *chatInput) (*huma.StreamResponse, error) {
 		run, err := rs.Submit(ctx, "u1", in.Body)
 		if err != nil {
 			return nil, err
 		}
-		return ai.UIStream(run), nil
+		return chat.UIStream(run), nil
 	})
 	get := huma.Operation{OperationID: "chat-resume", Method: http.MethodGet, Path: "/chat/{id}/stream"}
 	rest.Public()(&get)
-	rest.RegisterSSE(api, get, ai.UIEvents, func(ctx context.Context, in *resumeInput) (*huma.StreamResponse, error) {
+	rest.RegisterSSE(api, get, chat.UIEvents, func(ctx context.Context, in *resumeInput) (*huma.StreamResponse, error) {
 		run, err := rs.Get(ctx, "u1", in.ID)
 		if err != nil {
 			return nil, err
 		}
-		return ai.UIResume(run), nil
+		return chat.UIResume(run), nil
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
@@ -106,16 +106,16 @@ func userMessage(text string) map[string]any {
 }
 
 func TestUIStreamWithApproval(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Reply{Reasoning: "先查", Text: "好的", Calls: []aitest.Call{
+	m := chattest.NewModel(
+		chattest.Reply{Reasoning: "先查", Text: "好的", Calls: []chattest.Call{
 			{ID: "g1", Name: "get_order", Args: orderArgs{"C3"}},
 			{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}},
 		}},
-		aitest.Text("已退款"),
+		chattest.Text("已退款"),
 	)
 	var refunded refunds
 	refund := refunded.tool()
-	rs := newRuns(t, m, []tool.Tool{refund, getOrder(0)}, ai.RequireApproval(refund))
+	rs := newRuns(t, m, []tool.Tool{refund, getOrder(0)}, chat.RequireApproval(refund))
 	url := chatServer(t, rs)
 
 	// useChat 只发送最后一条消息（prepareSendMessagesRequest）。
@@ -166,14 +166,14 @@ func TestUIStreamWithApproval(t *testing.T) {
 }
 
 func TestUIStreamRejectAndSteer(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Calls(aitest.Call{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}),
-		aitest.Calls(aitest.Call{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}),
-		aitest.Text("好的，不退了"),
+	m := chattest.NewModel(
+		chattest.Calls(chattest.Call{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}),
+		chattest.Calls(chattest.Call{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}),
+		chattest.Text("好的，不退了"),
 	)
 	var refunded refunds
 	refund := refunded.tool()
-	rs := newRuns(t, m, []tool.Tool{refund, getOrder(300 * time.Millisecond)}, ai.RequireApproval(refund))
+	rs := newRuns(t, m, []tool.Tool{refund, getOrder(300 * time.Millisecond)}, chat.RequireApproval(refund))
 	url := chatServer(t, rs)
 
 	resp := postChat(t, url, map[string]any{"id": "c1", "message": userMessage("查 A1")})
@@ -214,7 +214,7 @@ func TestUIStreamRejectAndSteer(t *testing.T) {
 }
 
 func TestUIResume(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "慢 回答", Delay: 300 * time.Millisecond})
+	m := chattest.NewModel(chattest.Reply{Text: "慢 回答", Delay: 300 * time.Millisecond})
 	rs := newRuns(t, m, nil)
 	url := chatServer(t, rs)
 
@@ -245,7 +245,7 @@ func TestUIResume(t *testing.T) {
 }
 
 func TestSubmitRejectsBadRequests(t *testing.T) {
-	rs := newRuns(t, aitest.NewModel(), nil)
+	rs := newRuns(t, chattest.NewModel(), nil)
 	url := chatServer(t, rs)
 	for _, body := range []any{
 		map[string]any{"id": "c1"},

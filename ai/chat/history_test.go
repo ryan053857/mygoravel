@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/aitest"
+	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/ryan053857/mygoravel/ai/chat/chattest"
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/lock"
@@ -27,7 +27,7 @@ import (
 // Load 按逻辑顺序返回：Save 保存的消息排在它的游标之后，而不是按写入时间。
 type messageTable struct {
 	mu      sync.Mutex
-	rows    map[ai.Conversation][]row
+	rows    map[chat.Conversation][]row
 	saveErr error
 }
 
@@ -39,10 +39,10 @@ type row struct {
 }
 
 func newMessageTable() *messageTable {
-	return &messageTable{rows: map[ai.Conversation][]row{}}
+	return &messageTable{rows: map[chat.Conversation][]row{}}
 }
 
-func (t *messageTable) ordered(c ai.Conversation) []row {
+func (t *messageTable) ordered(c chat.Conversation) []row {
 	rows := append([]row(nil), t.rows[c]...)
 	key := func(r row) (int, int) {
 		if r.after >= 0 {
@@ -64,10 +64,10 @@ func (t *messageTable) ordered(c ai.Conversation) []row {
 	return rows
 }
 
-func (t *messageTable) Load(_ context.Context, c ai.Conversation) (ai.History, error) {
+func (t *messageTable) Load(_ context.Context, c chat.Conversation) (chat.History, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var h ai.History
+	var h chat.History
 	for _, r := range t.ordered(c) {
 		h.Messages = append(h.Messages, r.msg)
 	}
@@ -75,7 +75,7 @@ func (t *messageTable) Load(_ context.Context, c ai.Conversation) (ai.History, e
 	return h, nil
 }
 
-func (t *messageTable) Save(_ context.Context, c ai.Conversation, e ai.Entry) error {
+func (t *messageTable) Save(_ context.Context, c chat.Conversation, e chat.Entry) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.saveErr != nil {
@@ -90,14 +90,14 @@ func (t *messageTable) Save(_ context.Context, c ai.Conversation, e ai.Entry) er
 }
 
 // write 是应用自己写入一条消息，例如群成员的发言。
-func (t *messageTable) write(c ai.Conversation, msg model.Message) {
+func (t *messageTable) write(c chat.Conversation, msg model.Message) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.rows[c] = append(t.rows[c], row{msg: msg, seq: len(t.rows[c]) + 1, after: -1})
 }
 
 // dump 按逻辑顺序描述对话。
-func (t *messageTable) dump(c ai.Conversation) string {
+func (t *messageTable) dump(c chat.Conversation) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	var msgs []model.Message
@@ -107,7 +107,7 @@ func (t *messageTable) dump(c ai.Conversation) string {
 	return describe(msgs)
 }
 
-func (t *messageTable) runOf(c ai.Conversation, content string) string {
+func (t *messageTable) runOf(c chat.Conversation, content string) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, r := range t.rows[c] {
@@ -118,11 +118,11 @@ func (t *messageTable) runOf(c ai.Conversation, content string) string {
 	return ""
 }
 
-func newHistoryRuns(t *testing.T, m *aitest.Model, tools []tool.Tool, store ai.HistoryStore, opts ...ai.Option) *ai.Runs {
+func newHistoryRuns(t *testing.T, m *chattest.Model, tools []tool.Tool, store chat.HistoryStore, opts ...chat.Option) *chat.Runs {
 	t.Helper()
 	ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithTools(tools),
 		llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
-	rs := ai.NewRuns("test", ag, nil, append(opts, ai.UseHistory(store))...)
+	rs := chat.NewRuns("test", ag, nil, append(opts, chat.UseHistory(store))...)
 	t.Cleanup(func() { _ = rs.Close() })
 	return rs
 }
@@ -150,10 +150,10 @@ func tail(msgs []model.Message) []model.Message {
 	return nil
 }
 
-var group = ai.Conversation{UserID: "", ID: "g1"}
+var group = chat.Conversation{UserID: "", ID: "g1"}
 
 func TestHistoryNotify(t *testing.T) {
-	m := aitest.NewModel(aitest.Text("明天 上午 十点"))
+	m := chattest.NewModel(chattest.Text("明天 上午 十点"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
 	ctx := context.Background()
@@ -173,14 +173,14 @@ func TestHistoryNotify(t *testing.T) {
 	if got := table.runOf(group, "明天 上午 十点"); got != r.ID {
 		t.Fatalf("answer saved by run %q, want %q", got, r.ID)
 	}
-	if !strings.Contains(strings.Join(names, " "), ai.EventText) {
+	if !strings.Contains(strings.Join(names, " "), chat.EventText) {
 		t.Fatalf("events %q", names)
 	}
 }
 
 // 回答期间到达的消息不被拒绝：运行结束后再运行一轮，多次通知合并为一轮。
 func TestHistoryNotifyWhileRunningCoalesces(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "第一轮", Delay: 300 * time.Millisecond}, aitest.Text("第二轮"))
+	m := chattest.NewModel(chattest.Reply{Text: "第一轮", Delay: 300 * time.Millisecond}, chattest.Text("第二轮"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
 	ctx := context.Background()
@@ -212,10 +212,10 @@ func TestHistoryNotifyWhileRunningCoalesces(t *testing.T) {
 }
 
 func TestHistoryStartSavesUserMessage(t *testing.T) {
-	m := aitest.NewModel(aitest.Text("你好"))
+	m := chattest.NewModel(chattest.Text("你好"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
-	c := ai.Conversation{UserID: "u1", ID: "c1"}
+	c := chat.Conversation{UserID: "u1", ID: "c1"}
 	r, err := rs.Start(context.Background(), c.UserID, c.ID, model.NewUserMessage("在吗"))
 	if err != nil {
 		t.Fatal(err)
@@ -227,16 +227,16 @@ func TestHistoryStartSavesUserMessage(t *testing.T) {
 }
 
 func TestHistoryApproval(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Reply{Calls: []aitest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
-		aitest.Text("已退款"),
+	m := chattest.NewModel(
+		chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
+		chattest.Text("已退款"),
 	)
 	var refunded refunds
 	refund := refunded.tool()
 	table := newMessageTable()
-	rs := newHistoryRuns(t, m, []tool.Tool{refund}, table, ai.RequireApproval(refund))
+	rs := newHistoryRuns(t, m, []tool.Tool{refund}, table, chat.RequireApproval(refund))
 	ctx := context.Background()
-	c := ai.Conversation{UserID: "u1", ID: "c1"}
+	c := chat.Conversation{UserID: "u1", ID: "c1"}
 
 	r, err := rs.Start(ctx, c.UserID, c.ID, model.NewUserMessage("给 A1 退款"))
 	if err != nil {
@@ -248,7 +248,7 @@ func TestHistoryApproval(t *testing.T) {
 	if err != nil || len(calls) != 1 || calls[0].ID != "r1" {
 		t.Fatalf("pending %+v err %v", calls, err)
 	}
-	if _, err := rs.Notify(ctx, c.UserID, c.ID); !errors.Is(err, ai.ErrAwaitingApproval) {
+	if _, err := rs.Notify(ctx, c.UserID, c.ID); !errors.Is(err, chat.ErrAwaitingApproval) {
 		t.Fatalf("notify while awaiting approval: %v", err)
 	}
 	next, err := rs.Approve(ctx, c.UserID, c.ID, "r1")
@@ -265,14 +265,14 @@ func TestHistoryApproval(t *testing.T) {
 }
 
 func TestHistorySteerIsSaved(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Calls(aitest.Call{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}),
-		aitest.Text("都查好了"),
+	m := chattest.NewModel(
+		chattest.Calls(chattest.Call{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}),
+		chattest.Text("都查好了"),
 	)
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, []tool.Tool{getOrder(300 * time.Millisecond)}, table)
 	ctx := context.Background()
-	c := ai.Conversation{UserID: "u1", ID: "c1"}
+	c := chat.Conversation{UserID: "u1", ID: "c1"}
 	r, err := rs.Start(ctx, c.UserID, c.ID, model.NewUserMessage("查 A1"))
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestHistorySteerIsSaved(t *testing.T) {
 }
 
 func TestHistorySaveFailureStopsRun(t *testing.T) {
-	m := aitest.NewModel(aitest.Text("回答"))
+	m := chattest.NewModel(chattest.Text("回答"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
 	table.write(group, model.NewUserMessage("问题"))
@@ -302,13 +302,13 @@ func TestHistorySaveFailureStopsRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	names, _ := collect(t, r, "")
-	if !strings.Contains(strings.Join(names, " "), ai.EventError) {
+	if !strings.Contains(strings.Join(names, " "), chat.EventError) {
 		t.Fatalf("events %q", names)
 	}
 }
 
 func TestHistoryNothingToAnswer(t *testing.T) {
-	m := aitest.NewModel()
+	m := chattest.NewModel()
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
 	table.write(group, model.NewUserMessage("问题"))
@@ -325,23 +325,23 @@ func TestHistoryNothingToAnswer(t *testing.T) {
 
 func TestHistoryModeAPIs(t *testing.T) {
 	ctx := context.Background()
-	rs := newHistoryRuns(t, aitest.NewModel(), nil, newMessageTable())
-	if _, err := rs.UIMessages(ctx, "u1", "c1"); !errors.Is(err, ai.ErrNeedsSessions) {
+	rs := newHistoryRuns(t, chattest.NewModel(), nil, newMessageTable())
+	if _, err := rs.UIMessages(ctx, "u1", "c1"); !errors.Is(err, chat.ErrNeedsSessions) {
 		t.Fatalf("UIMessages: %v", err)
 	}
-	if err := rs.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, ai.ErrNeedsSessions) {
+	if err := rs.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, chat.ErrNeedsSessions) {
 		t.Fatalf("Append: %v", err)
 	}
 
-	plain := newRuns(t, aitest.NewModel(), nil)
-	if _, err := plain.Notify(ctx, "u1", "c1"); !errors.Is(err, ai.ErrNeedsHistory) {
+	plain := newRuns(t, chattest.NewModel(), nil)
+	if _, err := plain.Notify(ctx, "u1", "c1"); !errors.Is(err, chat.ErrNeedsHistory) {
 		t.Fatalf("Notify without History: %v", err)
 	}
 
-	ag := llmagent.New("support", llmagent.WithModel(aitest.NewModel()))
+	ag := llmagent.New("support", llmagent.WithModel(chattest.NewModel()))
 	for name, build := range map[string]func(){
-		"neither": func() { ai.NewRuns("test", ag, nil) },
-		"both":    func() { ai.NewRuns("test", ag, inmemory.NewSessionService(), ai.UseHistory(newMessageTable())) },
+		"neither": func() { chat.NewRuns("test", ag, nil) },
+		"both":    func() { chat.NewRuns("test", ag, inmemory.NewSessionService(), chat.UseHistory(newMessageTable())) },
 	} {
 		func() {
 			defer func() {
@@ -356,7 +356,7 @@ func TestHistoryModeAPIs(t *testing.T) {
 
 // 消息在回答保存之前写入、通知在运行结束之后才到达：新的运行仍然回应它。
 func TestHistoryLateNotify(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "第一轮", Delay: 200 * time.Millisecond}, aitest.Text("第二轮"))
+	m := chattest.NewModel(chattest.Reply{Text: "第一轮", Delay: 200 * time.Millisecond}, chattest.Text("第二轮"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
 	ctx := context.Background()
@@ -383,13 +383,13 @@ func TestHistoryLateNotify(t *testing.T) {
 
 // 多实例：通知落在另一个实例上时转发给运行所在的实例，运行结束后再运行一轮。
 func TestClusterHistoryNotifyForwarded(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "第一轮", Delay: 300 * time.Millisecond}, aitest.Text("第二轮"))
+	m := chattest.NewModel(chattest.Reply{Text: "第一轮", Delay: 300 * time.Millisecond}, chattest.Text("第二轮"))
 	table := newMessageTable()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	locker := lock.New(locktest.NewStore())
-	newInstance := func() *ai.Runs {
+	newInstance := func() *chat.Runs {
 		ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
-		return ai.NewRuns("test", ag, nil, ai.UseHistory(table), ai.Cluster(hub, locker))
+		return chat.NewRuns("test", ag, nil, chat.UseHistory(table), chat.Cluster(hub, locker))
 	}
 	a, b := newInstance(), newInstance()
 	t.Cleanup(func() {

@@ -1,4 +1,4 @@
-// Package postgres 把对话保存在 PostgreSQL 中，表由 ai.Migrations 创建。
+// Package postgres 把对话保存在 PostgreSQL 中，表由 chat.Migrations 创建。
 package postgres
 
 import (

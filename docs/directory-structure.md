@@ -213,11 +213,13 @@ mygoravel 的每个包都可以单独使用，按需引入即可。下面按文�
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `ai` | 对话式 agent：后台运行、插话、工具审批、事件推送 | [AI 助手](ai.md) |
-| `ai/postgres`、`ai/sqlite`、`ai/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
+| `ai` | 模型的配置和几种能力的接口：生成图片、合成与识别语音、计算向量、重排、决策 | [媒体](ai.md#media)、[决策](ai.md#decisions) |
+| `ai/chat` | 对话式 agent：后台运行、插话、工具审批、事件推送 | [AI 助手](ai.md) |
+| `ai/chat/postgres`、`ai/chat/sqlite`、`ai/chat/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
 | `ai/openai`、`ai/openrouter` | 生成图片、合成与识别语音、计算向量和重排；`ai/openai` 还能调用决策模型 | [媒体](ai.md#media)、[决策](ai.md#decisions) |
 | `ai/systemone` | 用 System One 格式调用决策模型 | [决策](ai.md#decisions) |
-| `ai/aitest` | 按脚本回复的模型，测试 agent 时不访问真实服务 | [测试](ai.md#testing) |
+| `ai/chat/chattest` | 按脚本回复的模型，测试 agent 时不访问真实服务 | [测试](ai.md#testing) |
+| `ai/aitest` | 图片、语音、向量、重排和决策的替身 | [测试](ai.md#testing) |
 | `document/split` | 把 Markdown 切分为可追溯到原文的分段，供检索和计算向量使用 | [文档转换与切分](documents.md#splitting) |
 | `document/convert` | 把 PDF、Word、PowerPoint、Excel、CSV、HTML 等转换为 Markdown；各格式在子包中，`convert/all` 注册全部 | [文档转换与切分](documents.md#converting) |
 

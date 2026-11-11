@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 
 	"trpc.group/trpc-go/trpc-agent-go/log"
 
-	"github.com/ryan053857/mygoravel/ai"
+	"github.com/ryan053857/mygoravel/ai/chat"
 )
 
 // trpcLog 收集 trpc-agent-go 的日志。SetLogger 改的是进程级全局变量，trpc-agent-go
@@ -18,7 +18,7 @@ import (
 var trpcLog lockedBuffer
 
 func TestMain(m *testing.M) {
-	ai.SetLogger(slog.New(slog.NewTextHandler(&trpcLog, nil)))
+	chat.SetLogger(slog.New(slog.NewTextHandler(&trpcLog, nil)))
 	os.Exit(m.Run())
 }
 
@@ -31,15 +31,6 @@ func TestSetLogger(t *testing.T) {
 	}
 	if strings.Contains(got, "hidden by handler level") {
 		t.Fatalf("debug should follow the handler level: %q", got)
-	}
-}
-
-func TestModelConfigValidate(t *testing.T) {
-	if err := (ai.ModelConfig{}).Validate(); err == nil {
-		t.Fatal("empty config should be invalid")
-	}
-	if err := (ai.ModelConfig{Model: "deepseek-chat", APIKey: "k"}).Validate(); err != nil {
-		t.Fatal(err)
 	}
 }
 

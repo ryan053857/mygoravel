@@ -1,5 +1,5 @@
-// Package aitest 提供按脚本回复的模型，用于测试 agent，不访问真实的模型服务。
-package aitest
+// Package chattest 提供按脚本回复的模型，用于测试 agent，不访问真实的模型服务。
+package chattest
 
 import (
 	"context"
@@ -64,7 +64,7 @@ func (m *Model) LastRequest() []model.Message {
 }
 
 // Info 实现 model.Model。
-func (m *Model) Info() model.Info { return model.Info{Name: "aitest"} }
+func (m *Model) Info() model.Info { return model.Info{Name: "chattest"} }
 
 // GenerateContent 实现 model.Model。
 func (m *Model) GenerateContent(ctx context.Context, req *model.Request) (<-chan *model.Response, error) {
@@ -73,7 +73,7 @@ func (m *Model) GenerateContent(ctx context.Context, req *model.Request) (<-chan
 	n := len(m.requests)
 	if n > len(m.replies) {
 		m.mu.Unlock()
-		return nil, fmt.Errorf("aitest: unexpected request %d, script has %d replies", n, len(m.replies))
+		return nil, fmt.Errorf("chattest: unexpected request %d, script has %d replies", n, len(m.replies))
 	}
 	reply := m.replies[n-1]
 	m.mu.Unlock()
@@ -99,7 +99,7 @@ func (m *Model) GenerateContent(ctx context.Context, req *model.Request) (<-chan
 	go func() {
 		defer close(ch)
 		send := func(r *model.Response) bool {
-			r.Model, r.Timestamp, r.Created = "aitest", time.Now(), time.Now().Unix()
+			r.Model, r.Timestamp, r.Created = "chattest", time.Now(), time.Now().Unix()
 			select {
 			case ch <- r:
 				return true

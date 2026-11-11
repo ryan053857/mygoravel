@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 	tsqlite "trpc.group/trpc-go/trpc-agent-go/session/sqlite"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/aitest"
-	aimysql "github.com/ryan053857/mygoravel/ai/mysql"
-	aipg "github.com/ryan053857/mygoravel/ai/postgres"
-	aisqlite "github.com/ryan053857/mygoravel/ai/sqlite"
+	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/ryan053857/mygoravel/ai/chat/chattest"
+	aimysql "github.com/ryan053857/mygoravel/ai/chat/mysql"
+	aipg "github.com/ryan053857/mygoravel/ai/chat/postgres"
+	aisqlite "github.com/ryan053857/mygoravel/ai/chat/sqlite"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
@@ -52,7 +52,7 @@ func TestSessionMigrationsMatchTrpc(t *testing.T) {
 		auto := dbtesting.Open(t, driver, nil)
 		s := newSessions(t, driver, auto, true)
 		_ = s.Close()
-		migrated := dbtesting.Open(t, driver, ai.Migrations())
+		migrated := dbtesting.Open(t, driver, chat.Migrations())
 		want, got := schema(t, driver, auto), schema(t, driver, migrated)
 		if len(want) == 0 {
 			t.Fatal("trpc-agent-go created no tables")
@@ -117,19 +117,19 @@ func schema(t *testing.T, driver database.Driver, db *bun.DB) []string {
 // TestSessionsAcrossRestart 在迁移建出的表上运行到等待审批，再用新的 Runs（相当于新进程）批准并继续。
 func TestSessionsAcrossRestart(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		db := dbtesting.Open(t, driver, ai.Migrations())
+		db := dbtesting.Open(t, driver, chat.Migrations())
 		ctx := context.Background()
 		var refunded refunds
 		refund := refunded.tool()
-		m := aitest.NewModel(
-			aitest.Calls(aitest.Call{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}),
-			aitest.Text("已退款"),
+		m := chattest.NewModel(
+			chattest.Calls(chattest.Call{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}),
+			chattest.Text("已退款"),
 		)
-		start := func() (*ai.Runs, func()) {
+		start := func() (*chat.Runs, func()) {
 			sessions := newSessions(t, driver, db, false)
 			ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithTools([]tool.Tool{refund}),
 				llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
-			rs := ai.NewRuns("test", ag, sessions, ai.RequireApproval(refund))
+			rs := chat.NewRuns("test", ag, sessions, chat.RequireApproval(refund))
 			return rs, func() { _ = rs.Close(); _ = sessions.Close() }
 		}
 
@@ -169,7 +169,7 @@ func TestSessionsAcrossRestart(t *testing.T) {
 	})
 }
 
-func wait(t *testing.T, r *ai.Run) {
+func wait(t *testing.T, r *chat.Run) {
 	t.Helper()
 	select {
 	case <-r.Done():

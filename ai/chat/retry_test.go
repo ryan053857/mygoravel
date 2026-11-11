@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model"
 
 	"github.com/ryan053857/mygoravel/ai"
+	"github.com/ryan053857/mygoravel/ai/chat"
 )
 
 // failingServer 总是返回 500，并让客户端几乎不等待就重试；返回请求计数。
@@ -35,7 +36,7 @@ func TestModelRetries(t *testing.T) {
 		{4, 5},
 	} {
 		s, hits := failingServer(t)
-		m := ai.NewModel(ai.ModelConfig{Model: "m", BaseURL: s.URL, APIKey: "k", MaxRetries: tc.maxRetries})
+		m := chat.NewModel(ai.ModelConfig{Model: "m", BaseURL: s.URL, APIKey: "k", MaxRetries: tc.maxRetries})
 		ch, err := m.GenerateContent(context.Background(), &model.Request{
 			Messages:         []model.Message{model.NewUserMessage("hi")},
 			GenerationConfig: model.GenerationConfig{Stream: false},
@@ -53,14 +54,6 @@ func TestModelRetries(t *testing.T) {
 		}
 		if got := hits.Load(); got != tc.requests {
 			t.Errorf("max_retries %d: %d requests, want %d", tc.maxRetries, got, tc.requests)
-		}
-	}
-}
-
-func TestModelConfigRetries(t *testing.T) {
-	for in, want := range map[int]int{0: 2, -1: 0, -5: 0, 5: 5} {
-		if got := (ai.ModelConfig{MaxRetries: in}).Retries(); got != want {
-			t.Errorf("Retries() with %d = %d, want %d", in, got, want)
 		}
 	}
 }

@@ -1,4 +1,4 @@
-package ai
+package chat
 
 import (
 	"context"
@@ -18,7 +18,7 @@ var (
 	// ErrNoWorker 表示没有调用 Serve 的实例接收请求，例如 worker 都没有运行或正在停止（503）。
 	ErrNoWorker = errorx.Define(errorx.Unavailable, "ai.no_worker")
 	// ErrRunOptions 表示使用 RunOnWorkers 时传入了运行选项：agent.RunOption 不能跨实例传递。
-	ErrRunOptions = errors.New("ai: run options cannot be sent to workers; set them on the agent")
+	ErrRunOptions = errors.New("chat: run options cannot be sent to workers; set them on the agent")
 )
 
 // dispatchTimeout 是等待 worker 处理请求的时限。Approve 在 worker 上执行工具，可能需要一段时间。
@@ -118,7 +118,7 @@ func (rs *Runs) dispatch(ctx context.Context, req dispatchReq, opts []agent.RunO
 		select {
 		case msg, ok := <-sub.C():
 			if !ok {
-				return nil, errors.Wrap(sub.Err(), "ai: dispatch")
+				return nil, errors.Wrap(sub.Err(), "chat: dispatch")
 			}
 			var reply dispatchReply
 			if err := json.Unmarshal(msg.Data, &reply); err != nil {
@@ -143,7 +143,7 @@ func (rs *Runs) dispatch(ctx context.Context, req dispatchReq, opts []agent.RunO
 			if !claimed {
 				return nil, ErrNoWorker.New()
 			}
-			return nil, errors.Newf("ai: %s: the worker did not finish in %s", req.Op, dispatchTimeout)
+			return nil, errors.Newf("chat: %s: the worker did not finish in %s", req.Op, dispatchTimeout)
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -155,7 +155,7 @@ func (rs *Runs) dispatch(ctx context.Context, req dispatchReq, opts []agent.RunO
 // 进行中的运行在 Shutdown 中等待结束。需要 Cluster。
 func (rs *Runs) Serve(ctx context.Context) error {
 	if rs.cluster == nil {
-		return errors.New("ai: Serve needs Cluster")
+		return errors.New("chat: Serve needs Cluster")
 	}
 	c := rs.cluster
 	for {
@@ -221,7 +221,7 @@ func (rs *Runs) serveOne(req dispatchReq) {
 	case opReject:
 		run, err = rs.rejectLocal(ctx, req.UserID, req.Session, req.CallID, req.Reason, nil)
 	default:
-		err = errors.Newf("ai: unknown dispatched operation %q", req.Op)
+		err = errors.Newf("chat: unknown dispatched operation %q", req.Op)
 	}
 	out := dispatchReply{Kind: "done", Error: encodeError(err)}
 	if run != nil {
@@ -242,7 +242,7 @@ func (rs *Runs) getRun(ctx context.Context, userID, sessionID, runID string) (*R
 			return r, nil
 		}
 		if time.Now().After(deadline) {
-			return nil, errors.Newf("ai: cannot reach run %s on the worker", runID)
+			return nil, errors.Newf("chat: cannot reach run %s on the worker", runID)
 		}
 		select {
 		case <-time.After(20 * time.Millisecond):

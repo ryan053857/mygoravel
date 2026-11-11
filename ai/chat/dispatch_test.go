@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/aitest"
+	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/ryan053857/mygoravel/ai/chat/chattest"
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/lock"
@@ -23,23 +23,23 @@ import (
 
 // deployment 是一个 web 实例（RunOnWorkers）和若干 worker 实例（Serve），共用对话存储、广播和锁。
 type deployment struct {
-	web     *ai.Runs
-	workers []*ai.Runs
+	web     *chat.Runs
+	workers []*chat.Runs
 	stop    []context.CancelFunc
 }
 
 // newDeployment 创建部署。web 的模型没有任何回复，被调用就会出错：运行必须发生在 worker 上。
-func newDeployment(t *testing.T, workerModel *aitest.Model, tools []tool.Tool, workers int, opts ...ai.Option) *deployment {
+func newDeployment(t *testing.T, workerModel *chattest.Model, tools []tool.Tool, workers int, opts ...chat.Option) *deployment {
 	t.Helper()
 	sessions := inmemory.NewSessionService()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	locker := lock.New(locktest.NewStore())
-	newRuns := func(m *aitest.Model, extra ...ai.Option) *ai.Runs {
+	newRuns := func(m *chattest.Model, extra ...chat.Option) *chat.Runs {
 		ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithTools(tools),
 			llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
-		return ai.NewRuns("test", ag, sessions, append(append([]ai.Option{ai.Cluster(hub, locker)}, opts...), extra...)...)
+		return chat.NewRuns("test", ag, sessions, append(append([]chat.Option{chat.Cluster(hub, locker)}, opts...), extra...)...)
 	}
-	d := &deployment{web: newRuns(aitest.NewModel(), ai.RunOnWorkers())}
+	d := &deployment{web: newRuns(chattest.NewModel(), chat.RunOnWorkers())}
 	for range workers {
 		w := newRuns(workerModel)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -63,7 +63,7 @@ func newDeployment(t *testing.T, workerModel *aitest.Model, tools []tool.Tool, w
 }
 
 func TestWorkersRunConversation(t *testing.T) {
-	m := aitest.NewModel(aitest.Text("你好 世界"))
+	m := chattest.NewModel(chattest.Text("你好 世界"))
 	d := newDeployment(t, m, nil, 2)
 	ctx := context.Background()
 	r, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("hi"))
@@ -71,7 +71,7 @@ func TestWorkersRunConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	names, _ := collect(t, r, "")
-	if got := strings.Join(names, " "); !strings.Contains(got, ai.EventText) || !strings.HasSuffix(got, ai.EventDone) {
+	if got := strings.Join(names, " "); !strings.Contains(got, chat.EventText) || !strings.HasSuffix(got, chat.EventDone) {
 		t.Fatalf("events %s", got)
 	}
 	// 两个 worker 中只有一个处理：模型只有一条回复，第二次调用会出错。
@@ -85,7 +85,7 @@ func TestWorkersRunConversation(t *testing.T) {
 }
 
 func TestWorkersBusyAndOptions(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "慢", Delay: 300 * time.Millisecond})
+	m := chattest.NewModel(chattest.Reply{Text: "慢", Delay: 300 * time.Millisecond})
 	d := newDeployment(t, m, nil, 1)
 	ctx := context.Background()
 	r, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("hi"))
@@ -93,17 +93,17 @@ func TestWorkersBusyAndOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	// worker 返回的错误按错误码还原。
-	if _, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("again")); !errors.Is(err, ai.ErrBusy) {
+	if _, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("again")); !errors.Is(err, chat.ErrBusy) {
 		t.Fatalf("second start: %v", err)
 	}
-	if _, err := d.web.Start(ctx, "u1", "c2", model.NewUserMessage("x"), agent.WithRuntimeState(map[string]any{"k": 1})); !errors.Is(err, ai.ErrRunOptions) {
+	if _, err := d.web.Start(ctx, "u1", "c2", model.NewUserMessage("x"), agent.WithRuntimeState(map[string]any{"k": 1})); !errors.Is(err, chat.ErrRunOptions) {
 		t.Fatalf("run options: %v", err)
 	}
 	<-r.Done()
 }
 
 func TestWorkersCancelFromWeb(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "很慢", Delay: 5 * time.Second})
+	m := chattest.NewModel(chattest.Reply{Text: "很慢", Delay: 5 * time.Second})
 	d := newDeployment(t, m, nil, 1)
 	r, err := d.web.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
 	if err != nil {
@@ -112,19 +112,19 @@ func TestWorkersCancelFromWeb(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	r.Cancel()
 	_, events := collect(t, r, "")
-	if !events[len(events)-1].Data.(ai.Done).Canceled {
+	if !events[len(events)-1].Data.(chat.Done).Canceled {
 		t.Fatal("run was not canceled")
 	}
 }
 
 func TestWorkersApproval(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Reply{Calls: []aitest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
-		aitest.Text("已退款"),
+	m := chattest.NewModel(
+		chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
+		chattest.Text("已退款"),
 	)
 	var refunded refunds
 	refund := refunded.tool()
-	d := newDeployment(t, m, []tool.Tool{refund}, 1, ai.RequireApproval(refund))
+	d := newDeployment(t, m, []tool.Tool{refund}, 1, chat.RequireApproval(refund))
 	ctx := context.Background()
 	r, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("给 A1 退款"))
 	if err != nil {
@@ -136,22 +136,22 @@ func TestWorkersApproval(t *testing.T) {
 		t.Fatalf("approve: %v %v", next, err)
 	}
 	names, _ := collect(t, next, "")
-	if len(refunded.done) != 1 || !strings.Contains(strings.Join(names, " "), ai.EventText) {
+	if len(refunded.done) != 1 || !strings.Contains(strings.Join(names, " "), chat.EventText) {
 		t.Fatalf("refunded %v events %q", refunded.done, names)
 	}
 }
 
 func TestWorkersUnavailable(t *testing.T) {
-	defer ai.SetReplyTimeout(200 * time.Millisecond)()
+	defer chat.SetReplyTimeout(200 * time.Millisecond)()
 	ctx := context.Background()
 	t.Run("no worker", func(t *testing.T) {
-		d := newDeployment(t, aitest.NewModel(), nil, 0)
-		if _, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("hi")); !errors.Is(err, ai.ErrNoWorker) {
+		d := newDeployment(t, chattest.NewModel(), nil, 0)
+		if _, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("hi")); !errors.Is(err, chat.ErrNoWorker) {
 			t.Fatalf("start without workers: %v", err)
 		}
 	})
 	t.Run("stopping worker is skipped", func(t *testing.T) {
-		m := aitest.NewModel(aitest.Text("好"))
+		m := chattest.NewModel(chattest.Text("好"))
 		d := newDeployment(t, m, nil, 2)
 		if err := d.workers[0].Shutdown(ctx); err != nil {
 			t.Fatal(err)
@@ -167,26 +167,26 @@ func TestWorkersUnavailable(t *testing.T) {
 		}
 	})
 	t.Run("all workers stopping", func(t *testing.T) {
-		d := newDeployment(t, aitest.NewModel(), nil, 1)
+		d := newDeployment(t, chattest.NewModel(), nil, 1)
 		if err := d.workers[0].Shutdown(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("hi")); !errors.Is(err, ai.ErrNoWorker) {
+		if _, err := d.web.Start(ctx, "u1", "c1", model.NewUserMessage("hi")); !errors.Is(err, chat.ErrNoWorker) {
 			t.Fatalf("start while workers stop: %v", err)
 		}
 	})
 }
 
 func TestWorkersNotifyWithHistory(t *testing.T) {
-	m := aitest.NewModel(aitest.Text("十点"))
+	m := chattest.NewModel(chattest.Text("十点"))
 	table := newMessageTable()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	locker := lock.New(locktest.NewStore())
-	newRuns := func(m *aitest.Model, extra ...ai.Option) *ai.Runs {
+	newRuns := func(m *chattest.Model, extra ...chat.Option) *chat.Runs {
 		ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
-		return ai.NewRuns("test", ag, nil, append([]ai.Option{ai.UseHistory(table), ai.Cluster(hub, locker)}, extra...)...)
+		return chat.NewRuns("test", ag, nil, append([]chat.Option{chat.UseHistory(table), chat.Cluster(hub, locker)}, extra...)...)
 	}
-	web, worker := newRuns(aitest.NewModel(), ai.RunOnWorkers()), newRuns(m)
+	web, worker := newRuns(chattest.NewModel(), chat.RunOnWorkers()), newRuns(m)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { _ = worker.Serve(ctx) }()
 	t.Cleanup(func() {

@@ -1,4 +1,4 @@
-package ai
+package chat
 
 import (
 	"context"
@@ -133,7 +133,7 @@ func decodeEvent(w wireEvent) (Event, error) {
 		err = json.Unmarshal(w.Data, &d)
 		ev.Data = d
 	default:
-		err = errors.Newf("ai: unknown event %q", w.Name)
+		err = errors.Newf("chat: unknown event %q", w.Name)
 	}
 	return ev, err
 }
@@ -645,7 +645,7 @@ func (m *mirror) request(ctx context.Context, c ctlMsg) error {
 	case <-m.run.done:
 		return ErrFinished
 	case <-timer.C:
-		return errors.Newf("ai: %s: the running instance did not reply", c.Kind)
+		return errors.Newf("chat: %s: the running instance did not reply", c.Kind)
 	case <-ctx.Done():
 		return ctx.Err()
 	}

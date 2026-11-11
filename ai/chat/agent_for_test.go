@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/aitest"
+	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/ryan053857/mygoravel/ai/chat/chattest"
 )
 
 // employees 模拟按对话选择 AI 员工：每个对话对应一个 agent，可以随时替换。
@@ -29,7 +29,7 @@ func (e *employees) set(conversation string, ag agent.Agent) {
 	e.agents[conversation] = ag
 }
 
-func (e *employees) choose(_ context.Context, c ai.Conversation) (agent.Agent, error) {
+func (e *employees) choose(_ context.Context, c chat.Conversation) (agent.Agent, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	ag, ok := e.agents[c.ID]
@@ -44,10 +44,10 @@ func employee(name string, m model.Model, tools ...tool.Tool) agent.Agent {
 		llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
 }
 
-func newAgentForRuns(t *testing.T, e *employees, opts ...ai.Option) *ai.Runs {
+func newAgentForRuns(t *testing.T, e *employees, opts ...chat.Option) *chat.Runs {
 	t.Helper()
 	sessions := inmemory.NewSessionService()
-	rs := ai.NewRuns("test", nil, sessions, append(opts, ai.AgentFor(e.choose))...)
+	rs := chat.NewRuns("test", nil, sessions, append(opts, chat.AgentFor(e.choose))...)
 	t.Cleanup(func() {
 		_ = rs.Close()
 		_ = sessions.Close()
@@ -55,23 +55,23 @@ func newAgentForRuns(t *testing.T, e *employees, opts ...ai.Option) *ai.Runs {
 	return rs
 }
 
-func answer(t *testing.T, r *ai.Run) string {
+func answer(t *testing.T, r *chat.Run) string {
 	t.Helper()
 	_, events := collect(t, r, "")
 	var b strings.Builder
 	for _, ev := range events {
-		if ev.Name == ai.EventText {
-			b.WriteString(ev.Data.(ai.Text).Text)
+		if ev.Name == chat.EventText {
+			b.WriteString(ev.Data.(chat.Text).Text)
 		}
-		if ev.Name == ai.EventError {
-			b.WriteString("error:" + ev.Data.(ai.Error).Message)
+		if ev.Name == chat.EventError {
+			b.WriteString("error:" + ev.Data.(chat.Error).Message)
 		}
 	}
 	return b.String()
 }
 
 func TestAgentForChoosesPerConversation(t *testing.T) {
-	a, b := aitest.NewModel(aitest.Text("我是小A")), aitest.NewModel(aitest.Text("我是小B"))
+	a, b := chattest.NewModel(chattest.Text("我是小A")), chattest.NewModel(chattest.Text("我是小B"))
 	e := &employees{agents: map[string]agent.Agent{"c1": employee("xiaoa", a), "c2": employee("xiaob", b)}}
 	rs := newAgentForRuns(t, e)
 	ctx := context.Background()
@@ -91,9 +91,9 @@ func TestAgentForChoosesPerConversation(t *testing.T) {
 
 // 每一轮重新选择：修改 AI 员工的配置后，下一次运行就使用新的 agent。
 func TestAgentForChangeTakesEffectNextRun(t *testing.T) {
-	old, updated := aitest.NewModel(aitest.Text("旧配置")), aitest.NewModel(aitest.Text("新配置"))
+	old, updated := chattest.NewModel(chattest.Text("旧配置")), chattest.NewModel(chattest.Text("新配置"))
 	e := &employees{agents: map[string]agent.Agent{"c1": employee("xiaoa", old)}}
-	rs := newAgentForRuns(t, e, ai.KeepFinished(0))
+	rs := newAgentForRuns(t, e, chat.KeepFinished(0))
 	ctx := context.Background()
 	r, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("一"))
 	if err != nil {
@@ -129,13 +129,13 @@ func TestAgentForChooseError(t *testing.T) {
 
 // 工具由各个 AI 员工自己提供：按名称要求审批，批准后执行这个对话的 agent 上的工具。
 func TestAgentForApprovalUsesEmployeeTool(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Reply{Calls: []aitest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
-		aitest.Text("已退款"),
+	m := chattest.NewModel(
+		chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
+		chattest.Text("已退款"),
 	)
 	var refunded refunds
 	e := &employees{agents: map[string]agent.Agent{"c1": employee("xiaoa", m, refunded.tool())}}
-	rs := newAgentForRuns(t, e, ai.RequireApprovalOf("refund_order"))
+	rs := newAgentForRuns(t, e, chat.RequireApprovalOf("refund_order"))
 	ctx := context.Background()
 	r, err := rs.Start(ctx, "u1", "c1", model.NewUserMessage("给 A1 退款"))
 	if err != nil {
@@ -159,10 +159,10 @@ func TestAgentForApprovalUsesEmployeeTool(t *testing.T) {
 
 // 群聊：应用的消息表加按会话选择的 AI 员工。
 func TestAgentForWithHistory(t *testing.T) {
-	m := aitest.NewModel(aitest.Text("十点"))
+	m := chattest.NewModel(chattest.Text("十点"))
 	e := &employees{agents: map[string]agent.Agent{group.ID: employee("xiaoa", m)}}
 	table := newMessageTable()
-	rs := ai.NewRuns("test", nil, nil, ai.UseHistory(table), ai.AgentFor(e.choose))
+	rs := chat.NewRuns("test", nil, nil, chat.UseHistory(table), chat.AgentFor(e.choose))
 	t.Cleanup(func() { _ = rs.Close() })
 	table.write(group, model.NewUserMessage("[张三] @小A 几点开会"))
 	r, err := rs.Notify(context.Background(), group.UserID, group.ID)
@@ -180,8 +180,8 @@ func TestAgentForNewRunsChecks(t *testing.T) {
 	sessions := inmemory.NewSessionService()
 	defer sessions.Close()
 	for name, build := range map[string]func(){
-		"neither": func() { ai.NewRuns("test", nil, sessions) },
-		"both":    func() { ai.NewRuns("test", employee("x", aitest.NewModel()), sessions, ai.AgentFor(e.choose)) },
+		"neither": func() { chat.NewRuns("test", nil, sessions) },
+		"both":    func() { chat.NewRuns("test", employee("x", chattest.NewModel()), sessions, chat.AgentFor(e.choose)) },
 	} {
 		func() {
 			defer func() {

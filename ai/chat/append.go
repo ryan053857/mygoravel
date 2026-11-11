@@ -1,4 +1,4 @@
-package ai
+package chat
 
 import (
 	"context"
@@ -29,11 +29,11 @@ const appendExtension = "mygoravel.ai.appended"
 func (rs *Runs) Append(ctx context.Context, userID, sessionID, author string, msg model.Message) error {
 	switch {
 	case author == "":
-		return errors.New("ai: append needs an author")
+		return errors.New("chat: append needs an author")
 	case msg.Role != model.RoleUser && msg.Role != model.RoleAssistant:
-		return errors.Newf("ai: cannot append a %q message", msg.Role)
+		return errors.Newf("chat: cannot append a %q message", msg.Role)
 	case msg.Content == "" && len(msg.ContentParts) == 0:
-		return errors.New("ai: cannot append an empty message")
+		return errors.New("chat: cannot append an empty message")
 	}
 	if rs.history != nil {
 		return ErrNeedsSessions
@@ -70,7 +70,7 @@ func (rs *Runs) Append(ctx context.Context, userID, sessionID, author string, ms
 		return ErrAwaitingApproval.New()
 	}
 	if !hasUserMessage(sess) && msg.Role != model.RoleUser {
-		return errors.New("ai: a conversation must start with a user message")
+		return errors.New("chat: a conversation must start with a user message")
 	}
 	if sess == nil {
 		if sess, err = rs.sessions.CreateSession(ctx, key, session.StateMap{}); err != nil {
@@ -87,7 +87,7 @@ func (rs *Runs) Append(ctx context.Context, userID, sessionID, author string, ms
 		Choices: []model.Choice{{Message: msg}},
 	})
 	evt.Extensions = map[string]json.RawMessage{appendExtension: mark}
-	return errors.Wrap(rs.sessions.AppendEvent(ctx, sess, evt), "ai: append message")
+	return errors.Wrap(rs.sessions.AppendEvent(ctx, sess, evt), "chat: append message")
 }
 
 // hasUserMessage 报告对话中是否已经有用户消息。

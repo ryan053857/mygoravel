@@ -1,11 +1,6 @@
 package ai
 
-import (
-	"github.com/cockroachdb/errors"
-	"github.com/openai/openai-go/option"
-	"trpc.group/trpc-go/trpc-agent-go/model"
-	"trpc.group/trpc-go/trpc-agent-go/model/openai"
-)
+import "github.com/cockroachdb/errors"
 
 // ModelConfig 描述 OpenAI 兼容接口上的一个模型，DeepSeek、通义千问、Kimi、OpenAI 等都提供这种接口。
 // 它是普通的值：可以放进配置文件，也可以由应用从数据库等处查出后现场构造。
@@ -46,16 +41,4 @@ func (c ModelConfig) Validate() error {
 		errs = append(errs, errors.New("api_key is required"))
 	}
 	return errors.Join(errs...)
-}
-
-// NewModel 按配置创建模型，opts 原样传给 openai.New。其他接口的模型直接使用 trpc-agent-go 的对应包创建。
-func NewModel(cfg ModelConfig, opts ...openai.Option) model.Model {
-	base := []openai.Option{
-		openai.WithAPIKey(cfg.APIKey),
-		openai.WithOpenAIOptions(option.WithMaxRetries(cfg.Retries())),
-	}
-	if cfg.BaseURL != "" {
-		base = append(base, openai.WithBaseURL(cfg.BaseURL))
-	}
-	return openai.New(cfg.Model, append(base, opts...)...)
 }

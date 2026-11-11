@@ -104,7 +104,7 @@ if errors.Is(err, outbound.ErrForbidden) {
 
   ```go
   client := outbound.New(outbound.Options{AnyPort: true, Timeout: -1}) // 流式响应不能有总超时
-  chat := ai.NewModel(cfg, openai.WithOpenAIOptions(option.WithHTTPClient(client)))
+  llm := chat.NewModel(cfg, openai.WithOpenAIOptions(option.WithHTTPClient(client)))
   media := aiopenai.New(cfg, aiopenai.WithHTTPClient(client))
   ```
 

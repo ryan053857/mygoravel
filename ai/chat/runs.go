@@ -1,4 +1,4 @@
-package ai
+package chat
 
 import (
 	"cmp"
@@ -31,7 +31,7 @@ var (
 	// ErrNotPending 表示要审批的工具调用不存在或已经处理过。
 	ErrNotPending = errorx.Define(errorx.NotFound, "ai.not_pending")
 	// ErrFinished 表示运行已经结束，不能再插入消息，应当开始新的运行。
-	ErrFinished = errors.New("ai: run finished")
+	ErrFinished = errors.New("chat: run finished")
 	// ErrShuttingDown 表示本实例正在停止，不再开始新的运行（503）。客户端稍后重试，
 	// 多实例部署时会落到其他实例上。
 	ErrShuttingDown = errorx.Define(errorx.Unavailable, "ai.shutting_down")
@@ -95,7 +95,7 @@ func RequireApprovalOf(names ...string) Option {
 // choose 返回错误时这一轮失败，运行以 error 事件结束。创建 llmagent 的开销很小，也可以由应用按配置缓存。
 func AgentFor(choose func(ctx context.Context, c Conversation) (agent.Agent, error)) Option {
 	if choose == nil {
-		panic("ai: nil agent chooser")
+		panic("chat: nil agent chooser")
 	}
 	return func(rs *Runs) { rs.choose = choose }
 }
@@ -129,21 +129,21 @@ func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Optio
 	}
 	switch {
 	case rs.history == nil && sessions == nil:
-		panic("ai: NewRuns needs a session service or UseHistory")
+		panic("chat: NewRuns needs a session service or UseHistory")
 	case rs.history != nil && sessions != nil:
-		panic("ai: pass nil sessions with UseHistory")
+		panic("chat: pass nil sessions with UseHistory")
 	case rs.history != nil:
 		rs.ephemeral = inmemory.NewSessionService()
 		sessions = rs.ephemeral
 	}
 	if rs.workers && rs.cluster == nil {
-		panic("ai: RunOnWorkers needs Cluster")
+		panic("chat: RunOnWorkers needs Cluster")
 	}
 	switch {
 	case ag == nil && rs.choose == nil:
-		panic("ai: NewRuns needs an agent or AgentFor")
+		panic("chat: NewRuns needs an agent or AgentFor")
 	case ag != nil && rs.choose != nil:
-		panic("ai: pass a nil agent with AgentFor")
+		panic("chat: pass a nil agent with AgentFor")
 	}
 	rs.logger = logging.Or(rs.logger).With(logging.AttrComponent, "ai")
 	runnerOpts := append([]runner.Option{runner.WithSessionService(sessions)}, rs.runnerOpts...)
@@ -152,7 +152,7 @@ func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Optio
 	} else {
 		// 每一轮用 agent.WithAgent 指定 AgentFor 选出的 agent，默认的 agent 不会被用到。
 		rs.runner = runner.NewRunnerWithAgentFactory(app, app, func(context.Context, agent.RunOptions) (agent.Agent, error) {
-			return nil, errors.New("ai: no agent chosen for the run")
+			return nil, errors.New("chat: no agent chosen for the run")
 		}, runnerOpts...)
 	}
 	return rs
@@ -532,7 +532,7 @@ func (rs *Runs) approvalTool(ctx context.Context, key session.Key, name string) 
 	if t := rs.approval[name]; t != nil {
 		return t, nil
 	}
-	return nil, errors.Newf("ai: tool %q is not available", name)
+	return nil, errors.Newf("chat: tool %q is not available", name)
 }
 
 // rejection 是 Reject 写给模型的调用结果。
@@ -783,7 +783,7 @@ func (r *Run) round(ctx context.Context, msg *model.Message, reqID string, opts 
 	if rs.choose != nil {
 		ag, err := rs.choose(ctx, rs.conversation(r.key))
 		if err != nil {
-			return nil, "", cleanup, errors.Wrap(err, "ai: choose agent")
+			return nil, "", cleanup, errors.Wrap(err, "chat: choose agent")
 		}
 		opts = append(opts, agent.WithAgent(ag))
 	}

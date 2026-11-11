@@ -1,4 +1,4 @@
-package ai_test
+package chat_test
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/aitest"
+	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/ryan053857/mygoravel/ai/chat/chattest"
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
 	"github.com/ryan053857/mygoravel/database"
@@ -24,20 +24,20 @@ import (
 )
 
 // twoInstances 创建共用会话存储、广播和锁的两个 Runs，相当于同一个应用的两个实例。
-func twoInstances(t *testing.T, m *aitest.Model, tools []tool.Tool) (*ai.Runs, *ai.Runs) {
+func twoInstances(t *testing.T, m *chattest.Model, tools []tool.Tool) (*chat.Runs, *chat.Runs) {
 	t.Helper()
 	return twoInstancesOn(t, m, tools, broadcasttest.NewBackend(), locktest.NewStore())
 }
 
-func twoInstancesOn(t *testing.T, m *aitest.Model, tools []tool.Tool, backend broadcast.Backend, store lock.Store) (*ai.Runs, *ai.Runs) {
+func twoInstancesOn(t *testing.T, m *chattest.Model, tools []tool.Tool, backend broadcast.Backend, store lock.Store) (*chat.Runs, *chat.Runs) {
 	t.Helper()
 	sessions := inmemory.NewSessionService()
 	hub := broadcast.New(backend, nil)
 	locker := lock.New(store)
-	newInstance := func() *ai.Runs {
+	newInstance := func() *chat.Runs {
 		ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithTools(tools),
 			llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
-		return ai.NewRuns("test", ag, sessions, ai.Cluster(hub, locker))
+		return chat.NewRuns("test", ag, sessions, chat.Cluster(hub, locker))
 	}
 	a, b := newInstance(), newInstance()
 	t.Cleanup(func() {
@@ -50,9 +50,9 @@ func twoInstancesOn(t *testing.T, m *aitest.Model, tools []tool.Tool, backend br
 }
 
 func TestClusterMirrorsRunOnOtherInstance(t *testing.T) {
-	m := aitest.NewModel(
-		aitest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []aitest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
-		aitest.Text("都 查好了"),
+	m := chattest.NewModel(
+		chattest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []chattest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
+		chattest.Text("都 查好了"),
 	)
 	a, b := twoInstances(t, m, []tool.Tool{getOrder(400 * time.Millisecond)})
 	mirrorScenario(t, m, a, b)
@@ -63,16 +63,16 @@ func TestClusterOnDatabase(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		bdb := dbtesting.Open(t, driver, broadcast.Migrations())
 		ldb := dbtesting.Open(t, driver, lock.Migrations())
-		m := aitest.NewModel(
-			aitest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []aitest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
-			aitest.Text("都 查好了"),
+		m := chattest.NewModel(
+			chattest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []chattest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
+			chattest.Text("都 查好了"),
 		)
 		a, b := twoInstancesOn(t, m, []tool.Tool{getOrder(1500 * time.Millisecond)}, broadcast.NewDatabase(bdb, nil), lock.NewDatabase(ldb))
 		mirrorScenario(t, m, a, b)
 	})
 }
 
-func mirrorScenario(t *testing.T, m *aitest.Model, a, b *ai.Runs) {
+func mirrorScenario(t *testing.T, m *chattest.Model, a, b *chat.Runs) {
 	t.Helper()
 	ctx := context.Background()
 	local, err := a.Start(ctx, "u1", "c1", model.NewUserMessage("查 A1"))
@@ -82,7 +82,7 @@ func mirrorScenario(t *testing.T, m *aitest.Model, a, b *ai.Runs) {
 	time.Sleep(150 * time.Millisecond)
 
 	// 另一个实例上：对话正忙，Get 返回镜像，插话转发给运行所在的实例。
-	if _, err := b.Start(ctx, "u1", "c1", model.NewUserMessage("又一个问题")); !errors.Is(err, ai.ErrBusy) {
+	if _, err := b.Start(ctx, "u1", "c1", model.NewUserMessage("又一个问题")); !errors.Is(err, chat.ErrBusy) {
 		t.Fatalf("start on other instance: %v", err)
 	}
 	remote, err := b.Get(ctx, "u1", "c1")
@@ -126,7 +126,7 @@ func joined(events []string) string {
 }
 
 func TestClusterResumeAndCancelFromOtherInstance(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "很慢", Delay: 5 * time.Second})
+	m := chattest.NewModel(chattest.Reply{Text: "很慢", Delay: 5 * time.Second})
 	a, b := twoInstances(t, m, nil)
 	url := chatServer(t, b)
 	local, err := a.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
@@ -156,8 +156,8 @@ func TestClusterResumeAndCancelFromOtherInstance(t *testing.T) {
 }
 
 func TestClusterMirrorDetectsSilentInstance(t *testing.T) {
-	defer ai.SetClusterTiming(time.Hour, 200*time.Millisecond)()
-	m := aitest.NewModel(aitest.Reply{Text: "迟到的回答", Delay: 700 * time.Millisecond})
+	defer chat.SetClusterTiming(time.Hour, 200*time.Millisecond)()
+	m := chattest.NewModel(chattest.Reply{Text: "迟到的回答", Delay: 700 * time.Millisecond})
 	a, b := twoInstances(t, m, nil)
 	ctx := context.Background()
 	if _, err := a.Start(ctx, "u1", "c1", model.NewUserMessage("hi")); err != nil {
@@ -182,7 +182,7 @@ func TestClusterMirrorDetectsSilentInstance(t *testing.T) {
 
 // 一个实例停止时，进行中的运行继续直到结束，其他实例照常镜像它。
 func TestClusterShutdownFinishesRunsMirroredElsewhere(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "说 完 了", Delay: 400 * time.Millisecond})
+	m := chattest.NewModel(chattest.Reply{Text: "说 完 了", Delay: 400 * time.Millisecond})
 	a, b := twoInstances(t, m, nil)
 	ctx := context.Background()
 	if _, err := a.Start(ctx, "u1", "c1", model.NewUserMessage("hi")); err != nil {
@@ -197,7 +197,7 @@ func TestClusterShutdownFinishesRunsMirroredElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, events := collect(t, mirrored, "")
-	if done := events[len(events)-1].Data.(ai.Done); done.Canceled {
+	if done := events[len(events)-1].Data.(chat.Done); done.Canceled {
 		t.Fatal("run was canceled by shutdown")
 	}
 	if err := <-shutdown; err != nil {
@@ -213,14 +213,14 @@ func TestClusterShutdownFinishesRunsMirroredElsewhere(t *testing.T) {
 
 // 对话在其他实例上回答时，Append 返回 ErrBusy。
 func TestClusterAppendWhileRunningElsewhere(t *testing.T) {
-	m := aitest.NewModel(aitest.Reply{Text: "慢", Delay: 300 * time.Millisecond})
+	m := chattest.NewModel(chattest.Reply{Text: "慢", Delay: 300 * time.Millisecond})
 	a, b := twoInstances(t, m, nil)
 	ctx := context.Background()
 	r, err := a.Start(ctx, "u1", "c1", model.NewUserMessage("hi"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, ai.ErrBusy) {
+	if err := b.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, chat.ErrBusy) {
 		t.Fatalf("append on other instance: %v", err)
 	}
 	<-r.Done()
@@ -231,7 +231,7 @@ func TestClusterAppendWhileRunningElsewhere(t *testing.T) {
 		if err == nil {
 			break
 		}
-		if !errors.Is(err, ai.ErrBusy) || time.Now().After(deadline) {
+		if !errors.Is(err, chat.ErrBusy) || time.Now().After(deadline) {
 			t.Fatalf("append after the run: %v", err)
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -240,7 +240,7 @@ func TestClusterAppendWhileRunningElsewhere(t *testing.T) {
 
 // 同一个对话在保留期内再次运行：上一次运行的 owner 关闭，其他实例镜像到的是这一次运行。
 func TestClusterRerunWithinKeepMirrorsLatest(t *testing.T) {
-	m := aitest.NewModel(aitest.Text("第一次"), aitest.Reply{Text: "第二次", Delay: 500 * time.Millisecond})
+	m := chattest.NewModel(chattest.Text("第一次"), chattest.Reply{Text: "第二次", Delay: 500 * time.Millisecond})
 	a, b := twoInstances(t, m, nil)
 	ctx := context.Background()
 	first, err := a.Start(ctx, "u1", "c1", model.NewUserMessage("一"))
@@ -248,12 +248,12 @@ func TestClusterRerunWithinKeepMirrorsLatest(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-first.Done()
-	var second *ai.Run
+	var second *chat.Run
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		if second, err = a.Start(ctx, "u1", "c1", model.NewUserMessage("二")); err == nil {
 			break
 		}
-		if !errors.Is(err, ai.ErrBusy) || time.Now().After(deadline) {
+		if !errors.Is(err, chat.ErrBusy) || time.Now().After(deadline) {
 			t.Fatal(err)
 		}
 	}
