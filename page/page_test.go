@@ -2,6 +2,7 @@ package page_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/ryan053857/mygoravel/errorx"
@@ -59,5 +60,32 @@ func TestInvalidCursor(t *testing.T) {
 		if !errors.Is(err, page.ErrInvalidCursor) || errorx.KindOf(err) != errorx.InvalidArgument {
 			t.Fatalf("%q: %v", c, err)
 		}
+	}
+}
+
+func TestOffsetLinks(t *testing.T) {
+	cases := []struct {
+		page, total int
+		want        []int
+	}{
+		{1, 0, []int{1}},
+		{1, 10, []int{1}},
+		{1, 20, []int{1, 2}},
+		{1, 60, []int{1, 2, 0, 6}},
+		{10, 200, []int{1, 0, 9, 10, 11, 0, 20}},
+		{3, 200, []int{1, 2, 3, 4, 0, 20}},
+		{4, 200, []int{1, 2, 3, 4, 5, 0, 20}},
+		{5, 200, []int{1, 0, 4, 5, 6, 0, 20}},
+		{17, 200, []int{1, 0, 16, 17, 18, 19, 20}},
+		{20, 200, []int{1, 0, 19, 20}},
+	}
+	for _, c := range cases {
+		o := page.NewOffset([]int{}, page.OffsetParams{Page: c.page, PerPage: 10}, c.total)
+		if got := o.Links(1); !slices.Equal(got, c.want) {
+			t.Errorf("page %d of %d: %v, want %v", c.page, o.LastPage(), got, c.want)
+		}
+	}
+	if last := page.NewOffset([]int{}, page.OffsetParams{Page: 1, PerPage: 20}, 41).LastPage(); last != 3 {
+		t.Errorf("LastPage = %d", last)
 	}
 }

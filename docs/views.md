@@ -8,6 +8,7 @@
 - [登录](#login)
 - [渲染页面](#rendering-pages)
 - [局部更新](#partial-updates)
+- [列表页](#list-pages)
 - [错误页](#error-pages)
 - [跳转](#redirects)
 - [提示消息](#flash-messages)
@@ -308,6 +309,106 @@ func (h *Handlers) Preview(w http.ResponseWriter, r *http.Request) error {
 ```
 
 同一个地址既要返回整页、又要返回片段时，用 `web.IsPartial(r)` 判断：它在 htmx 请求的目标不是整个 `body`、也没有 `hx-select` 时为真。htmx 的属性、触发方式和替换方式见 [htmx 文档](https://four.htmx.org/docs)。
+
+<a id="list-pages"></a>
+## 列表页
+
+后台的文章列表可以搜索、按状态筛选、排序和翻页。列表的状态全部放在地址的查询参数中，例如 `/admin/articles?status=draft&sort=title&page=2`。这样刷新、后退、复制链接都能回到同一个状态。
+
+查询参数用一个结构体描述，写法与[表单](forms.md#defining-forms)相同：字段名取 `json` 标签，规则写在 Huma 标签上。查询参数都是可选的，字段要带 `omitempty`。分页嵌入 `page.OffsetParams`。下面的 `ListQuery` 放在文章模块中，同时带上 `query` 标签，[列表接口](responses.md#offset-pagination)也可以直接使用它：
+
+```go
+type ListQuery struct {
+    Q      string `query:"q" json:"q,omitempty"`
+    Status string `query:"status" json:"status,omitempty" enum:"draft,published"`
+    Sort   string `query:"sort" json:"sort,omitempty" default:"-created" enum:"-created,title,-title"`
+    page.OffsetParams
+}
+```
+
+处理器用 `web.ParseQuery` 解析请求的查询参数。空值等同于没有这个参数，没有的参数取 `default` 标签的值。参数不合法时（例如 `?page=0`）返回 `web.ErrBadQuery`，页面呈现为 `422`：
+
+```go
+func (h *Handlers) List(w http.ResponseWriter, r *http.Request) error {
+    q, err := web.ParseQuery[article.ListQuery](r)
+    if err != nil {
+        return err
+    }
+    sub, _ := identity.FromContext(r.Context())
+    items, total, err := h.list.Handle(r.Context(), sub, q)
+    if err != nil {
+        return err
+    }
+    list := page.NewOffset(items, q.OffsetParams, total)
+    if web.IsPartial(r) {
+        web.PushURL(w, listURL(q))
+        return web.Render(w, r, http.StatusOK, views.ArticleTable(q, list))
+    }
+    return web.Render(w, r, http.StatusOK, views.Articles(q, list))
+}
+```
+
+`article.List` 是列表 action，用 `q.Limit()`、`q.Offset()` 查询当前页，同时返回总数。筛选、排序、翻页都只替换列表区域，`web.PushURL` 让 htmx 把地址栏改为这个状态的地址。
+
+链接由 `web.QueryURL` 生成，它是 `ParseQuery` 的逆操作。零值和等于 `default` 的参数会被省略，同一个状态总是得到同一个地址。在视图包中写几个小函数：
+
+```go
+func listURL(q article.ListQuery) string { return web.QueryURL("/admin/articles", q) }
+
+func pageURL(q article.ListQuery, p int) string {
+    q.Page = p
+    return listURL(q)
+}
+
+// sortURL 按 key 排序，已经按它升序时改为降序，并回到第一页。
+func sortURL(q article.ListQuery, key string) string {
+    if q.Sort == key {
+        key = "-" + key
+    }
+    q.Sort, q.Page = key, 1
+    return listURL(q)
+}
+```
+
+列表区域把筛选表单也包含在内。区域每次整体替换，表单里的排序字段就总是当前的状态；搜索框带 `hx-preserve`，替换时保留原来的元素，用户可以连续输入，不会丢失焦点。htmx 4 的属性默认不继承，区域上的 `hx-target`、`hx-swap` 要加 `:inherited`，表单和链接才会沿用它们：
+
+```templ
+templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
+	<section id="articles" hx-target:inherited="this" hx-swap:inherited="outerHTML">
+		<form hx-get="/admin/articles" hx-trigger="input delay:300ms from:#q, change from:#status">
+			<input id="q" name="q" type="search" value={ q.Q } hx-preserve/>
+			<select id="status" name="status">
+				<option value="">全部</option>
+				<option value="draft" selected?={ q.Status == "draft" }>草稿</option>
+				<option value="published" selected?={ q.Status == "published" }>已发布</option>
+			</select>
+			<input type="hidden" name="sort" value={ q.Sort }/>
+		</form>
+		<table>
+			<tr><th><a href={ templ.SafeURL(sortURL(q, "title")) } hx-get={ sortURL(q, "title") }>标题</a></th></tr>
+			for _, item := range list.Items {
+				<tr><td>{ item.Title }</td></tr>
+			}
+		</table>
+		<nav>
+			for _, p := range list.Links(1) {
+				if p == 0 {
+					<span>…</span>
+				} else {
+					<a href={ templ.SafeURL(pageURL(q, p)) } hx-get={ pageURL(q, p) } aria-current?={ p == q.Page }>{ strconv.Itoa(p) }</a>
+				}
+			}
+		</nav>
+	</section>
+}
+```
+
+`list.Links(1)` 返回分页导航中要显示的页码：首页、末页，以及当前页两侧各 1 页，省略的部分用 `0` 表示，例如 `[1 0 9 10 11 0 20]`。`list.LastPage()` 是最后一页的页码。链接同时写 `href`，不支持 htmx 的场景（例如在新标签页打开）也能正常访问。
+
+两个细节：
+
+- 表单的 `hx-trigger` 要用 `from:` 指明来源。如果写成 `input delay:300ms, change`，输入框失焦时触发的 `change` 会再提交一次，和随后点击的排序链接争抢。
+- 地址交给 `web.PushURL`，元素上不写 `hx-push-url`。表单提交时会带上空字段（`?q=&status=`），由服务端推送的地址不含这些参数。
 
 <a id="error-pages"></a>
 ## 错误页

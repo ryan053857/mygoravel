@@ -157,6 +157,8 @@ if err != nil {
 return &ListArticlesOutput{Body: page.NewOffset(toDTOs(rows), in.OffsetParams, total)}, nil
 ```
 
+页面中的列表同样使用 `page.OffsetParams` 和 `page.Offset`，`LastPage`、`Links` 用于渲染分页导航，见[列表页](views.md#list-pages)。
+
 客户端请求 `/articles?page=2&per_page=20` 时得到：
 
 ```json

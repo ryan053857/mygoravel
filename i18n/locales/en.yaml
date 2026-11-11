@@ -22,6 +22,7 @@ sheet.missing_columns: "Missing required columns: {{.columns}}"
 sheet.unknown_column: "Unknown column: {{.column}}"
 web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
+web.bad_query: "Invalid query parameter {{.field}}: {{.message}}"
 web.cross_origin: Cross-origin request rejected
 validation.required: This field is required
 validation.filled: This field must not be empty

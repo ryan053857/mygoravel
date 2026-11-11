@@ -22,6 +22,7 @@ sheet.missing_columns: 缺少必需的列：{{.columns}}
 sheet.unknown_column: 没有这一列：{{.column}}
 web.not_found: 页面不存在
 web.bad_form: 无法解析提交的表单
+web.bad_query: 查询参数 {{.field}} 不正确：{{.message}}
 web.cross_origin: 跨站请求被拒绝
 validation.required: 必填
 validation.filled: 不能为空
