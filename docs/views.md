@@ -23,7 +23,9 @@
 
 - [templ](https://templ.guide) 把 `.templ` 文件编译成带类型参数的 Go 函数，相当于 Blade 组件，错误在编译期就能发现；
 - [htmx 4](https://four.htmx.org) 用 HTML 属性声明「点这里就请求某个地址，把返回的片段放到某个位置」，服务端只管返回 HTML；
-- [Alpine.js](https://alpinejs.dev) 处理下拉、弹窗这类纯前端的小交互。
+- [Alpine.js](https://alpinejs.dev) 处理纯前端的小交互，例如折叠区、计数。
+
+按钮、表格、下拉菜单、对话框这些现成的组件，见[界面组件](components.md)。
 
 `web` 包负责把它们接到框架上：渲染 templ 组件、加载会话和检查登录、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。
 
