@@ -222,6 +222,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。下面按文�
 | `apitoken` | 存在数据库中的 API 令牌，用作 JSON API 的 Bearer 凭据 | [API 令牌](api-tokens.md) |
 | `authz` | 基于角色的权限：代码中声明的权限目录，角色按租户分配 | [授权](authorization.md)、[多租户](tenancy.md) |
 | `hashing` | 密码的单向哈希与重新哈希 | [哈希](hashing.md) |
+| `crypt` | 用应用密钥加密数据、签名和校验链接 | [加密与签名链接](encryption.md) |
 
 <a id="database-packages"></a>
 ### 数据库

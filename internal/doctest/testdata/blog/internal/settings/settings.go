@@ -4,6 +4,7 @@ package settings
 
 import (
 	"example.com/blog/internal/auth"
+	"github.com/ryan053857/mygoravel/crypt"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/logging"
@@ -19,6 +20,7 @@ type Config struct {
 	Logs     logging.Config  `yaml:"logs"`
 	Database database.Config `yaml:"database"`
 	Auth     auth.Config     `yaml:"auth"`
+	Crypt    crypt.Config    `yaml:"crypt"`
 	Mail     MailConfig      `yaml:"mail"`
 	Queue    queue.Config    `yaml:"queue"`
 	Schedule schedule.Config `yaml:"schedule"`

@@ -77,6 +77,7 @@
 - [多租户](tenancy.md)
 - [授权](authorization.md)
 - [哈希](hashing.md)
+- [加密与签名链接](encryption.md)
 
 ## 数据库
 

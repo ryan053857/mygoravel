@@ -39,13 +39,14 @@ var dependencies = map[string][]string{
 	"web":          {"errorx", "form", "httpx", "i18n", "identity", "logging", "session"},
 	"lock":         {},
 	"hashing":      {},
+	"crypt":        {"errorx"},
 	"queue":        {"logging"},
 	"broadcast":    {"identity", "logging"},
 	"realtime":     {"broadcast", "errorx", "httpx", "identity", "logging"},
 	"schedule":     {"lock", "logging"},
 	"ai":           {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
 	"command":      {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports", "exports", "realtime"},
+	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "crypt", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports", "exports", "realtime"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
