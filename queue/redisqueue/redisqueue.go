@@ -25,7 +25,7 @@ import (
 // Name 是驱动的名称，写入 queue_failed_jobs.driver。
 const Name = "redis"
 
-// Driver 为每个 topic 使用五个键，键名以 prefix:{topic}: 开头（花括号是哈希标签，同一 topic 的键在同一个集群槽位）：
+// Driver 为每个 topic 使用六个键，键名以 prefix:{topic}: 开头（花括号是哈希标签，同一 topic 的键在同一个集群槽位）：
 //
 //   - schedule：有序集合，成员是任务 ID，分数是可以领取的时间（Unix 毫秒）；任务被领取后分数是租约到期时间，
 //     到期没有确认的任务会被重新领取。
@@ -33,6 +33,7 @@ const Name = "redis"
 //   - attempts：哈希，任务 ID 到已领取的次数，也是防护令牌：任务被重新领取后旧的领取不再生效。
 //   - leases：有序集合，被领取、还没有确认或放回的任务，分数与 schedule 中相同（租约到期时间）。
 //   - retries：有序集合，等待重试、还没有被再次领取的任务，分数与 schedule 中相同（重试时间）。
+//   - unique：哈希，带 Unique 键、还没被领取过的任务，k:<键> 到任务 ID，i:<任务 ID> 到键；任务第一次被领取时删除。
 //
 // leases 和 retries 让 Stats 只做几次计数，不必遍历任务。
 // 每个操作是一次脚本调用，时间取 Redis 服务端时钟。任务完成后各个键中的记录都被删除，不需要清理。
@@ -61,7 +62,7 @@ func (d *Driver) Name() string { return Name }
 
 func (d *Driver) keys(topic string) []string {
 	base := d.prefix + ":{" + topic + "}:"
-	return []string{base + "schedule", base + "jobs", base + "attempts", base + "leases", base + "retries"}
+	return []string{base + "schedule", base + "jobs", base + "attempts", base + "leases", base + "retries", base + "unique"}
 }
 
 // body 是保存在 jobs 哈希中的任务内容。
@@ -70,10 +71,17 @@ type body struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// enqueue 写入一个任务；ID 已存在时返回 0。
+// enqueue 写入一个任务；ID 已存在时返回 0，ARGV[4] 是非空的 Unique 键且已有同键的任务时返回 2。
 var enqueue = redis.NewScript(`
+local key = ARGV[4]
+if key ~= "" and redis.call("HEXISTS", KEYS[6], "k:" .. key) == 1 then
+	return 2
+end
 if redis.call("HSETNX", KEYS[2], ARGV[1], ARGV[3]) == 0 then
 	return 0
+end
+if key ~= "" then
+	redis.call("HSET", KEYS[6], "k:" .. key, ARGV[1], "i:" .. ARGV[1], key)
 end
 local at = tonumber(ARGV[2])
 if at == 0 then
@@ -85,7 +93,7 @@ redis.call("HSET", KEYS[3], ARGV[1], 0)
 return 1
 `)
 
-// Enqueue 实现 queue.Driver。同一个 ID 重复入队返回错误。
+// Enqueue 实现 queue.Driver。同一个 ID 重复入队返回错误；已有同一个 Unique 键的任务时跳过。
 func (d *Driver) Enqueue(ctx context.Context, jobs ...queue.Job) error {
 	for _, j := range jobs {
 		data, err := json.Marshal(body{Payload: j.Payload, Metadata: j.Metadata})
@@ -96,7 +104,7 @@ func (d *Driver) Enqueue(ctx context.Context, jobs ...queue.Job) error {
 		if !j.AvailableAt.IsZero() {
 			at = j.AvailableAt.UnixMilli()
 		}
-		added, err := enqueue.Run(ctx, d.rdb, d.keys(j.Topic), j.ID.String(), at, data).Int()
+		added, err := enqueue.Run(ctx, d.rdb, d.keys(j.Topic), j.ID.String(), at, data, j.Unique).Int()
 		if err != nil {
 			return errors.Wrapf(err, "redisqueue: enqueue %s", j.ID)
 		}
@@ -153,8 +161,18 @@ func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 	return out, nil
 }
 
-// claim 领取最多 ARGV[1] 个到期的任务，租约 ARGV[2] 毫秒；返回 {id, attempts, body, 领取前的分数, ...}。
+// claim 领取最多 ARGV[1] 个到期的任务，租约 ARGV[2] 毫秒，释放它们的 Unique 键；
+// 返回 {id, attempts, body, 领取前的分数, ...}。
 var claim = redis.NewScript(`
+local function release(id)
+	local key = redis.call("HGET", KEYS[6], "i:" .. id)
+	if key then
+		redis.call("HDEL", KEYS[6], "i:" .. id)
+		if redis.call("HGET", KEYS[6], "k:" .. key) == id then
+			redis.call("HDEL", KEYS[6], "k:" .. key)
+		end
+	end
+end
 local t = redis.call("TIME")
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local due = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", now, "WITHSCORES", "LIMIT", 0, tonumber(ARGV[1]))
@@ -168,6 +186,7 @@ for i = 1, #due, 2 do
 		local attempts = redis.call("HINCRBY", KEYS[3], id, 1)
 		redis.call("ZADD", KEYS[4], expires, id)
 		redis.call("ZREM", KEYS[5], id)
+		release(id)
 		table.insert(out, id)
 		table.insert(out, attempts)
 		table.insert(out, data)
@@ -176,6 +195,7 @@ for i = 1, #due, 2 do
 		redis.call("ZREM", KEYS[1], id)
 		redis.call("ZREM", KEYS[4], id)
 		redis.call("ZREM", KEYS[5], id)
+		release(id)
 	end
 end
 return out

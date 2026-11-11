@@ -16,6 +16,8 @@ type Driver interface {
 	// Name 是驱动的名称，写入 queue_failed_jobs.driver，重新入队时据此找回驱动。
 	Name() string
 	// Enqueue 保存任务，任务在 Job.AvailableAt 之后可以被领取。Job.Attempt 被忽略。
+	// Job.Unique 非空时，同一 topic 中已有同键、还没被领取过的任务，就跳过这个任务，不返回错误；
+	// 同一批中键相同的任务只保留第一个。任务第一次被领取时释放它的键。不支持的驱动返回错误。
 	Enqueue(ctx context.Context, jobs ...Job) error
 	// Claim 领取 req.Topic 中最多 req.Max 个到期的任务，每个任务的租约为 req.Lease。
 	// 没有到期的任务时一直等待，直到领取到至少一个或 ctx 结束（此时返回 ctx 的错误）；
@@ -37,6 +39,8 @@ type Job struct {
 	AvailableAt time.Time
 	// Attempt 是领取到的任务本次是第几次执行，从 1 开始。
 	Attempt int
+	// Unique 是发布时用 queue.Unique 指定的键，见 Driver.Enqueue。领取到的任务中为空。
+	Unique string
 }
 
 // ClaimRequest 是 Driver.Claim 的参数。

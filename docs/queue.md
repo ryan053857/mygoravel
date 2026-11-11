@@ -5,6 +5,7 @@
 - [发布任务](#publishing-jobs)
     - [延迟执行](#delayed-jobs)
     - [带类型的 topic](#typed-topics)
+    - [合并重复任务](#unique-jobs)
 - [处理任务](#processing-jobs)
     - [启动 worker](#running-workers)
     - [配置](#configuration)
@@ -110,6 +111,26 @@ err := PublishAt.Publish(ctx, queue.Database(tx), item.ID, queue.At(item.Publish
 ```
 
 `Topic` 的 `Publish` 和 `Handle` 方法与 `queue.Publish`、`queue.Handle` 相同，只是不再需要 topic 参数。把它和处理任务的 action 声明在同一个文件中，见[队列任务](actions.md#as-jobs)。
+
+<a id="unique-jobs"></a>
+### 合并重复任务
+
+有些任务只要最后执行一次就够了。例如文章每次保存都要重建它的搜索索引：作者连续保存十次，不需要排十个任务，只要有一次重建读到最新的内容。`queue.Unique` 用一个键合并这类任务：
+
+```go
+var Reindex = queue.Topic[uuid.UUID]("articles.reindex")
+
+// 在 Update.Handle 的事务中：
+err := Reindex.Publish(ctx, queue.Database(tx), item.ID, queue.Unique(item.ID.String()))
+```
+
+同一个 topic 中已经有键相同、还没开始执行的任务时，这次发布什么也不做，`Publish` 返回 `nil`。已有任务的 payload 和执行时间保持不变，所以同一个键应当代表同一件事。
+
+任务开始执行时键就释放了：重建索引期间作者又保存了一次，会再排入一个任务，这次修改不会被漏掉。也就是说，每次发布之后至少还有一次执行，读到的是发布时已经提交的数据。代价是执行期间的发布会让任务多执行一次，处理函数本来就需要能安全地重复执行。
+
+也可以用事件 ID 作为键，合并第三方回调的重发：排队期间收到的重发被合并；任务执行之后才收到的重发会再执行一次，处理函数仍然要按事件 ID 判断是否已经处理过。
+
+键只在 topic 内唯一，最长 255 字节。数据库和 Redis 驱动支持 `Unique`，[NATS](#nats-driver) 驱动不支持。
 
 <a id="processing-jobs"></a>
 ## 处理任务
@@ -492,7 +513,7 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 - **失败任务需要数据库。** 用 `WithFailedJobs` 指定，表结构见[准备数据表](#preparing-tables)。
 - **持久性取决于 Redis 的配置。** 只开启 RDB 快照时，Redis 重启会丢失最近一次快照之后发布的任务；需要可靠的队列时开启 AOF（`appendonly yes`）。主从切换同样可能丢失刚写入的任务。
 
-每个 topic 在 Redis 中有五个键，键名以 `blog:queue:{mail.send}:` 开头，花括号让同一个 topic 的键落在同一个集群槽位，因此也可以使用 Redis 集群。任务完成后对应的记录都会删除，不需要清理。租约和延迟按 Redis 服务端的时钟计算，不受各实例时钟偏差影响。
+每个 topic 在 Redis 中有六个键，键名以 `blog:queue:{mail.send}:` 开头，花括号让同一个 topic 的键落在同一个集群槽位，因此也可以使用 Redis 集群。任务完成后对应的记录都会删除，不需要清理。租约和延迟按 Redis 服务端的时钟计算，不受各实例时钟偏差影响。
 
 <a id="publish-after-commit"></a>
 ### 事务提交后再发布
@@ -552,6 +573,7 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 - **租约过期后不能阻止旧的确认。** 一个 worker 与 NATS 失联超过租约、任务被重新投递后，原来的 worker 仍然可以确认它。处理函数本来就需要能重复执行，这通常没有影响。
 - **停止超时释放的任务计入一次执行。** NATS 的投递次数不能回退。
 - **不检查重复的任务 ID。**
+- **不支持[合并重复任务](#unique-jobs)。** JetStream 无法原子地判断一个任务是否还没被领取，带 `queue.Unique` 发布时返回 `natsqueue.ErrUniqueUnsupported`，任务不会入队。
 
 <a id="using-watermill"></a>
 ## 使用 Watermill

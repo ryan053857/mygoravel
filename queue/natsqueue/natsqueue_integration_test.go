@@ -40,6 +40,6 @@ func TestDriver(t *testing.T) {
 			return natsqueue.New(connect(t), stream), dbtesting.Open(t, sqlite.Driver, queue.Migrations())
 		},
 		NoFencing:    true,
-		PartialStats: true, NoRedeliveryTime: true,
+		PartialStats: true, NoRedeliveryTime: true, NoUnique: true,
 	})
 }

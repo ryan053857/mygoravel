@@ -33,6 +33,10 @@ const Name = "nats"
 // headerID 是保存任务 ID 的消息头。
 const headerID = "Queue-Job-Id"
 
+// ErrUniqueUnsupported 表示发布时使用了 queue.Unique：JetStream 无法原子地判断任务是否还没被领取，
+// NATS 驱动不支持合并任务。
+var ErrUniqueUnsupported = errors.New("natsqueue: queue.Unique is not supported")
+
 // minPoll 是一次拉取请求最短的等待时间。
 const minPoll = 100 * time.Millisecond
 
@@ -129,8 +133,13 @@ type body struct {
 }
 
 // Enqueue 实现 queue.Driver。延迟任务按秒向上取整，不会早于 AvailableAt 被领取。
-// NATS 不检查任务 ID 是否重复。
+// NATS 不检查任务 ID 是否重复，也不支持 Unique：有任务带 Unique 键时整批都不发布，返回 ErrUniqueUnsupported。
 func (d *Driver) Enqueue(ctx context.Context, jobs ...queue.Job) error {
+	for _, j := range jobs {
+		if j.Unique != "" {
+			return errors.Wrapf(ErrUniqueUnsupported, "natsqueue: job %s", j.ID)
+		}
+	}
 	if err := d.ensureStream(ctx); err != nil {
 		return err
 	}

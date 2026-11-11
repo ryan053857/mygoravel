@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +38,8 @@ type Backend struct {
 	PartialStats bool
 	// NoRedeliveryTime 表示驱动给不出重新领取的任务可以被领取的时间，Job.AvailableAt 为零值。
 	NoRedeliveryTime bool
+	// NoUnique 表示驱动不支持 queue.Unique：带键的发布返回错误，什么也不入队。
+	NoUnique bool
 }
 
 // Run 运行全部场景。
@@ -62,6 +65,11 @@ func Run(t *testing.T, b Backend) {
 		{"stats", stats},
 		{"claimed jobs report when they became available", claimedAvailableAt},
 		{"metrics", metrics},
+		{"unique merges pending jobs", uniqueMergesPending},
+		{"unique key is released when claimed", uniqueReleasedOnClaim},
+		{"unique delayed job holds its key", uniqueDelayed},
+		{"unique within one batch", uniqueBatch},
+		{"unique concurrent publishes", uniqueConcurrent},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
 			d, db := b.New(t)
@@ -839,4 +847,137 @@ func gaugeValue[N int64 | float64](data metricdata.Aggregation, attrs attribute.
 		}
 	}
 	return 0, false
+}
+
+// drain 领取 topic 中的全部到期任务并确认，返回它们的 payload，按 N 排序。
+func (s *setup) drain(t *testing.T, topic string) []int {
+	t.Helper()
+	var ns []int
+	for _, c := range s.claim(t, topic, 10*time.Second, 500*time.Millisecond) {
+		var p payload
+		if err := json.Unmarshal(c.Job().Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		if c.Job().Unique != "" {
+			t.Errorf("claimed job carries unique key %q", c.Job().Unique)
+		}
+		ns = append(ns, p.N)
+		if err := c.Ack(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	slices.Sort(ns)
+	return ns
+}
+
+// unique 检查不支持 Unique 的驱动拒绝带键的发布；返回 true 表示驱动支持，场景继续。
+func (s *setup) unique(t *testing.T) bool {
+	t.Helper()
+	if !s.backend.NoUnique {
+		return true
+	}
+	if err := queue.Publish(context.Background(), s.driver, "jobs", payload{N: 1}, queue.Unique("a")); err == nil {
+		t.Fatal("publish with Unique succeeded on a driver without support")
+	}
+	s.empty(t, "jobs")
+	return false
+}
+
+func uniqueMergesPending(t *testing.T, s *setup) {
+	if !s.unique(t) {
+		return
+	}
+	s.publish(t, "jobs", 1, queue.Unique("article:1"))
+	s.publish(t, "jobs", 2, queue.Unique("article:1")) // 合并到第一个，payload 保持 1
+	s.publish(t, "jobs", 3, queue.Unique("article:2"))
+	s.publish(t, "jobs", 4)
+	s.publish(t, "other", 5, queue.Unique("article:1")) // 键只在 topic 内唯一
+	if got := s.drain(t, "jobs"); !slices.Equal(got, []int{1, 3, 4}) {
+		t.Fatalf("jobs = %v", got)
+	}
+	if got := s.drain(t, "other"); !slices.Equal(got, []int{5}) {
+		t.Fatalf("other = %v", got)
+	}
+}
+
+func uniqueReleasedOnClaim(t *testing.T, s *setup) {
+	if !s.unique(t) {
+		return
+	}
+	s.publish(t, "jobs", 1, queue.Unique("k"))
+	claims := s.claim(t, "jobs", 10*time.Second, time.Second)
+	if len(claims) != 1 {
+		t.Fatalf("claimed %d jobs", len(claims))
+	}
+	// 任务已经开始执行，再发布排入新的任务；新任务又占用键。
+	s.publish(t, "jobs", 2, queue.Unique("k"))
+	s.publish(t, "jobs", 3, queue.Unique("k"))
+	if got := s.drain(t, "jobs"); !slices.Equal(got, []int{2}) {
+		t.Fatalf("jobs = %v", got)
+	}
+	// 放回去等待重试的任务不再占用键。
+	if err := claims[0].Retry(context.Background(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.publish(t, "jobs", 4, queue.Unique("k"))
+	if got := s.drain(t, "jobs"); !slices.Equal(got, []int{1, 4}) {
+		t.Fatalf("jobs after retry = %v", got)
+	}
+}
+
+func uniqueDelayed(t *testing.T, s *setup) {
+	if !s.unique(t) {
+		return
+	}
+	s.publish(t, "jobs", 1, queue.Unique("k"), queue.Delay(time.Second))
+	s.publish(t, "jobs", 2, queue.Unique("k")) // 合并，已有任务的执行时间不变
+	s.empty(t, "jobs")
+	time.Sleep(time.Second)
+	if got := s.drain(t, "jobs"); !slices.Equal(got, []int{1}) {
+		t.Fatalf("jobs = %v", got)
+	}
+}
+
+func uniqueBatch(t *testing.T, s *setup) {
+	if !s.unique(t) {
+		return
+	}
+	msg := func(n int, key string) *message.Message {
+		data, _ := json.Marshal(payload{N: n})
+		m := message.NewMessage(uuid.Must(uuid.NewV7()).String(), data)
+		if key != "" {
+			m.Metadata.Set("_queue_unique", key)
+		}
+		return m
+	}
+	err := queue.NewPublisher(s.driver).Publish("jobs", msg(1, "a"), msg(2, "a"), msg(3, "b"), msg(4, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.drain(t, "jobs"); !slices.Equal(got, []int{1, 3, 4}) {
+		t.Fatalf("jobs = %v", got)
+	}
+}
+
+func uniqueConcurrent(t *testing.T, s *setup) {
+	if !s.unique(t) {
+		return
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+	for i := range 20 {
+		wg.Go(func() {
+			errs <- queue.Publish(context.Background(), s.driver, "jobs", payload{N: i}, queue.Unique("k"))
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := s.drain(t, "jobs"); len(got) != 1 {
+		t.Fatalf("jobs = %v", got)
+	}
 }

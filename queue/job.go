@@ -14,6 +14,9 @@ import (
 // metadataAvailableAt 是通过 Publisher 发布 Watermill 消息时指定可执行时间的元数据，入队时转为 Job.AvailableAt。
 const metadataAvailableAt = "_queue_available_at"
 
+// metadataUnique 是通过 Publisher 发布 Watermill 消息时指定 Unique 键的元数据，入队时转为 Job.Unique。
+const metadataUnique = "_queue_unique"
+
 type job struct {
 	bun.BaseModel `bun:"table:queue_jobs,alias:j"`
 
@@ -24,6 +27,7 @@ type job struct {
 	Attempts    int               `bun:"attempts,notnull"`
 	AvailableAt time.Time         `bun:"available_at,notnull"`
 	ReservedAt  time.Time         `bun:"reserved_at,nullzero"`
+	UniqueKey   string            `bun:"unique_key,nullzero"`
 	CreatedAt   time.Time         `bun:"created_at,notnull"`
 }
 

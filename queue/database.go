@@ -30,26 +30,52 @@ type dbDriver struct {
 func (d *dbDriver) Name() string { return driverDatabase }
 
 // Enqueue 实现 Driver。同一个 ID 重复入队会返回主键冲突的错误。
+//
+// 带 Unique 键的任务靠唯一索引 (topic, unique_key) 合并，冲突时什么也不做，不会让外层事务中止；
+// 并发发布同一个键时，后者等前者的事务结束：前者提交则跳过，回滚则插入。
+// MySQL 使用不修改任何列的 upsert，它不区分冲突的是哪个唯一键，因此带键的任务 ID 重复时也会被跳过；
+// Publish 每次生成新的 ID，只有 Publisher 重复使用消息 UUID 时才会遇到。
 func (d *dbDriver) Enqueue(ctx context.Context, jobs ...Job) error {
-	if len(jobs) == 0 {
-		return nil
-	}
 	now := time.Now().UTC()
-	rows := make([]job, len(jobs))
-	for i, j := range jobs {
-		rows[i] = job{ID: j.ID, Topic: j.Topic, Payload: j.Payload, Metadata: j.Metadata, AvailableAt: now, CreatedAt: now}
+	var plain, keyed []job
+	seen := map[[2]string]bool{}
+	for _, j := range jobs {
+		row := job{ID: j.ID, Topic: j.Topic, Payload: j.Payload, Metadata: j.Metadata, AvailableAt: now, UniqueKey: j.Unique, CreatedAt: now}
 		if j.AvailableAt.After(now) {
-			rows[i].AvailableAt = j.AvailableAt.UTC()
+			row.AvailableAt = j.AvailableAt.UTC()
 		}
-		if rows[i].Payload == nil {
-			rows[i].Payload = []byte{}
+		if row.Payload == nil {
+			row.Payload = []byte{}
 		}
-		if rows[i].Metadata == nil {
-			rows[i].Metadata = map[string]string{}
+		if row.Metadata == nil {
+			row.Metadata = map[string]string{}
+		}
+		if j.Unique == "" {
+			plain = append(plain, row)
+			continue
+		}
+		if k := [2]string{j.Topic, j.Unique}; !seen[k] {
+			seen[k] = true
+			keyed = append(keyed, row)
 		}
 	}
-	_, err := d.db.NewInsert().Model(&rows).Exec(ctx)
-	return err
+	if len(plain) > 0 {
+		if _, err := d.db.NewInsert().Model(&plain).Exec(ctx); err != nil {
+			return err
+		}
+	}
+	if len(keyed) > 0 {
+		q := d.db.NewInsert().Model(&keyed)
+		if d.db.Dialect().Name() == dialect.MySQL {
+			q = q.On("DUPLICATE KEY UPDATE id = id")
+		} else {
+			q = q.On("CONFLICT (topic, unique_key) DO NOTHING")
+		}
+		if _, err := q.Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Claim 实现 Driver：每 req.PollInterval 查询一次，直到领取到任务。
@@ -74,7 +100,7 @@ func (d *dbDriver) Claim(ctx context.Context, req ClaimRequest) ([]Claim, error)
 	}
 }
 
-// claim 领取 topic 中最多 n 个到期的任务：attempts 加一，available_at 推到租约到期时间。
+// claim 领取 topic 中最多 n 个到期的任务：attempts 加一，available_at 推到租约到期时间，释放 Unique 键。
 // 返回的行保留领取前的 available_at，即任务本次可以被领取的时间。
 //
 // 先锁住到期的行再更新，两步在一个事务中：PostgreSQL 和 MySQL 用 SKIP LOCKED 跳过其他实例正在领取的行，
@@ -101,6 +127,7 @@ func (d *dbDriver) claim(req ClaimRequest) ([]job, error) {
 		_, err := tx.NewUpdate().Model((*job)(nil)).
 			Set("available_at = ?", now.Add(req.Lease)).
 			Set("reserved_at = ?", now).
+			Set("unique_key = NULL").
 			Set("attempts = j.attempts + 1").
 			Where("j.id IN (?)", bun.In(ids)).
 			Exec(ctx)
