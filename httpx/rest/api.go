@@ -1,7 +1,6 @@
 package rest
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -30,7 +29,7 @@ type API struct {
 	mode    Mode
 	router  chi.Router
 	logger  *slog.Logger
-	resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
+	resolve identity.Resolver
 	watcher httpx.CredentialWatcher
 }
 
@@ -57,7 +56,7 @@ type Options struct {
 	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体时响应 401，其他 4xx 类错误按其分类响应，
 	// 例如不是租户成员时返回 errorx.NotFound 得到 404；5xx 类错误响应对应的状态码。
 	// 返回的主体中 Method、Credential、Scopes、Impersonator 总是取自凭据，Resolve 改变它们不起作用。
-	Resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
+	Resolve identity.Resolver
 	// Credentials 让 RequireAuth 保护的长连接（例如 SSE）在收到复查信号时立即重新校验凭据，
 	// 撤销 token、停用用户后连接随即结束；nil 时只按 30 秒的间隔定期校验。通常是 broadcast.NewCredentials 的返回值。
 	Credentials httpx.CredentialWatcher

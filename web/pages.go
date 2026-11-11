@@ -25,10 +25,8 @@ import (
 var (
 	// ErrNotFound 是页面不存在的错误，Pages.NotFound 呈现它。
 	ErrNotFound = errorx.Define(errorx.NotFound, "web.not_found")
-	// ErrForbidden 表示已登录但缺少所需的权限，与 rest.RequireBearer 使用同一个错误码。
-	ErrForbidden = errorx.Define(errorx.PermissionDenied, "auth.forbidden")
-	// errUnauthenticated 表示会话已经失效，与 rest.RequireBearer 使用同一个错误码。
-	errUnauthenticated = errorx.Define(errorx.Unauthenticated, "auth.unauthenticated")
+	// ErrForbidden 表示已登录但不能访问：会话绑定了其他租户，或缺少所需的权限。它就是 identity.ErrForbidden。
+	ErrForbidden = identity.ErrForbidden
 	// ErrCrossOrigin 表示跨站的非安全请求被拒绝。
 	ErrCrossOrigin = errorx.Define(errorx.PermissionDenied, "web.cross_origin")
 )
@@ -65,7 +63,7 @@ type Options struct {
 	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效：销毁会话并按未登录处理；
 	// 其他错误按分类呈现错误页，例如不是租户成员时返回 errorx.NotFound 得到 404。
 	// 权限检查使用返回的主体；其中 Method、Credential、Scopes、Impersonator 总是取自会话，Resolve 改变它们不起作用。
-	Resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
+	Resolve identity.Resolver
 	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求，例如 ui.ErrorPage。
 	// message 来自 httpx.ErrorDetail：业务错误的译文，或状态描述。
 	ErrorPage func(status int, message string) templ.Component
@@ -131,7 +129,7 @@ func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sub, ok, err := p.subject(r)
+		sub, ok, err := p.subject(r, access.permissions)
 		if err != nil {
 			p.Error(w, r, err)
 			return
@@ -139,12 +137,6 @@ func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 		if !ok {
 			Redirect(w, r, loginURL(r, p.opts.Login)+"?next="+url.QueryEscape(returnTo(r)))
 			return
-		}
-		for _, perm := range access.permissions {
-			if !sub.Can(perm) {
-				p.Error(w, r, ErrForbidden.New())
-				return
-			}
 		}
 		token := p.opts.Sessions.Token(r.Context())
 		ctx := identity.WithSubject(r.Context(), sub)
@@ -156,37 +148,14 @@ func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 	})
 }
 
-// recheck 在长连接期间重新确认会话：从存储重新读取（会话可能已被登出或撤销），检查凭据绑定的租户，
-// 经过 Options.Resolve（用户可能已被停用或移出租户），再检查权限。存储或 Resolve 暂时故障时返回 5xx 类错误，连接保持。
-func (p *Pages) recheck(ctx context.Context, token string, want identity.Subject, access Access) error {
-	stored, ok, err := session.Lookup(ctx, p.opts.Sessions, token)
-	if err != nil {
-		return err
+// recheck 在长连接期间重新确认会话：从存储重新读取（会话可能已被登出或撤销），再执行与首次相同的检查，
+// 见 identity.Reestablish。存储或 Resolve 暂时故障时返回 5xx 类错误，连接保持。
+func (p *Pages) recheck(ctx context.Context, token string, was identity.Subject, access Access) error {
+	lookup := func(ctx context.Context) (identity.Subject, error) {
+		stored, _, err := session.Lookup(ctx, p.opts.Sessions, token)
+		return stored, err
 	}
-	if !ok || stored.ID != want.ID || stored.Impersonator != want.Impersonator {
-		return errUnauthenticated.New()
-	}
-	if stored.Tenant != "" && stored.Tenant != identity.TenantFromContext(ctx) {
-		return ErrForbidden.New()
-	}
-	sub := stored
-	if p.opts.Resolve != nil {
-		sub, err = p.opts.Resolve(ctx, stored)
-		switch {
-		case err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError:
-			return err
-		case err != nil && errorx.KindOf(err) == errorx.Unauthenticated, err == nil && sub.ID == "":
-			return errUnauthenticated.New()
-		case err != nil:
-			return err
-		}
-	}
-	for _, perm := range access.permissions {
-		if !sub.Can(perm) {
-			return ErrForbidden.New()
-		}
-	}
-	return nil
+	return identity.Reestablish(ctx, was, lookup, p.opts.Resolve, access.permissions...)
 }
 
 // Login 把 sub 记为当前会话的主体，并记录 r 的客户端地址和 User-Agent 作为登录设备，见 session.Login。
@@ -207,33 +176,27 @@ func (p *Pages) Logout(ctx context.Context) error {
 	return session.Logout(ctx, p.opts.Sessions)
 }
 
-// subject 返回当前请求的主体：会话中保存的主体，经过 Options.Resolve 转换。
+// subject 返回当前请求的主体：会话中保存的主体经过 identity.Establish，并能执行 permissions 中的全部权限。
 // 未登录，或 Resolve 认为主体已失效（此时销毁会话）时返回 ok 为 false；需要呈现错误页时返回 err，
-// 例如保存的主体绑定了其他租户、不是租户成员。
-func (p *Pages) subject(r *http.Request) (identity.Subject, bool, error) {
+// 例如保存的主体绑定了其他租户、不是租户成员、缺少权限。
+func (p *Pages) subject(r *http.Request, permissions []string) (identity.Subject, bool, error) {
 	ctx := r.Context()
 	stored, ok := session.Subject(ctx, p.opts.Sessions)
 	if !ok {
 		return identity.Subject{}, false, nil
 	}
-	if stored.Tenant != "" && stored.Tenant != identity.TenantFromContext(ctx) {
-		return identity.Subject{}, false, ErrForbidden.New()
-	}
-	if p.opts.Resolve == nil {
-		return stored, true, nil
-	}
-	sub, err := p.opts.Resolve(ctx, stored)
+	saved := func(context.Context) (identity.Subject, error) { return stored, nil }
+	sub, err := identity.Establish(ctx, saved, p.opts.Resolve, permissions...)
 	switch {
-	case err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError:
+	case err == nil:
+		return sub, true, nil
+	case identity.Failed(err):
 		return identity.Subject{}, false, errors.Wrap(err, "resolve subject")
-	case err != nil && errorx.KindOf(err) == errorx.Unauthenticated, err == nil && sub.ID == "":
+	case errors.Is(err, identity.ErrUnauthenticated):
 		return identity.Subject{}, false, session.Logout(ctx, p.opts.Sessions)
-	case err != nil:
+	default:
 		return identity.Subject{}, false, err
 	}
-	// Resolve 加载权限和租户；认证方式、凭据、凭据的限制和代为登录者由会话决定，不随 Resolve 改变。
-	sub.Method, sub.Credential, sub.Scopes, sub.Impersonator = stored.Method, stored.Credential, stored.Scopes, stored.Impersonator
-	return sub, true, nil
 }
 
 var pathParam = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)

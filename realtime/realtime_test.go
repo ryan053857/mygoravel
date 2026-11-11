@@ -347,6 +347,82 @@ func TestTokenBoundToAnotherTenantIsRejected(t *testing.T) {
 	mustConnect(t, n.url, "t", http.Header{"X-Tenant": {"acme"}})
 }
 
+// Resolve 加载 token 连接的权限：频道的授权函数看到的是 Resolve 之后的主体，凭据字段仍然取自 token；
+// Resolve 拒绝时连接不成立，暂时故障时客户端稍后重连。
+func TestResolveTokenSubject(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		state = "member"
+	)
+	set := func(v string) { mu.Lock(); state = v; mu.Unlock() }
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{
+		Authenticate: (&tokens{}).validate,
+		Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch state {
+			case "down":
+				return identity.Subject{}, errUnavailable.New()
+			case "stranger":
+				return identity.Subject{}, errorx.Define(errorx.NotFound, "test.not_member").New()
+			}
+			// 重新构造主体：凭据字段不由 Resolve 决定。
+			return identity.Subject{ID: sub.ID, Permissions: []string{"articles:read"}}, nil
+		},
+	}, nil)
+	seen := make(chan identity.Subject, 1)
+	n.rt.Channel("articles", realtime.Private(func(_ context.Context, sub identity.Subject, _ realtime.Params) (bool, error) {
+		seen <- sub
+		return sub.Can("articles:read"), nil
+	}))
+	mustConnect(t, n.url, "alice", nil).mustSubscribe("articles")
+	if sub := <-seen; sub.Credential != "cred-alice" || !sub.Can("articles:read") {
+		t.Fatalf("subject %+v", sub)
+	}
+
+	set("stranger")
+	if rejected(t, n.url, "alice", nil) != 3500 {
+		t.Fatal("subject rejected by Resolve was connected")
+	}
+	set("down")
+	if _, reply := connect(t, n.url, "alice", nil); reply.Error == nil || reply.Error.Code != 100 {
+		t.Fatalf("connect while Resolve is down: %+v", reply)
+	}
+}
+
+// 连接期间 Resolve 与 Authenticate 一起复查：用户被移出租户后连接结束，Resolve 暂时故障时保持。
+func TestResolveRecheckDisconnects(t *testing.T) {
+	defer realtime.SetCredentialInterval(50 * time.Millisecond)()
+	var (
+		mu    sync.Mutex
+		state = "member"
+	)
+	set := func(v string) { mu.Lock(); state = v; mu.Unlock() }
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{
+		Authenticate: (&tokens{}).validate,
+		Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch state {
+			case "down":
+				return identity.Subject{}, errUnavailable.New()
+			case "removed":
+				return identity.Subject{}, errorx.Define(errorx.NotFound, "test.not_member").New()
+			}
+			return sub, nil
+		},
+	}, nil)
+	c := mustConnect(t, n.url, "alice", nil)
+	set("down")
+	time.Sleep(150 * time.Millisecond)
+	n.rt.Channel("articles", realtime.Public())
+	c.mustSubscribe("articles")
+	set("removed")
+	if code := c.closed(); code != 3500 {
+		t.Fatalf("closed with %d", code)
+	}
+}
+
 func TestRevokedTokenDisconnects(t *testing.T) {
 	store := &tokens{}
 	// 复查信号经由另一个 Hub 传递也可以：Credentials 只负责提醒。

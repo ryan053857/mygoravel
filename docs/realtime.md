@@ -124,17 +124,12 @@ editor.Get("/realtime", func(w http.ResponseWriter, r *http.Request) error {
 <a id="tokens"></a>
 ### SPA 与移动端
 
-浏览器的 WebSocket 不能设置 `Authorization` 请求头，所以 SDK 在连接时传入 token，由 `Options.Authenticate` 校验。它通常就是 [API 令牌](api-tokens.md)的校验器，需要权限时再经过 [Resolve](authorization.md#resolving-permissions)：
+浏览器的 WebSocket 不能设置 `Authorization` 请求头，所以 SDK 在连接时传入 token，由 `Options.Authenticate` 校验，它通常就是 [API 令牌](api-tokens.md)的校验器。token 不保存权限，`Options.Resolve` 加载它，与 API 的 [`rest.Options.Resolve`](authorization.md#resolving-permissions) 是同一个函数：
 
 ```go
 rt, err := realtime.New(hub, realtime.Options{
-    Authenticate: func(ctx context.Context, token string) (identity.Subject, error) {
-        sub, err := tokens.Validate(ctx, token)
-        if err != nil {
-            return sub, err
-        }
-        return roles.Resolve(ctx, sub)
-    },
+    Authenticate: tokens.Validate,
+    Resolve:      roles.Resolve,
 })
 router.Handle("/realtime", rt.Handler())
 ```
@@ -143,7 +138,7 @@ router.Handle("/realtime", rt.Handler())
 const centrifuge = new Centrifuge('wss://api.example.com/realtime', { token: apiToken });
 ```
 
-token 无效时连接以 3500 关闭，SDK 不再重连。既没有会话也没有 token 的连接是匿名的，只能订阅公开频道。
+token 无效或 `Resolve` 拒绝主体时，连接以 3500 关闭，SDK 不再重连。连接期间两者每 30 秒重新运行一次，token 被撤销、用户被停用或移出租户后连接结束。既没有会话也没有 token 的连接是匿名的，只能订阅公开频道。
 
 <a id="revocation"></a>
 ### 撤销后断开

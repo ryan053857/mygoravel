@@ -7,7 +7,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/identity"
 )
@@ -20,11 +19,6 @@ type TokenValidator func(ctx context.Context, token string) (identity.Subject, e
 type Authenticator func(ctx huma.Context) (identity.Subject, error)
 
 const authMetadata = "mygoravel.auth"
-
-var (
-	errUnauthenticated = errorx.Define(errorx.Unauthenticated, "auth.unauthenticated")
-	errForbidden       = errorx.Define(errorx.PermissionDenied, "auth.forbidden")
-)
 
 // RequireBearer 要求请求携带有效的 Authorization: Bearer token，校验器返回有效主体，
 // 并且主体能执行 permissions 中的全部权限（identity.Subject.Can）。
@@ -43,14 +37,17 @@ func RequireBearer(api huma.API, validate TokenValidator, permissions ...string)
 }
 
 // RequireAuth 为路由声明名为 name 的安全方案：在 OpenAPI 组件中登记 scheme 并标记路由的 Security，
-// 同时安装运行时中间件。运行时依次：
+// 同时安装运行时中间件。
+//
+// 运行时用 identity.Establish 得到本次请求的主体并写入 identity.WithSubject：
 //
 //   - authenticate 识别调用者：没有凭据或凭据无效返回 401，认证后端故障返回对应的 5xx；
 //   - 主体的 Tenant 由凭据设置且与本次请求的租户（identity.TenantFromContext）不同时返回 403；
 //   - 调用 Options.Resolve（如果有）得到本次请求的主体，错误的处理见 Options.Resolve；
-//   - 主体能执行 permissions 中的全部权限后写入 identity.WithSubject，否则返回 403。
+//   - 主体不能执行 permissions 中的某项权限时返回 403。
 //
-// 认证通过后安装 httpx.CredentialCheck：SSE 等长连接期间定期重新执行以上检查，凭据失效或失去权限时结束连接。
+// 认证通过后安装 httpx.CredentialCheck：SSE 等长连接期间定期重新执行以上检查（identity.Reestablish），
+// 凭据失效或失去权限时结束连接。
 // 每条路由只能声明一种认证方案。RequireBearer 基于它实现。
 func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authenticate Authenticator, permissions ...string) func(op *huma.Operation) {
 	if name == "" || scheme == nil || authenticate == nil {
@@ -62,7 +59,7 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 		challenge = strings.ToUpper(scheme.Scheme[:1]) + scheme.Scheme[1:]
 	}
 	required := append([]string(nil), permissions...)
-	var resolve func(context.Context, identity.Subject) (identity.Subject, error)
+	var resolve identity.Resolver
 	var watcher httpx.CredentialWatcher
 	if a, ok := api.(*API); ok {
 		resolve, watcher = a.resolve, a.watcher
@@ -84,16 +81,20 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 		op.Security = []map[string][]string{{name: {}}}
 		op.Middlewares = append(op.Middlewares, func(ctx huma.Context, next func(huma.Context)) {
 			ctx.SetHeader("Cache-Control", "no-store")
-			sub, err := establish(ctx, authenticate, resolve, required)
+			// authenticate 读取请求头等与 context 无关的部分，复查时只替换 context。
+			auth := func(c context.Context) (identity.Subject, error) {
+				return authenticate(huma.WithContext(ctx, c))
+			}
+			sub, err := identity.Establish(ctx.Context(), auth, resolve, required...)
 			switch {
 			case err == nil:
-			case httpx.StatusOf(err) >= 500:
+			case identity.Failed(err):
 				if a, ok := api.(*API); ok {
 					a.logger.ErrorContext(ctx.Context(), "authentication backend failed", "scheme", name, "error", err)
 				}
 				writeError(api, ctx, huma.NewErrorWithContext(ctx, httpx.StatusOf(err), "authentication unavailable"))
 				return
-			case errors.Is(err, errUnauthenticated):
+			case errors.Is(err, identity.ErrUnauthenticated):
 				if challenge != "" {
 					ctx.SetHeader("WWW-Authenticate", challenge)
 				}
@@ -105,11 +106,7 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 			}
 			// 长连接期间（例如 SSE）重新执行全部检查：凭据被撤销、主体变化、不再是租户成员或失去权限时结束连接。
 			recheck := func(c context.Context) error {
-				again, err := establish(huma.WithContext(ctx, c), authenticate, resolve, required)
-				if err == nil && (again.ID != sub.ID || again.Impersonator != sub.Impersonator) {
-					return errUnauthenticated.New()
-				}
-				return err
+				return identity.Reestablish(c, sub, auth, resolve, required...)
 			}
 			reqCtx := httpx.WithCredentialCheck(identity.WithSubject(ctx.Context(), sub), recheck)
 			if watcher != nil {
@@ -118,41 +115,6 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 			next(huma.WithContext(ctx, reqCtx))
 		})
 	}
-}
-
-// establish 识别调用者并得到本次请求的主体，步骤见 RequireAuth。返回的错误已按响应归类：
-// 5xx 类错误表示后端故障；errUnauthenticated 表示没有有效的凭据；其他 4xx 类错误按其分类响应。
-func establish(ctx huma.Context, authenticate Authenticator, resolve func(context.Context, identity.Subject) (identity.Subject, error), required []string) (identity.Subject, error) {
-	sub, err := authenticate(ctx)
-	if err != nil && httpx.StatusOf(err) >= 500 {
-		return identity.Subject{}, err
-	}
-	if err != nil || sub.ID == "" {
-		return identity.Subject{}, errUnauthenticated.New()
-	}
-	if sub.Tenant != "" && sub.Tenant != identity.TenantFromContext(ctx.Context()) {
-		return identity.Subject{}, errForbidden.New()
-	}
-	if resolve != nil {
-		cred := sub
-		sub, err = resolve(ctx.Context(), cred)
-		switch {
-		case err != nil && httpx.StatusOf(err) >= 500:
-			return identity.Subject{}, err
-		case err != nil && errorx.KindOf(err) == errorx.Unauthenticated, err == nil && sub.ID == "":
-			return identity.Subject{}, errUnauthenticated.New()
-		case err != nil:
-			return identity.Subject{}, err
-		}
-		// Resolve 加载权限和租户；认证方式、凭据、凭据的限制和代为登录者由凭据决定，不随 Resolve 改变。
-		sub.Method, sub.Credential, sub.Scopes, sub.Impersonator = cred.Method, cred.Credential, cred.Scopes, cred.Impersonator
-	}
-	for _, perm := range required {
-		if !sub.Can(perm) {
-			return identity.Subject{}, errForbidden.New(errorx.Public("permission", perm))
-		}
-	}
-	return sub, nil
 }
 
 // registerScheme 在 OpenAPI 组件中登记安全方案。

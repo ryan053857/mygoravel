@@ -156,7 +156,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。下面按文�
 | `cleanup` | 按逆序关闭入口打开的资源 | [依赖装配](dependencies.md#closing-resources) |
 | `errorx` | 定义带稳定错误码和分类的业务错误 | [错误处理](errors.md) |
 | `logging` | 构造 slog 日志器，传递请求关联字段；`logging/logtest` 用于测试 | [日志](logging.md) |
-| `identity` | 表示已认证的主体，并在 context 中传递 | [认证](authentication.md) |
+| `identity` | 表示已认证的主体，并在 context 中传递；API、页面和实时频道共用的主体确立规则 | [认证](authentication.md) |
 | `page` | 固定分页与游标分页的参数和响应结构 | [分页](responses.md#pagination) |
 | `httpx` | HTTP 中间件、平滑停机 | [中间件](middleware.md)、[请求生命周期](lifecycle.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |

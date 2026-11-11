@@ -35,6 +35,12 @@ type Options struct {
 	//
 	// nil 时带 token 的连接一律拒绝。请求已经由认证中间件识别出主体时（例如同源页面的会话），不使用 token。
 	Authenticate func(ctx context.Context, token string) (identity.Subject, error)
+	// Resolve 把 Authenticate 给出的主体转换为这个连接的主体，例如按 identity.TenantFromContext 加载用户在租户中的权限，
+	// 通常与 rest.Options.Resolve 相同（authz.Store.Resolve）；nil 时直接使用 Authenticate 给出的主体。
+	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效，其他 4xx 类错误同样拒绝连接；
+	// 连接期间与 Authenticate 一起定期重新调用，用户被停用或移出租户后连接结束。
+	// 认证中间件识别出的主体（例如同源页面的会话）已经由 web.Options.Resolve 处理，不再经过它。
+	Resolve identity.Resolver
 	// Credentials 让连接在收到复查信号时立即重新校验凭据，撤销 token、退出登录后连接随即结束；
 	// nil 时只按 30 秒的间隔定期校验。通常是 broadcast.NewCredentials 的返回值，
 	// 与 rest.Options.Credentials、web.Options.Credentials 相同。

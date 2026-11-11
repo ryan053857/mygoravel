@@ -8,13 +8,9 @@ import (
 
 	"github.com/centrifugal/centrifuge"
 
-	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/identity"
 )
-
-// errUnauthenticated 表示 token 无效，只在包内用于归类，不会返回给客户端。
-var errUnauthenticated = errorx.Define(errorx.Unauthenticated, "realtime.unauthenticated")
 
 // connection 是一个连接的身份。
 type connection struct {
@@ -30,9 +26,9 @@ func (rt *Realtime) connecting(ctx context.Context, e centrifuge.ConnectEvent) (
 	if sub, ok := identity.FromContext(ctx); ok && sub.ID != "" {
 		conn.sub = sub
 	} else if e.Token != "" {
-		sub, err := rt.authenticate(ctx, e.Token)
+		sub, err := identity.Establish(ctx, rt.authenticator(e.Token), rt.opts.Resolve)
 		switch {
-		case err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError:
+		case identity.Failed(err):
 			rt.logger.ErrorContext(ctx, "authentication backend failed", "error", err)
 			return centrifuge.ConnectReply{}, centrifuge.ErrorInternal
 		case err != nil:
@@ -47,21 +43,14 @@ func (rt *Realtime) connecting(ctx context.Context, e centrifuge.ConnectEvent) (
 	}, nil
 }
 
-// authenticate 用 Options.Authenticate 校验 token。返回的错误已归类：5xx 表示暂时无法判断，其他表示 token 无效。
-func (rt *Realtime) authenticate(ctx context.Context, token string) (identity.Subject, error) {
-	if rt.opts.Authenticate == nil {
-		return identity.Subject{}, errUnauthenticated.New()
+// authenticator 用 Options.Authenticate 校验 token；没有设置时带 token 的连接一律无效。
+func (rt *Realtime) authenticator(token string) identity.Authenticator {
+	return func(ctx context.Context) (identity.Subject, error) {
+		if rt.opts.Authenticate == nil {
+			return identity.Subject{}, nil
+		}
+		return rt.opts.Authenticate(ctx, token)
 	}
-	sub, err := rt.opts.Authenticate(ctx, token)
-	switch {
-	case err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError:
-		return identity.Subject{}, err
-	case err != nil || sub.ID == "":
-		return identity.Subject{}, errUnauthenticated.New()
-	case sub.Tenant != "" && sub.Tenant != identity.TenantFromContext(ctx):
-		return identity.Subject{}, errUnauthenticated.New()
-	}
-	return sub, nil
 }
 
 // valid 重新校验连接的凭据，只有确定已经失效时返回 false。
@@ -71,11 +60,8 @@ func (rt *Realtime) valid(ctx context.Context, conn *connection) bool {
 	if conn.token == "" {
 		return httpx.CheckCredential(ctx) == nil
 	}
-	sub, err := rt.authenticate(ctx, conn.token)
-	if err != nil {
-		return httpx.StatusOf(err) >= http.StatusInternalServerError
-	}
-	return sub.ID == conn.sub.ID && sub.Impersonator == conn.sub.Impersonator
+	err := identity.Reestablish(ctx, conn.sub, rt.authenticator(conn.token), rt.opts.Resolve)
+	return err == nil || identity.Failed(err)
 }
 
 // connected 为已经建立的连接安装订阅和发布的处理器，并在连接期间复查凭据。

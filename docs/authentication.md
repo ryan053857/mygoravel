@@ -243,7 +243,7 @@ api := rest.New(rest.Options{
 
 `Resolve` 只负责加载权限和租户：返回的主体中 `Method`、`Credential`、`Scopes` 和 `Impersonator` 总是取自凭据，像上面这样修改收到的主体，或者新建一个主体返回，结果都一样。
 
-页面使用同样签名的 [`web.Options.Resolve`](views.md#login)，所以同一个函数可以同时交给 API 和页面。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
+页面的 [`web.Options.Resolve`](views.md#login) 和实时频道的 [`realtime.Options.Resolve`](realtime.md#tokens) 都是同一个类型 `identity.Resolver`，所以同一个函数可以同时交给它们，三者按相同的规则处理它的返回值。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
 
 <a id="tenants"></a>
 ## 多租户

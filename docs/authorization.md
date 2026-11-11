@@ -140,11 +140,12 @@ err = roles.Assign(ctx, userID, "", editor.ID)
 <a id="resolving-permissions"></a>
 ### 每次请求加载权限
 
-`roles.Resolve` 可以直接交给 API 和页面的 `Resolve`，它在每个请求中按用户当前的角色加载权限：
+`roles.Resolve` 可以直接交给 API、页面和[实时频道](realtime.md#tokens)的 `Resolve`，它在每个请求中按用户当前的角色加载权限：
 
 ```go
 api := rest.New(rest.Options{Resolve: roles.Resolve})
 pages := web.New(web.Options{Resolve: roles.Resolve /* 其余字段见视图 */})
+rt, err := realtime.New(hub, realtime.Options{Authenticate: tokens.Validate, Resolve: roles.Resolve})
 ```
 
 加载是一次带索引的查询，不使用缓存，因此修改角色、撤销分配都在下一个请求生效。已经建立的长连接按新的权限每 30 秒校验一次；需要立即生效时，修改后调用 `RecheckSubject`，修改角色的权限后调用 `RecheckTenant`，见[立即断开](sse.md#immediate-revocation)。还需要检查账号是否停用时，在外面包一层：
