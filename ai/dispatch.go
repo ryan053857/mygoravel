@@ -138,7 +138,7 @@ func (rs *Runs) dispatch(ctx context.Context, req dispatchReq, opts []agent.RunO
 			if reply.Run == "" {
 				return nil, nil
 			}
-			return rs.Get(ctx, req.UserID, req.Session)
+			return rs.getRun(ctx, req.UserID, req.Session, reply.Run)
 		case <-wait.C:
 			if !claimed {
 				return nil, ErrNoWorker.New()
@@ -228,4 +228,26 @@ func (rs *Runs) serveOne(req dispatchReq) {
 		out.Run = run.ID
 	}
 	reply(out)
+}
+
+// getRun 返回对话中 ID 为 runID 的运行的镜像。镜像可能先连到刚结束的上一次运行，短时间内重试。
+func (rs *Runs) getRun(ctx context.Context, userID, sessionID, runID string) (*Run, error) {
+	deadline := time.Now().Add(replyTimeout)
+	for {
+		r, err := rs.Get(ctx, userID, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if r != nil && r.ID == runID {
+			return r, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.Newf("ai: cannot reach run %s on the worker", runID)
+		}
+		select {
+		case <-time.After(20 * time.Millisecond):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }

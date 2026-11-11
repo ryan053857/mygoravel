@@ -290,6 +290,11 @@ func (o *owner) control(sub *broadcast.Subscription) {
 	defer close(o.ctlDone)
 	for {
 		for msg := range sub.C() {
+			select {
+			case <-o.closing:
+				return // 已被新的运行取代或已过保留期：不再回应，即使订阅还没来得及关闭
+			default:
+			}
 			var c ctlMsg
 			if err := json.Unmarshal(msg.Data, &c); err != nil {
 				continue
