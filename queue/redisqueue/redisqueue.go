@@ -102,7 +102,7 @@ func (d *Driver) Enqueue(ctx context.Context, jobs ...queue.Job) error {
 		}
 		var at int64
 		if !j.AvailableAt.IsZero() {
-			at = j.AvailableAt.UnixMilli()
+			at = ceilMilli(j.AvailableAt)
 		}
 		added, err := enqueue.Run(ctx, d.rdb, d.keys(j.Topic), j.ID.String(), at, data, j.Unique).Int()
 		if err != nil {
@@ -317,3 +317,12 @@ func (c *claimed) Retry(ctx context.Context, at time.Time) error {
 }
 
 func (c *claimed) Release(ctx context.Context) error { return c.run(ctx, "release", 0) }
+
+// ceilMilli 把时间向上取整到毫秒：延迟发布的任务不会早于指定的时间被领取。
+func ceilMilli(t time.Time) int64 {
+	ms := t.UnixMilli()
+	if t.Sub(time.UnixMilli(ms)) > 0 {
+		ms++
+	}
+	return ms
+}

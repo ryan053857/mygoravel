@@ -29,9 +29,10 @@ func AccessLog(cfg AccessLogConfig, logger *slog.Logger) func(http.Handler) http
 		WithResponseHeader: cfg.ResponseHeader,
 		WithRequestBody:    cfg.RequestBody,
 		WithResponseBody:   cfg.ResponseBody,
-		WithTraceID:        cfg.TraceID,
-		WithSpanID:         cfg.TraceID,
-		WithClientIP:       true,
+		// trace_id 和 span_id 由 logging 的 context 字段输出。
+		WithTraceID:  false,
+		WithSpanID:   false,
+		WithClientIP: true,
 		// request_id 已由 context 字段输出，不再重复记录 slog-chi 的 id 字段。
 		WithRequestID:     false,
 		WithCustomMessage: func(http.ResponseWriter, *http.Request) string { return "http request" },

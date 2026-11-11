@@ -8,13 +8,20 @@
     - [定时任务](#schedule-metrics)
     - [数据库](#database-metrics)
     - [告警示例](#alerting)
+- [链路追踪](#tracing)
+    - [创建 TracerProvider](#tracer-provider)
+    - [HTTP 请求](#http-tracing)
+    - [队列](#queue-tracing)
+    - [定时任务](#schedule-tracing)
+    - [数据库](#database-tracing)
+    - [日志](#trace-logs)
 
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，数据库的指标由 Bun 自带的扩展报告。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Grafana Cloud、Datadog 等都能接收。
+框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路，数据库的指标和链路由 Bun 自带的扩展报告。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
 
-和其他功能一样，指标需要显式开启：把同一个 `MeterProvider` 交给需要报告指标的部分即可，没有传入的部分不报告。
+和其他功能一样，两者都需要显式开启：把同一个 `MeterProvider`、`TracerProvider` 交给需要报告的部分即可，没有传入的部分不报告。
 
 <a id="metrics"></a>
 ## 指标
@@ -116,7 +123,7 @@ db.AddQueryHook(bunotel.NewQueryHook(bunotel.WithMeterProvider(meters)))
 - 不区分成功和失败；
 - 指标名和属性名来自旧版的语义约定，现成的数据库仪表盘需要调整查询。
 
-这个钩子同时为每条查询创建链路追踪的 span。没有设置全局 `TracerProvider` 时它们不会被记录，没有开销。
+同一个钩子还可以报告链路，见[数据库的链路](#database-tracing)。
 
 <a id="alerting"></a>
 ### 告警示例
@@ -137,3 +144,107 @@ rate(go_sql_connections_wait_count_total[5m]) > 0
 # 每天凌晨的报表任务 25 小时内没有成功过
 increase(schedule_task_duration_seconds_count{schedule_task="reports:daily", schedule_task_outcome="succeeded"}[25h]) == 0
 ```
+
+<a id="tracing"></a>
+## 链路追踪
+
+一个请求发布了任务、任务又调用了其他服务时，链路追踪把它们串成一条链路，可以看到每一步的耗时和在哪一步出错。
+
+<a id="tracer-provider"></a>
+### 创建 TracerProvider
+
+和 `MeterProvider` 一样在 `open` 中创建，保存在 `App` 中：
+
+```go
+import (
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+traceExporter, err := otlptracehttp.New(ctx)
+if err != nil {
+    return nil, err
+}
+tracers := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExporter))
+stack.MustAdd("tracing", tracers.Shutdown)
+```
+
+接收地址、服务名和采样率同样来自标准环境变量，例如 `OTEL_TRACES_SAMPLER=parentbased_traceidratio`、`OTEL_TRACES_SAMPLER_ARG=0.1` 只记录 10% 的链路。
+
+框架按 [W3C Trace Context](https://www.w3.org/TR/trace-context/) 读写链路，不需要设置全局的 propagator。
+
+<a id="http-tracing"></a>
+### HTTP 请求
+
+`httpx.Tracing` 为每个请求创建一个服务端 span，名称是方法和路由模板，例如 `GET /articles/{id}`。它安装在最外层，访问日志才能带上 `trace_id`：
+
+```go
+router.Use(httpx.Tracing(a.tracers), httpx.Metrics(a.meters))
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+```
+
+请求头带有 `traceparent` 时（例如来自前端或另一个服务），span 接在调用方的链路之后。`5xx` 的请求标记为错误。处理器从请求的 `ctx` 中拿到这个 span，用 `tracers.Tracer(...)` 创建的 span 都会接在它下面。
+
+<a id="queue-tracing"></a>
+### 队列
+
+`queue.Publish` 把 `ctx` 中的链路写入任务的元数据（`traceparent`），不需要任何设置。订阅者传入 `queue.WithTracerProvider` 后，为每次执行创建一个 `process <topic>` span，接在发布任务的 span 之后：
+
+```go
+sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil,
+    queue.WithMeterProvider(a.meters), queue.WithTracerProvider(a.tracers))
+```
+
+这样，发布文章的请求和随后发送通知邮件的任务出现在同一条链路中，中间隔了多久、邮件为什么失败都能看到。每次重试是一个新的 span，失败、重试和租约丢失时标记为错误。
+
+<a id="schedule-tracing"></a>
+### 定时任务
+
+```go
+sched := schedule.New(a.locker, a.cfg.Schedule, nil,
+    schedule.WithMeterProvider(a.meters), schedule.WithTracerProvider(a.tracers))
+```
+
+每次执行创建一个 `schedule <任务名>` span，是一条新链路的起点，任务中发布的队列任务接在它之后。被跳过或由其他实例执行的触发没有 span。
+
+<a id="database-tracing"></a>
+### 数据库
+
+把 `TracerProvider` 也交给[数据库指标](#database-metrics)中的钩子，每条查询就成为一个 span，接在请求或任务的 span 下面，一个请求慢在哪条 SQL 上一目了然：
+
+```go
+db.AddQueryHook(bunotel.NewQueryHook(
+    bunotel.WithMeterProvider(meters),
+    bunotel.WithTracerProvider(childSpans{tracers}),
+))
+```
+
+span 的名称是操作（如 `SELECT`），带有 SQL 语句和发起查询的代码位置。语句中的参数保持为占位符，例如 `WHERE (id = ?)`，用户数据不会进入链路。
+
+不要直接传入 `tracers`。bunotel 为每条查询都创建 span，不管 `ctx` 中有没有上级 span；而队列轮询、调度器加锁这些后台查询不属于任何请求，每秒都会各自成为一条只有一个 span 的链路，淹没真正有用的数据。`childSpans` 只在已有上级 span 时创建：
+
+```go
+// childSpans 只为已在链路中的查询创建 span，后台查询不产生孤立的链路。
+type childSpans struct{ trace.TracerProvider }
+
+func (p childSpans) Tracer(name string, opts ...trace.TracerOption) trace.Tracer {
+    return childTracer{p.TracerProvider.Tracer(name, opts...)}
+}
+
+type childTracer struct{ trace.Tracer }
+
+func (t childTracer) Start(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+    if !trace.SpanContextFromContext(ctx).IsValid() {
+        return ctx, trace.SpanFromContext(ctx) // 不记录的空 span
+    }
+    return t.Tracer.Start(ctx, name, opts...)
+}
+```
+
+`trace` 是 `go.opentelemetry.io/otel/trace`。查询要接在请求的链路上，前提是把请求的 `ctx` 一路传给 Bun 的 `Scan`、`Exec`；用 `context.Background()` 发起的查询不会出现在链路中。
+
+<a id="trace-logs"></a>
+### 日志
+
+`ctx` 中有 span 时，用它记录的日志自动带上 `trace_id` 和 `span_id`，包括访问日志、队列和调度器的日志，以及处理函数里 `slog.InfoContext(ctx, ...)` 记录的业务日志。在链路追踪系统中可以按 `trace_id` 找到一条链路的全部日志。
+

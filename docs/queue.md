@@ -88,7 +88,7 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
 - **不会丢通知**：文章发布成功，通知任务就一定在库里；邮件服务器暂时不可用时任务会自动重试。
 - **不会发错通知**：事务回滚时任务一起回滚，不会出现「邮件发出去了，文章没发布」。
 
-每个任务有一个 UUIDv7 作为 ID。`ctx` 中的 `request_id` 会随任务保存，处理任务时还原到处理函数的 `ctx` 中，见[日志](#logging)。
+每个任务有一个 UUIDv7 作为 ID。`ctx` 中的 `request_id` 和 OpenTelemetry 链路会随任务保存，处理任务时还原到处理函数的 `ctx` 中，见[日志](#logging)和[链路追踪](telemetry.md#queue-tracing)。
 
 <a id="delayed-jobs"></a>
 ### 延迟执行
@@ -309,7 +309,7 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 
 队列的日志带有 `component=queue` 字段，可以[单独设置级别](logging.md#component-levels)。任务失败后等待重试记录为 `warn`，转入失败任务表记录为 `error`，日志中包含 topic、错误和下次重试的等待时间。
 
-处理函数的 `ctx` 中带有 `message_id`（任务 ID）、`attempt`（第几次执行），以及发布时的 `request_id`。使用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它们，可以把一个请求和它产生的任务串起来。
+处理函数的 `ctx` 中带有 `message_id`（任务 ID）、`attempt`（第几次执行），以及发布时的 `request_id`。使用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它们，可以把一个请求和它产生的任务串起来。使用链路追踪时，任务的执行还会出现在发布它的请求的链路中，见[链路追踪](telemetry.md#queue-tracing)。
 
 <a id="observability"></a>
 ## 观测

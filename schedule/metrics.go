@@ -6,7 +6,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // meterName 是调度器指标的 instrumentation scope。
@@ -56,6 +58,34 @@ func WithMeterProvider(mp metric.MeterProvider) SchedulerOption {
 		panic(errors.Wrap(err, "schedule: create schedule.task.skipped"))
 	}
 	return func(s *Scheduler) { s.metrics = &metrics{duration: duration, skipped: skipped} }
+}
+
+// WithTracerProvider 让调度器为每次执行创建一个 OpenTelemetry span，名称是 "schedule <任务名>"，
+// 是一条新链路的起点：任务中发布的队列任务、发出的请求都出现在这条链路中。返回错误或 panic 时 span 标记为错误。
+// 被跳过或由其他实例执行的触发不创建 span。tp 为 nil 时 panic。
+func WithTracerProvider(tp trace.TracerProvider) SchedulerOption {
+	if tp == nil {
+		panic("schedule: nil tracer provider")
+	}
+	tracer := tp.Tracer(meterName)
+	return func(s *Scheduler) { s.tracer = tracer }
+}
+
+// startSpan 在设置了 TracerProvider 时开始本次执行的 span，返回的函数以执行结果结束它。
+func (s *Scheduler) startSpan(ctx context.Context, task string, tick time.Time) (context.Context, func(error)) {
+	if s.tracer == nil {
+		return ctx, func(error) {}
+	}
+	ctx, span := s.tracer.Start(ctx, "schedule "+task, trace.WithNewRoot(), trace.WithAttributes(
+		attrTask.String(task), attribute.Int64("schedule.tick", tick.Unix()),
+	))
+	return ctx, func(err error) {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}
 }
 
 // metrics 是调度器的指标，未设置 MeterProvider 时为 nil。

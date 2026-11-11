@@ -141,8 +141,6 @@ type AccessLogConfig struct {
 	// RequestBody、ResponseBody 记录请求体与响应体，各最多 64 KiB。
 	RequestBody  bool `yaml:"request_body"`
 	ResponseBody bool `yaml:"response_body"`
-	// TraceID 记录 OpenTelemetry 的 trace_id 与 span_id。
-	TraceID bool `yaml:"trace_id"`
 }
 
 // DefaultAccessLogConfig 返回只记录基本字段的配置。
