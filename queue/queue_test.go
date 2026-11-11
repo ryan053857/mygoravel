@@ -135,3 +135,9 @@ func TestRetryAfter(t *testing.T) {
 		t.Fatal("Permanent(RetryAfter(...)) is not permanent")
 	}
 }
+
+func TestAttemptFromContextOutsideJob(t *testing.T) {
+	if n, final := queue.AttemptFromContext(context.Background()); n != 0 || final {
+		t.Fatalf("AttemptFromContext = %d, %t", n, final)
+	}
+}

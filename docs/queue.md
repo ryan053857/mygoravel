@@ -224,6 +224,19 @@ if resp.StatusCode == http.StatusTooManyRequests {
 
 这次重试同样计入执行次数，次数用完时照常转入失败任务表。
 
+任务自己保存了处理状态时，需要在放弃之前记下最终结果，例如把一条投递记录从「重试中」改为「失败」。`queue.AttemptFromContext` 返回本次是第几次执行，以及这是否是最后一次：
+
+```go
+if err != nil {
+    if _, final := queue.AttemptFromContext(ctx); final {
+        markFailed(ctx, a.db, id, err) // 本次之后不再重试
+    }
+    return err
+}
+```
+
+从失败任务表[重新入队](#failed-jobs)的任务从第 1 次重新计数。
+
 <a id="failed-jobs"></a>
 ### 失败任务
 

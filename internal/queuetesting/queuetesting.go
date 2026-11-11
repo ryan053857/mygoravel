@@ -303,9 +303,15 @@ func failedJobs(t *testing.T, s *setup) {
 	var fail atomic.Bool
 	fail.Store(true)
 	var handled atomic.Int64
+	var mu sync.Mutex
+	var attempts []string // AttemptFromContext 的结果
 	s.start(t, cfg, func(r *message.Router, sub *queue.Subscriber) {
 		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
 			handled.Add(1)
+			n, final := queue.AttemptFromContext(ctx)
+			mu.Lock()
+			attempts = append(attempts, fmt.Sprintf("%d/%t", n, final))
+			mu.Unlock()
 			if fail.Load() {
 				return errors.Newf("job %d failed", p.N)
 			}
@@ -331,6 +337,12 @@ func failedJobs(t *testing.T, s *setup) {
 	eventually(t, 5*time.Second, func() bool { return handled.Load() == 3 })
 	if len(s.failedRows(t)) != 0 {
 		t.Fatal("retried job still in failed jobs")
+	}
+	mu.Lock()
+	got := strings.Join(attempts, " ")
+	mu.Unlock()
+	if got != "1/false 2/true 1/false" {
+		t.Fatalf("AttemptFromContext = %s", got)
 	}
 	if err := s.failed.Retry(ctx, rows[0].ID); !errors.Is(err, queue.ErrFailedJobNotFound) {
 		t.Fatalf("retry missing: %v", err)

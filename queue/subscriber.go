@@ -233,7 +233,9 @@ func (s *Subscriber) deliver(ctx context.Context, out chan<- *message.Message, c
 		}
 	}
 	o := &outcome{}
-	msgCtx, cancel := context.WithCancelCause(context.WithValue(logging.WithAttrs(context.Background(), attrs...), outcomeKey{}, o))
+	msgCtx := logging.WithAttrs(context.Background(), attrs...)
+	msgCtx = context.WithValue(msgCtx, attemptKey{}, attemptInfo{j.Attempt, s.cfg.MaxAttempts})
+	msgCtx, cancel := context.WithCancelCause(context.WithValue(msgCtx, outcomeKey{}, o))
 	msg.SetContext(msgCtx)
 
 	select {
