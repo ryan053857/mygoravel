@@ -119,6 +119,15 @@ func Trigger(w http.ResponseWriter, name string, detail map[string]any) {
 	h.Set("HX-Trigger", asciiJSON(strings.TrimSuffix(cur, "}")+sep+string(key)+":"+string(b)+"}"))
 }
 
+// DialogCloseEvent 是 CloseDialog 派发的事件，event.detail.id 是对话框的 ID。web/ui 的衔接脚本把它交给对话框组件。
+const DialogCloseEvent = "web:dialog-close"
+
+// CloseDialog 让 htmx 处理完这个响应后关闭 id 对应的对话框，例如对话框中的表单保存成功后。
+// 必须在写出响应之前调用。
+func CloseDialog(w http.ResponseWriter, id string) {
+	Trigger(w, DialogCloseEvent, map[string]any{"id": id})
+}
+
 // asciiJSON 把 JSON 中的非 ASCII 字符转义为 \uXXXX：浏览器按 Latin-1 解读响应头，中文必须转义。
 func asciiJSON(s string) string {
 	var b strings.Builder
@@ -136,13 +145,13 @@ func asciiJSON(s string) string {
 	return b.String()
 }
 
-// deliverFlashes 在 htmx 请求的非跳转响应写出状态码之前调用：把会话中的提示放进 HX-Trigger。
-func deliverFlashes(w http.ResponseWriter, r *http.Request, status int) {
+// deliverFlashes 在 htmx 请求的非跳转响应写出状态码之前调用：把会话中的提示和 extra 放进 HX-Trigger。
+func deliverFlashes(w http.ResponseWriter, r *http.Request, status int, extra []Message) {
 	h := w.Header()
 	if !IsHTMX(r) || (status >= 300 && status < 400) || h.Get("HX-Redirect") != "" || h.Get("HX-Location") != "" || h.Get("HX-Refresh") == "true" {
 		return
 	}
-	if list := Flashes(r.Context()); len(list) > 0 {
+	if list := append(Flashes(r.Context()), extra...); len(list) > 0 {
 		Trigger(w, FlashEvent, map[string]any{"messages": list})
 	}
 }

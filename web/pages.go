@@ -7,11 +7,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 
 	"github.com/a-h/templ"
 	"github.com/alexedwards/scs/v2"
 	"github.com/cockroachdb/errors"
+	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
@@ -44,13 +46,16 @@ const (
 	ModeRoutes
 )
 
-// Options 创建 Pages。运行模式下，除 Tenant、Resolve、Static、TrustedOrigins、Logger 外都必须设置。
+// Options 创建 Pages。运行模式下 Sessions、Login、ErrorPage 必须设置，其余可空。
+//
+// 一个应用可以有多个 Pages，例如运营后台和租户端：各自的会话 cookie、登录页、主题和错误呈现。
 type Options struct {
 	Mode Mode
 	// Sessions 是页面使用的会话，由 session.New 创建。Pages 接管它的错误处理：
 	// 会话存储出错时记录日志并呈现 500 错误页。
 	Sessions *scs.SessionManager
 	// Login 是登录页地址。Require 的路由把未登录的请求带到这里，并在 next 参数中附上原地址。
+	// 可以包含路径参数的占位，按当前请求的同名参数替换，例如租户在路径中时写 /t/{tenant}/login。
 	Login string
 	// Tenant 从请求中取出本次请求所在的租户，例如路径参数 chi.URLParam(r, "tenant")、子域名或自定义域名；
 	// 结果在每条页面路由（包括公开路由）开始时写入 identity.WithTenant。nil 表示始终是平台本身（""）。
@@ -61,13 +66,16 @@ type Options struct {
 	// 其他错误按分类呈现错误页，例如不是租户成员时返回 errorx.NotFound 得到 404。
 	// 权限检查使用返回的主体；其中 Method、Credential、Scopes、Impersonator 总是取自会话，Resolve 改变它们不起作用。
 	Resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
-	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求。
+	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求，例如 ui.ErrorPage。
 	// message 来自 httpx.ErrorDetail：业务错误的译文，或状态描述。
 	ErrorPage func(status int, message string) templ.Component
-	// ErrorFragment 渲染局部 htmx 请求的错误，替换到 ErrorTarget。
+	// ErrorFragment 渲染局部 htmx 请求的错误，替换到 ErrorTarget。nil 时（默认）不替换页面内容，
+	// 错误作为 Type 为 error 的提示随 FlashEvent 送达，与 Flash 存入的提示显示在同一处。
 	ErrorFragment func(status int, message string) templ.Component
-	// ErrorTarget 是错误片段的替换位置（CSS 选择器），例如 #flash。它应当存在于每个页面的布局中。
+	// ErrorTarget 是错误片段的替换位置（CSS 选择器）。设置了 ErrorFragment 时必填，它应当存在于每个页面的布局中。
 	ErrorTarget string
+	// Theme 是这组页面的外观，由 web/ui 渲染：页面路由和错误页的组件用 ThemeFrom 读取。
+	Theme Theme
 	// Static 是应用的静态资源，见 NewStatic；页面和错误页的组件用 StaticURL 取地址。可空。
 	Static *Static
 	// TrustedOrigins 是允许跨站提交的来源，例如 https://admin.example.com；可空。
@@ -94,8 +102,11 @@ func New(opts Options) *Pages {
 	if opts.Sessions == nil || opts.Login == "" {
 		panic("web: Sessions and Login are required")
 	}
-	if opts.ErrorPage == nil || opts.ErrorFragment == nil || opts.ErrorTarget == "" {
-		panic("web: ErrorPage, ErrorFragment and ErrorTarget are required")
+	if opts.ErrorPage == nil {
+		panic("web: ErrorPage is required")
+	}
+	if opts.ErrorFragment != nil && opts.ErrorTarget == "" {
+		panic("web: ErrorTarget is required with ErrorFragment")
 	}
 	p := &Pages{opts: opts, logger: logging.Or(opts.Logger).With(logging.AttrComponent, "http")}
 	opts.Sessions.ErrorFunc = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -126,7 +137,7 @@ func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 			return
 		}
 		if !ok {
-			Redirect(w, r, p.opts.Login+"?next="+url.QueryEscape(returnTo(r)))
+			Redirect(w, r, loginURL(r, p.opts.Login)+"?next="+url.QueryEscape(returnTo(r)))
 			return
 		}
 		for _, perm := range access.permissions {
@@ -222,6 +233,15 @@ func (p *Pages) subject(r *http.Request) (identity.Subject, bool, error) {
 	return sub, true, nil
 }
 
+var pathParam = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// loginURL 把 login 中的 {name} 替换为当前请求的路径参数 name。
+func loginURL(r *http.Request, login string) string {
+	return pathParam.ReplaceAllStringFunc(login, func(m string) string {
+		return url.PathEscape(chi.URLParam(r, m[1:len(m)-1]))
+	})
+}
+
 // returnTo 返回登录后应回到的本站地址：htmx 请求取发起请求的页面，其余取请求本身。
 func returnTo(r *http.Request) string {
 	if IsHTMX(r) {
@@ -253,11 +273,12 @@ func (p *Pages) handle(fn HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// Error 呈现 err：按 errorx 分类确定状态码，5xx 记录日志，带 errorx.RetryAfter 时设置 Retry-After。局部 htmx 请求渲染 ErrorFragment，
-// 并通过 HX-Retarget、HX-Reswap 放进 ErrorTarget；其余请求渲染 ErrorPage。
-// 用于中间件等页面处理器之外的场景。
+// Error 呈现 err：按 errorx 分类确定状态码，5xx 记录日志，带 errorx.RetryAfter 时设置 Retry-After。
+// 普通请求和整页 htmx 请求渲染 ErrorPage。局部 htmx 请求：设置了 ErrorFragment 时渲染它，
+// 并通过 HX-Retarget、HX-Reswap 放进 ErrorTarget；否则不替换页面内容（HX-Reswap: none），
+// 错误作为 Type 为 error 的提示随 FlashEvent 送达。用于中间件等页面处理器之外的场景。
 func (p *Pages) Error(w http.ResponseWriter, r *http.Request, err error) {
-	r = r.WithContext(withStatic(r.Context(), p.opts.Static))
+	r = r.WithContext(p.withLook(r.Context()))
 	status := httpx.StatusOf(err)
 	if status >= http.StatusInternalServerError {
 		p.logger.ErrorContext(r.Context(), "page handler failed", "error", err)
@@ -265,6 +286,12 @@ func (p *Pages) Error(w http.ResponseWriter, r *http.Request, err error) {
 	message := httpx.ErrorDetail(r.Context(), err)
 	if d := errorx.RetryAfterOf(err); d > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(d.Seconds()))))
+	}
+	if IsPartial(r) && p.opts.ErrorFragment == nil {
+		w.Header().Set("HX-Reswap", "none")
+		flashError(w, Message{Type: "error", Title: message})
+		w.WriteHeader(status)
+		return
 	}
 	c := p.opts.ErrorPage(status, message)
 	if IsPartial(r) {
@@ -289,6 +316,17 @@ type responseWriter struct {
 	http.ResponseWriter
 	r     *http.Request
 	wrote bool
+	// extra 是随这个响应送达、不经过会话的提示，例如局部请求的错误。
+	extra []Message
+}
+
+// flashError 让 m 随响应送达：页面处理器之内与会话中的提示合并为一个 FlashEvent，之外直接触发。
+func flashError(w http.ResponseWriter, m Message) {
+	if rw, ok := w.(*responseWriter); ok {
+		rw.extra = append(rw.extra, m)
+		return
+	}
+	Trigger(w, FlashEvent, map[string]any{"messages": []Message{m}})
 }
 
 func (w *responseWriter) WriteHeader(status int) {
@@ -296,7 +334,7 @@ func (w *responseWriter) WriteHeader(status int) {
 		return
 	}
 	w.wrote = true
-	deliverFlashes(w, w.r, status)
+	deliverFlashes(w, w.r, status, w.extra)
 	if IsHTMX(w.r) && status >= 300 && status < 400 {
 		if loc := w.Header().Get("Location"); loc != "" {
 			w.Header().Del("Location")

@@ -11,11 +11,11 @@
 <a id="introduction"></a>
 ## 简介
 
-页面用到的样式表、脚本、字体和图片放在应用中，通过 `embed` 打进二进制，由 `web.Static` 提供。部署时仍然只有一个二进制文件。
+[界面组件](components.md)的样式表和脚本由框架内置，`ui.Assets()` 提供。应用自己的图片、字体、脚本，以及用 Tailwind 生成的样式表，放在应用中，通过 `embed` 打进二进制，由 `web.Static` 提供。部署时仍然只有一个二进制文件。
 
 `web.Static` 按文件内容给地址加上指纹，例如 `/static/css/app.3f2a9c1d.css`。这样的地址可以让浏览器和 CDN 永久缓存：文件内容一变，指纹随之改变，页面引用的就是新地址，不需要手动加版本号，也不会读到旧缓存。
 
-本章接着[视图](views.md)一章，给博客的编辑后台加上样式表。
+本章接着[视图](views.md)一章，给博客的编辑后台加上应用自己的静态文件和样式。
 
 <a id="static-files"></a>
 ## 存放静态文件
@@ -62,15 +62,10 @@ router.Handle(web.AssetsPath+"*", web.Assets())
 <a id="referencing"></a>
 ## 在页面中引用
 
-在 templ 组件中用 `web.StaticURL` 取地址。例如在布局的 `<head>` 中加载样式表：
+在 templ 组件中用 `web.StaticURL` 取地址。例如在页面上显示 logo：
 
 ```templ
-<head>
-	<meta charset="utf-8"/>
-	<title>{ title }</title>
-	<link rel="stylesheet" href={ web.StaticURL(ctx, "css/app.css") }/>
-	@web.Scripts()
-</head>
+<img src={ web.StaticURL(ctx, "img/logo.svg") } alt="Blog"/>
 ```
 
 文件名是相对 `static` 目录的路径。页面路由和错误页渲染时，`ctx` 中带有 `Options.Static`，返回的是带指纹的地址。不存在的文件不会报错，地址也不带指纹。可以访问 `/static/` 加文件名检查文件是否存在。
@@ -111,12 +106,15 @@ static_dir: internal/web/static
 <a id="tailwind"></a>
 ## 用 Tailwind CSS 编写样式
 
-[Tailwind CSS](https://tailwindcss.com) 直接在 HTML 的 `class` 中组合样式，适合与 templ 一起使用。它的 [standalone CLI](https://tailwindcss.com/blog/standalone-cli) 是一个独立的可执行文件，不需要 Node.js。从 [GitHub Releases](https://github.com/tailwindlabs/tailwindcss/releases) 下载对应平台的版本，放进 `PATH`。
+内置的样式表包含组件用到的类名和一组常用的布局工具类，见[使用组件](components.md#using-components)。设计感强的页面，例如落地页、租户端的首页，会用到更多的类名和自己的设计令牌，这时用 [Tailwind CSS](https://tailwindcss.com) 生成应用自己的样式表。它代替内置的样式表，组件、风格与应用的类名生成在同一份样式表中。
+
+Tailwind 的 [standalone CLI](https://tailwindcss.com/blog/standalone-cli) 是一个独立的可执行文件，不需要 Node.js。从 [GitHub Releases](https://github.com/tailwindlabs/tailwindcss/releases) 下载对应平台的版本，放进 `PATH`。
 
 样式的入口文件不放进 `static`，下面是 `internal/web/app.css`：
 
 ```css
 @import "tailwindcss";
+@import "./.web-ui/style-nova.css";
 
 @theme {
   --color-brand-500: oklch(0.62 0.2 275);
@@ -124,15 +122,16 @@ static_dir: internal/web/static
 }
 ```
 
-`@theme` 定义设计令牌，即应用自己的颜色、字体等。使用[界面组件](components.md)时，初始化会在这个文件中导入组件的主题变量，组件和你自己的页面共用同一套令牌。之后就可以在 class 中使用 `bg-brand-500`、`font-display` 这样的工具类，见 [Tailwind 文档](https://tailwindcss.com/docs/theme)。
+- 第二行导入组件和一套风格，风格与[主题](components.md#themes)的 `style` 一致。`.web-ui` 目录由 [dev 命令](commands.md#dev-command)的 `devcmd.Tailwind` 从框架中复制过来，目录中带 `.gitignore`，不会被提交。
+- `@theme` 定义应用自己的设计令牌，之后就可以在 class 中使用 `bg-brand-500`、`font-display` 这样的工具类，见 [Tailwind 文档](https://tailwindcss.com/docs/theme)。组件的颜色变量（`bg-primary`、`text-muted-foreground` 等）同样可以使用。
 
-生成样式表：
+然后让主题使用生成的样式表：
 
-```bash
-tailwindcss -i internal/web/app.css -o internal/web/static/css/app.css --minify
+```yaml
+theme:
+  style: nova
+  stylesheet: css/app.css
 ```
-
-Tailwind 会扫描项目中的文件，包括 `.templ` 和生成的 `_templ.go`，只输出实际用到的 class。生成的 `app.css` 和 `_templ.go` 一样，要提交到版本库，这样构建和 CI 不需要安装 Tailwind。
 
 开发时运行 [dev 命令](commands.md#dev-command)，打开 http://localhost:7331：
 
@@ -140,4 +139,4 @@ Tailwind 会扫描项目中的文件，包括 `.templ` 和生成的 `_templ.go`�
 go run ./cmd/api dev --config config/app.yaml,config/local.yaml
 ```
 
-修改 `.templ` 后，templ 重新生成代码、重启应用；Tailwind 随之重新生成样式表，浏览器自动刷新。停止 `dev` 时，它会生成压缩的样式表，可以直接提交。
+修改 `.templ` 后，templ 重新生成代码、重启应用；Tailwind 随之重新生成 `internal/web/static/css/app.css`，浏览器自动刷新。停止 `dev` 时，它会生成压缩的样式表。生成的 `app.css` 和 `_templ.go` 一样要提交到版本库，这样构建和 CI 不需要安装 Tailwind。

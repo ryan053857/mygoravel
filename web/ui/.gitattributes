@@ -1,0 +1,7 @@
+# go generate 生成的文件：在代码评审中折叠。
+css/vendor/** linguist-vendored
+css/classes.txt linguist-generated
+css/style-*.css linguist-generated
+manifest.go linguist-generated
+*_templ.go linguist-generated
+assets/** binary linguist-generated

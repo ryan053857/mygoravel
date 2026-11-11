@@ -226,17 +226,20 @@ go run ./cmd/api dev --config config/app.yaml,config/local.yaml
 然后打开 http://localhost:7331。它同时运行：
 
 - `go tool templ generate --watch`：修改 `.templ` 或 `.go` 后重新生成代码，用 `go run ./cmd/api serve` 重启应用，`--config` 与 `dev` 相同。templ 在 7331 端口代理应用，并注入自动刷新的脚本；
-- `Tools` 中每个工具的监听命令，例如 `devcmd.Tailwind` 运行 `tailwindcss --watch`；
+- `Tools` 中每个工具的监听命令，例如 `devcmd.Tailwind` 运行 `tailwindcss --watch`。启动前，它把框架内置的组件样式源复制到入口旁边的 `.web-ui` 目录，见[用 Tailwind 编写样式](assets.md#tailwind)。只用内置样式表、不写 Tailwind 的应用不需要它；
 - 监视 `Static` 目录：其中的文件变化时（例如 Tailwind 重新生成了样式表）刷新浏览器。
 
 `addr` 从配置中取出应用的监听地址，代理据此访问应用。`config/local.yaml` 设置 `static_dir`，让应用直接读取磁盘上的静态文件，见[前端资源](assets.md#development)。
 
 `dev` 启动前检查 templ（`go get -tool github.com/a-h/templ/cmd/templ`）和各工具是否已安装。按 `Ctrl-C` 停止后，它会运行 `templ generate` 和各工具的生成命令，例如 `tailwindcss --minify`，把监听模式的输出恢复为正式版本，可以直接提交。
 
-其他生成工具写成 `devcmd.Tool`，`Watch` 是开发时的监听命令，`Build` 是停止后的生成命令。例如打包组件脚本的 shadcn-templ：
+其他生成工具写成 `devcmd.Tool`，`Watch` 是开发时的监听命令，`Build` 是停止后的生成命令，`Prepare` 在启动监听命令之前运行一次。例如用 esbuild 打包应用自己的脚本：
 
 ```go
-devcmd.Tool{Watch: []string{"shadcn-templ", "bundle", "--watch"}, Build: []string{"shadcn-templ", "bundle"}}
+devcmd.Tool{
+    Watch: []string{"esbuild", "internal/web/js/app.js", "--bundle", "--outdir=internal/web/static/js", "--watch=forever"},
+    Build: []string{"esbuild", "internal/web/js/app.js", "--bundle", "--outdir=internal/web/static/js", "--minify"},
+}
 ```
 
 <a id="migrate-command"></a>

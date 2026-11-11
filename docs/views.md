@@ -6,6 +6,7 @@
 - [装配页面](#assembling-pages)
 - [注册页面路由](#page-routes)
 - [登录](#login)
+- [多组页面](#multiple-areas)
 - [渲染页面](#rendering-pages)
 - [局部更新](#partial-updates)
 - [列表页](#list-pages)
@@ -27,7 +28,7 @@
 
 按钮、表格、下拉菜单、对话框这些现成的组件，见[界面组件](components.md)。
 
-`web` 包负责把它们接到框架上：渲染 templ 组件、加载会话和检查登录、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。
+`web` 包负责把它们接到框架上：渲染 templ 组件、加载会话和检查登录、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。`web/ui` 包内置了界面组件的样式表和脚本，按主题加载，不需要安装 Tailwind。
 
 页面总是使用[会话](session.md)：用户登录后，服务器把身份记在会话里，浏览器通过 cookie 自动携带。JSON API 则只用 Bearer token，不使用会话，见[认证](authentication.md)。
 
@@ -52,38 +53,22 @@ go get -tool github.com/a-h/templ/cmd/templ
 ```templ
 package web
 
-import "github.com/ryan053857/mygoravel/web"
+import "github.com/ryan053857/mygoravel/web/ui"
 
 templ Layout(title string) {
-	<!DOCTYPE html>
-	<html lang="zh-CN">
-		<head>
-			<meta charset="utf-8"/>
-			<title>{ title }</title>
-			<link rel="stylesheet" href={ web.StaticURL(ctx, "css/app.css") }/>
-			@web.Scripts()
-		</head>
-		<body>
-			<div id="flash"></div>
-			<main id="main">
-				{ children... }
-			</main>
-		</body>
-	</html>
-}
-
-templ ErrorPage(status int, message string) {
-	@Layout(message) {
-		<h1>{ message }</h1>
+	@ui.Page(ui.PageProps{Title: title}) {
+		<main id="main" class="mx-auto max-w-5xl p-6">
+			{ children... }
+		</main>
+		@ui.Modal()
+		@ui.Toaster()
 	}
-}
-
-templ ErrorFragment(status int, message string) {
-	<p class="error">{ message }</p>
 }
 ```
 
-`web.Scripts()` 输出加载 htmx、hx-sse、hx-alpine-compat 和 Alpine 的 `<script>` 标签。`web.StaticURL` 返回应用自己的样式表的地址，见[前端资源](assets.md)。`#flash` 是局部请求出错时放置错误提示的位置，见[错误页](#error-pages)。
+`ui.Page` 输出完整的 HTML 文档，`<head>` 中按[主题](components.md#themes)加载样式表、htmx、Alpine 和组件脚本。`ui.Toaster()` 显示[提示消息](#flash-messages)和局部请求的错误，`ui.Modal()` 是放置[对话框](components.md#dialogs)的位置。错误页用 `ui.ErrorPage`，见[装配页面](#assembling-pages)。
+
+这些都可以换成自己的组件：自己写 `<html>` 时，在 `<head>` 中调用 `@ui.Head()`；不用 `web/ui` 时，`@web.Scripts()` 只输出 htmx 与 Alpine 的 `<script>` 标签，样式由应用自己提供。
 
 <a id="assembling-pages"></a>
 ## 装配页面
@@ -98,18 +83,18 @@ func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
         return nil, err
     }
     pages := web.New(web.Options{
-        Sessions:      sessions,
-        Static:        static,
-        Login:         "/login",
-        ErrorPage:     layout.ErrorPage,
-        ErrorFragment: layout.ErrorFragment,
-        ErrorTarget:   "#flash",
+        Sessions:  sessions,
+        Static:    static,
+        Login:     "/login",
+        ErrorPage: ui.ErrorPage,
+        Theme:     a.cfg.Theme,
     })
 
     router := chi.NewRouter()
     router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
     router.Handle(web.StaticPath+"*", static)
     router.Handle(web.AssetsPath+"*", web.Assets())
+    router.Handle(ui.AssetsPath+"*", ui.Assets())
     router.NotFound(pages.NotFound)
 
     router.Route("/api/v1", func(r chi.Router) {
@@ -142,7 +127,7 @@ func PageRoutes(r chi.Router, pages *web.Pages, db *bun.DB, hasher *hashing.Hash
 几点说明：
 
 - 页面和 JSON API 共用一个 Router。API 挂在 `/api/v1` 下，不经过会话；`BasePath` 让 OpenAPI 文档中的地址带上这个前缀，见 [API 版本](routing.md#api-versioning)。`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
-- `static` 提供应用自己的样式表、图片等静态文件，`layout` 是应用的 `internal/web` 包，见[前端资源](assets.md)。
+- `static` 提供应用自己的图片等静态文件，见[前端资源](assets.md)。`Theme` 来自配置，决定组件的风格和颜色，见[主题](components.md#themes)；`ui.Assets()` 提供它们的样式表和脚本。
 - `a.hasher` 是登录校验密码用的[哈希器](hashing.md#hashing-passwords)，和数据库一样在 `open` 中创建，见[依赖装配](dependencies.md#assembling-the-application)。
 - `web.New` 接管会话的错误处理：会话存储出错时记录日志，并用 `ErrorPage` 呈现 `500`。
 - [请求超时](middleware.md#request-timeout)按路由组安装，[服务端推送](sse.md)的路由不能有超时。
@@ -274,7 +259,39 @@ pages := web.New(web.Options{
 | 其他 4xx 类错误（例如不是这个租户的成员） | 按分类呈现错误页，例如 `404`，不登出 |
 | 5xx 类错误（例如数据库故障） | 呈现错误页 |
 
-`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 `Resolve` 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
+`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 `Resolve` 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。租户在路径中时，`Login` 写成 `/t/{tenant}/login`，跳转时 `{tenant}` 换成当前请求的路径参数。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
+
+<a id="multiple-areas"></a>
+## 多组页面
+
+一个应用可以有几组页面，例如运营后台和租户端，各用一个 `web.Pages`，挂在各自的子路由上。每组有自己的会话 cookie、登录页、主题和错误呈现，互不影响：登录运营后台不会登录租户端。
+
+```go
+ops := web.New(web.Options{
+    Sessions:  session.New(a.cfg.Ops.Session, session.NewStore(a.db)),
+    Login:     "/ops/login",
+    ErrorPage: ui.ErrorPage,
+    Theme:     a.cfg.Ops.Theme,
+})
+tenant := web.New(web.Options{
+    Sessions:  session.New(a.cfg.Tenant.Session, session.NewStore(a.db)),
+    Login:     "/t/{tenant}/login",
+    ErrorPage: ui.ErrorPage,
+    Theme:     a.cfg.Tenant.Theme,
+    Tenant:    func(r *http.Request) string { return chi.URLParam(r, "tenant") },
+    Static:    static,
+})
+router.Route("/ops", func(r chi.Router) {
+    r.NotFound(ops.NotFound)
+    opsweb.Register(r, ops, a.db)
+})
+router.Route("/t/{tenant}", func(r chi.Router) {
+    r.NotFound(tenant.NotFound)
+    tenantweb.Register(r, tenant, a.db)
+})
+```
+
+两组会话的 `cookie.name` 要不同，例如 `ops_session` 和 `session`。主题、提示和错误样式的差异见[不同区域的界面](components.md#areas)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面
@@ -428,7 +445,9 @@ templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
 | 请求 | 呈现 |
 | --- | --- |
 | 普通请求、整页 htmx 请求 | 用 `ErrorPage` 渲染整页 |
-| 局部 htmx 请求 | 用 `ErrorFragment` 渲染片段，通过 `HX-Retarget` 放进 `ErrorTarget`，原来的目标保持不变 |
+| 局部 htmx 请求 | 不替换页面内容，错误作为 `Type` 为 `error` 的[提示](#flash-messages)送达，`ui.Toaster()` 把它显示为 toast |
+
+局部请求的错误需要别的样子时，设置 `Options.ErrorFragment` 和 `ErrorTarget`：错误用 `ErrorFragment` 渲染，通过 `HX-Retarget` 放进 `ErrorTarget` 选择的元素，例如页面顶部的一条横幅。
 
 传给组件的 `message` 与 JSON API 的 `detail` 相同：业务错误按错误码翻译，其他错误只是状态描述，内部错误信息不会出现在页面上。5xx 错误会记录日志。
 
@@ -471,9 +490,11 @@ web.Redirect(w, r, "/admin/articles")
 | --- | --- |
 | 跳转（`303` 或 `HX-Redirect`） | 留在会话里，由跳转后的页面显示 |
 | 整页 | 布局用 `web.Flashes(ctx)` 取出并渲染 |
-| htmx 请求的其他响应，包括片段、`204` 和错误片段 | 放进 `HX-Trigger` 响应头，htmx 在 `body` 上派发 `web:flash` 事件，`event.detail.messages` 是提示列表 |
+| htmx 请求的其他响应，包括片段、`204` 和错误 | 放进 `HX-Trigger` 响应头，htmx 在 `body` 上派发 `web:flash` 事件，`event.detail.messages` 是提示列表。局部请求出错时，错误也作为一条 `error` 提示放在其中 |
 
-布局中放一个提示区域，同时处理两种情况：服务端渲染整页时取出的提示，以及 htmx 请求带来的提示。
+布局中的 `ui.Toaster()` 处理两种情况：服务端渲染整页时取出的提示，以及 htmx 请求带来的提示，都显示为 toast。
+
+需要别的样子时，不用 `ui.Toaster()`，自己写提示区域。例如用 Alpine 写的提示列表：
 
 ```templ
 <div id="toasts" x-data="{ messages: [] }" x-on:web:flash.window="messages.push(...$event.detail.messages)">
@@ -486,7 +507,7 @@ web.Redirect(w, r, "/admin/articles")
 </div>
 ```
 
-这个区域不要用作 `ErrorTarget`：错误片段会替换掉 `ErrorTarget` 的全部内容。`web.Flash` 只能在页面路由中、写出响应之前调用。
+`web.Flash` 只能在页面路由中、写出响应之前调用。
 
 <a id="triggering-events"></a>
 ## 触发事件
@@ -542,11 +563,11 @@ func csp(next http.Handler) http.Handler {
 
 `rand` 是 `crypto/rand`。在页面路由之前安装它，例如 `router.Use(csp)`。
 
-- `web.Scripts()` 读取 context 中的 nonce，给 htmx 和 Alpine 的 `<script>` 带上它；同时设置 htmx 的 `inlineScriptNonce`，htmx 执行交换进来的脚本时也使用这个 nonce。
+- `ui.Head()` 读取 context 中的 nonce，给它输出的 `<script>`、`<style>` 带上它；其中的 `web.Scripts()` 还设置了 htmx 的 `inlineScriptNonce`，htmx 执行交换进来的脚本时也使用这个 nonce。
 - 布局中自己写的内联脚本，要加上 `nonce={ templ.GetNonce(ctx) }`。
 - `'self'` 允许加载本站的脚本文件，包括[静态文件](assets.md)。
 
-Alpine 的表达式（`x-data`、`x-on` 等）和 htmx 的 `hx-on` 在运行时编译执行，需要 `'unsafe-eval'`。去掉它之后，这两类属性都会失效。只用 htmx 属性、不写 Alpine 表达式的页面可以去掉它；也可以改用 Alpine 的 [CSP 版本](https://alpinejs.dev/advanced/csp)。
+Alpine 的表达式（`x-data`、`x-on` 等）和 htmx 的 `hx-on` 在运行时编译执行，需要 `'unsafe-eval'`。去掉它之后，这两类属性都会失效。只用 htmx 属性和[界面组件](components.md)、不写 Alpine 表达式的页面可以去掉它；也可以改用 Alpine 的 [CSP 版本](https://alpinejs.dev/advanced/csp)。
 
 > [!WARNING]
 > 不要把应用的脚本写在 `<body>` 里。用户点后退时，htmx 会重新请求整页并替换 `body`，其中的脚本会再执行一次，事件监听器就注册了两遍。应用的脚本放进静态文件，在 `<head>` 中加载：`<script defer src={ web.StaticURL(ctx, "js/app.js") }></script>`。

@@ -8,6 +8,8 @@
 //		},
 //	}, func(cfg settings.Config) string { return cfg.HTTP.Addr }))
 //
+// 只使用 web/ui 预编译样式表的应用不需要 Tailwind，Tools 可以为空。
+//
 // 然后运行 go run ./cmd/api dev --config config/app.yaml,config/local.yaml，打开 http://localhost:7331。
 package devcmd
 
@@ -50,19 +52,65 @@ type Options struct {
 // Tool 是一个生成工具：开发时运行 Watch 监听源文件，dev 停止后运行一次 Build。
 // 监听模式的输出通常没有压缩，Build 把它恢复为可以提交的正式版本。
 //
-//	devcmd.Tool{Watch: []string{"shadcn-templ", "bundle", "--watch"}, Build: []string{"shadcn-templ", "bundle"}}
+//	devcmd.Tool{Watch: []string{"esbuild", "js/app.js", "--outdir=static/js", "--watch"}, Build: []string{"esbuild", "js/app.js", "--outdir=static/js", "--minify"}}
 type Tool struct {
 	Watch []string
 	Build []string // 可空
+	// Prepare 在启动 Watch 之前运行一次，可空。
+	Prepare func() error
 }
 
+// UIDir 是 Tailwind 在样式入口旁边放置 web/ui 样式源的目录名。
+const UIDir = ".web-ui"
+
 // Tailwind 返回 Tailwind standalone CLI：监听时生成 output，停止后生成压缩的 output。
+//
+// 启动前，它把框架 web/ui 的样式源复制到 input 旁边的 UIDir 目录（目录中带 .gitignore，不会被提交），
+// 入口用相对路径导入一套风格，组件、风格与应用自己的类名生成在同一份样式表中：
+//
+//	@import "tailwindcss";
+//	@import "./.web-ui/style-maia.css";
 func Tailwind(input, output string) Tool {
 	// --watch=always：标准输入不是终端时也继续监听，否则 tailwindcss 在标准输入关闭时退出。
 	return Tool{
-		Watch: []string{"tailwindcss", "-i", input, "-o", output, "--watch=always"},
-		Build: []string{"tailwindcss", "-i", input, "-o", output, "--minify"},
+		Watch:   []string{"tailwindcss", "-i", input, "-o", output, "--watch=always"},
+		Build:   []string{"tailwindcss", "-i", input, "-o", output, "--minify"},
+		Prepare: func() error { return copyUI(filepath.Join(filepath.Dir(input), UIDir)) },
 	}
+}
+
+const framework = "github.com/ryan053857/mygoravel"
+
+// copyUI 把框架的 web/ui/css 复制到 dst，替换已有的内容。框架的位置由 go list 给出（通常在模块缓存中）。
+func copyUI(dst string) error {
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", framework).Output()
+	dir := strings.TrimSpace(string(out))
+	if err != nil || dir == "" {
+		return errors.Newf("devcmd: cannot locate %s with go list: %v", framework, err)
+	}
+	src := filepath.Join(dir, "web", "ui", "css")
+	if err := os.RemoveAll(dst); err != nil {
+		return errors.Wrap(err, "devcmd: remove ui styles")
+	}
+	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, 0o644)
+	})
+	if err != nil {
+		return errors.Wrap(err, "devcmd: copy ui styles")
+	}
+	return errors.Wrap(os.WriteFile(filepath.Join(dst, ".gitignore"), []byte("*\n"), 0o644), "devcmd: copy ui styles")
 }
 
 // New 构造 dev 命令。它加载 --config 指定的配置，用 addr 取应用的 HTTP 监听地址，然后同时运行：
@@ -101,6 +149,13 @@ func New[C any](opts Options, addr func(C) string) *cobra.Command {
 			d := dev{opts: opts, configs: configs, target: target, out: shared(cmd.OutOrStdout()), errOut: shared(cmd.ErrOrStderr())}
 			if err := d.check(); err != nil {
 				return command.AsExitError(command.ExitUnavailable, err)
+			}
+			for _, tool := range opts.Tools {
+				if tool.Prepare != nil {
+					if err := tool.Prepare(); err != nil {
+						return command.AsExitError(command.ExitUnavailable, err)
+					}
+				}
 			}
 			fmt.Fprintf(d.out, "dev: 打开 http://localhost:%d（代理 %s）\n", opts.ProxyPort, target)
 			err = command.Concurrently(cmd.Context(), d.runs()...)

@@ -44,7 +44,7 @@ blog/
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker、调度器等运行部分，以及需要 App 的命令（各模块命令、seed、queue）
 │   ├── auth/                token 校验器；authweb/ 是登录页
-│   ├── web/                 页面布局与错误页组件（templ）、样式入口 app.css；static/ 是嵌入的静态文件，ui/ 是界面组件
+│   ├── web/                 页面布局（templ）、Tailwind 的样式入口 app.css；static/ 是嵌入的静态文件
 │   └── article/             文章业务模块
 │       ├── article.go       模型、业务错误与共享的规则
 │       ├── create.go        创建文章
@@ -162,7 +162,8 @@ mygoravel 的每个包都可以单独使用，按需引入即可。下面按文�
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
 | `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
 | `form` | 按 Huma 标签转换、验证文本形式的字段值，页面表单和表格导入共用 | [表单](forms.md#defining-forms) |
-| `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、提示消息、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
+| `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、提示消息、主题、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
+| `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载，提示、对话框与页面的衔接 | [界面组件](components.md) |
 
 <a id="digging-deeper"></a>
 ### 深入了解

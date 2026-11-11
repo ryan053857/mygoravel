@@ -171,6 +171,11 @@ func (s *Static) DescribeRoute() httpx.Route { return httpx.Route{Access: httpx.
 
 type staticKey struct{}
 
+// withLook 把 Options.Static 和 Options.Theme 放进 ctx，供 StaticURL、ThemeFrom 使用。
+func (p *Pages) withLook(ctx context.Context) context.Context {
+	return context.WithValue(withStatic(ctx, p.opts.Static), themeKey{}, p.opts.Theme)
+}
+
 // withStatic 把 s 放进 ctx，供 StaticURL 使用。
 func withStatic(ctx context.Context, s *Static) context.Context {
 	if s == nil {

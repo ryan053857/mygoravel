@@ -1,0 +1,13 @@
+/* 只用于预编译样式表：不装 Tailwind 的区域可以使用的常用布局工具类（间距、flex、grid、尺寸、文字、主题颜色），
+   断点 sm、md、lg。使用 Tailwind 的区域按实际用到的类名生成，不需要它。 */
+@source inline("{,sm:,md:,lg:}{p,px,py,pt,pr,pb,pl,m,mx,my,mt,mr,mb,ml,gap,gap-x,gap-y,space-x,space-y}-{0,0.5,1,1.5,2,2.5,3,4,5,6,8,10,12,16,20,24}");
+@source inline("{,sm:,md:,lg:}{flex,inline-flex,grid,block,inline-block,hidden,contents}");
+@source inline("{,sm:,md:,lg:}{flex-row,flex-col,flex-wrap,flex-1,shrink-0,grow,items-start,items-center,items-end,items-stretch,justify-start,justify-center,justify-end,justify-between,self-start,self-center,self-end}");
+@source inline("{,sm:,md:,lg:}grid-cols-{1,2,3,4,5,6,12}");
+@source inline("{,sm:,md:,lg:}col-span-{1,2,3,4,6,12,full}");
+@source inline("{,sm:,md:,lg:}{w,h,min-w,max-w}-{full,screen,auto,fit,min,max,0,4,6,8,10,12,16,20,24,32,40,48,64,72,80,96,xs,sm,md,lg,xl,2xl,3xl,4xl,5xl,6xl,7xl}");
+@source inline("{min-h-svh,min-h-screen,h-svh,size-4,size-5,size-6,size-8,mx-auto}");
+@source inline("{,sm:,md:,lg:}text-{xs,sm,base,lg,xl,2xl,3xl,4xl,left,center,right}");
+@source inline("{font-normal,font-medium,font-semibold,font-bold,truncate,whitespace-nowrap,leading-none,leading-tight,tracking-tight,underline,uppercase}");
+@source inline("{text,bg,border}-{background,foreground,primary,primary-foreground,muted,muted-foreground,secondary,accent,destructive,card,border}");
+@source inline("{border,border-t,border-b,border-l,border-r,rounded,rounded-md,rounded-lg,rounded-xl,rounded-full,shadow-sm,shadow,shadow-md,overflow-hidden,overflow-auto,relative,absolute,fixed,sticky,inset-0,top-0,z-10,z-50}");

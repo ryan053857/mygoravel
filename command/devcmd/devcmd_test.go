@@ -28,6 +28,7 @@ type settings struct {
 const fake = `#!/bin/sh
 echo "$(basename "$0") $*" >> "$DEVCMD_LOG"
 if [ "$1 $2" = "tool -n" ]; then echo /fake/templ; exit 0; fi
+if [ "$1 $2" = "list -m" ]; then echo "$DEVCMD_FRAMEWORK"; exit 0; fi
 case "$*" in
 *--watch*)
 	trap 'echo "stopped $(basename "$0")" >> "$DEVCMD_LOG"; exit 0' INT
@@ -49,6 +50,9 @@ func setup(t *testing.T, tools ...string) (dir, log string) {
 	}
 	log = filepath.Join(dir, "log")
 	t.Setenv("DEVCMD_LOG", log)
+	framework, _ := filepath.Abs("../..")
+	t.Setenv("DEVCMD_FRAMEWORK", framework)
+	t.Chdir(dir) // Tailwind 把 web/ui 的样式源复制到相对路径的入口旁边
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
 	if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte("addr: 0.0.0.0:9090\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -119,6 +123,16 @@ func TestDev(t *testing.T) {
 		if !strings.Contains(l, want) {
 			t.Errorf("log missing %q:\n%s", want, l)
 		}
+	}
+
+	// 启动前，web/ui 的样式源已经复制到入口旁边，并且不会被提交。
+	for _, f := range []string{"style-maia.css", "ui.css", "classes.txt", "vendor/styles/style-maia.css"} {
+		if _, err := os.Stat(filepath.Join(dir, "web", devcmd.UIDir, f)); err != nil {
+			t.Errorf("ui styles: %v", err)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "web", devcmd.UIDir, ".gitignore")); string(b) != "*\n" {
+		t.Errorf(".gitignore = %q", b)
 	}
 
 	if err := os.WriteFile(filepath.Join(static, "app.css"), []byte("body{}"), 0o644); err != nil {
