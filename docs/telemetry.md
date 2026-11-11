@@ -8,6 +8,7 @@
     - [定时任务](#schedule-metrics)
     - [数据库](#database-metrics)
     - [Redis](#redis-metrics)
+    - [NATS](#nats-metrics)
     - [告警示例](#alerting)
 - [链路追踪](#tracing)
     - [创建 TracerProvider](#tracer-provider)
@@ -21,7 +22,7 @@
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路，数据库和 Redis 的指标和链路由 Bun、go-redis 自带的扩展报告。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
+框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路，数据库和 Redis 的指标和链路由 Bun、go-redis 自带的扩展报告，NATS 见[这一节](#nats-metrics)。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
 
 和其他功能一样，两者都需要显式开启：把同一个 `MeterProvider`、`TracerProvider` 交给需要报告的部分即可，没有传入的部分不报告。
 
@@ -161,6 +162,46 @@ err := redisotel.InstrumentMetrics(rdb,
 
 和数据库一样，连接池的等待是 Redis 变慢的第一个信号，`timeouts` 增长时已经有命令失败了。`use_time` 以小数毫秒记录，区分成败，比数据库的查询耗时好用；键不存在（`redis.Nil`）记为 `nil`，统计错误率时只看 `error`。
 
+<a id="nats-metrics"></a>
+### NATS
+
+nats.go 没有官方的 OpenTelemetry 扩展，大部分时候也不需要：[NATS 队列](queue.md#nats-driver)的任务和其他驱动一样报告[队列的指标](#queue-metrics)，积压和处理中的任务数来自 JetStream 的 consumer；链路随任务的元数据传递，见[队列的链路](#queue-tracing)。[广播](broadcasting.md#redis-and-nats)是尽力而为的通知，不需要指标。
+
+还缺的是客户端与服务器的连接状态。nats.go 的 `nc.Stats()` 记录了重连次数，在 `open` 中用 `nats.Connect` 创建连接 `nc` 之后，注册两个指标：
+
+```go
+meter := meters.Meter("nats")
+_, err = meter.Int64ObservableGauge("nats.client.connected",
+    metric.WithDescription("是否已连接到 NATS 服务器，1 为已连接"),
+    metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+        var v int64
+        if nc.IsConnected() {
+            v = 1
+        }
+        o.Observe(v)
+        return nil
+    }))
+if err != nil {
+    return nil, err
+}
+_, err = meter.Int64ObservableCounter("nats.client.reconnects",
+    metric.WithDescription("与 NATS 服务器重新建立连接的次数"),
+    metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+        o.Observe(int64(nc.Stats().Reconnects))
+        return nil
+    }))
+```
+
+`metric` 是 `go.opentelemetry.io/otel/metric`。导出到 Prometheus 后是 `nats_client_connected` 和 `nats_client_reconnects_total`。
+
+服务器本身的状态，例如慢消费者、内存、JetStream 占用的存储，在服务器上而不在客户端。用 NATS 官方的 [prometheus-nats-exporter](https://github.com/nats-io/prometheus-nats-exporter) 从服务器的监控接口抓取，服务器用 `-m 8222` 开启监控接口：
+
+```shell
+prometheus-nats-exporter -varz -jsz=consumers http://nats:8222
+```
+
+它在 `:7777/metrics` 提供 Prometheus 格式的指标，例如 `gnatsd_varz_slow_consumers`（处理不过来、被服务器断开的客户端数）和 `jetstream_consumer_num_redelivered`（按 `stream_name`、`consumer_name` 区分的重新投递数）。这些指标不经过 OpenTelemetry，由 Prometheus 直接抓取。
+
 <a id="alerting"></a>
 ### 告警示例
 
@@ -179,6 +220,9 @@ rate(go_sql_connections_wait_count_total[5m]) > 0
 
 # 等不到 Redis 连接，命令已经失败
 rate(db_client_connections_timeouts_total{db_system="redis"}[5m]) > 0
+
+# 与 NATS 断开超过 1 分钟
+max_over_time(nats_client_connected[1m]) == 0
 
 # 每天凌晨的报表任务 25 小时内没有成功过
 increase(schedule_task_duration_seconds_count{schedule_task="reports:daily", schedule_task_outcome="succeeded"}[25h]) == 0
