@@ -3,6 +3,8 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/json"
+	"html"
 	"io"
 	"net/http"
 
@@ -40,16 +42,34 @@ type assetsHandler struct{ http.Handler }
 // DescribeRoute 实现 httpx.RouteDescriber。
 func (assetsHandler) DescribeRoute() httpx.Route { return httpx.Route{Access: httpx.AccessPublic} }
 
-var scripts = `<script src="` + AssetsPath + `htmx-` + HTMXVersion + `.min.js"></script>
-<script src="` + AssetsPath + `hx-sse-` + HTMXVersion + `.min.js"></script>
-<script src="` + AssetsPath + `hx-alpine-compat-` + HTMXVersion + `.min.js"></script>
-<script defer src="` + AssetsPath + `alpine-` + AlpineVersion + `.min.js"></script>
-`
-
 // Scripts 输出加载内嵌脚本的 script 标签，放在布局的 head 中：htmx 与扩展先加载，Alpine 最后以 defer 加载。
+//
+// ctx 中有 templ.WithNonce 设置的 nonce 时，配合内容安全策略（CSP）使用：每个标签都带上 nonce，
+// 并把 htmx.config.inlineScriptNonce 设为它。htmx 执行交换进来的 <script> 时（包括后退时恢复的整页）
+// 用这个 nonce，否则这些脚本会被 CSP 拦截。
 func Scripts() templ.Component {
-	return templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
-		_, err := io.WriteString(w, scripts)
-		return err
+	return templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+		attr := ""
+		nonce := templ.GetNonce(ctx)
+		if nonce != "" {
+			attr = ` nonce="` + html.EscapeString(nonce) + `"`
+		}
+		for _, s := range []struct{ file, extra string }{
+			{"htmx-" + HTMXVersion + ".min.js", ""},
+			{"hx-sse-" + HTMXVersion + ".min.js", ""},
+			{"hx-alpine-compat-" + HTMXVersion + ".min.js", ""},
+			{"alpine-" + AlpineVersion + ".min.js", " defer"},
+		} {
+			if _, err := io.WriteString(w, "<script"+s.extra+attr+` src="`+AssetsPath+s.file+`"></script>`+"\n"); err != nil {
+				return err
+			}
+		}
+		if nonce != "" {
+			js, _ := json.Marshal(nonce) // json 转义 <、>、&，可以放进 <script>
+			if _, err := io.WriteString(w, "<script"+attr+">htmx.config.inlineScriptNonce = "+string(js)+"</script>\n"); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }

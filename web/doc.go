@@ -9,7 +9,7 @@
 //
 // Render 渲染组件，ParseForm 解码并按 Huma 标签验证表单，ParseQuery、QueryURL、PushURL 处理列表页的查询参数，
 // Flash 存入一次性提示，Trigger 让 htmx 在页面上派发事件，SSE 推送服务端事件，
-// Assets 与 Scripts 提供内嵌的 htmx、hx-sse、hx-alpine-compat 与 Alpine.js；
+// Assets 与 Scripts 提供内嵌的 htmx、hx-sse、hx-alpine-compat 与 Alpine.js（Scripts 支持 templ.WithNonce 设置的 CSP nonce）；
 // NewStatic 提供应用自己的静态文件，按内容加指纹，组件用 StaticURL 取地址。
 //
 //	pages := web.New(web.Options{
