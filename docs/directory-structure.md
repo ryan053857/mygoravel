@@ -38,7 +38,7 @@ blog/
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker、调度器等运行部分，以及需要 App 的命令（各模块命令、seed、queue）
 │   ├── auth/                token 校验器；authweb/ 是登录页
-│   ├── web/                 页面布局与错误页组件（templ）
+│   ├── web/                 页面布局与错误页组件（templ）、样式入口 app.css；static/ 是嵌入的静态文件
 │   └── article/             文章业务模块
 │       ├── article.go       模型、业务错误与共享的规则
 │       ├── create.go        创建文章
@@ -72,7 +72,7 @@ blog/
 | `internal/article/publish.go` | [编写 action](actions.md#writing-actions)、[授权](authorization.md#checking-in-transactions) |
 | `internal/article/create.go`、`get.go`、`update.go` | [数据库](database.md#constraint-errors)、[action 的 HTTP 入口](routing.md#http-actions)、[错误处理](errors.md#example) |
 | `internal/article/routes.go`、`dto.go` | [模块内注册](routing.md#module-registration)、[共享响应结构](routing.md#shared-responses) |
-| `internal/web/`、`internal/article/articleweb/` | [视图](views.md)、[表单](forms.md) |
+| `internal/web/`、`internal/article/articleweb/` | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md) |
 | `internal/auth/authweb/` | [登录](views.md#login) |
 | `migrations/` | [迁移](migrations.md#embedding-migrations) |
 
@@ -154,7 +154,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
 | `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
 | `form` | 按 Huma 标签转换、验证文本形式的字段值，页面表单和表格导入共用 | [表单](forms.md#defining-forms) |
-| `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、SSE，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[服务端推送](sse.md) |
+| `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
 | `apitoken` | 存在数据库中的 API 令牌，用作 JSON API 的 Bearer 凭据 | [API 令牌](api-tokens.md) |
 | `authz` | 基于角色的权限：代码中声明的权限目录，角色按租户分配 | [授权](authorization.md)、[多租户](tenancy.md) |
 | `hashing` | 密码的单向哈希与重新哈希 | [哈希](hashing.md) |

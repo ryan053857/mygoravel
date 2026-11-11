@@ -44,7 +44,7 @@ const (
 	ModeRoutes
 )
 
-// Options 创建 Pages。运行模式下，除 Tenant、Resolve、TrustedOrigins、Logger 外都必须设置。
+// Options 创建 Pages。运行模式下，除 Tenant、Resolve、Static、TrustedOrigins、Logger 外都必须设置。
 type Options struct {
 	Mode Mode
 	// Sessions 是页面使用的会话，由 session.New 创建。Pages 接管它的错误处理：
@@ -68,6 +68,8 @@ type Options struct {
 	ErrorFragment func(status int, message string) templ.Component
 	// ErrorTarget 是错误片段的替换位置（CSS 选择器），例如 #flash。它应当存在于每个页面的布局中。
 	ErrorTarget string
+	// Static 是应用的静态资源，见 NewStatic；页面和错误页的组件用 StaticURL 取地址。可空。
+	Static *Static
 	// TrustedOrigins 是允许跨站提交的来源，例如 https://admin.example.com；可空。
 	TrustedOrigins []string
 	// Logger 记录 5xx 错误；nil 表示 slog.Default()。
@@ -248,6 +250,7 @@ func (p *Pages) handle(fn HandlerFunc) http.HandlerFunc {
 // 并通过 HX-Retarget、HX-Reswap 放进 ErrorTarget；其余请求渲染 ErrorPage。
 // 用于中间件等页面处理器之外的场景。
 func (p *Pages) Error(w http.ResponseWriter, r *http.Request, err error) {
+	r = r.WithContext(withStatic(r.Context(), p.opts.Static))
 	status := httpx.StatusOf(err)
 	if status >= http.StatusInternalServerError {
 		p.logger.ErrorContext(r.Context(), "page handler failed", "error", err)

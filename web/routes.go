@@ -80,12 +80,13 @@ func (p *Pages) route(access Access, h HandlerFunc) http.Handler {
 		})
 	}
 	handler := p.cop.Handler(p.opts.Sessions.LoadAndSave(p.authorize(access, p.handle(h))))
-	if tenant := p.opts.Tenant; tenant != nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			handler.ServeHTTP(w, r.WithContext(identity.WithTenant(r.Context(), tenant(r))))
-		})
-	}
-	return handler
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := withStatic(r.Context(), p.opts.Static)
+		if tenant := p.opts.Tenant; tenant != nil {
+			ctx = identity.WithTenant(ctx, tenant(r))
+		}
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // pageRoute 是一条页面路由的处理器，向 httpx.Routes 报告访问策略。

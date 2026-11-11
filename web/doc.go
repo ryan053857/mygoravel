@@ -8,7 +8,8 @@
 // 页面路由实现 httpx.RouteDescriber，routes 命令可以列出它们；ModeRoutes 只登记路由，不需要会话。
 //
 // Render 渲染组件，ParseForm 解码并按 Huma 标签验证表单，SSE 推送服务端事件，
-// Assets 与 Scripts 提供内嵌的 htmx、hx-sse、hx-alpine-compat 与 Alpine.js。
+// Assets 与 Scripts 提供内嵌的 htmx、hx-sse、hx-alpine-compat 与 Alpine.js；
+// NewStatic 提供应用自己的静态文件，按内容加指纹，组件用 StaticURL 取地址。
 //
 //	pages := web.New(web.Options{
 //		Sessions:      sessions,

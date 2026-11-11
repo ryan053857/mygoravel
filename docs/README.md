@@ -30,6 +30,7 @@
 - [响应](responses.md)
 - [视图](views.md)
 - [表单](forms.md)
+- [前端资源](assets.md)
 - [会话](session.md)
 - [错误处理](errors.md)
 - [日志](logging.md)

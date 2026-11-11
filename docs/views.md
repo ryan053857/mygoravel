@@ -54,6 +54,7 @@ templ Layout(title string) {
 		<head>
 			<meta charset="utf-8"/>
 			<title>{ title }</title>
+			<link rel="stylesheet" href={ web.StaticURL(ctx, "css/app.css") }/>
 			@web.Scripts()
 		</head>
 		<body>
@@ -76,7 +77,7 @@ templ ErrorFragment(status int, message string) {
 }
 ```
 
-`web.Scripts()` 输出加载 htmx、hx-sse、hx-alpine-compat 和 Alpine 的 `<script>` 标签。`#flash` 是局部请求出错时放置错误提示的位置，见[错误页](#error-pages)。
+`web.Scripts()` 输出加载 htmx、hx-sse、hx-alpine-compat 和 Alpine 的 `<script>` 标签。`web.StaticURL` 返回应用自己的样式表的地址，见[前端资源](assets.md)。`#flash` 是局部请求出错时放置错误提示的位置，见[错误页](#error-pages)。
 
 <a id="assembling-pages"></a>
 ## 装配页面
@@ -86,8 +87,13 @@ templ ErrorFragment(status int, message string) {
 ```go
 func (a *App) HTTP(ctx context.Context) error {
     sessions := session.New(a.cfg.Session, session.NewStore(a.db))
+    static, err := web.NewStatic(layout.Static, web.StaticOptions{DevDir: a.cfg.StaticDir})
+    if err != nil {
+        return err
+    }
     pages := web.New(web.Options{
         Sessions:      sessions,
+        Static:        static,
         Login:         "/login",
         ErrorPage:     layout.ErrorPage,
         ErrorFragment: layout.ErrorFragment,
@@ -96,6 +102,7 @@ func (a *App) HTTP(ctx context.Context) error {
 
     router := chi.NewRouter()
     router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+    router.Handle(web.StaticPath+"*", static)
     router.Handle(web.AssetsPath+"*", web.Assets())
     router.NotFound(pages.NotFound)
 
@@ -122,6 +129,7 @@ func PageRoutes(r chi.Router, pages *web.Pages, db *bun.DB, hasher *hashing.Hash
 几点说明：
 
 - 页面和 JSON API 共用一个 Router。API 挂在 `/api/v1` 下，不经过会话；`BasePath` 让 OpenAPI 文档中的地址带上这个前缀，见 [API 版本](routing.md#api-versioning)。`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
+- `static` 提供应用自己的样式表、图片等静态文件，`layout` 是应用的 `internal/web` 包，见[前端资源](assets.md)。
 - `a.hasher` 是登录校验密码用的[哈希器](hashing.md#hashing-passwords)，和数据库一样在 `open` 中创建，见[依赖装配](dependencies.md#assembling-the-application)。
 - `web.New` 接管会话的错误处理：会话存储出错时记录日志，并用 `ErrorPage` 呈现 `500`。
 - [请求超时](middleware.md#request-timeout)按路由组安装，[服务端推送](sse.md)的路由不能有超时。
