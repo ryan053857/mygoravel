@@ -202,10 +202,4 @@ func TestViews(t *testing.T) {
 > [!WARNING]
 > 请让 `REDIS_TEST_URL` 指向专门的测试实例，不要指向存放真实数据的 Redis。
 
-本地可以用 Docker 启动一个临时的 Redis：
-
-```bash
-docker run --name app-test-redis --rm -d -p 127.0.0.1:56379:6379 redis:8
-export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
-go test -race -count=1 -tags=integration ./...
-```
+本地用 `compose.test.yml` 把 Redis 和 PostgreSQL 一起启动，见[在本地运行数据库测试](testing.md#running-database-tests-locally)。

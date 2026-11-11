@@ -392,35 +392,66 @@ PostgreSQL 和 MySQL 测试文件开头的 `//go:build integration` 让这些测
 <a id="running-database-tests-locally"></a>
 ### 在本地运行数据库测试
 
-使用 SQLite 时不需要准备任何东西。使用 PostgreSQL 时，如果你安装了 Docker，可以用下面的命令启动一个临时的 PostgreSQL：
+使用 SQLite 时不需要准备任何东西。使用 PostgreSQL 时，在项目根目录放一个只给测试用的 `compose.test.yml`。博客应用还用 Redis 记录浏览量，见 [Redis](redis.md#testing)，所以一起启动：
 
-```bash
-docker run --name app-test-postgres --rm -d \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 127.0.0.1:55432:5432 postgres:18
+```yaml
+# compose.test.yml
+name: blog-test
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - 127.0.0.1:55432:5432
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: pg_isready -U postgres
+      interval: 1s
+      retries: 60
+
+  redis:
+    image: redis:8
+    ports:
+      - 127.0.0.1:56379:6379
+    tmpfs:
+      - /data
+    healthcheck:
+      test: redis-cli ping
+      interval: 1s
+      retries: 30
 ```
 
-等待数据库就绪：
+`--wait` 等到所有服务的健康检查通过才返回，之后就可以直接运行测试：
 
 ```bash
-docker exec app-test-postgres pg_isready -U postgres
-```
-
-然后设置环境变量并运行测试：
-
-```bash
+docker compose -f compose.test.yml up -d --wait
 export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
+export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
 go test -race -count=1 -tags=integration ./...
 ```
 
-测试完成后，执行 `docker stop app-test-postgres` 即可清理。使用 MySQL 时，用 `mysql:8.4` 镜像启动，等 `mysqladmin ping` 成功后设置 `MYSQL_TEST_URL`：
+每个测试使用自己的临时库，服务可以一直开着反复运行测试。数据放在 tmpfs 中，执行 `docker compose -f compose.test.yml down -v` 清理后不会留下任何数据。
 
-```bash
-docker run --name app-test-mysql --rm -d \
-  -e MYSQL_ROOT_PASSWORD=mysql \
-  -p 127.0.0.1:53306:3306 mysql:8.4
-export MYSQL_TEST_URL='mysql://root:mysql@127.0.0.1:53306/'
+使用 MySQL 时，把 `postgres` 服务换成下面的配置，并设置 `MYSQL_TEST_URL='mysql://root:mysql@127.0.0.1:53306/'`。健康检查必须用 `-h 127.0.0.1` 走 TCP：MySQL 初始化期间只监听本地 socket，这时通过 socket 的 `ping` 已经成功，但还不能从外部连接。
+
+```yaml
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+    ports:
+      - 127.0.0.1:53306:3306
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: mysqladmin ping -h 127.0.0.1 -pmysql --silent
+      interval: 1s
+      retries: 120
 ```
+
 Redis 的集成测试见 [Redis](redis.md#testing)。
 
 <a id="command-tests"></a>
