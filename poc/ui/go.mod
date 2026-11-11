@@ -45,6 +45,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	github.com/rs/cors v1.11.1 // indirect
 	github.com/samber/lo v1.53.0 // indirect
 	github.com/samber/slog-chi v1.19.1 // indirect
 	github.com/samber/slog-common v0.22.0 // indirect

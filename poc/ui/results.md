@@ -115,3 +115,14 @@ shadcn-templ 可以直接用，框架不依赖它：组件代码属于应用。�
   - S4：非法的查询参数返回 422 页面。
 
 全部场景通过。
+
+## 后续：开发命令改用框架的 dev（#140）
+
+`cmd/dev` 原型已进入框架（`command/devcmd`）。PoC 改为 `cmd/poc`，由 `command.Root` 装配 `serve` 和 `dev`，配置放在 `config/app.yaml` 和 `config/local.yaml`。
+
+真实运行的结果：
+- 修改 `.templ` 文字、只改 CSS、修改 Go 代码后，浏览器都刷新，应用也重启了；
+- 停止后所有子进程退出、端口释放；
+- 组件脚本恢复为提交的版本，样式表与全新的 `--minify` 构建一致。
+
+还发现 `shadcn-templ bundle --watch` 输出的是未压缩的脚本，文件名却不变，因此框架用 `devcmd.Tool{Watch, Build}` 在停止后重新生成正式版本。

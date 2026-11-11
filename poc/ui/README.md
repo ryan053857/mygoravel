@@ -1,16 +1,14 @@
 # shadcn-templ + Tailwind PoC
 
-验证 mygoravel 页面的 UI 层：后台用 [shadcn-templ](https://github.com/axadrn/shadcn-templ) 组件，面向用户的页面用同一套设计令牌加 Tailwind 工具类。直接使用框架的 `web`、`session`、`httpx`，独立 module，不影响框架 go.mod。
+验证 mygoravel 页面的 UI 层：后台用 [shadcn-templ](https://github.com/axadrn/shadcn-templ) 组件，面向用户的页面用同一套设计令牌加 Tailwind 工具类。直接使用框架的 `web`、`session`、`httpx`、`command/devcmd`。原型阶段的静态资源、flash、列表辅助、开发命令都已进入框架（#124、#126、#134、#140）。独立 module，不影响框架 go.mod。
 
 - `components/`、`utils/`、`assets/css/{shadcn-tailwind,tw-animate}.css`：`shadcn-templ init --preset nova` 和 `shadcn-templ add …` 复制进来的代码（v2.0.0，22 个组件），未修改。
 - `assets/css/globals.css`：Tailwind 入口。shadcn 的主题变量之后是应用自己的品牌令牌（`--color-brand-*`、`--font-display`）和 View Transition 动画。
-- `static/`：「应用静态资源」的原型。按内容哈希加指纹，可以长期缓存；开发模式直接读磁盘。
 - `app/`：演示应用。
   - 后台 `/admin/articles`：筛选、排序、翻页，对话框里新建和编辑，下拉菜单，删除确认，toast。
   - 落地页 `/`：品牌色、暗色模式、价格切换的 View Transition、普通表单和跳转后的 flash。
-  - `app/flash.go`：flash 和 HX-Trigger 辅助函数的原型。
-- `cmd/demo`：`go run ./cmd/demo`，访问 http://localhost:8080。
-- `cmd/dev`：开发命令原型，用 `command.Concurrently` 同时运行 tailwind、shadcn-templ bundle 和 templ 三个 watch 进程。
+  - `app/flash.go`：把 `web.Flashes` 取出的提示渲染为 shadcn-templ 的 toast。
+- `cmd/poc`：`go run ./cmd/poc serve`，访问 http://localhost:8080；`go run ./cmd/poc dev --config config/app.yaml,config/local.yaml`，访问 http://localhost:7331（框架的 dev 命令，#140）。
 
 ## 构建
 
@@ -18,7 +16,7 @@
 go tool templ generate
 tailwindcss -i assets/css/globals.css -o assets/css/app.css --minify   # Tailwind v4 standalone CLI
 shadcn-templ bundle                                                     # 修改组件 JS 后
-go run ./cmd/dev                                                        # 开发：打开 http://localhost:7331
+go run ./cmd/poc dev --config config/app.yaml,config/local.yaml          # 开发：打开 http://localhost:7331
 ```
 
 ## 测试
