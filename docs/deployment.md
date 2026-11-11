@@ -7,6 +7,9 @@
     - [执行迁移](#running-migrations)
     - [启动服务](#starting-the-server)
 - [选择运行形态](#process-forms)
+- [使用 systemd 运行](#systemd)
+    - [发布新版本](#systemd-releases)
+- [使用 Docker 运行](#docker)
 - [健康检查](#health-checks)
 - [平滑停止](#graceful-shutdown)
 - [反向代理与网络](#reverse-proxies)
@@ -106,6 +109,148 @@ worker 和调度器不监听端口，部署平台按进程是否存活判断它�
 
 所有部分共用同一个数据库连接池。估算 `max_open_conns` 时，要把 HTTP 请求、队列各 topic 的 `concurrency` 和同时执行的定时任务都算进去；分开部署时按各自的负载分别设置，所有实例的连接数之和不应超过数据库的上限。
 
+<a id="systemd"></a>
+## 使用 systemd 运行
+
+在虚拟机或物理机上，用 systemd 管理应用进程：开机和崩溃后启动它，收集它的日志，停止时向它发送 `SIGTERM`。mygoravel 不提供生成或安装 unit 文件的命令，下面的模板 unit 改一下路径就能使用。
+
+假设部署目录是 `/opt/blog`，其中有 `bin/api`、`config`，以及存放 SQLite 数据库和本地磁盘文件的 `storage`。密钥写在 `/etc/blog/env` 中，每行一个 `DATABASE_URL=...`，权限设为 `600`。应用以系统用户 `blog` 运行，只有 `storage` 可写：
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin blog
+sudo install -d -o blog -g blog /opt/blog/storage
+```
+
+```ini
+# /etc/systemd/system/blog@.service
+[Unit]
+Description=blog %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=blog
+WorkingDirectory=/opt/blog
+EnvironmentFile=/etc/blog/env
+ExecStart=/opt/blog/bin/api %i --config=config/app.yaml,config/prod.yaml
+Restart=on-failure
+RestartSec=5s
+RestartPreventExitStatus=2 3
+TimeoutStopSec=45s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/blog/storage
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+文件名中的 `@` 表示这是一个模板，`%i` 是启用时写在 `@` 之后的实例名，在这里就是要运行的命令。所以同一个文件可以运行任何一种[运行形态](#process-forms)：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now blog@start                          # 一体运行
+sudo systemctl enable --now blog@serve blog@work blog@schedule  # 或者分开运行
+```
+
+从一体改为分开时，先 `sudo systemctl disable --now blog@start`，再启用另外三个。
+
+几处设置的用意：
+
+- **重启。** 进程以非 0 状态退出时，`Restart=on-failure` 会重启它。数据库暂时连不上时，应用以 `ExitUnavailable`（4）退出，systemd 每 5 秒重试一次，直到连上为止。`RestartPreventExitStatus=2 3` 排除了用法错误和配置错误，这两种错误重启多少次都一样，unit 直接进入失败状态，`systemctl status` 能看到原因。
+- **停止。** `TimeoutStopSec` 是发送 `SIGTERM` 后等待进程退出的时间，超时后发送 `SIGKILL`。它要大于三个 `shutdown_timeout` 中最大的一个，见[平滑停止](#graceful-shutdown)。上面的 45 秒是按队列和调度器默认的 30 秒设置的。
+- **文件系统。** `ProtectSystem=strict` 把整个文件系统变为只读，只有 `ReadWritePaths` 中的目录可写，`PrivateTmp` 为进程提供一个独立的 `/tmp`。应用需要写入其他目录时，要把它加到 `ReadWritePaths` 中。
+
+应用写到标准错误的 JSON 日志由 journald 收集：
+
+```bash
+journalctl -u 'blog@*' -f
+```
+
+<a id="systemd-releases"></a>
+### 发布新版本
+
+```bash
+set -e
+CONFIG=--config=config/app.yaml,config/prod.yaml
+
+sudo install -m 755 api /opt/blog/bin/api.new
+sudo mv /opt/blog/bin/api.new /opt/blog/bin/api
+sudo systemd-run --wait --pipe --quiet --uid=blog \
+    -p EnvironmentFile=/etc/blog/env -p WorkingDirectory=/opt/blog \
+    /opt/blog/bin/api migrate up $CONFIG
+sudo systemctl restart 'blog@*'
+```
+
+- 新二进制先写到 `api.new`，再改名覆盖。直接写入正在运行的二进制会因为 `Text file busy` 失败。
+- 迁移用 `systemd-run` 执行，它使用和服务相同的用户、环境变量和工作目录，以迁移的退出码结束，迁移失败时脚本就此停止。不要把迁移写进 unit 的 `ExecStartPre`：这样进程每次崩溃重启都会再执行一次迁移，分开运行时三个实例还会同时执行。
+- `restart` 先停止旧进程，再启动新进程，这期间 HTTP 服务不可用。需要不中断服务时，部署两台机器放在负载均衡之后，一台一台地发布。
+
+<a id="docker"></a>
+## 使用 Docker 运行
+
+应用是一个静态二进制，镜像只需要这个二进制和 `config` 目录：
+
+```dockerfile
+# Dockerfile
+FROM golang:1.27 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./cmd/api && mkdir /out/storage
+
+FROM gcr.io/distroless/static-debian13:nonroot
+WORKDIR /app
+COPY --from=build /out/api /app/api
+COPY config /app/config
+COPY --from=build --chown=nonroot:nonroot /out/storage /app/storage
+ENTRYPOINT ["/app/api", "--config=config/app.yaml,config/prod.yaml"]
+CMD ["start"]
+```
+
+- **`ENTRYPOINT` 必须使用 exec 形式**，也就是 JSON 数组。这样应用就是容器中的 1 号进程，能直接收到 `docker stop` 发送的 `SIGTERM`。如果写成 `ENTRYPOINT ./api start` 这样的 shell 形式，信号会发给 shell，应用收不到，宽限期一到就被强制终止。
+- **`--config` 写在 `ENTRYPOINT` 中**，`docker run blog migrate up` 这样的命令也会使用同样的配置。在命令后面再传 `--config`，会追加到这两个文件之后。
+- **distroless 镜像带有 CA 证书和时区数据**，访问 HTTPS 接口、调度器使用 `In(loc)` 都不需要额外安装。
+- **`storage` 用于 SQLite 和本地磁盘，要挂载卷。** 镜像中预先建好这个目录并交给 `nonroot` 用户，否则新建的命名卷属于 root，应用无法写入。使用 PostgreSQL 和 S3 磁盘时，容器不需要任何卷。
+
+用 Docker Compose 分开运行，并在启动前执行迁移：
+
+```yaml
+# compose.yaml
+x-app: &app
+  image: blog:${APP_VERSION}
+  environment:
+    APP_URL: https://blog.example.com
+    DATABASE_URL: ${DATABASE_URL}
+  restart: unless-stopped
+  stop_grace_period: 45s
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  migrate:
+    image: blog:${APP_VERSION}
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    command: [migrate, up]
+  serve:
+    <<: *app
+    command: [serve]
+    ports: ["8080:8080"]
+  work:
+    <<: *app
+    command: [work]
+  schedule:
+    <<: *app
+    command: [schedule]
+```
+
+`stop_grace_period` 不能省略：Docker 默认只等 10 秒就发送 `SIGKILL`，比队列和调度器默认的 `shutdown_timeout` 还短。一体运行时把三个服务换成一个运行 `start` 的服务即可。
+
 <a id="health-checks"></a>
 ## 健康检查
 
@@ -126,7 +271,7 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 - `http.shutdown_timeout` 决定了排空请求的最长时间；`queue.shutdown_timeout` 决定了 worker 等待处理中任务的最长时间；`schedule.shutdown_timeout` 决定了调度器等待执行中任务的最长时间；
 - 一体运行时三者同时开始停止，停机时间取其中最长的一个，而不是相加；
 - 使用 [AI 助手](ai.md#deployment)时，HTTP 服务停止之后，清理资源时还要等进行中的回答说完，这段时间（文档示例中是 1 分钟）与上面的停机时间相加；
-- 部署平台的停止宽限期（例如 Kubernetes 的 `terminationGracePeriodSeconds`）应当大于上面的停机时间加上关闭数据库等资源所需的时间，否则进程可能在清理完成前被强制终止。超时未完成的队列任务会在其他实例上重新执行，定时任务不会补跑。
+- 部署平台的停止宽限期（systemd 的 `TimeoutStopSec`、Docker 的 `stop_grace_period`、Kubernetes 的 `terminationGracePeriodSeconds`）应当大于上面的停机时间加上关闭数据库等资源所需的时间，否则进程可能在清理完成前被强制终止。超时未完成的队列任务会在其他实例上重新执行，定时任务不会补跑。
 
 <a id="reverse-proxies"></a>
 ## 反向代理与网络
