@@ -88,7 +88,9 @@ func New(cfg ai.ModelConfig, opts ...Option) *Client {
 	if base == "" {
 		base = defaultBaseURL
 	}
-	ro := append([]option.RequestOption{option.WithBaseURL(base), option.WithAPIKey(cfg.APIKey)}, c.extra...)
+	ro := append([]option.RequestOption{
+		option.WithBaseURL(base), option.WithAPIKey(cfg.APIKey), option.WithMaxRetries(cfg.Retries()),
+	}, c.extra...)
 	c.client = oa.NewClient(ro...)
 	return c
 }

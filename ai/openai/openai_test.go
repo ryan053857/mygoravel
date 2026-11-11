@@ -1,6 +1,7 @@
 package openai_test
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -271,4 +273,26 @@ func TestRerank(t *testing.T) {
 
 	_, err = c.Rerank(t.Context(), "q", []string{"a"}, 0)
 	assert.ErrorContains(t, err, "rerank index 1 out of range")
+}
+
+func TestClientRetries(t *testing.T) {
+	for _, tc := range []struct {
+		maxRetries int
+		requests   int32
+	}{{0, 3}, {-1, 1}} {
+		var hits atomic.Int32
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			hits.Add(1)
+			w.Header().Set("Retry-After-Ms", "1")
+			http.Error(w, `{"error":{"message":"overloaded"}}`, http.StatusTooManyRequests)
+		}))
+		c := openai.New(ai.ModelConfig{Model: "m", BaseURL: s.URL, APIKey: "k", MaxRetries: tc.maxRetries})
+		if _, err := c.Embed(context.Background(), []string{"x"}); err == nil {
+			t.Errorf("max_retries %d: expected an error", tc.maxRetries)
+		}
+		s.Close()
+		if got := hits.Load(); got != tc.requests {
+			t.Errorf("max_retries %d: %d requests, want %d", tc.maxRetries, got, tc.requests)
+		}
+	}
 }
