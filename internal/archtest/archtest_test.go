@@ -34,6 +34,7 @@ var dependencies = map[string][]string{
 	"form":         {"i18n"},
 	"sheet":        {"errorx", "form"},
 	"imports":      {"database", "errorx", "filesystem", "i18n", "identity", "queue", "sheet"},
+	"exports":      {"database", "errorx", "filesystem", "i18n", "identity", "queue", "sheet"},
 	"web":          {"errorx", "form", "httpx", "i18n", "identity", "logging", "session"},
 	"lock":         {},
 	"hashing":      {},
@@ -42,7 +43,7 @@ var dependencies = map[string][]string{
 	"schedule":     {"lock", "logging"},
 	"ai":           {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
 	"command":      {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports"},
+	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports", "exports"},
 }
 
 // 基础包不引用传输、数据库和命令组件。

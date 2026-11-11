@@ -169,6 +169,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `filesystem/local`、`filesystem/s3` | 本地与 S3 磁盘 | [文件存储与上传](filesystem.md#disks) |
 | `sheet` | 读写 CSV 和 Excel（XLSX）表格，按结构体解码并验证导入的每一行 | [导入与导出](import-export.md) |
 | `imports` | 在后台导入表格：进度、断点续跑、失败行下载 | [后台导入](import-export.md#background-imports) |
+| `exports` | 在后台导出表格：进度，完成后上传到文件存储 | [后台导出](import-export.md#background-exports) |
 | `mail` | 邮件消息、发送接口与模板渲染 | [邮件](mail.md) |
 | `mail/smtp`、`mail/resend` | 通过 SMTP 服务器或 Resend API 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend) |
 | `mail/logmail`、`mail/mailtest` | 开发时写进日志、测试时记录在内存中的发送器 | [邮件](mail.md#assembling-mailer)、[测试](mail.md#testing) |

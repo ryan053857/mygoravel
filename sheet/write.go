@@ -130,6 +130,12 @@ func (w *Writer) Close() error {
 	return err
 }
 
+// RowWriter 逐行写出表格。*Writer 实现了它，exports.Writer 在写出的同时记录导出进度；
+// 导出的业务代码接收 RowWriter，同一份代码可以写入 HTTP 响应，也可以在后台导出。
+type RowWriter interface {
+	Write(cells ...any) error
+}
+
 // Column 是导出的一列。
 type Column[T any] struct {
 	// Key 是这一列的标识，Select 按它选择列，例如前端让用户勾选要导出的列。

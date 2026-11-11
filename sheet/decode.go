@@ -149,7 +149,7 @@ func Header[T any]() []string {
 
 // Template 写出导入 T 的模板：Header 作为表头，examples 中的每一项作为一行示例。
 // 切片字段的值以逗号连接，因此填好的模板可以原样被 Decode 读取。Template 不会关闭 w。
-func Template[T any](w *Writer, examples ...T) error {
+func Template[T any](w RowWriter, examples ...T) error {
 	fs := fieldsOf(reflect.TypeFor[T]())
 	row := make([]any, len(fs))
 	for i, f := range fs {
