@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -420,6 +421,38 @@ func TestResolveRecheckDisconnects(t *testing.T) {
 	set("removed")
 	if code := c.closed(); code != 3500 {
 		t.Fatalf("closed with %d", code)
+	}
+}
+
+// Options.Tenant 把连接所在的租户写入 context：Resolve 按它加载权限，租户频道的授权函数看到的主体带着这个租户，
+// 绑定了其他租户的 token 被拒绝。
+func TestTenantOption(t *testing.T) {
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{
+		Authenticate: func(_ context.Context, token string) (identity.Subject, error) {
+			bound, _ := strings.CutPrefix(token, "bound-to-")
+			if bound == token {
+				bound = "" // 没有绑定租户的 token
+			}
+			return identity.Subject{ID: "alice", Tenant: bound}, nil
+		},
+		Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+			sub.Tenant, sub.Permissions = identity.TenantFromContext(ctx), []string{"articles"}
+			return sub, nil
+		},
+		Tenant: func(r *http.Request) string { return r.Header.Get("X-Tenant") },
+	}, nil)
+	n.rt.Channel("t:{tenant}:articles", realtime.Private(func(_ context.Context, sub identity.Subject, p realtime.Params) (bool, error) {
+		return p["tenant"] == sub.Tenant && sub.Can("articles"), nil
+	}))
+	acme := http.Header{"X-Tenant": {"acme"}}
+	c := mustConnect(t, n.url, "any", acme)
+	c.mustSubscribe("t:acme:articles")
+	if reply := c.subscribe("t:globex:articles"); reply.Error == nil || reply.Error.Code != 103 {
+		t.Fatalf("subscribed to another tenant's channel: %+v", reply)
+	}
+	mustConnect(t, n.url, "bound-to-acme", acme)
+	if rejected(t, n.url, "bound-to-globex", acme) != 3500 {
+		t.Fatal("token bound to another tenant was accepted")
 	}
 }
 

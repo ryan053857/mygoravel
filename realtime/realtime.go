@@ -41,6 +41,11 @@ type Options struct {
 	// 连接期间与 Authenticate 一起定期重新调用，用户被停用或移出租户后连接结束。
 	// 认证中间件识别出的主体（例如同源页面的会话）已经由 web.Options.Resolve 处理，不再经过它。
 	Resolve identity.Resolver
+	// Tenant 从连接请求中取出它所在的租户，例如路径参数 chi.URLParam(r, "tenant")、子域名或请求头，
+	// 结果写入 identity.WithTenant：Resolve 据此加载权限，绑定了其他租户的 token 被拒绝。
+	// 与 rest.Options.Tenant、web.Options.Tenant 的作用相同。nil 时使用外层中间件已经写入的租户
+	// （页面路由由 web.Options.Tenant 写入），都没有时是平台本身（""）。
+	Tenant func(r *http.Request) string
 	// Credentials 让连接在收到复查信号时立即重新校验凭据，撤销 token、退出登录后连接随即结束；
 	// nil 时只按 30 秒的间隔定期校验。通常是 broadcast.NewCredentials 的返回值，
 	// 与 rest.Options.Credentials、web.Options.Credentials 相同。
@@ -189,6 +194,9 @@ func (rt *Realtime) Unsubscribe(subjectID, channel string) error {
 func (rt *Realtime) Handler() http.Handler {
 	ws := centrifuge.NewWebsocketHandler(rt.node, centrifuge.WebsocketConfig{CheckOrigin: rt.checkOrigin})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tenant := rt.opts.Tenant; tenant != nil {
+			r = r.WithContext(identity.WithTenant(r.Context(), tenant(r)))
+		}
 		ws.ServeHTTP(hijackable(w), r)
 	})
 }

@@ -37,7 +37,7 @@ SaaS 应用通常有三类用户：
 <a id="identifying-tenants"></a>
 ## 确定租户
 
-本次请求属于哪个租户由请求本身决定。用 `Tenant` 选项告诉 API 和页面怎样取出它，常见的三种方式：
+本次请求属于哪个租户由请求本身决定。用 `Tenant` 选项告诉 API 和页面怎样取出它，常见的三种方式（SPA 和移动端用 token 连接的[实时频道](realtime.md#tokens)也有同样的选项）：
 
 ```go
 // 路径：/t/{tenant}/articles
