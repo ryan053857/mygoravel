@@ -44,7 +44,7 @@ func TestRequireInstallsCredentialCheck(t *testing.T) {
 	pages := web.New(o)
 	router := chi.NewRouter()
 	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		return pages.Login(r.Context(), identity.Subject{ID: "alice", Type: identity.SubjectUser})
+		return pages.Login(r, identity.Subject{ID: "alice", Type: identity.SubjectUser})
 	})
 	captured := make(chan context.Context, 1)
 	pages.Routes(router, web.Require("events")).Get("/events", func(w http.ResponseWriter, r *http.Request) error {

@@ -326,7 +326,7 @@ func (h *socialHandlers) callback(w http.ResponseWriter, r *http.Request) error 
     if err != nil {
         return err
     }
-    if err := h.pages.Login(ctx, identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}); err != nil {
+    if err := h.pages.Login(r, identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}); err != nil {
         return err
     }
     web.Redirect(w, r, next)

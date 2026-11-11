@@ -7,16 +7,40 @@ import (
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 
 	"github.com/ryan053857/mygoravel/identity"
 )
 
-// subjectKey 是会话中保存已认证主体的键。
-const subjectKey = "mygoravel.subject"
+const (
+	// subjectKey 是会话中保存已认证主体的键。
+	subjectKey = "mygoravel.subject"
+	// loginKey 是会话中保存登录设备的键，Store 把它写入设备信息列。
+	loginKey = "mygoravel.login"
+)
+
+// maxUserAgent 是保存的 User-Agent 的最大字符数，与 MySQL 迁移中的列宽一致。
+const maxUserAgent = 255
 
 func init() {
 	// scs 默认用 gob 编码会话数据，接口值中的自定义类型需要注册。
 	gob.Register(identity.Subject{})
+	gob.Register(login{})
+}
+
+// Device 描述登录所用的设备，用于设备列表。
+type Device struct {
+	// IP 是登录请求的客户端地址。
+	IP string
+	// UserAgent 是登录请求的 User-Agent，超过 255 个字符时截断。
+	UserAgent string
+}
+
+// login 是保存在会话数据中的登录设备和时间。
+type login struct {
+	IP        string
+	UserAgent string
+	At        time.Time
 }
 
 // New 按 cfg 创建 scs 会话管理器，读写会话数据直接使用它的原生方法。
@@ -49,18 +73,33 @@ func New(cfg Config, store scs.Store) *scs.SessionManager {
 	return sm
 }
 
-// Login 把 sub 记为当前会话的主体，Method 置为 session。
+// Login 把 sub 记为当前会话的主体，并记录登录设备 d。
 // 它先更换会话 token，防止登录前泄露的 token 被沿用（会话固定攻击）。
-func Login(ctx context.Context, sm *scs.SessionManager, sub identity.Subject) error {
+//
+// 每次登录得到一个新的会话 ID，保存为主体的 Credential（Method 为 session），
+// 与 API 令牌的 ID 一样用于设备列表中标出当前设备、退出其他设备，见 Store.List。
+func Login(ctx context.Context, sm *scs.SessionManager, sub identity.Subject, d Device) error {
 	if sub.ID == "" {
 		return errors.New("session: subject ID is required")
+	}
+	id, err := uuid.NewV7()
+	if err != nil {
+		return errors.Wrap(err, "session: new id")
 	}
 	if err := sm.RenewToken(ctx); err != nil {
 		return errors.Wrap(err, "session: renew token")
 	}
-	sub.Method = "session"
+	sub.Method, sub.Credential = "session", id.String()
 	sm.Put(ctx, subjectKey, sub)
+	sm.Put(ctx, loginKey, login{IP: d.IP, UserAgent: truncate(d.UserAgent, maxUserAgent), At: time.Now().UTC()})
 	return nil
+}
+
+func truncate(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 // Logout 销毁当前会话，并让浏览器删除会话 cookie。

@@ -201,7 +201,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
         u, err := h.authenticate.Handle(r.Context(), f.Data.Email, f.Data.Password)
         if err == nil {
             sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}
-            if err := h.pages.Login(r.Context(), sub); err != nil {
+            if err := h.pages.Login(r, sub); err != nil {
                 return err
             }
             web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
@@ -224,7 +224,7 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-`pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
+`pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效；它还从请求中记录客户端地址和 User-Agent，用于[设备列表](session.md#listing-sessions)。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
 
 会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时设置 `Options.Resolve`，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回本次请求的主体。它与 API 的 [`rest.Options.Resolve`](authentication.md#resolving-subjects) 签名相同，同一个函数可以交给两者：
 

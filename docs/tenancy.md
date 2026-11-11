@@ -193,7 +193,7 @@ err = roles.Assign(ctx, staffID, authz.AllTenants, support.ID)
 
 ```go
 sub := identity.Subject{ID: customer.ID, Type: identity.SubjectUser, Tenant: identity.TenantFromContext(ctx)}
-err := pages.Login(ctx, sub)               // 页面
+err := pages.Login(r, sub)                   // 页面
 plain, err := tokens.Login(ctx, sub, device) // 单页应用或 App
 ```
 

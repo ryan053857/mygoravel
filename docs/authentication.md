@@ -47,7 +47,7 @@ type Subject struct {
 | `Type` | 调用者类别：`identity.SubjectUser`（用户）或 `identity.SubjectService`（服务） |
 | `Impersonator` | 代为登录时实际操作的人，例如客服的 ID；为空表示调用者本人，见[代为登录](#impersonation) |
 | `Method` | 认证方式，例如 `bearer` 或 `session` |
-| `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)的 ID；用于登出当前设备，可以为空 |
+| `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)或[会话](session.md#listing-sessions)的 ID；用于在设备列表中标出当前设备、退出其他设备，可以为空 |
 | `Tenant` | 本次请求所在的租户，`""` 表示平台本身；由凭据设置时，凭据只能在这个租户中使用，见[多租户](#tenants) |
 | `Permissions` | 调用者拥有的权限，例如 `articles:write` |
 | `Scopes` | 本次请求所用凭据被限制在内的权限，例如只读令牌的 `articles:read`；`nil` 表示不限制 |
@@ -289,7 +289,7 @@ func (h *Handlers) Impersonate(w http.ResponseWriter, r *http.Request) error {
         return web.ErrForbidden.New() // 先回到自己的账号，不能层层代为登录
     }
     target := identity.Subject{ID: chi.URLParam(r, "id"), Type: identity.SubjectUser, Impersonator: staff.ID}
-    if err := h.pages.Login(r.Context(), target); err != nil {
+    if err := h.pages.Login(r, target); err != nil {
         return err
     }
     web.Redirect(w, r, "/")
@@ -299,7 +299,7 @@ func (h *Handlers) Impersonate(w http.ResponseWriter, r *http.Request) error {
 func (h *Handlers) StopImpersonating(w http.ResponseWriter, r *http.Request) error {
     sub, _ := identity.FromContext(r.Context())
     if sub.Impersonator != "" {
-        if err := h.pages.Login(r.Context(), identity.Subject{ID: sub.Impersonator, Type: identity.SubjectUser}); err != nil {
+        if err := h.pages.Login(r, identity.Subject{ID: sub.Impersonator, Type: identity.SubjectUser}); err != nil {
             return err
         }
     }

@@ -24,7 +24,7 @@ var dependencies = map[string][]string{
 	"mail":       {"i18n"},
 	"ratelimit":  {"errorx"},
 	"httpx":      {"errorx", "identity", "i18n", "logging", "ratelimit"},
-	"session":    {"identity"},
+	"session":    {"errorx", "identity"},
 	"apitoken":   {"errorx", "identity"},
 	"authz":      {"errorx", "identity"},
 	"activity":   {"identity", "logging"},

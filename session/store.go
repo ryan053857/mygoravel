@@ -10,13 +10,18 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
 
+	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/identity"
 )
+
+// ErrNotFound 表示要撤销的会话不存在、已失效或不属于该主体。
+var ErrNotFound = errorx.Define(errorx.NotFound, "session.not_found")
 
 // Store 是基于 Bun 的会话存储，实现 scs.CtxStore 和 scs.IterableCtxStore，
 // 查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供三种数据库的表结构。
 //
-// 每行记录登录主体的 ID，RevokeSubject 和 RevokeOthers 据此撤销某个主体的会话。
+// 每行记录登录主体的 ID、会话 ID（主体的 Credential）和登录设备，List 据此列出设备，
+// Revoke、RevokeOthers 和 RevokeSubject 据此撤销某个主体的会话。
 // 删除和撤销只给行打上 revoked_at 标记，读取时跳过：撤销前已在处理中的请求结束时会再次提交会话，
 // 若真的删除行，这次提交会把会话重新插入；而提交不会清除标记，被撤销的会话不会复活。
 // 标记行在过期后由 Cleanup 删除。
@@ -29,11 +34,27 @@ type Store struct {
 type row struct {
 	bun.BaseModel `bun:"table:sessions,alias:s"`
 
-	Token     string    `bun:"token,pk"`
-	SubjectID string    `bun:"subject_id,nullzero"`
-	Data      []byte    `bun:"data,notnull"`
-	Expiry    time.Time `bun:"expiry,notnull"`
-	RevokedAt time.Time `bun:"revoked_at,nullzero"`
+	Token        string    `bun:"token,pk"`
+	SubjectID    string    `bun:"subject_id,nullzero"`
+	ID           string    `bun:"id,nullzero"`
+	Impersonator string    `bun:"impersonator,notnull"`
+	IP           string    `bun:"ip,notnull"`
+	UserAgent    string    `bun:"user_agent,notnull"`
+	LoggedInAt   time.Time `bun:"logged_in_at,nullzero"`
+	Data         []byte    `bun:"data,notnull"`
+	Expiry       time.Time `bun:"expiry,notnull"`
+	RevokedAt    time.Time `bun:"revoked_at,nullzero"`
+}
+
+// Session 是一个已登录会话的信息，不包含会话 token。
+type Session struct {
+	ID           string // 会话 ID，即登录时主体的 Credential
+	Impersonator string // 代为登录时实际操作的人，见 identity.Subject.Impersonator；"" 表示用户本人
+	IP           string
+	UserAgent    string
+	LoggedInAt   time.Time
+	ExpiresAt    time.Time // 当前的过期时间；设置了空闲超时时，每次请求都会向后推迟
+	Current      bool      // 是否为 List 传入的主体本次请求所用的会话
 }
 
 // NewStore 创建会话存储。db 必须已执行 sessions 迁移。
@@ -57,28 +78,48 @@ func (s *Store) FindCtx(ctx context.Context, token string) ([]byte, bool, error)
 	return r.Data, true, nil
 }
 
-// CommitCtx 写入会话及其登录主体的 ID，token 已存在时覆盖；覆盖不清除撤销标记。
+// CommitCtx 写入会话，以及从会话数据中取出的登录主体、会话 ID 和登录设备；token 已存在时覆盖，覆盖不清除撤销标记。
 func (s *Store) CommitCtx(ctx context.Context, token string, b []byte, expiry time.Time) error {
 	_, values, err := scs.GobCodec{}.Decode(b)
 	if err != nil {
 		return errors.Wrap(err, "session: decode")
 	}
 	sub, _ := values[subjectKey].(identity.Subject)
-	r := &row{Token: token, SubjectID: sub.ID, Data: b, Expiry: expiry.UTC()}
+	l, _ := values[loginKey].(login)
+	r := &row{
+		Token: token, SubjectID: sub.ID, ID: sub.Credential, Impersonator: sub.Impersonator,
+		IP: l.IP, UserAgent: l.UserAgent, LoggedInAt: l.At, Data: b, Expiry: expiry.UTC(),
+	}
 	if s.db.Dialect().Name() == dialect.MySQL {
 		// MySQL 8 用行别名引用新值，VALUES() 函数已不推荐使用；Bun 的插入构造器不生成行别名。
-		var subject any
-		if r.SubjectID != "" {
-			subject = r.SubjectID
-		}
-		_, err = s.db.NewRaw(`INSERT INTO sessions (token, subject_id, data, expiry) VALUES (?, ?, ?, ?) AS new
-ON DUPLICATE KEY UPDATE subject_id = new.subject_id, data = new.data, expiry = new.expiry`,
-			r.Token, subject, r.Data, r.Expiry).Exec(ctx)
+		_, err = s.db.NewRaw(`INSERT INTO sessions (token, subject_id, id, impersonator, ip, user_agent, logged_in_at, data, expiry)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) AS new
+ON DUPLICATE KEY UPDATE subject_id = new.subject_id, id = new.id, impersonator = new.impersonator, ip = new.ip,
+user_agent = new.user_agent, logged_in_at = new.logged_in_at, data = new.data, expiry = new.expiry`,
+			r.Token, null(r.SubjectID), null(r.ID), r.Impersonator, r.IP, r.UserAgent, nullTime(r.LoggedInAt), r.Data, r.Expiry).Exec(ctx)
 		return errors.Wrap(err, "session: commit")
 	}
-	_, err = s.db.NewInsert().Model(r).On("CONFLICT (token) DO UPDATE").
-		Set("subject_id = EXCLUDED.subject_id").Set("data = EXCLUDED.data").Set("expiry = EXCLUDED.expiry").Exec(ctx)
+	q := s.db.NewInsert().Model(r).On("CONFLICT (token) DO UPDATE")
+	for _, col := range []string{"subject_id", "id", "impersonator", "ip", "user_agent", "logged_in_at", "data", "expiry"} {
+		q = q.Set("? = EXCLUDED.?", bun.Ident(col), bun.Ident(col))
+	}
+	_, err = q.Exec(ctx)
 	return errors.Wrap(err, "session: commit")
+}
+
+// null 把空字符串转换为 NULL，供原生 SQL 使用，与 nullzero 一致。
+func null(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func nullTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
 }
 
 // DeleteCtx 撤销会话；token 不存在时什么也不做。
@@ -95,14 +136,54 @@ func (s *Store) RevokeSubject(ctx context.Context, subjectID string) (int, error
 	return affected(s.revoke(ctx).Where("subject_id = ?", subjectID).Exec(ctx))
 }
 
-// RevokeOthers 撤销当前登录主体除本会话外的全部会话，返回撤销的个数，例如“退出其他设备”。
-// 当前会话未登录时返回错误。
-func (s *Store) RevokeOthers(ctx context.Context, sm *scs.SessionManager) (int, error) {
-	sub, ok := Subject(ctx, sm)
-	if !ok {
-		return 0, errors.New("session: not logged in")
+// List 返回 sub 未过期、未撤销的会话，最近登录的在前；本次请求所用的会话（sub.Credential）标为 Current。
+func (s *Store) List(ctx context.Context, sub identity.Subject) ([]Session, error) {
+	if sub.ID == "" {
+		return nil, errors.New("session: subject ID is required")
 	}
-	return affected(s.revoke(ctx).Where("subject_id = ?", sub.ID).Where("token <> ?", sm.Token(ctx)).Exec(ctx))
+	var rows []row
+	err := s.live(s.db.NewSelect().Model(&rows).
+		Column("id", "impersonator", "ip", "user_agent", "logged_in_at", "expiry")).
+		Where("subject_id = ?", sub.ID).OrderExpr("logged_in_at DESC").Scan(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "session: list")
+	}
+	out := make([]Session, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Session{
+			ID: r.ID, Impersonator: r.Impersonator, IP: r.IP, UserAgent: r.UserAgent,
+			LoggedInAt: r.LoggedInAt, ExpiresAt: r.Expiry, Current: r.ID != "" && r.ID == sub.Credential,
+		})
+	}
+	return out, nil
+}
+
+// Revoke 撤销 sub 的会话 id，例如在设备列表中退出某一台设备。会话不存在、已失效或不属于 sub 时返回 ErrNotFound。
+func (s *Store) Revoke(ctx context.Context, sub identity.Subject, id string) error {
+	if sub.ID == "" || id == "" {
+		return ErrNotFound.New()
+	}
+	n, err := affected(s.revoke(ctx).Where("subject_id = ?", sub.ID).Where("id = ?", id).Exec(ctx))
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound.New()
+	}
+	return nil
+}
+
+// RevokeOthers 撤销 sub 除本次请求所用会话（sub.Credential）以外的全部会话，返回撤销的个数，例如“退出其他设备”。
+// 在 API 中调用时 sub.Credential 是 API 令牌的 ID，不是任何会话，因此撤销全部会话。
+func (s *Store) RevokeOthers(ctx context.Context, sub identity.Subject) (int, error) {
+	if sub.ID == "" {
+		return 0, errors.New("session: subject ID is required")
+	}
+	q := s.revoke(ctx).Where("subject_id = ?", sub.ID)
+	if sub.Credential != "" {
+		q = q.Where("(id IS NULL OR id <> ?)", sub.Credential)
+	}
+	return affected(q.Exec(ctx))
 }
 
 // revoke 返回给未撤销、未过期的行打上撤销标记的更新，调用方补充条件。

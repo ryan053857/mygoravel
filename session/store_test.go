@@ -183,14 +183,74 @@ func TestStoreRevokeOthers(t *testing.T) {
 			}
 		}
 
-		// 未登录的会话不能撤销其他会话。
-		sm := session.New(defaults(), store)
-		ctx, err := sm.Load(context.Background(), "")
-		if err != nil {
-			t.Fatal(err)
+		// 没有主体时不能撤销。
+		if _, err := store.RevokeOthers(context.Background(), identity.Subject{}); err == nil {
+			t.Fatal("expected error without subject")
 		}
-		if _, err := store.RevokeOthers(ctx, sm); err == nil {
-			t.Fatal("expected error when not logged in")
+		// 在 API 中调用时 Credential 是令牌 ID，撤销全部会话。
+		n, err := store.RevokeOthers(context.Background(), identity.Subject{ID: "alice", Credential: "0193a8e0-0000-7000-8000-000000000000"})
+		if err != nil || n != 1 {
+			t.Fatalf("revoke from api: n=%d err=%v", n, err)
+		}
+		if resp := do(t, laptop, http.MethodGet, srv.URL+"/me", ""); resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("laptop still signed in: %d", resp.StatusCode)
+		}
+	})
+}
+
+// 登录时记录设备；List 列出主体的会话并标出当前会话，Revoke 只能撤销自己的会话。
+func TestStoreListAndRevoke(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		store := session.NewStore(dbtesting.Open(t, driver, session.Migrations()))
+		srv := newApp(t, store)
+		laptop, phone, bob := newClient(t), newClient(t), newClient(t)
+		for c, user := range map[*http.Client]string{laptop: "alice", phone: "alice", bob: "bob"} {
+			if resp := do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"`+user+`"}`); resp.StatusCode != http.StatusNoContent {
+				t.Fatalf("login %s status=%d", user, resp.StatusCode)
+			}
+		}
+		devices := func(c *http.Client) []session.Session {
+			t.Helper()
+			resp := do(t, c, http.MethodGet, srv.URL+"/devices", "")
+			var list []session.Session
+			if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+				t.Fatal(err)
+			}
+			return list
+		}
+		list := devices(laptop)
+		if len(list) != 2 {
+			t.Fatalf("list=%+v", list)
+		}
+		var current, other session.Session
+		for _, s := range list {
+			if s.ID == "" || s.IP != "10.0.0.1" || s.UserAgent != "Go-http-client/1.1" || s.LoggedInAt.IsZero() || !s.ExpiresAt.After(time.Now()) {
+				t.Fatalf("session=%+v", s)
+			}
+			if s.Current {
+				current = s
+			} else {
+				other = s
+			}
+		}
+		if current.ID == "" || other.ID == "" {
+			t.Fatalf("current not marked: %+v", list)
+		}
+		// bob 不能撤销 alice 的会话。
+		if resp := do(t, bob, http.MethodPost, srv.URL+"/devices/revoke?id="+other.ID, ""); resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("bob revoked alice: %d", resp.StatusCode)
+		}
+		if resp := do(t, laptop, http.MethodPost, srv.URL+"/devices/revoke?id="+other.ID, ""); resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("revoke: %d", resp.StatusCode)
+		}
+		if resp := do(t, phone, http.MethodGet, srv.URL+"/me", ""); resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("phone still signed in: %d", resp.StatusCode)
+		}
+		if list := devices(laptop); len(list) != 1 || !list[0].Current {
+			t.Fatalf("after revoke: %+v", list)
+		}
+		if resp := do(t, laptop, http.MethodPost, srv.URL+"/devices/revoke?id="+other.ID, ""); resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("revoke twice: %d", resp.StatusCode)
 		}
 	})
 }

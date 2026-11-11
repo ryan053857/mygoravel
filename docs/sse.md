@@ -206,7 +206,7 @@ editor.Post("/admin/articles/publish", h.Publish)
 <a id="revoked-credentials"></a>
 ## 凭据失效
 
-长连接只在建立时经过认证。之后会话被登出或[撤销](session.md#revoking-sessions)、API token 被[撤销](api-tokens.md#revoking-tokens)、用户被停用或失去所需的 scope，已经建立的连接也不应该继续收到消息。
+长连接只在建立时经过认证。之后会话被登出或[撤销](session.md#revoking-sessions)、API token 被[撤销](api-tokens.md#revoking-tokens)、用户被停用或失去所需的权限，已经建立的连接也不应该继续收到消息。
 
 页面路由的 `web.Require` 和 JSON API 的 `rest.RequireBearer` 在认证通过后，都会在请求中登记一个重新校验函数。SSE 每 30 秒运行一次：
 

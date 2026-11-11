@@ -217,7 +217,19 @@ func (a *SignOutEverywhere) Handle(ctx context.Context, userID string) error {
 }
 ```
 
-“退出其他设备”也是如此：在页面中发起时，调用会话存储的 `RevokeOthers`，再调用 `tokens.RevokeOthers(ctx, sub)`。此时主体来自会话，没有 token 凭据，所以会撤销全部登录 token。在单页应用中发起时则反过来，调用会话存储的 `RevokeSubject`，再调用 `tokens.RevokeOthers`。见[撤销会话](session.md#revoking-sessions)。
+“退出其他设备”也是如此。会话存储的 [`RevokeOthers`](session.md#revoking-sessions) 与 token 存储的签名相同，都只保留 `sub.Credential` 对应的那一个凭据，所以页面和单页应用可以调用同一个 action：
+
+```go
+func (a *SignOutOthers) Handle(ctx context.Context, subject identity.Subject) error {
+    if _, err := a.sessions.RevokeOthers(ctx, subject); err != nil {
+        return err
+    }
+    _, err := a.tokens.RevokeOthers(ctx, subject)
+    return err
+}
+```
+
+在页面中发起时，`Credential` 是会话 ID，保留当前会话、撤销全部登录 token；在单页应用中发起时，`Credential` 是 token 的 ID，保留当前 token、撤销全部会话。
 
 <a id="loading-permissions"></a>
 ## 加载权限

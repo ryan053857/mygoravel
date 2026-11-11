@@ -5,6 +5,7 @@
 - [装配会话](#assembling-sessions)
 - [读写会话数据](#session-data)
 - [使用数据库存储](#database-store)
+    - [设备列表](#listing-sessions)
     - [撤销会话](#revoking-sessions)
     - [过期清理](#cleanup)
 - [使用 Redis 存储](#redis-store)
@@ -98,18 +99,43 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-表中每行是一个会话：`token` 是主键，`subject_id` 是[登录](views.md#login)的主体 ID（未登录时为空），`data` 是 scs 编码后的会话数据，`expiry` 是过期时间，`revoked_at` 是撤销时间。
+表中每行是一个会话：
+
+| 列 | 说明 |
+| --- | --- |
+| `token` | 主键，即 cookie 中的会话 token |
+| `subject_id` | [登录](views.md#login)的主体 ID，未登录时为空 |
+| `id` | 登录时生成的会话 ID，也是主体的 `Credential`；未登录时为空 |
+| `impersonator` | [代为登录](authentication.md#impersonation)时实际操作的人 |
+| `ip`、`user_agent`、`logged_in_at` | 登录设备的地址、User-Agent 和登录时间，由 `pages.Login` 从登录请求中取得 |
+| `data` | scs 编码后的会话数据 |
+| `expiry`、`revoked_at` | 过期时间和撤销时间 |
+
+<a id="listing-sessions"></a>
+### 设备列表
+
+“账号安全”页面列出用户登录过的浏览器。`List` 返回主体全部有效的会话，最近登录的在前：
+
+```go
+list, err := store.List(ctx, sub)
+for _, s := range list {
+    // s.ID、s.IP、s.UserAgent、s.LoggedInAt、s.ExpiresAt、s.Impersonator
+    // s.Current：是否为本次请求所用的会话
+}
+```
+
+`sub` 是处理器用 `identity.FromContext` 读到的主体，`Current` 根据它的 `Credential` 判断。会话 ID 不是会话 token，可以放进页面和表单。应用同时签发了 [API 令牌](api-tokens.md#listing-tokens)时，把 `tokens.List` 的结果一起列出，用户就能看到全部设备。
 
 <a id="revoking-sessions"></a>
 ### 撤销会话
 
-用户在多处登录后，可以在“账号安全”页面退出其他设备。`RevokeOthers` 撤销当前登录主体除本会话以外的全部会话，返回撤销的个数：
+| 方法 | 撤销范围 | 常见用途 |
+| --- | --- | --- |
+| `Revoke(ctx, sub, id)` | `sub` 的一个会话 | 在设备列表中退出某台设备 |
+| `RevokeOthers(ctx, sub)` | `sub` 除本次请求所用会话以外的全部会话 | “退出其他设备”、修改密码后 |
+| `RevokeSubject(ctx, userID)` | 该用户的全部会话 | 封禁账号、调整权限 |
 
-```go
-n, err := store.RevokeOthers(ctx, sessions)
-```
-
-`ctx` 是处理器收到的 context，路由需要用 [`web.Require`](views.md#login) 保护。修改密码后通常也调用它。
+`Revoke` 在会话不存在或不属于 `sub` 时返回 `session.ErrNotFound`，即 `404`。三者的用法与 [API 令牌](api-tokens.md#revoking-tokens)的同名方法相同。在 API 中调用 `RevokeOthers` 时，主体的 `Credential` 是令牌的 ID，不对应任何会话，因此撤销全部会话。
 
 管理员封禁账号或调整权限后，用 `RevokeSubject` 撤销该用户的全部会话：
 
@@ -155,7 +181,7 @@ go get github.com/alexedwards/scs/goredisstore@latest
 sessions := session.New(a.cfg.Session, goredisstore.New(a.rdb))
 ```
 
-其他代码不变。会话借助 Redis 的键过期自动清除，不需要迁移，也不需要定期清理。`RevokeOthers` 和 `RevokeSubject` 只由数据库存储提供。
+其他代码不变。会话借助 Redis 的键过期自动清除，不需要迁移，也不需要定期清理。设备列表和撤销只由数据库存储提供。
 
 <a id="csrf"></a>
 ## 跨站请求伪造

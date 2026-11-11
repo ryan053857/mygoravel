@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -169,9 +170,14 @@ func (p *Pages) recheck(ctx context.Context, token string, want identity.Subject
 	return nil
 }
 
-// Login 把 sub 记为当前会话的主体，见 session.Login。
-func (p *Pages) Login(ctx context.Context, sub identity.Subject) error {
-	return session.Login(ctx, p.opts.Sessions, sub)
+// Login 把 sub 记为当前会话的主体，并记录 r 的客户端地址和 User-Agent 作为登录设备，见 session.Login。
+// 客户端地址取自 r.RemoteAddr，经过 httpx.ClientIP 时就是真实的客户端地址。
+func (p *Pages) Login(r *http.Request, sub identity.Subject) error {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	return session.Login(r.Context(), p.opts.Sessions, sub, session.Device{IP: ip, UserAgent: r.UserAgent()})
 }
 
 // Logout 销毁当前会话，见 session.Logout。

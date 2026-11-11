@@ -35,7 +35,7 @@ func authServer(t *testing.T, store scs.Store, configure ...func(*web.Options)) 
 		if sub.ID == "root" {
 			sub.Permissions = []string{"admin"}
 		}
-		if err := pages.Login(r.Context(), sub); err != nil {
+		if err := pages.Login(r, sub); err != nil {
 			return err
 		}
 		web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/me"))
@@ -244,7 +244,7 @@ func TestTenantPages(t *testing.T) {
 	public := pages.Routes(router, web.Public)
 	// 登录时可以把会话绑定到一个租户，例如只属于该租户的终端客户账号。
 	public.Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		return pages.Login(r.Context(), identity.Subject{ID: r.FormValue("user"), Tenant: r.FormValue("tenant")})
+		return pages.Login(r, identity.Subject{ID: r.FormValue("user"), Tenant: r.FormValue("tenant")})
 	})
 	public.Get("/t/{tenant}/about", show)
 	pages.Routes(router, web.Require("articles:read")).Get("/t/{tenant}/dash", show)
@@ -295,7 +295,7 @@ func TestImpersonation(t *testing.T) {
 	pages := web.New(o)
 	router := chi.NewRouter()
 	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		return pages.Login(r.Context(), identity.Subject{ID: r.FormValue("user"), Impersonator: r.FormValue("impersonator")})
+		return pages.Login(r, identity.Subject{ID: r.FormValue("user"), Impersonator: r.FormValue("impersonator")})
 	})
 	pages.Routes(router, web.Require()).Get("/me", func(w http.ResponseWriter, r *http.Request) error {
 		sub, _ := identity.FromContext(r.Context())

@@ -87,7 +87,7 @@ func newApp(t *testing.T, store scs.Store) *httptest.Server {
 		if in.User == "root" {
 			sub.Permissions = []string{"admin"}
 		}
-		if err := session.Login(r.Context(), sm, sub); err != nil {
+		if err := session.Login(r.Context(), sm, sub, session.Device{IP: "10.0.0.1", UserAgent: r.UserAgent()}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -117,12 +117,30 @@ func newApp(t *testing.T, store scs.Store) *httptest.Server {
 	router.Get("/admin", me("admin"))
 	if st, ok := store.(*session.Store); ok {
 		router.Post("/logout-others", func(w http.ResponseWriter, r *http.Request) {
-			n, err := st.RevokeOthers(r.Context(), sm)
+			sub, _ := session.Subject(r.Context(), sm)
+			n, err := st.RevokeOthers(r.Context(), sub)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusUnauthorized)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]int{"revoked": n})
+		})
+		router.Get("/devices", func(w http.ResponseWriter, r *http.Request) {
+			sub, _ := session.Subject(r.Context(), sm)
+			list, err := st.List(r.Context(), sub)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(list)
+		})
+		router.Post("/devices/revoke", func(w http.ResponseWriter, r *http.Request) {
+			sub, _ := session.Subject(r.Context(), sm)
+			if err := st.Revoke(r.Context(), sub, r.URL.Query().Get("id")); err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		})
 	}
 	srv := httptest.NewServer(router)
