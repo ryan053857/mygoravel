@@ -92,11 +92,13 @@ func TestWatch(t *testing.T) {
 	if err := os.WriteFile(css, []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, func() bool { return n.Load() == 1 })
+	// WriteFile 先清空再写入，轮询可能落在两步之间，把一次写入算成两次变化。
+	waitUntil(t, func() bool { return n.Load() >= 1 })
+	before := n.Load()
 	if err := os.WriteFile(css, []byte("ab"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, func() bool { return n.Load() == 2 })
+	waitUntil(t, func() bool { return n.Load() > before })
 	cancel()
 	if err := <-done; err != context.Canceled {
 		t.Errorf("watch returned %v", err)
