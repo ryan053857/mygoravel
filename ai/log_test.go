@@ -8,8 +8,6 @@ import (
 	"sync"
 	"testing"
 
-	"trpc.group/trpc-go/trpc-agent-go/log"
-
 	"github.com/ryan053857/mygoravel/ai"
 )
 
@@ -22,14 +20,18 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// 测试适配器本身，而不是调用 SetLogger：修改全局日志会与同一个包中其他测试留下的
+// trpc-agent-go 内部 goroutine 发生数据竞争。
 func TestSetLogger(t *testing.T) {
-	log.Warnf("model %s slow", "x")
-	log.Debug("hidden by handler level")
-	got := trpcLog.String()
-	if !strings.Contains(got, `level=WARN msg="model x slow" component=ai`) {
+	var buf bytes.Buffer
+	l := ai.NewLogAdapter(slog.New(slog.NewTextHandler(&buf, nil)))
+	l.Warnf("model %s slow", "x")
+	l.Debug("hidden")
+	got := buf.String()
+	if !strings.Contains(got, "level=WARN") || !strings.Contains(got, `msg="model x slow"`) || !strings.Contains(got, "component=ai") {
 		t.Fatalf("log output %q", got)
 	}
-	if strings.Contains(got, "hidden by handler level") {
+	if strings.Contains(got, "hidden") {
 		t.Fatalf("debug should follow the handler level: %q", got)
 	}
 }

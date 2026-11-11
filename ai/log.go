@@ -13,9 +13,14 @@ import (
 // SetLogger 让 trpc-agent-go 的日志写到 l，带 component=ai 字段，可以按组件设置级别。
 // trpc-agent-go 的日志是进程级的全局设置，在装配时调用一次。
 func SetLogger(l *slog.Logger) {
-	a := slogAdapter{logging.Or(l).With(logging.AttrComponent, "ai")}
+	a := newLogAdapter(l)
 	log.Default = a
 	log.ContextDefault = a
+}
+
+// newLogAdapter 把 l 包装为 trpc-agent-go 的日志接口。
+func newLogAdapter(l *slog.Logger) slogAdapter {
+	return slogAdapter{logging.Or(l).With(logging.AttrComponent, "ai")}
 }
 
 type slogAdapter struct{ l *slog.Logger }
