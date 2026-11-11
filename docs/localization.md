@@ -28,7 +28,7 @@ mygoravel 的本地化基于 [go-i18n](https://github.com/nicksnyder/go-i18n)。
 
 ```go
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 api := rest.New(rest.Options{Router: router})
 ```
 

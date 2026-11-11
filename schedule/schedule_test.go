@@ -15,7 +15,7 @@ import (
 )
 
 func newScheduler() *schedule.Scheduler {
-	return schedule.New(lock.New(lock.NewMemoryStore()), nil)
+	return schedule.New(lock.New(lock.NewMemoryStore()), schedule.DefaultConfig(), nil)
 }
 
 // counter 返回一个记录执行次数的任务。
@@ -110,7 +110,7 @@ func TestLocation(t *testing.T) {
 func TestRunsOncePerTickAcrossInstances(t *testing.T) {
 	locker := lock.New(lock.NewMemoryStore())
 	var once, every atomic.Int64
-	a, b := schedule.New(locker, nil), schedule.New(locker, nil)
+	a, b := schedule.New(locker, schedule.DefaultConfig(), nil), schedule.New(locker, schedule.DefaultConfig(), nil)
 	for _, s := range []*schedule.Scheduler{a, b} {
 		s.Add("once", "@everysecond", counter(&once))
 		s.Add("every", "@everysecond", counter(&every), schedule.EveryInstance())
@@ -153,7 +153,7 @@ func TestOverlap(t *testing.T) {
 			release := make(chan struct{})
 			scheds := make([]*schedule.Scheduler, tc.instances)
 			for i := range scheds {
-				scheds[i] = schedule.New(locker, nil)
+				scheds[i] = schedule.New(locker, schedule.DefaultConfig(), nil)
 				scheds[i].Add("report", "@everysecond", blockingTask(&runs, started, release), tc.opts...)
 			}
 			var wg sync.WaitGroup
@@ -245,4 +245,25 @@ func TestCleanup(t *testing.T) {
 	if err := failing(context.Background()); !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestConfig(t *testing.T) {
+	var cfg schedule.Config
+	cfg.SetDefaults()
+	if cfg.ShutdownTimeout != 30*time.Second || cfg.Validate() != nil {
+		t.Fatalf("defaults %+v: %v", cfg, cfg.Validate())
+	}
+	if (schedule.Config{}).Validate() != nil {
+		t.Fatal("zero shutdown_timeout must be allowed")
+	}
+	bad := schedule.Config{ShutdownTimeout: -time.Second}
+	if bad.Validate() == nil {
+		t.Fatal("negative shutdown_timeout accepted")
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("New with invalid config did not panic")
+		}
+	}()
+	schedule.New(lock.New(lock.NewMemoryStore()), bad, nil)
 }

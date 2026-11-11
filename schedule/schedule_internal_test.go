@@ -17,10 +17,10 @@ func TestRunWaitsThenCancelsTasks(t *testing.T) {
 	}{
 		{"finishes", 300 * time.Millisecond, time.Second, nil},
 		{"canceled after timeout", time.Hour, 200 * time.Millisecond, context.Canceled},
+		{"canceled at once", time.Hour, 0, context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := New(lock.New(lock.NewMemoryStore()), nil)
-			s.shutdownTimeout = tc.timeout
+			s := New(lock.New(lock.NewMemoryStore()), Config{ShutdownTimeout: tc.timeout}, nil)
 			started := make(chan struct{}, 1)
 			result := make(chan error, 1)
 			s.Add("slow", "@everysecond", func(ctx context.Context) error {

@@ -57,11 +57,11 @@ ratelimit.Config{
 `httpx.RateLimit` 把限流器安装为中间件。配额用完时返回 `429 Too Many Requests`，并通过 `Retry-After` 响应头告诉客户端多少秒后重试。限流不在默认中间件中，需要时在 `httpx.Defaults` 之后安装：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
-router.Use(httpx.RateLimit(ratelimit.NewMemory(cfg.HTTP.RateLimit), httpx.KeyByIP))
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+router.Use(httpx.RateLimit(ratelimit.NewMemory(a.cfg.HTTP.RateLimit), httpx.KeyByIP))
 ```
 
-`cfg.HTTP.RateLimit` 来自 `http.rate_limit` 配置段，下面是它的默认值：
+`a.cfg.HTTP.RateLimit` 来自 `http.rate_limit` 配置段，下面是它的默认值：
 
 ```yaml
 http:
@@ -89,7 +89,7 @@ skipHealth := func(r *http.Request) string {
     }
     return httpx.KeyByIP(r)
 }
-router.Use(httpx.RateLimit(ratelimit.NewMemory(cfg.HTTP.RateLimit), skipHealth))
+router.Use(httpx.RateLimit(ratelimit.NewMemory(a.cfg.HTTP.RateLimit), skipHealth))
 ```
 
 中间件运行在路由匹配和认证之前，只能使用请求本身携带的信息。不要用 `Authorization` 等未经校验的请求头做 key：客户端每次换一个值就能得到一份新配额。需要按用户限流时，请[在处理器中限流](#in-handlers)。
@@ -168,7 +168,7 @@ attempts := redislimit.New(rdb, "blog:login", ratelimit.Config{Rate: 5, Interval
 Redis 的写入很快，也适合多个实例共享的全局限流：
 
 ```go
-router.Use(httpx.RateLimit(redislimit.New(rdb, "blog:http", cfg.HTTP.RateLimit), httpx.KeyByIP))
+router.Use(httpx.RateLimit(redislimit.New(a.rdb, "blog:http", a.cfg.HTTP.RateLimit), httpx.KeyByIP))
 ```
 
 这时 Redis 不可用会让所有请求都得到 `503`。如果宁可短时间不限流也要保证可用，请继续使用内存限流器。

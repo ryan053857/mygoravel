@@ -159,7 +159,7 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
 安装[默认中间件](middleware.md#default-middleware)后，`httpx.AccessLog` 会为每个请求记录一条[访问日志](middleware.md#access-log)，`rest.New` 创建的 API 会为 5xx 错误记录诊断信息：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 api := rest.New(rest.Options{Router: router})
 ```
 

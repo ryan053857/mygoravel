@@ -68,7 +68,7 @@
 当应用收到 `SIGTERM` 或 Ctrl+C 时，我们希望它**不要粗暴地中断正在处理的请求**。`httpx.ListenAndServe` 负责完成这件事：
 
 ```go
-return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{
+return httpx.ListenAndServe(ctx, a.cfg.HTTP, api.Handler(), httpx.ServeOptions{
     OnDraining: draining.Set,
 })
 ```

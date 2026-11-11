@@ -11,6 +11,7 @@ import (
 	"github.com/ryan053857/mygoravel/mail/resend"
 	"github.com/ryan053857/mygoravel/mail/smtp"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/schedule"
 )
 
 type Config struct {
@@ -20,6 +21,7 @@ type Config struct {
 	Auth     auth.Config     `yaml:"auth"`
 	Mail     MailConfig      `yaml:"mail"`
 	Queue    queue.Config    `yaml:"queue"`
+	Schedule schedule.Config `yaml:"schedule"`
 }
 
 type MailConfig struct {
