@@ -6,6 +6,7 @@
     - [Run：serve 与常驻进程](#run-command)
     - [openapi 命令](#openapi-command)
     - [routes 命令](#routes-command)
+    - [dev 命令](#dev-command)
     - [migrate 命令](#migrate-command)
     - [config 命令](#config-command)
 - [自定义命令](#custom-commands)
@@ -42,6 +43,7 @@ import (
     "example.com/blog/internal/settings"
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/command"
+    "github.com/ryan053857/mygoravel/command/devcmd"
     "github.com/ryan053857/mygoravel/command/migratecmd"
     "github.com/ryan053857/mygoravel/command/httpcmd"
     "github.com/ryan053857/mygoravel/database"
@@ -60,12 +62,19 @@ func New() *cobra.Command {
         httpcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
         httpcmd.Routes(bootstrap.DocRouter),
         command.Config[settings.Config](),
+        devcmd.New(devcmd.Options{
+            Main:   "./cmd/api",
+            Static: "internal/web/static",
+            Tools:  []devcmd.Tool{devcmd.Tailwind("internal/web/app.css", "internal/web/static/css/app.css")},
+        }, httpAddr),
     )
     root.AddCommand(bootstrap.Commands()...)
     return root
 }
 
 func dbConfig(cfg settings.Config) database.Config { return cfg.Database }
+
+func httpAddr(cfg settings.Config) string { return cfg.HTTP.Addr }
 ```
 
 入口文件 `cmd/api/main.go` 只有一行：
@@ -95,9 +104,10 @@ func main() {
 | `migratecmd.Publish(driver, sources...)` | 显式挂载的 `migrate publish` | 否 |
 | `httpcmd.OpenAPI(opts, register)` | `openapi` | 否 |
 | `httpcmd.Routes(router)` | `routes` | 否 |
+| `devcmd.New(opts, addr)` | `dev`，开发页面时监听文件变化并刷新浏览器，见 [dev 命令](#dev-command) | 是 |
 | `command.Bind(open, declare)` | 应用声明的命令，例如 `article publish`，见[从命令行运行 action](actions.md#as-commands) | 是 |
 
-迁移命令和 HTTP 命令分别放在 `command/migratecmd` 和 `command/httpcmd` 两个子包中。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
+迁移命令、HTTP 命令和 dev 命令分别放在 `command/migratecmd`、`command/httpcmd`、`command/devcmd` 三个子包中。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
 
 不提供 HTTP API 的应用，例如一个只消费消息队列的常驻进程，只装配它需要的命令即可：
 
@@ -202,6 +212,31 @@ POST    /articles/{id}/publish  article-publish  bearer: articles  发布文章
 - **OPERATION ID**、**SUMMARY** 来自 `huma.Operation`，页面路由没有，显示为 `-`。摘要中的换行会合并为空格。
 
 Huma 自动注册的 `/docs`、`/openapi.json`、`/schemas/{schema}` 等文档端点默认不显示，加上 `--all` 才会列出。列表也包含直接注册在 chi 上的原生路由和挂载的子路由；挂载的不透明 `http.Handler`（例如 `Mount("/files", handler)`）显示为 `/files/*`，无法展开其内部路由。
+
+<a id="dev-command"></a>
+### dev 命令
+
+开发[服务端渲染的页面](views.md)时，修改模板或样式后需要重新生成代码、重启应用、刷新浏览器。`dev` 命令把这些合成一条命令：
+
+```bash
+go run ./cmd/api dev --config config/app.yaml,config/local.yaml
+```
+
+然后打开 http://localhost:7331。它同时运行：
+
+- `go tool templ generate --watch`：修改 `.templ` 或 `.go` 后重新生成代码，用 `go run ./cmd/api serve` 重启应用，`--config` 与 `dev` 相同。templ 在 7331 端口代理应用，并注入自动刷新的脚本；
+- `Tools` 中每个工具的监听命令，例如 `devcmd.Tailwind` 运行 `tailwindcss --watch`；
+- 监视 `Static` 目录：其中的文件变化时（例如 Tailwind 重新生成了样式表）刷新浏览器。
+
+`addr` 从配置中取出应用的监听地址，代理据此访问应用。`config/local.yaml` 设置 `static_dir`，让应用直接读取磁盘上的静态文件，见[前端资源](assets.md#development)。
+
+`dev` 启动前检查 templ（`go get -tool github.com/a-h/templ/cmd/templ`）和各工具是否已安装。按 `Ctrl-C` 停止后，它会运行 `templ generate` 和各工具的生成命令，例如 `tailwindcss --minify`，把监听模式的输出恢复为正式版本，可以直接提交。
+
+其他生成工具写成 `devcmd.Tool`，`Watch` 是开发时的监听命令，`Build` 是停止后的生成命令。例如打包组件脚本的 shadcn-templ：
+
+```go
+devcmd.Tool{Watch: []string{"shadcn-templ", "bundle", "--watch"}, Build: []string{"shadcn-templ", "bundle"}}
+```
 
 <a id="migrate-command"></a>
 ### migrate 命令

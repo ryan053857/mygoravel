@@ -134,9 +134,10 @@ tailwindcss -i internal/web/app.css -o internal/web/static/css/app.css --minify
 
 Tailwind 会扫描项目中的文件，包括 `.templ` 和生成的 `_templ.go`，只输出实际用到的 class。生成的 `app.css` 和 `_templ.go` 一样，要提交到版本库，这样构建和 CI 不需要安装 Tailwind。
 
-开发时同时运行两个监听命令，再打开 templ 的代理地址 http://localhost:7331。修改 `.templ` 后，templ 重新生成代码、重启应用，并刷新浏览器；Tailwind 随之重新生成样式表：
+开发时运行 [dev 命令](commands.md#dev-command)，打开 http://localhost:7331：
 
 ```bash
-go tool templ generate --watch --proxy=http://localhost:8080 --cmd="go run ./cmd/api serve --config config/app.yaml,config/local.yaml"
-tailwindcss -i internal/web/app.css -o internal/web/static/css/app.css --watch
+go run ./cmd/api dev --config config/app.yaml,config/local.yaml
 ```
+
+修改 `.templ` 后，templ 重新生成代码、重启应用；Tailwind 随之重新生成样式表，浏览器自动刷新。停止 `dev` 时，它会生成压缩的样式表，可以直接提交。
