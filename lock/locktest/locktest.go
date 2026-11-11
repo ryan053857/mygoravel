@@ -153,7 +153,7 @@ func TestStore(t *testing.T, newStore func() lock.Store) {
 			}
 		}
 		held(false)
-		lk, err := locker.Acquire(ctx, "a", 50*time.Millisecond)
+		lk, err := locker.Acquire(ctx, "a", time.Minute)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -171,14 +171,15 @@ func TestStore(t *testing.T, newStore func() lock.Store) {
 
 	t.Run("refresh", func(t *testing.T) {
 		locker := lock.New(newStore())
-		lk, err := locker.Acquire(ctx, "a", 30*time.Millisecond)
+		// 初始的过期时间要足够续期在慢的机器上完成，之后等它过去，确认续期生效。
+		lk, err := locker.Acquire(ctx, "a", 250*time.Millisecond)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := lk.Refresh(ctx, time.Minute); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 		if _, err := locker.Acquire(ctx, "a", time.Minute); !errors.Is(err, lock.ErrNotAcquired) {
 			t.Fatalf("refreshed lock lost err=%v", err)
 		}
