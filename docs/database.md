@@ -100,7 +100,7 @@ db, err := database.Open(ctx, sqlite.Driver, cfg.Database)
 - 每个事务在 `BEGIN` 时都会取得写锁，只读的事务请传入 `&sql.TxOptions{ReadOnly: true}`，它不取写锁，也不会让写入排队；
 - `ALTER TABLE` 只支持部分操作，修改列需要重建表，见 [SQLite 文档](https://www.sqlite.org/lang_altertable.html#otheralter)。
 
-部署和备份见[使用 SQLite 部署](deployment.md#sqlite)。
+部署见[使用 SQLite 部署](deployment.md#sqlite)，备份见[备份与恢复](deployment.md#backups)。
 
 <a id="mysql"></a>
 ### 使用 MySQL

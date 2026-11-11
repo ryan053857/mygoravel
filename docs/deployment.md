@@ -12,7 +12,12 @@
 - [反向代理与网络](#reverse-proxies)
 - [日志](#logging)
 - [使用 SQLite 部署](#sqlite)
-    - [备份](#sqlite-backups)
+- [备份与恢复](#backups)
+    - [数据库](#database-backups)
+    - [SQLite](#sqlite-backups)
+    - [文件](#file-backups)
+    - [恢复之后](#after-restoring)
+    - [恢复演练](#restore-drills)
 - [升级依赖](#upgrading)
 
 <a id="introduction"></a>
@@ -154,10 +159,28 @@ logs:
 - **迁移不加锁。** 请在同一个部署任务中先执行 `migrate up`，再启动服务，不要让多个任务同时执行迁移。
 - **队列和定时任务都可以使用 SQLite。** 队列的领取与业务写入共用唯一的写者，长时间不提交的写事务会让 worker 等待，见[队列](queue.md#preparing-tables)。
 
-需要运行多个实例，或者写入量超过单机承受能力时，请改用 PostgreSQL。
+需要运行多个实例，或者写入量超过单机承受能力时，请改用 PostgreSQL。备份方式见 [SQLite 的备份](#sqlite-backups)。
+
+<a id="backups"></a>
+## 备份与恢复
+
+应用的数据保存在两个地方：数据库，以及[文件存储](filesystem.md)使用的磁盘，两者都要备份。Redis 中的缓存、锁和限流计数丢失后会重新生成，不需要备份；使用 [Redis 队列驱动](queue.md#redis-driver)时，未执行的任务能否保住取决于 Redis 的持久化配置。
+
+mygoravel 不提供备份命令。只有数据库自己的备份机制能持续备份并恢复到任意时间点；在应用中定时导出，数据量大时很慢，还会丢掉两次导出之间写入的数据。
+
+<a id="database-backups"></a>
+### 数据库
+
+| 数据库 | 建议 |
+| --- | --- |
+| PostgreSQL | 使用托管数据库（RDS、Cloud SQL 等）时，开启自动备份和时间点恢复（PITR）；自建时用 [pgBackRest](https://pgbackrest.org) 或 [WAL-G](https://github.com/wal-g/wal-g) 持续归档 WAL |
+| MySQL | 托管数据库同上；自建时用 [Percona XtraBackup](https://docs.percona.com/percona-xtrabackup/) 做全量备份，加上 binlog 恢复到任意时间点 |
+| SQLite | 见[下文](#sqlite-backups) |
+
+库很小时，用 `pg_dump` 或 `mysqldump --single-transaction` 定时导出也可以，但只能恢复到导出的那一刻。`pg_dump` 的主版本不能低于数据库服务器的主版本。
 
 <a id="sqlite-backups"></a>
-### 备份
+### SQLite
 
 不要直接复制正在使用的数据库文件：此时部分数据可能还在 `-wal` 文件中，复制出来的文件可能不完整。请用 `VACUUM INTO` 生成一份一致的快照，它不会阻塞读写：
 
@@ -166,6 +189,33 @@ sqlite3 storage/app.db "VACUUM INTO '/backups/app-$(date +%F).db'"
 ```
 
 应用的二进制中已经包含 SQLite，服务器上没有 `sqlite3` 命令时，可以把同一条语句写成应用的[自定义命令](commands.md#custom-commands)，用 `db.ExecContext(ctx, "VACUUM INTO ?", path)` 执行。需要持续备份时，可以使用 [Litestream](https://litestream.io) 把数据库实时复制到对象存储。
+
+<a id="file-backups"></a>
+### 文件
+
+文件存储用 `files` 表记录文件，文件内容保存在磁盘上。`Delete` 之后，[清理任务](filesystem.md#cleanup)几分钟内就会删除磁盘上的对象。把数据库恢复到较早的时间点后，这段时间里删除的文件又会出现在 `files` 表中，磁盘上的对象却已经没有了。
+
+- **S3 磁盘**：为桶开启[版本控制](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html)。对象被删除时只是加上一个删除标记，删掉这个标记就能找回对象。再配置生命周期规则，让旧版本在一段时间后过期，这段时间不短于数据库备份的保留期。MinIO 等 S3 兼容存储同样支持版本控制。
+- **本地磁盘**：用 [restic](https://restic.net) 等工具定时备份 `disks.local.root` 目录，并保留历史快照。先备份数据库，再备份文件，两次备份的间隔尽量短。恢复后如果发现有记录找不到对应的对象，可以到更早的快照中找回。
+
+<a id="after-restoring"></a>
+### 恢复之后
+
+数据库回到了过去，但已经发出去的邮件、已经调用过的外部接口不会跟着撤回。恢复后要注意：
+
+- **任务会再执行一次。** 做备份时还在 `queue_jobs` 中的任务，恢复后会再执行一遍，其中有些在恢复前已经执行过：邮件可能再发一封，webhook 会用相同的 `webhook-id` 再投递一次。处理函数本来就需要能安全地重复执行，见[队列](queue.md)。
+- **撤销过的凭据又能用了。** 备份之后撤销的 [API token](api-tokens.md#revoking-tokens) 和[会话](session.md)，恢复后会重新生效。如果这段时间里有用户被封禁或改过密码，恢复后对这些用户再调用一次 `RevokeSubject`。无法逐个确认时，清空 `sessions` 表并删除 `api_tokens` 中 `kind = 'login'` 的行，让所有人重新登录；这段时间里撤销过的个人访问令牌需要再撤销一次。
+
+<a id="restore-drills"></a>
+### 恢复演练
+
+没有恢复过的备份并不可靠。请定期把备份恢复到一个临时数据库，再用同一个二进制连上去检查：
+
+```bash
+./bin/api migrate status --config=config/app.yaml,config/restore.yaml
+```
+
+`config/restore.yaml` 只把数据库地址改为临时库。确认迁移版本与预期一致后，再抽查几张业务表中最新的数据。每次演练都记下恢复用了多长时间，出事时停服大约也要这么久。
 
 <a id="upgrading"></a>
 ## 升级依赖
