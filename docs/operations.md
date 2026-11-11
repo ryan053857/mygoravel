@@ -4,6 +4,7 @@
 - [安装](#installation)
 - [发起操作](#starting)
 - [执行操作](#running)
+- [并行处理](#fanout)
 - [进度推送](#progress)
 - [任务中心](#listing)
 - [清理](#cleanup)
@@ -243,6 +244,52 @@ article.BulkPublishJob.Handle(router, sub, article.NewBulkPublish(a.db, a.hub, a
 
 > [!NOTE]
 > 每次重试都从头开始的操作，在回调开头调用 `r.Restart()` 把进度清零，例如导出要重新写出整个文件。
+
+<a id="fanout"></a>
+## 并行处理
+
+逐篇发布在一个任务中依次执行。每个单位很慢又彼此独立时，例如为每篇文章调用模型生成摘要，可以把操作扇出为多个队列任务，由多个 worker 并行处理，全部结束后操作变为 `completed`，相当于 Laravel 的 `Bus::batch`。
+
+topic 的 payload 是 `operation.Unit[T]`，T 是一个单位的业务数据：
+
+```go
+type SummarizeUnit struct {
+    Subject identity.Subject `json:"subject"`
+    ID      uuid.UUID        `json:"id"`
+}
+
+var SummarizeJob = queue.Topic[operation.Unit[SummarizeUnit]]("articles.summarize")
+```
+
+登记操作后，在同一个事务中用 `operation.Fanout` 加入单位，每个单位发布为一个任务：
+
+```go
+if op, err = a.ops.Start(ctx, tx, subject, "articles.summarize"); err != nil {
+    return err
+}
+return operation.Fanout(ctx, tx, queue.Database(tx), op.ID, SummarizeJob, units...)
+```
+
+处理函数只处理一个单位，`operation.HandleUnit` 把它包装为任务的处理函数，记下每个单位的结果：
+
+```go
+// Job 为一篇文章生成摘要。
+func (a *Summarize) Job(ctx context.Context, u operation.Unit[SummarizeUnit]) error {
+    return operation.HandleUnit(a.ops, func(ctx context.Context, op *operation.Operation, u SummarizeUnit) error {
+        return a.summarize(ctx, u.Subject, u.ID)
+    }, a.saved)(ctx, u)
+}
+```
+
+| 处理函数返回 | 单位 |
+| --- | --- |
+| nil | 成功，`Processed` 加一 |
+| 带错误码的业务错误 | 失败，`Processed`、`Failed` 各加一，不再重试 |
+| 其他错误 | 队列重试；最后一次仍然出错时失败，任务转入[失败任务表](queue.md#failed-jobs)，之后重试成功时 `Failed` 减一 |
+
+一个单位失败不会取消其他单位。每个单位结束时都在一个事务中调用 `saved`，最后一个单位结束时 `op.Finished()` 为 `true`，在这里发送通知或发布下一步任务；操作结束之后不再调用 `saved`，重试失败任务修正计数时也不会重复通知。已经成功的单位再次投递时不会再执行。
+
+每个单位都要锁住操作的行记下结果。单位很多又很快时，用 `Run` 在一个任务中处理更合适。
 
 <a id="progress"></a>
 ## 进度推送

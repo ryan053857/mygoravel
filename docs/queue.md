@@ -6,6 +6,7 @@
     - [延迟执行](#delayed-jobs)
     - [带类型的 topic](#typed-topics)
     - [合并重复任务](#unique-jobs)
+    - [多步任务](#multi-step-jobs)
 - [处理任务](#processing-jobs)
     - [启动 worker](#running-workers)
     - [配置](#configuration)
@@ -131,6 +132,32 @@ err := Reindex.Publish(ctx, queue.Database(tx), item.ID, queue.Unique(item.ID.St
 也可以用事件 ID 作为键，合并第三方回调的重发：排队期间收到的重发被合并；任务执行之后才收到的重发会再执行一次，处理函数仍然要按事件 ID 判断是否已经处理过。
 
 键只在 topic 内唯一，最长 255 字节。数据库和 Redis 驱动支持 `Unique`，[NATS](#nats-driver) 驱动不支持。
+
+<a id="multi-step-jobs"></a>
+### 多步任务
+
+有些工作要按顺序分几步完成，例如文章发布后先生成摘要，再推送给订阅者。不需要专门的链式 API：上一步完成后，在保存结果的事务中发布下一步：
+
+```go
+// Job 生成摘要，和下一步“推送给订阅者”一起提交。
+func (a *Summarize) Job(ctx context.Context, id uuid.UUID) error {
+    summary, err := a.generate(ctx, id) // 调用模型，不放在事务中
+    if err != nil {
+        return err
+    }
+    return database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+        _, err := tx.NewUpdate().Model((*Article)(nil)).Set("summary = ?", summary).Where("id = ?", id).Exec(ctx)
+        if err != nil {
+            return err
+        }
+        return NotifySubscribers.Publish(ctx, queue.Database(tx), id)
+    })
+}
+```
+
+每一步只依赖自己的 payload，下一步需要的数据（例如上一步的结果）直接放进下一步的 payload，类型由 `queue.Topic` 检查。下一步和这一步的结果在同一个事务中提交：这一步失败重试时不会提前发出下一步，提交之后下一步也不会丢。
+
+Laravel 的 `Bus::chain` 在发出时就固定了每一步的参数，后面的步骤拿不到前面的结果，所以这里不提供对应的 API。一组任务并行执行、全部结束后再做下一件事，用[后台操作的并行处理](operations.md#fanout)。
 
 <a id="processing-jobs"></a>
 ## 处理任务
