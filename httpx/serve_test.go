@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -116,4 +117,60 @@ func TestDrainStartedEndsLongRequests(t *testing.T) {
 	if httpx.DrainStarted(context.Background()) != nil {
 		t.Fatal("DrainStarted outside Serve should be nil")
 	}
+}
+
+// 连接在排空之前已经被接收、请求在排空开始之后才到：请求照常处理，而不是被 net/http 直接关闭。
+// 不停机升级时旧进程直到交接那一刻都在接收连接。
+func TestServeAnswersRequestsOnAcceptedConns(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan struct{})
+	counted := &countingListener{Listener: ln, accepted: accepted}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- httpx.Serve(ctx, httpx.DefaultConfig(), counted, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "ok")
+		}), httpx.ServeOptions{})
+	}()
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	<-accepted
+	cancel()
+	time.Sleep(50 * time.Millisecond) // 排空已经开始
+
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: test\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	resp, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(resp), "HTTP/1.1 200 OK") || !strings.HasSuffix(string(resp), "ok") {
+		t.Fatalf("response = %q, want 200 ok", resp)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("Serve = %v", err)
+	}
+}
+
+type countingListener struct {
+	net.Listener
+	accepted chan struct{}
+	once     atomic.Bool
+}
+
+func (l *countingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil && l.once.CompareAndSwap(false, true) {
+		close(l.accepted)
+	}
+	return c, err
 }

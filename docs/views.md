@@ -91,11 +91,11 @@ templ ErrorFragment(status int, message string) {
 在入口的 [`HTTP` 方法](dependencies.md#assembling-the-application)中创建[会话](session.md#assembling-sessions)和 `web.Pages`，再挂载内嵌脚本和 404 页面。下面是 `internal/bootstrap/http.go` 中 `HTTP` 方法的新写法：
 
 ```go
-func (a *App) HTTP(ctx context.Context) error {
+func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
     sessions := session.New(a.cfg.Session, session.NewStore(a.db))
     static, err := web.NewStatic(layout.Static, web.StaticOptions{DevDir: a.cfg.StaticDir})
     if err != nil {
-        return err
+        return nil, err
     }
     pages := web.New(web.Options{
         Sessions:      sessions,
@@ -122,7 +122,14 @@ func (a *App) HTTP(ctx context.Context) error {
         r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
         PageRoutes(r, pages, a.db, a.hasher)
     })
-    return httpx.ListenAndServe(ctx, a.cfg.HTTP, router, httpx.ServeOptions{})
+
+    ln, err := d.Listen("tcp", a.cfg.HTTP.Addr)
+    if err != nil {
+        return nil, err
+    }
+    return func(ctx context.Context) error {
+        return httpx.Serve(ctx, a.cfg.HTTP, ln, router, httpx.ServeOptions{})
+    }, nil
 }
 
 // PageRoutes 注册应用的全部页面，HTTP 方法和 DocRouter 共用它。

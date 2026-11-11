@@ -119,15 +119,17 @@ http:
 
 没有写出的字段使用默认值。所有超时和数值都必须为正数，写 `0` 或负数会在加载配置时报错；不需要某个中间件时，不安装它即可。
 
-把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值并校验），再把它交给 `httpx.Defaults` 和 `httpx.ListenAndServe`：
+把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值并校验），再把它交给 `httpx.Defaults` 和 `httpx.Serve`：
 
 ```go
 router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 // ...
-return httpx.ListenAndServe(ctx, a.cfg.HTTP, api.Handler(), httpx.ServeOptions{})
+ln, err := d.Listen("tcp", a.cfg.HTTP.Addr)
+// ...
+return httpx.Serve(ctx, a.cfg.HTTP, ln, api.Handler(), httpx.ServeOptions{})
 ```
 
-不经过 `config.Load` 时（例如在测试中），请从 `httpx.DefaultConfig()` 开始修改。零值的 `httpx.Config{}` 不合法，`httpx.Defaults` 会 panic，`httpx.ListenAndServe` 会返回错误。
+不经过 `config.Load` 时（例如在测试中），请从 `httpx.DefaultConfig()` 开始修改。零值的 `httpx.Config{}` 不合法，`httpx.Defaults` 会 panic，`httpx.Serve` 会返回错误。
 
 <a id="request-id"></a>
 ### 请求 ID

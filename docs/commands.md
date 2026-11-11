@@ -167,10 +167,11 @@ func Start(ctx context.Context, cfg settings.Config) error {
 
 小型部署只运行 `start`：一个进程、一份配置、一套资源。业务量增长后改为分别部署 `serve`、`work` 和 `schedule`，各自按负载增减实例，代码不用改。`start` 也可以部署多个实例：worker 竞争领取任务，调度器通过锁保证[每次触发只执行一次](scheduling.md#multiple-instances)。
 
-`run` 用 `command.Concurrently` 同时运行这些部分：
+`run` 先装配全部部分，再用 `d.Run` 同时运行它们（内部是 `command.Concurrently`）：
 
+- 一个部分装配失败（例如端口被占用）时，`run` 直接返回错误，哪个部分都不会开始运行，进程以非 0 状态退出。
 - 收到停止信号时，各部分同时平滑停止：HTTP 服务排空请求，worker 停止领取并等待处理中的任务，调度器不再触发并等待执行中的任务。全部返回之后才关闭数据库。
-- 一个部分启动失败（例如端口被占用）或出错退出时，其余部分随之停止，进程以非 0 状态退出。
+- 一个部分运行时出错退出，其余部分随之停止，进程以非 0 状态退出。
 - 一个部分在收到停止信号之前就正常返回，同样视为异常，错误中包含 `command.ErrStoppedEarly`，交给 systemd、Kubernetes 等重启。
 
 各部分共用 `open` 中创建的数据库连接池，HTTP 请求和 worker 的并发任务都会占用连接，设置 [`max_open_conns`](database.md#configuration) 时要按两者之和估算。

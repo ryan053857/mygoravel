@@ -131,7 +131,7 @@ return web.SSE(w, r, func(s *web.Stream) error {
 | `redisbroadcast.New(rdb, channel)` | Redis Pub/Sub | 已经使用 [Redis](redis.md) |
 | `natsbroadcast.New(nc, prefix)` | NATS 核心发布订阅 | 已经使用 NATS，或者消息量很大 |
 
-SQLite 只能单实例运行，用 `Memory` 即可。滚动发布时新旧进程短暂并存，连在旧进程上的浏览器会在旧进程退出时重连到新进程，并按 `Last-Event-ID` 补发。
+单实例部署可以用 `Memory`。使用[不停机升级](deployment.md#upgrade-overlap)或滚动发布时，新旧进程短暂并存，旧进程中还没结束的请求和任务发布的事件只进旧进程的 Hub，已经重连到新进程的浏览器收不到，这时请用 `NewDatabase`，SQLite 也可以使用。
 
 <a id="database-backend"></a>
 ### 数据库

@@ -14,8 +14,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.16
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.6
 	github.com/aws/smithy-go v1.28.8
+	github.com/cloudflare/tableflip v1.2.4-0.20240920015315-64983fb2d863
 	github.com/cockroachdb/errors v1.14.0
 	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/danielgtaylor/huma/v2 v2.40.0
 	github.com/eko/gocache/lib/v4 v4.2.0
 	github.com/eko/gocache/store/go_cache/v4 v4.2.2

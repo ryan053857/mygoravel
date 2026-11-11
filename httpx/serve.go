@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cockroachdb/errors"
 )
@@ -58,6 +60,8 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 	}
 	logger := componentLogger(opts.Logger)
 	srv := cfg.server(handler)
+	var fresh freshConns
+	srv.ConnState = fresh.track
 
 	// 所有请求 context 派生自 requestRoot，排空超时或结束后统一取消；
 	// draining 在排空开始时关闭，供 SSE 等长连接主动结束，见 DrainStarted。
@@ -80,20 +84,24 @@ func Serve(ctx context.Context, cfg Config, ln net.Listener, handler http.Handle
 	close(draining)
 	logger.Info("http server draining")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	// Shutdown 开始之后才读到的请求，net/http 不处理就关闭连接。所以先停止接收新连接，
+	// 等已经接收的连接读到第一个请求，再开始 Shutdown。升级时监听 socket 交给了新进程，
+	// 旧进程直到这一刻都在接收连接。
+	if !returned {
+		_ = ln.Close()
+		serveErr, returned = <-errc, true
+		if errors.Is(serveErr, net.ErrClosed) {
+			serveErr = nil
+		}
+		fresh.wait(shutdownCtx, cfg.ReadHeaderTimeout)
+	}
 	shutdownErr := srv.Shutdown(shutdownCtx)
 	cancel()
 	if shutdownErr != nil {
 		cancelRequests()
 		shutdownErr = errors.Join(shutdownErr, srv.Close())
 	}
-	if !returned {
-		serveErr = <-errc
-	}
 	cancelRequests()
-	// 本次停机流程产生的 ErrServerClosed 表示正常退出。
-	if !returned && errors.Is(serveErr, http.ErrServerClosed) {
-		serveErr = nil
-	}
 	logger.Info("http server stopped")
 	return errors.Join(errors.Wrap(serveErr, "httpx: serve"), errors.Wrap(shutdownErr, "httpx: shutdown"))
 }
@@ -116,3 +124,43 @@ func (d *Draining) Set() { d.v.Store(true) }
 
 // Load 报告是否正在排空。
 func (d *Draining) Load() bool { return d.v.Load() }
+
+// freshConns 记录已经接收、还没读到第一个请求的连接。
+type freshConns struct {
+	mu    sync.Mutex
+	conns map[net.Conn]struct{}
+}
+
+func (f *freshConns) track(c net.Conn, state http.ConnState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if state != http.StateNew {
+		delete(f.conns, c)
+		return
+	}
+	if f.conns == nil {
+		f.conns = make(map[net.Conn]struct{})
+	}
+	f.conns[c] = struct{}{}
+}
+
+func (f *freshConns) len() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.conns)
+}
+
+// wait 等待全部连接读到第一个请求，最多等 limit：超过请求头读取时限的连接会被服务器关闭。
+func (f *freshConns) wait(ctx context.Context, limit time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for f.len() > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}

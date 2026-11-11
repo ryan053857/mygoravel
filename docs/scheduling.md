@@ -78,6 +78,7 @@ import (
 
     "example.com/blog/internal/article"
     "example.com/blog/internal/settings"
+    "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/lock"
     "github.com/ryan053857/mygoravel/queue"
     "github.com/ryan053857/mygoravel/schedule"
@@ -100,9 +101,9 @@ func (a *App) tasks(opts ...schedule.SchedulerOption) *schedule.Scheduler {
     return sched
 }
 
-// Scheduler 按时执行定时任务，直到 ctx 被取消。
-func (a *App) Scheduler(ctx context.Context) error {
-    return a.tasks().Run(ctx)
+// Scheduler 装配调度器，返回的函数按时执行定时任务，直到 ctx 被取消。
+func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
+    return a.tasks().Run, nil
 }
 
 // Schedule 只运行调度器，schedule 命令调用它。
@@ -126,8 +127,8 @@ root.AddCommand(command.Run("schedule", "执行定时任务", bootstrap.Schedule
 
 去重的范围取决于锁存储：
 
-- 单实例部署使用 `lock.NewMemoryStore()`；
-- 多实例部署使用 `lock.NewDBStore(db)` 或 [Redis 存储](locks.md#redis-store)，所有实例共用同一个存储。
+- 单实例部署可以使用 `lock.NewMemoryStore()`；
+- 多实例部署，以及使用[不停机升级](deployment.md#upgrade-overlap)时，使用 `lock.NewDBStore(db)` 或 [Redis 存储](locks.md#redis-store)，所有进程共用同一个存储。
 
 使用数据库存储时，每次触发都会在 `locks` 表中留下一行，由上面的 `locks:cleanup` 定期删除。秒级任务每秒都会写一次 `locks` 表，这类任务较多时建议改用 Redis 存储，过期的键由 Redis 自动删除。
 
@@ -261,8 +262,8 @@ queue:prune-failed          @daily        2026-11-12 00:00:00  6h59m   no       
 上一次什么时候执行、结果如何，是运行时的数据：部署多个实例时，每次触发在哪个实例上执行并不确定。`schedule.WithObserver` 在每次执行时通知你，把它写进数据库，所有进程就都能看到：
 
 ```go
-func (a *App) Scheduler(ctx context.Context) error {
-    return a.tasks(schedule.WithObserver(a.recordRun)).Run(ctx)
+func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
+    return a.tasks(schedule.WithObserver(a.recordRun)).Run, nil
 }
 
 func (a *App) recordRun(ctx context.Context, e schedule.Event) {

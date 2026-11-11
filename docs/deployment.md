@@ -9,6 +9,7 @@
 - [选择运行形态](#process-forms)
 - [使用 systemd 运行](#systemd)
     - [发布新版本](#systemd-releases)
+- [不停机升级](#zero-downtime-upgrades)
 - [使用 Docker 运行](#docker)
 - [健康检查](#health-checks)
 - [平滑停止](#graceful-shutdown)
@@ -129,7 +130,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=exec
+Type=notify-reload
+NotifyAccess=all
+RuntimeDirectory=blog/%i
+PIDFile=/run/blog/%i/daemon.pid
 User=blog
 WorkingDirectory=/opt/blog
 EnvironmentFile=/etc/blog/env
@@ -159,6 +163,7 @@ sudo systemctl enable --now blog@serve blog@work blog@schedule  # 或者分开�
 
 几处设置的用意：
 
+- **就绪与升级。** `Type=notify-reload` 让 systemd 等应用报告就绪后才认为启动完成，`systemctl reload` 则触发[不停机升级](#zero-downtime-upgrades)。升级时报告就绪的是新进程，所以要用 `NotifyAccess=all`；新进程把自己的 PID 写进 `RuntimeDirectory` 中的 `daemon.pid`，旧进程退出后 systemd 从 `PIDFile` 找到它。这几项需要入口按[依赖装配](dependencies.md#assembling-the-application)一章使用 `command.Daemon`；不报告就绪的应用改用 `Type=exec`，并删掉 `NotifyAccess`、`RuntimeDirectory` 和 `PIDFile`。
 - **重启。** 进程以非 0 状态退出时，`Restart=on-failure` 会重启它。数据库暂时连不上时，应用以 `ExitUnavailable`（4）退出，systemd 每 5 秒重试一次，直到连上为止。`RestartPreventExitStatus=2 3` 排除了用法错误和配置错误，这两种错误重启多少次都一样，unit 直接进入失败状态，`systemctl status` 能看到原因。
 - **停止。** `TimeoutStopSec` 是发送 `SIGTERM` 后等待进程退出的时间，超时后发送 `SIGKILL`。它要大于三个 `shutdown_timeout` 中最大的一个，见[平滑停止](#graceful-shutdown)。上面的 45 秒是按队列和调度器默认的 30 秒设置的。
 - **文件系统。** `ProtectSystem=strict` 把整个文件系统变为只读，只有 `ReadWritePaths` 中的目录可写，`PrivateTmp` 为进程提供一个独立的 `/tmp`。应用需要写入其他目录时，要把它加到 `ReadWritePaths` 中。
@@ -175,18 +180,60 @@ journalctl -u 'blog@*' -f
 ```bash
 set -e
 CONFIG=--config=config/app.yaml,config/prod.yaml
+run() {
+    sudo systemd-run --wait --pipe --quiet --uid=blog \
+        -p EnvironmentFile=/etc/blog/env -p WorkingDirectory=/opt/blog "$@" $CONFIG
+}
 
 sudo install -m 755 api /opt/blog/bin/api.new
+run /opt/blog/bin/api.new config check
 sudo mv /opt/blog/bin/api.new /opt/blog/bin/api
-sudo systemd-run --wait --pipe --quiet --uid=blog \
-    -p EnvironmentFile=/etc/blog/env -p WorkingDirectory=/opt/blog \
-    /opt/blog/bin/api migrate up $CONFIG
-sudo systemctl restart 'blog@*'
+run /opt/blog/bin/api migrate up
+
+for unit in $(systemctl list-units 'blog@*' --state=active --plain --no-legend | awk '{print $1}'); do
+    sudo systemctl reload "$unit"
+    if [[ $(systemctl show -p StatusText --value "$unit") == "upgrade failed"* ]]; then
+        systemctl status "$unit" --no-pager
+        exit 1
+    fi
+done
 ```
 
-- 新二进制先写到 `api.new`，再改名覆盖。直接写入正在运行的二进制会因为 `Text file busy` 失败。
-- 迁移用 `systemd-run` 执行，它使用和服务相同的用户、环境变量和工作目录，以迁移的退出码结束，迁移失败时脚本就此停止。不要把迁移写进 unit 的 `ExecStartPre`：这样进程每次崩溃重启都会再执行一次迁移，分开运行时三个实例还会同时执行。
-- `restart` 先停止旧进程，再启动新进程，这期间 HTTP 服务不可用。需要不中断服务时，部署两台机器放在负载均衡之后，一台一台地发布。
+- 新二进制先写到 `api.new`，用它检查配置，再改名覆盖。直接写入正在运行的二进制会因为 `Text file busy` 失败。
+- `run` 用 `systemd-run` 执行一次性命令，它使用和服务相同的用户、环境变量和工作目录，以命令的退出码结束，失败时脚本就此停止。不要把迁移写进 unit 的 `ExecStartPre`：这样进程每次崩溃重启都会再执行一次迁移，分开运行时三个实例还会同时执行。
+- `reload` 让每个 unit 不停机地换成新版本，见下一节。新版本起不来时旧版本继续运行，`reload` 仍然返回成功，所以脚本检查 `Status` 行：以 `upgrade failed` 开头就是升级失败，后面是原因。
+
+<a id="zero-downtime-upgrades"></a>
+## 不停机升级
+
+`systemctl reload` 时，正在运行的进程用磁盘上的新二进制启动一个新进程，把监听端口交给它。新进程按[依赖装配](dependencies.md#assembling-the-application)的顺序打开数据库、装配全部运行部分，然后报告就绪；旧进程这时才开始平滑停止：排空请求，等待处理中的队列任务和定时任务。监听端口始终没有关闭，升级期间的请求不会失败。
+
+新进程在报告就绪之前退出，或者一分钟内没有就绪，就会被结束，旧进程继续服务。配置写错、数据库连不上、路由冲突、定时任务的表达式写错，都属于这种情况。
+
+这项功能由 `command.Daemon` 提供，只在设置了 `RuntimeDirectory=` 的 systemd `Type=notify-reload` 服务中启用，unit 文件见[上文](#systemd)。在开发环境、容器中运行时，应用的行为不变。上一次升级的旧进程还在排空时，`reload` 先等它退出，再开始这一次升级；systemd 等待 `reload` 的时间受 `TimeoutStartSec`（默认 90 秒）限制。
+
+<a id="upgrade-overlap"></a>
+### 新旧进程同时运行
+
+新进程就绪之后，旧进程还要排空一段时间：请求最多 `http.shutdown_timeout`，队列任务最多 `queue.shutdown_timeout`，进行中的 [AI 回答](ai.md#deployment)可能更久。这段时间相当于部署了两个实例，各部分要按[多个实例](#process-forms)选择存储：
+
+| 部分 | 升级时 | 需要 |
+| --- | --- | --- |
+| HTTP 服务 | 新连接由新进程处理，旧进程排空已有的请求 | 无 |
+| 队列 worker | 新进程开始领取任务，旧进程停止领取并等待处理中的任务，超时的任务交给新进程重新执行 | 处理函数能安全地重复执行，见[队列](queue.md) |
+| 调度器 | 新旧调度器短暂同时运行 | 数据库或 Redis 锁存储。使用 `lock.NewMemoryStore()` 时，同一次触发可能执行两次 |
+| 服务端推送 | 浏览器重连到新进程 | `broadcast.NewDatabase` 等共享后端。使用 `broadcast.Memory()` 时，旧进程中还没结束的请求和任务发布的事件收不到 |
+| AI 回答 | 旧进程等进行中的回答说完 | 配置 `ai.Cluster` 时浏览器重连后继续接收；否则回答说完后保存在对话中 |
+
+数据库存储在 SQLite 上同样可用，应用仍然只需要一个数据库文件。另外，同时运行期间数据库连接数是平时的两倍，`max_open_conns` 的两倍应当在数据库的连接上限之内。
+
+<a id="upgrade-limits"></a>
+### 限制
+
+- `reload` 重新读取配置文件，但新进程继承旧进程的环境变量，修改 `/etc/blog/env` 或 unit 文件之后要执行 `restart`。
+- 新进程在报告就绪之后崩溃，systemd 按 `Restart=` 用磁盘上的新二进制重启它，不会回到旧版本。
+- 旧进程排空期间，`systemctl status` 显示的主进程仍是旧进程，它退出后才换成新进程。
+- 机器重启、内核升级仍然会中断服务。需要避免这种中断时，部署多台机器放在负载均衡之后。
 
 <a id="docker"></a>
 ## 使用 Docker 运行
@@ -251,6 +298,8 @@ services:
 
 `stop_grace_period` 不能省略：Docker 默认只等 10 秒就发送 `SIGKILL`，比队列和调度器默认的 `shutdown_timeout` 还短。一体运行时把三个服务换成一个运行 `start` 的服务即可。
 
+容器中不使用 `reload`：镜像不可变，升级就是换一个新容器。需要不中断服务时，让部署平台先启动新容器，等 `/readyz` 返回成功再停止旧容器，例如 [Kamal](https://kamal-deploy.org)、Docker Swarm 的 `update_config.order: start-first`、Kubernetes 的 `maxUnavailable: 0`。新旧容器同时运行时，同样要满足[上一节](#upgrade-overlap)的条件。
+
 <a id="health-checks"></a>
 ## 健康检查
 
@@ -266,7 +315,7 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 
 部署平台在停止实例时通常会发送 `SIGTERM`。请确保这个信号能传递到应用进程——例如在容器中直接以应用二进制作为入口进程，而不是通过一个不转发信号的 shell 脚本启动。
 
-收到信号后，`httpx.ListenAndServe` 会开始排空请求，详见[请求生命周期](lifecycle.md#graceful-shutdown)。配置停机时间时请注意：
+收到信号后，`httpx.Serve` 会开始排空请求，详见[请求生命周期](lifecycle.md#graceful-shutdown)。配置停机时间时请注意：
 
 - `http.shutdown_timeout` 决定了排空请求的最长时间；`queue.shutdown_timeout` 决定了 worker 等待处理中任务的最长时间；`schedule.shutdown_timeout` 决定了调度器等待执行中任务的最长时间；
 - 一体运行时三者同时开始停止，停机时间取其中最长的一个，而不是相加；

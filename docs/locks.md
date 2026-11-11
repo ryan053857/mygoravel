@@ -33,7 +33,7 @@ locker := lock.New(lock.NewMemoryStore())
 publishScheduled := article.NewPublishScheduled(db, locker)
 ```
 
-`lock.New` 接收锁存储。`MemoryStore` 只在同一进程内互斥，适合开发、测试和单实例部署；多实例部署请使用[数据库存储](#database-store)或 [Redis 存储](#redis-store)。
+`lock.New` 接收锁存储。`MemoryStore` 只在同一进程内互斥，适合开发、测试和单实例部署；多实例部署，以及使用[不停机升级](deployment.md#upgrade-overlap)时，请使用[数据库存储](#database-store)或 [Redis 存储](#redis-store)。
 
 <a id="running-once"></a>
 ## 只让一个实例执行

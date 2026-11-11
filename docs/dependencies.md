@@ -100,8 +100,14 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
     }, nil
 }
 
-// run 装配 App，然后在同一个进程中运行 parts，直到收到停止信号。
-func run(ctx context.Context, cfg settings.Config, parts ...func(*App, context.Context) error) (err error) {
+// run 装配 App 和 parts，然后在同一个进程中运行 parts，直到收到停止信号。
+func run(ctx context.Context, cfg settings.Config, parts ...func(*App, *command.Daemon) (func(context.Context) error, error)) (err error) {
+    d, err := command.NewDaemon(nil)
+    if err != nil {
+        return err
+    }
+    defer d.Stop()
+
     var stack cleanup.Stack
     defer func() {
         err = stack.CloseWith(context.Background(), err)
@@ -113,9 +119,11 @@ func run(ctx context.Context, cfg settings.Config, parts ...func(*App, context.C
     }
     runs := make([]func(context.Context) error, len(parts))
     for i, part := range parts {
-        runs[i] = func(ctx context.Context) error { return part(app, ctx) }
+        if runs[i], err = part(app, d); err != nil {
+            return err
+        }
     }
-    return command.Concurrently(ctx, runs...)
+    return d.Run(ctx, runs...)
 }
 
 // Serve 只运行 HTTP 服务，serve 命令调用它。
@@ -142,6 +150,7 @@ import (
     "example.com/blog/internal/article"
     "example.com/blog/internal/auth"
     "github.com/go-chi/chi/v5"
+    "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/uptrace/bun"
@@ -170,8 +179,8 @@ func DocRouter() chi.Routes {
     return router
 }
 
-// HTTP 安装中间件、注册路由并开始监听，直到 ctx 被取消。
-func (a *App) HTTP(ctx context.Context) error {
+// HTTP 安装中间件、注册路由并取得监听端口，返回的函数运行 HTTP 服务，直到 ctx 被取消。
+func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
     router := chi.NewRouter()
     router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
     router.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
@@ -179,7 +188,14 @@ func (a *App) HTTP(ctx context.Context) error {
     opts.Router = router
     api := rest.New(opts)
     Routes(api, auth.Validator(a.cfg.Auth), a.db)
-    return httpx.ListenAndServe(ctx, a.cfg.HTTP, api.Handler(), httpx.ServeOptions{})
+
+    ln, err := d.Listen("tcp", a.cfg.HTTP.Addr)
+    if err != nil {
+        return nil, err
+    }
+    return func(ctx context.Context) error {
+        return httpx.Serve(ctx, a.cfg.HTTP, ln, api.Handler(), httpx.ServeOptions{})
+    }, nil
 }
 ```
 
@@ -187,7 +203,7 @@ func (a *App) HTTP(ctx context.Context) error {
 
 整个过程就是普通的函数调用：先创建被依赖的对象，再创建依赖它们的对象。数据库、缓存、锁这类多个运行部分都用到的资源放进 `open`；只有某个部分用到的，例如 HTTP 中间件，在它自己的方法里创建。`run` 返回之前，`defer` 中的 `stack.CloseWith` 不会执行，因此正在处理的请求不会因为数据库提前关闭而失败。请求处理与停机的完整顺序见[请求生命周期](lifecycle.md)。
 
-`run` 可以同时运行多个部分，`command.Concurrently` 让它们共用一个 `ctx`，一个出错时其余的一起停止。把 HTTP 服务、队列和定时任务放在一个进程中运行，见[在一个进程中运行多个部分](commands.md#running-together)。
+每个运行部分分两步：方法先装配好它需要的一切，包括取得监听端口，再返回运行它的函数。`run` 装配完全部部分之后才调用 `d.Run`，`d.Run` 报告进程已经就绪，再用 `command.Concurrently` 同时运行它们，让它们共用一个 `ctx`，一个出错时其余的一起停止。装配阶段的错误（例如路由冲突、端口被占用）在开始运行之前就返回，[不停机升级](deployment.md#zero-downtime-upgrades)时出错的新版本不会接管服务。把 HTTP 服务、队列和定时任务放在一个进程中运行，见[在一个进程中运行多个部分](commands.md#running-together)。
 
 > [!TIP]
 > 入口只打开当前命令真正需要的资源。例如 `serve` 命令需要数据库和 HTTP 监听，而 `openapi`、`routes` 命令不需要这些资源，它们直接使用 `API` 和 `DocRoutes`，不调用 `open`。

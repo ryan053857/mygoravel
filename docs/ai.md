@@ -643,11 +643,17 @@ runs := ai.NewRuns("blog", agent, sessions,
 )
 ```
 
-worker 进程在处理队列的同时调用 `runs.Serve`，`a.handleJobs` 是原来 `Worker` 中处理[队列](queue.md#running-workers)的部分：
+worker 进程在处理队列的同时调用 `runs.Serve`，`a.jobs` 是原来装配[队列 worker](queue.md#running-workers) 的 `Worker` 方法：
 
 ```go
-func (a *App) Worker(ctx context.Context) error {
-    return command.Concurrently(ctx, a.handleJobs, a.runs.Serve)
+func (a *App) Worker(d *command.Daemon) (func(context.Context) error, error) {
+    jobs, err := a.jobs(d)
+    if err != nil {
+        return nil, err
+    }
+    return func(ctx context.Context) error {
+        return command.Concurrently(ctx, jobs, a.runs.Serve)
+    }, nil
 }
 ```
 

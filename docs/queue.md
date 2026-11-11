@@ -155,21 +155,24 @@ import (
     "context"
 
     "example.com/blog/internal/settings"
+    "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/queue"
 )
 
-// Worker 处理队列任务，直到 ctx 被取消。
-func (a *App) Worker(ctx context.Context) error {
+// Worker 装配队列 worker，返回的函数处理队列任务，直到 ctx 被取消。
+func (a *App) Worker(*command.Daemon) (func(context.Context) error, error) {
     mailer, err := newMailer(a.cfg.Mail)
     if err != nil {
-        return err
+        return nil, err
     }
 
     sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil)
-    defer sub.Close()
     router := queue.NewRouter(nil)
     queue.Handle(router, sub, "mail.send", mailer.Send)
-    return router.Run(ctx)
+    return func(ctx context.Context) error {
+        defer sub.Close()
+        return router.Run(ctx)
+    }, nil
 }
 
 // Work 只运行队列 worker，work 命令调用它。
@@ -343,13 +346,16 @@ sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil, queue.WithMet
 队列中的任务数在采集时读取队列状态，每个注册了它的进程都会定期统计一次 `queue_jobs` 表。只在实例最少的那种进程中注册，通常是调度器：
 
 ```go
-func (a *App) Scheduler(ctx context.Context) error {
+func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
     reg, err := queue.ObserveJobs(a.meters, queue.Database(a.db), queue.NewFailedJobs(a.db))
     if err != nil {
-        return err
+        return nil, err
     }
-    defer reg.Unregister()
-    // ... 注册定时任务并运行
+    sched := a.tasks()
+    return func(ctx context.Context) error {
+        defer reg.Unregister()
+        return sched.Run(ctx)
+    }, nil
 }
 ```
 
