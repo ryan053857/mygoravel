@@ -207,6 +207,35 @@ func (c *client) membership() (kind string, info memberInfo) {
 	}
 }
 
+// noMembership 确认 d 之内没有 join 或 leave 事件。
+func (c *client) noMembership(d time.Duration) {
+	c.t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		for _, f := range c.pending {
+			if f.Push != nil && f.Push.Join != nil {
+				c.t.Fatalf("unexpected join of %s", f.Push.Join.Info.User)
+			}
+			if f.Push != nil && f.Push.Leave != nil {
+				c.t.Fatalf("unexpected leave of %s", f.Push.Leave.Info.User)
+			}
+		}
+		if err := c.read(time.Until(deadline)); errors.Is(err, context.DeadlineExceeded) {
+			return
+		} else if err != nil {
+			c.t.Fatalf("connection ended: %v", err)
+		}
+	}
+}
+
+// unsubscribe 主动取消订阅。
+func (c *client) unsubscribe(channel string) {
+	c.t.Helper()
+	if reply := c.call(map[string]any{"unsubscribe": map[string]any{"channel": channel}}); reply.Error != nil {
+		c.t.Fatalf("unsubscribe %s: %+v", channel, reply.Error)
+	}
+}
+
 // presence 读取频道的在线成员，返回每个主体的连接数。
 func (c *client) presence(channel string) (map[string]int, *protoError) {
 	c.t.Helper()

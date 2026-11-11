@@ -62,7 +62,8 @@ func editors(_ context.Context, sub identity.Subject, p realtime.Params) (any, b
 
 func TestPresenceChannel(t *testing.T) {
 	store := &tokens{}
-	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate}, nil)
+	// 不保留在线记录，离开事件立即发出；宽限期见 TestPresenceGrace。
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, PresenceGrace: -1}, nil)
 	n.rt.Channel("editing:{article}", realtime.Presence(editors))
 	n.rt.Channel("articles", realtime.Public())
 	ctx := context.Background()
@@ -73,16 +74,15 @@ func TestPresenceChannel(t *testing.T) {
 		t.Fatalf("own join = %s %+v", kind, m)
 	}
 
-	// 同一个主体的第二个连接和另一个主体加入：已经在频道中的连接收到 join。
+	// 事件按主体发出：同一个主体的第二个连接加入时没有事件，另一个主体加入时有。
 	tab := mustConnect(t, n.url, "alice", nil)
 	tab.mustSubscribe("editing:7")
 	bob := mustConnect(t, n.url, "bob", nil)
 	bob.mustSubscribe("editing:7")
-	for _, want := range []string{"alice", "bob"} {
-		if kind, m := alice.membership(); kind != "join" || m.User != want {
-			t.Fatalf("join = %s %+v, want %s", kind, m, want)
-		}
+	if kind, m := alice.membership(); kind != "join" || m.User != "bob" {
+		t.Fatalf("join = %s %+v, want bob", kind, m)
 	}
+	tab.noMembership(0) // 第二个连接没有收到自己的 join
 
 	if users, err := bob.presence("editing:7"); err != nil || len(users) != 2 || users["alice"] != 2 || users["bob"] != 1 {
 		t.Fatalf("presence = %v, %+v", users, err)
@@ -101,17 +101,18 @@ func TestPresenceChannel(t *testing.T) {
 		t.Fatalf("members of another channel = %+v, %v", members, err)
 	}
 
-	// 一个标签页关闭：收到 leave，主体仍然在线；最后一个连接断开后不再在线。
-	tab.close()
+	// 一个标签页关闭时主体仍然在线，没有事件；最后一个连接断开后发出 leave。
 	if kind, m := bob.membership(); kind != "join" || m.User != "bob" {
 		t.Fatalf("bob's own join = %s %+v", kind, m)
 	}
-	if kind, m := bob.membership(); kind != "leave" || m.User != "alice" {
-		t.Fatalf("leave = %s %+v", kind, m)
+	tab.close()
+	bob.noMembership(150 * time.Millisecond)
+	if members, err := n.rt.Members(ctx, "editing:7"); err != nil || len(members) != 2 || members[0].Connections != 1 {
+		t.Fatalf("members after closing one tab = %+v, %v", members, err)
 	}
 	alice.close()
 	if kind, m := bob.membership(); kind != "leave" || m.User != "alice" {
-		t.Fatalf("second leave = %s %+v", kind, m)
+		t.Fatalf("leave = %s %+v", kind, m)
 	}
 	if members, err := n.rt.Members(ctx, "editing:7"); err != nil || len(members) != 1 || members[0].ID != "bob" {
 		t.Fatalf("members after alice left = %+v, %v", members, err)
@@ -134,14 +135,15 @@ func TestPresenceChannel(t *testing.T) {
 	}
 }
 
-// 两个实例使用数据库的广播和在线成员存储：成员互相可见，在另一个实例上取消订阅时发出 leave。
+// 两个实例使用数据库的广播和在线成员存储：成员互相可见，重连到另一个实例时没有事件，
+// 在另一个实例上取消订阅时（宽限期之后）发出 leave。
 // 取消订阅的控制消息在 Hub 的投递中到达，离开事件又要发布到 Hub，这里确认两者不会互相等待。
 func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		hubDB := dbtesting.Open(t, driver, broadcast.Migrations())
 		presence := realtime.NewDatabasePresence(dbtesting.Open(t, driver, realtime.Migrations()))
 		store := &tokens{}
-		opts := realtime.Options{Authenticate: store.validate, Presence: presence}
+		opts := realtime.Options{Authenticate: store.validate, Presence: presence, PresenceGrace: 300 * time.Millisecond}
 		a := start(t, broadcast.NewDatabase(hubDB, nil), opts, nil)
 		b := start(t, broadcast.NewDatabase(hubDB, nil), opts, nil)
 		broadcasttest.Ready(t, a.hub, b.hub)
@@ -152,6 +154,9 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 		alice, bob := mustConnect(t, a.url, "alice", nil), mustConnect(t, b.url, "bob", nil)
 		alice.mustSubscribe("editing:7")
 		alice.membership() // 自己的 join
+		// 等 b 读到 alice 的 join 之后 bob 再订阅：数据库后端按轮询投递其他实例的消息，
+		// 否则这条稍早的 join 可能在 bob 订阅之后才到达 b。
+		broadcasttest.Ready(t, a.hub, b.hub)
 		bob.mustSubscribe("editing:7")
 		if kind, m := alice.membership(); kind != "join" || m.User != "bob" {
 			t.Fatalf("join from the other instance = %s %+v", kind, m)
@@ -162,6 +167,15 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 		if members, err := a.rt.Members(context.Background(), "editing:7"); err != nil || len(members) != 2 {
 			t.Fatalf("members = %+v, %v", members, err)
 		}
+
+		// alice 断开后在宽限期内重连到另一个实例：bob 看不到离开和加入，alice 也收不到自己的 join。
+		if kind, m := bob.membership(); kind != "join" || m.User != "bob" {
+			t.Fatalf("bob's own join = %s %+v", kind, m)
+		}
+		alice.close()
+		alice = mustConnect(t, b.url, "alice", nil)
+		alice.mustSubscribe("editing:7")
+		bob.noMembership(600 * time.Millisecond)
 
 		if err := a.rt.Unsubscribe("bob", "editing:7"); err != nil {
 			t.Fatal(err)
@@ -176,4 +190,108 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 			t.Fatalf("members after unsubscribe = %+v, %v", members, err)
 		}
 	})
+}
+
+// 连接离开后在线记录保留一个宽限期：期间主体重新加入时没有事件，期满仍然没有连接才发出 leave。
+func TestPresenceGrace(t *testing.T) {
+	const grace = 300 * time.Millisecond
+	store := &tokens{}
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, PresenceGrace: grace}, nil)
+	n.rt.Channel("editing:{article}", realtime.Presence(editors))
+	ctx := context.Background()
+	members := func() []realtime.Member {
+		t.Helper()
+		m, err := n.rt.Members(ctx, "editing:7")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	bob := mustConnect(t, n.url, "bob", nil)
+	bob.mustSubscribe("editing:7")
+	bob.membership() // 自己的 join
+	alice := mustConnect(t, n.url, "alice", nil)
+	alice.mustSubscribe("editing:7")
+	if kind, m := bob.membership(); kind != "join" || m.User != "alice" {
+		t.Fatalf("join = %s %+v", kind, m)
+	}
+
+	// 断开后在宽限期内用新的连接重新加入：没有 leave，也没有 join，期间一直在成员列表中。
+	alice.close()
+	time.Sleep(grace / 3)
+	if m := members(); len(m) != 2 {
+		t.Fatalf("members during the grace period = %+v", m)
+	}
+	alice = mustConnect(t, n.url, "alice", nil)
+	alice.mustSubscribe("editing:7")
+	bob.noMembership(2 * grace)
+	if m := members(); len(m) != 2 || m[0].ID != "alice" || m[0].Connections != 1 {
+		t.Fatalf("members after rejoining = %+v", m)
+	}
+
+	// 同一个连接取消订阅后在宽限期内重新订阅：同样没有事件，在线记录也没有被删除。
+	alice.unsubscribe("editing:7")
+	alice.mustSubscribe("editing:7")
+	bob.noMembership(2 * grace)
+	if m := members(); len(m) != 2 {
+		t.Fatalf("members after resubscribing = %+v", m)
+	}
+
+	// 离开后没有回来：宽限期内没有事件，期满后发出 leave，并从成员列表中消失。
+	left := time.Now()
+	alice.close()
+	bob.noMembership(grace / 2)
+	if kind, m := bob.membership(); kind != "leave" || m.User != "alice" {
+		t.Fatalf("leave = %s %+v", kind, m)
+	}
+	if waited := time.Since(left); waited < grace {
+		t.Fatalf("leave arrived after %v, before the grace period of %v", waited, grace)
+	}
+	if m := members(); len(m) != 1 || m[0].ID != "bob" {
+		t.Fatalf("members after the grace period = %+v", m)
+	}
+
+	// 宽限期满之后再加入，是一次新的 join。
+	alice = mustConnect(t, n.url, "alice", nil)
+	alice.mustSubscribe("editing:7")
+	if kind, m := bob.membership(); kind != "join" || m.User != "alice" {
+		t.Fatalf("join after the grace period = %s %+v", kind, m)
+	}
+}
+
+// 实例停止时不发离开事件：它上面的成员会重连到其他实例，在线记录保留到自行过期。
+func TestShutdownDoesNotAnnounceLeaves(t *testing.T) {
+	b := &bus{}
+	presence := realtime.NewMemoryPresence()
+	store := &tokens{}
+	opts := realtime.Options{Authenticate: store.validate, Presence: presence, PresenceGrace: 100 * time.Millisecond}
+	stopping := start(t, b.backend(), opts, nil)
+	other := start(t, b.backend(), opts, nil)
+	for _, n := range []*node{stopping, other} {
+		n.rt.Channel("editing:{article}", realtime.Presence(editors))
+	}
+	bob := mustConnect(t, other.url, "bob", nil)
+	bob.mustSubscribe("editing:7")
+	bob.membership() // 自己的 join
+	alice := mustConnect(t, stopping.url, "alice", nil)
+	alice.mustSubscribe("editing:7")
+	if kind, m := bob.membership(); kind != "join" || m.User != "alice" {
+		t.Fatalf("join = %s %+v", kind, m)
+	}
+
+	if err := stopping.rt.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if code := alice.closed(); code != 3001 {
+		t.Fatalf("closed with %d", code)
+	}
+	bob.noMembership(400 * time.Millisecond)
+	if m, err := other.rt.Members(context.Background(), "editing:7"); err != nil || len(m) != 2 {
+		t.Fatalf("members after the other instance stopped = %+v, %v", m, err)
+	}
+	// 重连到另一个实例，仍然没有事件。
+	alice = mustConnect(t, other.url, "alice", nil)
+	alice.mustSubscribe("editing:7")
+	bob.noMembership(300 * time.Millisecond)
 }

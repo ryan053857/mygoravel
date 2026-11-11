@@ -42,6 +42,8 @@ type bridge struct {
 	pubs centrifuge.BrokerEventHandler
 	ctl  centrifuge.ControlEventHandler
 
+	members *membership
+
 	// 控制消息和丢失消息的处理可能再向 Hub 发布（例如断开连接时的离开事件），
 	// 而 deliver 在 Hub 的投递中调用，不能发布，所以它们排队交给 run 处理，保持先后顺序。
 	mu    sync.Mutex
@@ -115,12 +117,13 @@ func (b *bridge) Publish(ch string, data []byte, opts centrifuge.PublishOptions)
 	return centrifuge.PublishResult{}, b.send(ctx, envelope{Kind: kindPublish, Channel: ch, Data: data, Info: opts.ClientInfo})
 }
 
+// PublishJoin 和 PublishLeave 交给 membership 决定是否发出、何时发出。
 func (b *bridge) PublishJoin(ch string, info *centrifuge.ClientInfo) error {
-	return b.sendNow(envelope{Kind: kindJoin, Channel: ch, Info: info})
+	return b.members.join(ch, info)
 }
 
 func (b *bridge) PublishLeave(ch string, info *centrifuge.ClientInfo) error {
-	return b.sendNow(envelope{Kind: kindLeave, Channel: ch, Info: info})
+	return b.members.leave(ch, info)
 }
 
 func (b *bridge) PublishControl(data []byte, nodeID, _ string) error {

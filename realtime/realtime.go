@@ -45,6 +45,9 @@ type Options struct {
 	// Presence 保存 presence 频道的在线成员，所有实例共用同一个存储：NewDatabasePresence 或 redispresence.New。
 	// nil 时保存在进程内存中，只适合单实例部署。
 	Presence PresenceStore
+	// PresenceGrace 是连接离开 presence 频道后保留在线记录的时间：期间主体重新加入时，
+	// 其他成员看不到离开和加入。零值为 DefaultPresenceGrace（10 秒），负数表示不保留。
+	PresenceGrace time.Duration
 	// MeterProvider 非 nil 时记录 realtime.connections 和 realtime.subscriptions 两个指标。
 	MeterProvider metric.MeterProvider
 	// Logger 记录连接和授权中的错误；nil 表示 slog.Default()。
@@ -103,7 +106,8 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 	b := newBridge(hub, node)
 	node.SetBroker(b)
 	node.SetController(b)
-	node.SetPresenceManager(presenceManager{store: rt.presence})
+	b.members = newMembership(opts.PresenceGrace, rt.presence, b.sendNow, rt.logger)
+	node.SetPresenceManager(presenceManager{store: rt.presence, members: b.members})
 	node.OnConnecting(rt.connecting)
 	node.OnConnect(rt.connected)
 	if err := node.Run(); err != nil {
@@ -112,6 +116,7 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 	go b.run()
 	unlisten := hub.Listen(b.deliver, b.lost)
 	rt.stop = func() {
+		b.members.close()
 		unlisten()
 		b.stop()
 	}

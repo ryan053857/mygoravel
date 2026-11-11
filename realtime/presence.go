@@ -29,8 +29,12 @@ type PresenceAuthorizer func(ctx context.Context, sub identity.Subject, p Params
 // 此外订阅者是频道的在线成员，彼此可以看到：客户端 SDK 能取得成员列表，并在成员加入、离开时收到事件。
 // 服务端用 Realtime.Members 查询。authorize 为 nil 时 panic。
 //
-// 同一个主体的每个连接（例如多个标签页）各算一次加入和离开，客户端按主体 ID 合并。
-// 连接正常断开时立即发出离开事件；实例崩溃时没有离开事件，成员在一分钟内从列表中消失。
+// 加入和离开事件按主体发出：主体的第一个连接加入时发出加入事件，之后的连接（例如另一个标签页）不再发；
+// 连接离开后在线记录保留 Options.PresenceGrace，期满时主体没有其他连接才发出离开事件。
+// 所以网络闪断后重连、刷新页面，其他成员都看不到离开和加入。主动取消订阅和 Realtime.Unsubscribe 同样经过宽限期。
+//
+// 事件可能重复（例如两个连接同时加入），客户端按主体 ID 处理。实例停止或崩溃时不发离开事件：
+// 重连到其他实例的成员保持在线，没有重连的成员在一分钟内从列表中消失，页面应当定期读取成员列表。
 func Presence(authorize PresenceAuthorizer) Rule {
 	if authorize == nil {
 		panic("realtime: nil presence authorizer")
@@ -91,19 +95,19 @@ func (rt *Realtime) Members(ctx context.Context, channel string) ([]Member, erro
 
 // presenceManager 用 PresenceStore 实现 centrifuge.PresenceManager。
 type presenceManager struct {
-	store PresenceStore
+	store   PresenceStore
+	members *membership
 }
 
 func (m presenceManager) AddPresence(ch, clientID string, info *centrifuge.ClientInfo) error {
 	ctx, cancel := context.WithTimeout(context.Background(), presenceTimeout)
 	defer cancel()
+	m.members.refreshed(ch, clientID)
 	return m.store.Add(ctx, PresenceEntry{Channel: ch, Client: clientID, Subject: info.UserID, Info: info.ChanInfo}, presenceTTL)
 }
 
 func (m presenceManager) RemovePresence(ch, clientID, _ string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), presenceTimeout)
-	defer cancel()
-	return m.store.Remove(ctx, ch, clientID)
+	return m.members.remove(ch, clientID)
 }
 
 func (m presenceManager) Presence(ch string) (map[string]*centrifuge.ClientInfo, error) {
