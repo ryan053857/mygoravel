@@ -23,8 +23,6 @@ const (
 	runningTTL = time.Minute
 	// maxLag 是调度循环落后时补算的最长时间，超过后跳过错过的触发。
 	maxLag = time.Minute
-	// shutdownTimeout 是停止时等待执行中的任务的最长时间，超时后取消它们的 ctx。
-	shutdownTimeout = 30 * time.Second
 )
 
 // MaxNameLength 是任务名的最大字节数。调度器的锁名是 "schedule:<任务名>:<触发时刻的 Unix 秒>"，
@@ -68,14 +66,18 @@ func In(loc *time.Location) Option { return func(t *task) { t.loc = loc } }
 
 // New 创建调度器。locker 用于多实例去重和防止重叠：多实例部署时使用数据库或 Redis 存储，
 // 单实例部署使用 lock.NewMemoryStore。logger 为 nil 时使用 slog.Default()。
-func New(locker *lock.Locker, logger *slog.Logger) *Scheduler {
+// locker 为 nil 或 cfg 不合法时 panic。
+func New(locker *lock.Locker, cfg Config, logger *slog.Logger) *Scheduler {
 	if locker == nil {
 		panic("schedule: nil locker")
+	}
+	if err := cfg.Validate(); err != nil {
+		panic(errors.Wrap(err, "schedule"))
 	}
 	return &Scheduler{
 		locker:          locker,
 		logger:          logging.Or(logger).With(logging.AttrComponent, "schedule"),
-		shutdownTimeout: shutdownTimeout,
+		shutdownTimeout: cfg.ShutdownTimeout,
 	}
 }
 
@@ -118,7 +120,7 @@ func (s *Scheduler) Add(name, expr string, run func(ctx context.Context) error, 
 //
 // 调度落后（例如进程被暂停）不到一分钟时补算错过的触发，同一个任务只补执行一次；
 // 落后更久时跳过错过的触发。ctx 取消后不再触发新任务，等待执行中的任务结束，
-// 最多等待 30 秒，超时后取消它们的 ctx。Run 只能调用一次。
+// 最多等待 Config.ShutdownTimeout，超时后取消它们的 ctx。Run 只能调用一次。
 func (s *Scheduler) Run(ctx context.Context) error {
 	tasks, err := s.start()
 	if err != nil {
@@ -178,7 +180,7 @@ func (s *Scheduler) start() ([]*task, error) {
 	return s.tasks, nil
 }
 
-// wait 等待执行中的任务结束，超过 shutdownTimeout 时取消它们的 ctx 后继续等待。
+// wait 等待执行中的任务结束，超过 ShutdownTimeout 时取消它们的 ctx 后继续等待。
 func (s *Scheduler) wait(wg *sync.WaitGroup, cancel context.CancelFunc) {
 	done := make(chan struct{})
 	go func() {

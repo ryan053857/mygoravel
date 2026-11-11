@@ -2,6 +2,7 @@ package database_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/ryan053857/mygoravel/database/migrate"
 	"github.com/ryan053857/mygoravel/database/postgres"
 	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/errorx"
 )
 
 func TestConfigValidate(t *testing.T) {
@@ -83,6 +85,19 @@ func TestOpenRunsConfigurationChecks(t *testing.T) {
 		if db != nil || validation == nil || err == nil || err.Error() != "database: "+validation.Error() {
 			t.Fatalf("validation=%v open=%v db=%v", validation, err, db)
 		}
+	}
+}
+
+func TestOpenReportsUnreachableDatabaseAsUnavailable(t *testing.T) {
+	// 端口 1 上没有 PostgreSQL，连接会立即被拒绝
+	cfg := database.DefaultConfig()
+	cfg.DSN = "postgres://postgres@127.0.0.1:1/blog?sslmode=disable&connect_timeout=2"
+	db, err := database.Open(context.Background(), postgres.Driver, cfg)
+	if db != nil || !errors.Is(err, database.ErrUnavailable) || errorx.KindOf(err) != errorx.Unavailable {
+		t.Fatalf("db=%v err=%v kind=%v", db, err, errorx.KindOf(err))
+	}
+	if !strings.Contains(err.Error(), "database: ping") {
+		t.Fatalf("err = %q, want the ping failure", err)
 	}
 }
 

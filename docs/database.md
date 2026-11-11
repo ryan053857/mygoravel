@@ -148,7 +148,7 @@ URL 上的查询参数原样交给 go-sql-driver/mysql，例如 `?tls=true`。�
 <a id="connecting"></a>
 ## 连接数据库
 
-使用 `database.Open` 打开连接池，第二个参数是应用使用的数据库驱动。它会立即 Ping 数据库确认连通，失败时自动释放已打开的资源。下面是一个完整的连接检查函数：
+使用 `database.Open` 打开连接池，第二个参数是应用使用的数据库驱动。它会立即 Ping 数据库确认连通，失败时自动释放已打开的资源，并返回 `database.ErrUnavailable`。这个错误属于 `errorx.Unavailable` 分类，命令因此以 `ExitUnavailable` 退出，部署脚本可以据此重试，见[退出码](commands.md#exit-codes)。下面是一个完整的连接检查函数：
 
 ```go
 package storage

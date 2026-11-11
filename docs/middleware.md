@@ -30,8 +30,8 @@ mygoravel 的中间件都是标准的 `func(http.Handler) http.Handler`，安装
 
 ```go
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
-router.Use(httpx.Timeout(cfg.HTTP.Timeout))
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+router.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
 
 api := rest.New(rest.Options{Router: router})
 ```
@@ -119,9 +119,9 @@ http:
 把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值并校验），再把它交给 `httpx.Defaults` 和 `httpx.ListenAndServe`：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 // ...
-return httpx.ListenAndServe(ctx, cfg.HTTP, api.Handler(), httpx.ServeOptions{})
+return httpx.ListenAndServe(ctx, a.cfg.HTTP, api.Handler(), httpx.ServeOptions{})
 ```
 
 不经过 `config.Load` 时（例如在测试中），请从 `httpx.DefaultConfig()` 开始修改。零值的 `httpx.Config{}` 不合法，`httpx.Defaults` 会 panic，`httpx.ListenAndServe` 会返回错误。
@@ -217,8 +217,8 @@ http:
 `httpx.RateLimit` 按客户端限制请求频率，超出时返回 `429`。它不在默认中间件中，需要时在 `httpx.Defaults` 之后安装：
 
 ```go
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
-router.Use(httpx.RateLimit(ratelimit.NewMemory(cfg.HTTP.RateLimit), httpx.KeyByIP))
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+router.Use(httpx.RateLimit(ratelimit.NewMemory(a.cfg.HTTP.RateLimit), httpx.KeyByIP))
 ```
 
 参数来自 `http.rate_limit` 段。限流的 key、配额参数、在处理器中按用户限流以及多实例共享计数，见[限流](rate-limiting.md)。
@@ -232,13 +232,13 @@ router.Use(httpx.RateLimit(ratelimit.NewMemory(cfg.HTTP.RateLimit), httpx.KeyByI
 
 ```go
 router.Use(
-    httpx.AssignRequestID(cfg.HTTP.RequestID),
+    httpx.AssignRequestID(a.cfg.HTTP.RequestID),
     httpx.NoSniff(),
-    httpx.ClientIP(cfg.HTTP.ClientIP),
-    httpx.AccessLog(cfg.HTTP.AccessLog, nil),
+    httpx.ClientIP(a.cfg.HTTP.ClientIP),
+    httpx.AccessLog(a.cfg.HTTP.AccessLog, nil),
     httpx.Recover(nil),
     func(next http.Handler) http.Handler {
-        small := httpx.BodyLimit(cfg.HTTP.BodyLimit)(next)
+        small := httpx.BodyLimit(a.cfg.HTTP.BodyLimit)(next)
         large := httpx.BodyLimit(httpx.BodyLimitConfig{MaxBytes: 20 << 20})(next)
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             if strings.HasPrefix(r.URL.Path, "/uploads/") {
@@ -269,7 +269,7 @@ router.Use(
 var readOnly atomic.Bool // 由运维开关控制，例如收到某个信号时切换
 
 router := chi.NewRouter()
-router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 router.Use(func(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if readOnly.Load() && r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -323,5 +323,5 @@ requireArticles(&legacy)
 这些中间件不依赖 `rest` 包。如果你有一个普通的 `http.Handler`（例如标准库的 `http.ServeMux`），可以用 `chi.Chain` 为它安装：
 
 ```go
-handler := chi.Chain(httpx.Defaults(cfg.HTTP, nil, nil)...).Handler(mux)
+handler := chi.Chain(httpx.Defaults(a.cfg.HTTP, nil, nil)...).Handler(mux)
 ```

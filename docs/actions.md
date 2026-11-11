@@ -260,7 +260,7 @@ func Commands(db *bun.DB) *cobra.Command {
 }
 ```
 
-构造命令行时还没有加载配置，也没有打开数据库。`command.Bind` 解决这个问题：它先用零值的依赖调用一次声明函数，得到命令的名称、参数和选项；执行其中一个命令时，再加载配置、调用 `open` 装配依赖，用装配好的依赖重新声明，执行同一个命令的 `RunE`，命令返回后关闭资源。下面是完整的 `internal/bootstrap/commands.go`，`open` 就是[依赖装配](dependencies.md#assembling-the-application)一章中 `serve` 用的那个：
+构造命令行时还没有加载配置，也没有打开数据库。`command.Bind` 解决这个问题：它先用零值的依赖调用一次声明函数，得到命令的名称、参数和选项；执行其中一个命令时，再加载配置、调用 `open` 装配依赖，用装配好的依赖重新声明，执行同一个命令的 `RunE`，命令返回后关闭资源。下面是完整的 `internal/bootstrap/commands.go`，`open` 就是[依赖装配](dependencies.md#assembling-the-application)一章中 `serve` 用的那个。除了各模块的命令，需要数据库的其他命令也在这里声明，例如[队列状态](queue.md#stats-command)和[填充数据](migrations.md#seeding)：
 
 ```go
 package bootstrap
@@ -272,11 +272,13 @@ import (
     "github.com/ryan053857/mygoravel/command"
 )
 
-// Commands 返回各模块的命令，执行时才装配 App。
+// Commands 返回需要 App 的命令，执行时才装配 App。
 func Commands() []*cobra.Command {
     return command.Bind(open, func(a *App) []*cobra.Command {
         return []*cobra.Command{
             article.Commands(a.db),
+            queueCmd(a.db),
+            seed(a.db),
         }
     })
 }
@@ -293,7 +295,7 @@ func Commands() []*cobra.Command {
 <a id="direct-calls"></a>
 ### 页面、其他 action 和脚本
 
-其他地方直接调用 `Handle`。[页面处理器](views.md#rendering-pages)持有它用到的 action；[填充数据](migrations.md#seeding)的 `seed` 命令组合了多个动作，它不是某一个 action 的入口，所以直接调用 `Create` 和 `Publish`：
+其他地方直接调用 `Handle`。[页面处理器](views.md#rendering-pages)持有它用到的 action；[填充数据](migrations.md#seeding)的 `seed` 命令组合了多个动作，它不是某一个 action 的入口，所以直接调用 `Create` 和 `Publish` 的 `Handle`：
 
 ```go
 item, err := article.NewCreate(db).Handle(ctx, alice, changes)

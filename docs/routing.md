@@ -332,10 +332,10 @@ func toDTO(a *Article) ArticleDTO {
 
 ```go
 router.Route("/api/v1", func(r chi.Router) {
-    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
+    r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
     opts := API
     opts.Router, opts.BasePath = r, "/api/v1"
-    Routes(rest.New(opts), auth.Validator(cfg.Auth), articles)
+    Routes(rest.New(opts), auth.Validator(a.cfg.Auth), a.db)
 })
 ```
 
@@ -345,10 +345,10 @@ router.Route("/api/v1", func(r chi.Router) {
 
 ```go
 router.Route("/api/v2", func(r chi.Router) {
-    r.Use(httpx.Timeout(cfg.HTTP.Timeout))
+    r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
     opts := APIv2
     opts.Router, opts.BasePath = r, "/api/v2"
-    RoutesV2(rest.New(opts), auth.Validator(cfg.Auth), articles)
+    RoutesV2(rest.New(opts), auth.Validator(a.cfg.Auth), a.db)
 })
 ```
 

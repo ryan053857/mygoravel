@@ -24,7 +24,7 @@ func openLockDB(t *testing.T, driver database.Driver) *lock.Locker {
 func TestLongestNameFitsDatabaseLock(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		var n atomic.Int64
-		s := schedule.New(openLockDB(t, driver), nil)
+		s := schedule.New(openLockDB(t, driver), schedule.DefaultConfig(), nil)
 		s.Add(strings.Repeat("x", schedule.MaxNameLength), "@every 1s", counter(&n))
 		for _, at := range []time.Time{time.Unix(math.MaxInt64, 0), time.Unix(math.MinInt64+1, 0)} {
 			if err := s.RunDue(context.Background(), at); err != nil {
@@ -44,7 +44,7 @@ func TestDatabaseLockRunsOncePerTick(t *testing.T) {
 		var n atomic.Int64
 		scheds := make([]*schedule.Scheduler, 3)
 		for i := range scheds {
-			scheds[i] = schedule.New(lock.New(lock.NewDBStore(db)), nil)
+			scheds[i] = schedule.New(lock.New(lock.NewDBStore(db)), schedule.DefaultConfig(), nil)
 			scheds[i].Add("cleanup", "@everysecond", counter(&n))
 		}
 		for tick := range 3 {

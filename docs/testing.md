@@ -5,6 +5,7 @@
 - [HTTP 测试](#http-tests)
     - [测试认证与错误响应](#testing-auth-and-errors)
 - [测试 action](#testing-actions)
+    - [测试命令入口](#testing-action-commands)
 - [测试配置](#testing-configuration)
 - [数据库测试](#database-tests)
     - [创建测试数据库](#creating-test-databases)
@@ -191,6 +192,63 @@ func TestDraftVisibilityAndPublishing(t *testing.T) {
 ```
 
 `dbtest.Open` 为这个测试创建一个独立的数据库并执行 `migrations.FS` 中的迁移，详见下面的[数据库测试](#database-tests)。
+
+<a id="testing-action-commands"></a>
+### 测试命令入口
+
+action 的[命令入口](actions.md#as-commands)通过模块的 `Commands` 测试。它返回原生的 `*cobra.Command`，直接传入测试数据库即可，不需要配置文件，也不经过 `command.Bind`。下面是 `internal/article/commands_test.go`：
+
+```go
+//go:build integration
+
+package article_test
+
+import (
+    "bytes"
+    "context"
+    "testing"
+
+    "example.com/blog/internal/article"
+    "example.com/blog/migrations"
+    "github.com/ryan053857/mygoravel/command"
+    "github.com/ryan053857/mygoravel/database/dbtest"
+    "github.com/ryan053857/mygoravel/database/postgres"
+    "github.com/ryan053857/mygoravel/identity"
+)
+
+func TestPublishCommand(t *testing.T) {
+    ctx := context.Background()
+    db := dbtest.Open(t, postgres.Driver, migrations.FS)
+    alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
+    item, err := article.NewCreate(db).Handle(ctx, alice, article.Changes{Title: "Hello World", Slug: "hello-world"})
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    run := func(args ...string) (string, error) {
+        var out bytes.Buffer
+        cmd := article.Commands(db)
+        cmd.SetOut(&out)
+        cmd.SetErr(&out)
+        cmd.SetArgs(args)
+        err := cmd.ExecuteContext(ctx)
+        return out.String(), err
+    }
+    if out, err := run("publish", item.ID.String()); err != nil || out != "hello-world\n" {
+        t.Fatalf("out = %q, err = %v", out, err)
+    }
+    // 业务错误按分类转换为退出码：重复发布是 Conflict，以 1 退出
+    if _, err := run("publish", item.ID.String()); command.ExitCode(err) != command.ExitFailure {
+        t.Fatalf("exit code = %d, err = %v", command.ExitCode(err), err)
+    }
+    // 参数不是合法的 ID 时是用法错误
+    if _, err := run("publish", "not-a-uuid"); command.ExitCode(err) != command.ExitUsage {
+        t.Fatalf("exit code = %d, err = %v", command.ExitCode(err), err)
+    }
+}
+```
+
+命令入口只负责解析参数和输出，业务规则仍然在上面的 `Handle` 测试中覆盖。
 
 优先使用真实的依赖。只有在确实需要隔离某项外部能力时（例如对象存储），才在业务包中定义一个小接口，并在测试中提供简单的实现，见[依赖装配](dependencies.md#replacing-dependencies-in-tests)。
 

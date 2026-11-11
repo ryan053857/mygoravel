@@ -32,7 +32,7 @@ func New[C any](fsys fs.FS, driver database.Driver, dbConfig func(cfg C) databas
 			}
 			db, err := database.Open(cmd.Context(), driver, dbConfig(cfg))
 			if err != nil {
-				return command.AsExitError(command.ExitUnavailable, err)
+				return err
 			}
 			defer db.Close()
 			provider, err := migrate.NewProvider(db, fsys)

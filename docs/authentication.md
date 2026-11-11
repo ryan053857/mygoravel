@@ -152,10 +152,10 @@ auth:
 
 使用 `rest.RequireBearer` 为路由启用认证。它的参数是 API 实例、校验器，以及调用者必须能执行的权限。
 
-下面是文章模块的 `routes.go` 中注册“获取文章”接口的片段：`api` 由 `rest.New` 创建，`cfg.Auth` 来自应用配置，`db` 是入口打开的数据库。`Get` action 的定义见[路由](routing.md#http-actions)：
+下面是注册“获取文章”接口的片段：`api` 由 `rest.New` 创建，`validate` 是入口中用 `auth.Validator(a.cfg.Auth)` 创建的校验器，`db` 是入口打开的数据库。`Get` action 的定义见[路由](routing.md#http-actions)：
 
 ```go
-requireArticles := rest.RequireBearer(api, auth.Validator(cfg.Auth), "articles")
+requireArticles := rest.RequireBearer(api, validate, "articles")
 
 op := huma.Operation{
     OperationID: "article-get",

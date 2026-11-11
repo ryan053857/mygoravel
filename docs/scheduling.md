@@ -24,13 +24,13 @@
 `schedule.New` 创建调度器，`Add` 注册任务。名称在调度器中唯一，也是锁名的一部分，最长 `schedule.MaxNameLength`（225）字节：
 
 ```go
-sched := schedule.New(locker, nil)
+sched := schedule.New(locker, cfg.Schedule, nil)
 sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(db).Handle)
 ```
 
 任务通常是 [action](actions.md#as-scheduled-tasks) 的 `Handle` 方法：发布到期文章的 `PublishScheduled` 不需要参数，它的 `Handle` 正好是任务的签名。
 
-`locker` 是[原子锁](locks.md)，调度器用它在多个实例之间去重、防止任务重叠，见[多个实例](#multiple-instances)。第二个参数是日志器，`nil` 时使用 `slog.Default()`。
+`locker` 是[原子锁](locks.md)，调度器用它在多个实例之间去重、防止任务重叠，见[多个实例](#multiple-instances)。第二个参数是配置段，见[失败与停止](#failures-and-shutdown)；第三个参数是日志器，`nil` 时使用 `slog.Default()`。
 
 [原子锁](locks.md#running-once)一章中，每个实例都要自己定时调用 `PublishScheduled` 并用锁避免重复执行；交给调度器之后，`PublishScheduled` 里的 `locker.Do` 可以去掉，它也不再需要 `locker` 依赖，调度器已经保证每次只在一个实例上执行。
 
@@ -81,7 +81,7 @@ import (
 
 // Scheduler 按时执行定时任务，直到 ctx 被取消。
 func (a *App) Scheduler(ctx context.Context) error {
-    sched := schedule.New(a.locker, nil)
+    sched := schedule.New(a.locker, a.cfg.Schedule, nil)
     sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(a.db).Handle)
     sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000))
     sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDBStore(a.db).Cleanup, 1000))
@@ -146,7 +146,19 @@ sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
 
 调度器的日志带有 `component=schedule` 字段，任务的 `ctx` 中带有 `task` 字段，用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它。
 
-调度器不补跑错过的触发：进程暂停或调度落后不到一分钟时，错过的触发会补上，同一个任务只补一次；部署、重启期间错过的触发直接跳过。收到停止信号后，调度器不再触发新任务，等待执行中的任务结束，最多等待 30 秒，超时后取消它们的 `ctx`。
+调度器不补跑错过的触发：进程暂停或调度落后不到一分钟时，错过的触发会补上，同一个任务只补一次；部署、重启期间错过的触发直接跳过。收到停止信号后，调度器不再触发新任务，等待执行中的任务结束，最多等待 `shutdown_timeout`，超时后取消它们的 `ctx`。这个时间在应用配置的调度段中设置：
+
+```go
+type Config struct {
+    // ...
+    Schedule schedule.Config `yaml:"schedule"`
+}
+```
+
+```yaml
+schedule:
+  shutdown_timeout: 30s # 默认值；为 0 时立即取消执行中的任务
+```
 
 <a id="framework-cleanups"></a>
 ## 清理框架数据
@@ -160,6 +172,7 @@ sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
 | [广播](broadcasting.md#database-backend) | `broadcast.NewDatabase(db, nil).Cleanup` | 每 10 分钟 |
 | [限流](rate-limiting.md#cleanup) | 任意一个 `ratelimit.NewDatabase(...)` 的 `Cleanup` | 每小时 |
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
+| [操作日志](activity.md#retention) | `activity.Cleanup(db, 保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(ctx, before, limit)` | 每天 |
 
 使用 Redis 存储时过期的数据由 Redis 自动删除，不需要注册清理任务。
@@ -171,7 +184,7 @@ sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
 
 ```go
 func TestDailyReport(t *testing.T) {
-    sched := schedule.New(lock.New(lock.NewMemoryStore()), nil)
+    sched := schedule.New(lock.New(lock.NewMemoryStore()), schedule.DefaultConfig(), nil)
     var ran bool
     sched.Add("reports:daily", "0 3 * * *", func(context.Context) error {
         ran = true
