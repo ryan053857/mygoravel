@@ -147,7 +147,7 @@ api := rest.New(rest.Options{Resolve: roles.Resolve})
 pages := web.New(web.Options{Resolve: roles.Resolve /* 其余字段见视图 */})
 ```
 
-加载是一次带索引的查询，不使用缓存，因此修改角色、撤销分配都在下一个请求生效。还需要检查账号是否停用时，在外面包一层：
+加载是一次带索引的查询，不使用缓存，因此修改角色、撤销分配都在下一个请求生效。已经建立的长连接按新的权限每 30 秒校验一次；需要立即生效时，修改后调用 `RecheckSubject`，修改角色的权限后调用 `RecheckTenant`，见[立即断开](sse.md#immediate-revocation)。还需要检查账号是否停用时，在外面包一层：
 
 ```go
 resolve := func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {

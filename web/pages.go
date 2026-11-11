@@ -72,6 +72,9 @@ type Options struct {
 	TrustedOrigins []string
 	// Logger 记录 5xx 错误；nil 表示 slog.Default()。
 	Logger *slog.Logger
+	// Credentials 让 Require 保护的长连接（例如 SSE）在收到复查信号时立即重新校验会话，
+	// 退出登录、停用用户后连接随即结束；nil 时只按 30 秒的间隔定期校验。通常是 broadcast.NewCredentials 的返回值。
+	Credentials httpx.CredentialWatcher
 }
 
 // Pages 注册页面路由：为每条路由加载会话、防御跨站请求伪造、检查登录，并统一呈现错误。可以并发使用。
@@ -133,6 +136,9 @@ func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 		token := p.opts.Sessions.Token(r.Context())
 		ctx := identity.WithSubject(r.Context(), sub)
 		ctx = httpx.WithCredentialCheck(ctx, func(c context.Context) error { return p.recheck(c, token, sub, access) })
+		if p.opts.Credentials != nil {
+			ctx = httpx.WithCredentialWatcher(ctx, p.opts.Credentials)
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

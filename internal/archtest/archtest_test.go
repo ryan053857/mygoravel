@@ -36,7 +36,7 @@ var dependencies = map[string][]string{
 	"lock":         {},
 	"hashing":      {},
 	"queue":        {"logging"},
-	"broadcast":    {"logging"},
+	"broadcast":    {"identity", "logging"},
 	"schedule":     {"lock", "logging"},
 	"ai":           {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
 	"command":      {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},

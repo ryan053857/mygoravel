@@ -31,6 +31,7 @@ type API struct {
 	router  chi.Router
 	logger  *slog.Logger
 	resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
+	watcher httpx.CredentialWatcher
 }
 
 // Options 创建 API。
@@ -57,6 +58,9 @@ type Options struct {
 	// 例如不是租户成员时返回 errorx.NotFound 得到 404；5xx 类错误响应对应的状态码。
 	// 返回的主体中 Method、Credential、Scopes、Impersonator 总是取自凭据，Resolve 改变它们不起作用。
 	Resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
+	// Credentials 让 RequireAuth 保护的长连接（例如 SSE）在收到复查信号时立即重新校验凭据，
+	// 撤销 token、停用用户后连接随即结束；nil 时只按 30 秒的间隔定期校验。通常是 broadcast.NewCredentials 的返回值。
+	Credentials httpx.CredentialWatcher
 }
 
 // New 创建 chi + Huma API，并让未匹配的路由与方法返回 Problem Details。
@@ -94,7 +98,7 @@ func New(opts Options) *API {
 			next(huma.WithContext(ctx, identity.WithTenant(ctx.Context(), tenant(ctx))))
 		})
 	}
-	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, resolve: opts.Resolve}
+	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, resolve: opts.Resolve, watcher: opts.Credentials}
 }
 
 // Mode 返回当前模式。

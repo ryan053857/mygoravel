@@ -63,8 +63,9 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 	}
 	required := append([]string(nil), permissions...)
 	var resolve func(context.Context, identity.Subject) (identity.Subject, error)
+	var watcher httpx.CredentialWatcher
 	if a, ok := api.(*API); ok {
-		resolve = a.resolve
+		resolve, watcher = a.resolve, a.watcher
 	}
 	return func(op *huma.Operation) {
 		if op.Metadata == nil {
@@ -111,6 +112,9 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 				return err
 			}
 			reqCtx := httpx.WithCredentialCheck(identity.WithSubject(ctx.Context(), sub), recheck)
+			if watcher != nil {
+				reqCtx = httpx.WithCredentialWatcher(reqCtx, watcher)
+			}
 			next(huma.WithContext(ctx, reqCtx))
 		})
 	}

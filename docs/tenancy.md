@@ -113,6 +113,8 @@ func (a *Create) Handle(ctx context.Context, subject identity.Subject, name stri
 | 自定义角色 | `roles.CreateRole(ctx, authz.Role{Tenant: sub.Tenant, ...})` |
 | 读取、修改某个角色 | 先用 `roles.Role(ctx, id, sub.Tenant)` 确认它属于本租户或是全局角色 |
 
+调整角色或移出成员之后，调用 [`RecheckSubject`](sse.md#immediate-revocation) 让这个人已经打开的长连接立即按新的权限校验。
+
 **租户 ID 只能来自 `sub.Tenant`，不能来自表单或请求体**，否则管理员可以操作其他租户。`Assign` 会拒绝把其他租户的角色分配到本租户，但无法知道调用者是否有权管理这个租户，这由路由上的 `members:manage` 和 `sub.Tenant` 保证。
 
 全局角色中可能有只供运营使用的角色。租户的角色列表中不应出现它们时，在展示和分配前按名称过滤。即使分配了，权限也只在这个租户中生效，不会扩散到平台或其他租户。

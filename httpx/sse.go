@@ -29,6 +29,7 @@ const credentialTimeout = 10 * time.Second
 //
 // 认证中间件安装了 CredentialCheck 时（rest.RequireAuth、web 的页面路由），每 30 秒重新校验一次凭据：
 // 会话或 token 被撤销、用户被停用或失去所需的 scope 后，连接最多 30 秒内结束，客户端重连时按普通请求重新认证。
+// 同时安装了 CredentialWatcher 时，收到复查信号立即校验，撤销后的连接随即结束。
 //
 // fn 应当在 Stream.Done 关闭时返回：客户端断开、服务器开始排空（见 DrainStarted），或凭据失效。
 //
@@ -61,6 +62,7 @@ func SSE(w http.ResponseWriter, r *http.Request, fn func(s *Stream) error) error
 	}
 
 	s := &Stream{w: w, rc: rc, ctx: ctx, lastEventID: r.Header.Get("Last-Event-ID")}
+	changed := watchCredential(ctx)
 	heartbeat := make(chan struct{})
 	go func() {
 		defer close(heartbeat)
@@ -68,6 +70,11 @@ func SSE(w http.ResponseWriter, r *http.Request, fn func(s *Stream) error) error
 		defer t.Stop()
 		check := time.NewTicker(credentialInterval)
 		defer check.Stop()
+		valid := func() bool {
+			cctx, done := context.WithTimeout(ctx, credentialTimeout)
+			defer done()
+			return CheckCredential(cctx) == nil
+		}
 		for {
 			select {
 			case <-ctx.Done():
@@ -78,10 +85,16 @@ func SSE(w http.ResponseWriter, r *http.Request, fn func(s *Stream) error) error
 					return
 				}
 			case <-check.C:
-				cctx, done := context.WithTimeout(ctx, credentialTimeout)
-				err := CheckCredential(cctx)
-				done()
-				if err != nil {
+				if !valid() {
+					cancel()
+					return
+				}
+			case _, ok := <-changed:
+				if !ok {
+					changed = nil
+					continue
+				}
+				if !valid() {
 					cancel()
 					return
 				}

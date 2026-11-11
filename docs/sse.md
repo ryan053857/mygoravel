@@ -7,6 +7,7 @@
 - [JSON API](#json-api)
 - [路由与超时](#routes-and-timeouts)
 - [凭据失效](#revoked-credentials)
+    - [立即断开](#immediate-revocation)
 - [部署](#deployment)
 
 <a id="introduction"></a>
@@ -219,6 +220,41 @@ editor.Post("/admin/articles/publish", h.Publish)
 连接结束后，浏览器重连时按普通请求重新认证：页面跳转到登录页，JSON API 返回 `401`。所以凭据失效后，最多 30 秒连接就会断开，处理器不需要自己检查。
 
 页面会重新读取会话存储并经过 [`Options.Resolve`](views.md#login)；JSON API 会重新运行 token 校验器，校验器有副作用时（例如 `apitoken` 延长登录 token 的有效期），长连接期间也会每 30 秒发生一次。自己实现认证中间件时，用 `httpx.WithCredentialCheck` 登记同样的校验函数，SSE 会照样运行它。
+
+<a id="immediate-revocation"></a>
+### 立即断开
+
+30 秒对大多数场景已经足够。需要撤销后立即断开时，用[广播](broadcasting.md)提醒所有实例上的长连接马上校验。在[入口](dependencies.md#assembling-the-application)中基于 Hub 创建 `broadcast.Credentials`，交给 API 和页面：
+
+```go
+creds := broadcast.NewCredentials(hub)
+api := rest.New(rest.Options{Resolve: roles.Resolve, Credentials: creds})
+pages := web.New(web.Options{Resolve: roles.Resolve, Credentials: creds /* 其余字段见视图 */})
+```
+
+凭据变化之后，调用对应的方法：
+
+| 方法 | 立即校验的连接 | 常见用途 |
+| --- | --- | --- |
+| `RecheckCredential(ctx, id)` | 使用这个凭据的连接，`id` 是主体的 `Credential`：会话 ID 或 token 的 ID | 退出某一台设备 |
+| `RecheckSubject(ctx, userID)` | 这个用户的全部连接 | 退出其他设备、修改密码、停用账号、调整角色、移出租户 |
+| `RecheckTenant(ctx, tenant)` | 请求所在租户为 `tenant` 的全部连接 | 修改角色的权限 |
+
+例如设备列表中的“退出这台设备”，`a.creds` 由 action 的构造函数传入：
+
+```go
+if err := a.tokens.Revoke(ctx, subject, id); err != nil {
+    return err
+}
+if err := a.creds.RecheckCredential(ctx, id); err != nil {
+    slog.WarnContext(ctx, "recheck credential", "error", err) // 连接仍会在 30 秒内断开
+}
+return nil
+```
+
+提醒只让连接立即执行一次上面的校验，是否断开仍由校验决定：凭据仍然有效的连接继续保持，多发的提醒只是多查一次。因此提醒要在修改提交之后发出，否则校验读到的还是旧数据；修改在事务中进行时，用 [AfterCommit](database.md#after-commit) 登记。提醒丢失时（例如 Redis 断线、发出之前进程退出），连接仍会在 30 秒的定期校验中断开。
+
+部署多个实例时，Hub 要使用数据库、Redis 或 NATS 后端，见[选择后端](broadcasting.md#backends)。
 
 <a id="deployment"></a>
 ## 部署

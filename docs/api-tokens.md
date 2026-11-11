@@ -203,7 +203,7 @@ for _, t := range list {
 | `RevokeOthers(ctx, sub)` | `sub` 除本次请求所用 token 以外的全部**登录 token** | “退出其他设备” |
 | `RevokeSubject(ctx, userID)` | 该用户的全部 token，包括个人访问令牌 | 封禁账号、修改密码 |
 
-撤销立即生效，被撤销的 token 在下一次请求时返回 `401`；用它建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)。
+撤销立即生效，被撤销的 token 在下一次请求时返回 `401`；用它建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)。撤销后调用 `RecheckCredential` 或 `RecheckSubject`，连接会立即结束，见[立即断开](sse.md#immediate-revocation)。
 
 同一个用户可能还在浏览器中通过[会话](session.md)登录了页面。让用户在所有地方下线时，两边都要撤销。下面是用户模块的 `SignOutEverywhere` action 的 `Handle`，会话存储和 token 存储由构造函数传入：
 

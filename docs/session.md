@@ -143,7 +143,7 @@ for _, s := range list {
 n, err := store.RevokeSubject(ctx, userID)
 ```
 
-被撤销的设备在下一次请求时成为未登录状态，受保护的页面会跳转到登录页；已经建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)。两者都是一条按 `subject_id` 索引执行的 `UPDATE`，不随会话总数变慢。
+被撤销的设备在下一次请求时成为未登录状态，受保护的页面会跳转到登录页；已经建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)，需要立即结束时见[立即断开](sse.md#immediate-revocation)。两者都是一条按 `subject_id` 索引执行的 `UPDATE`，不随会话总数变慢。
 
 应用同时为单页应用或 App 签发了 [API 令牌](api-tokens.md)时，要让用户在所有地方下线，还需要撤销他的令牌，见[撤销令牌](api-tokens.md#revoking-tokens)。
 

@@ -17,4 +17,6 @@
 //	sub := hub.Subscribe("room:42")
 //	defer sub.Close()
 //	for msg := range sub.C() { ... }
+//
+// Credentials 基于 Hub 提醒所有实例上的 SSE 连接立即重新校验凭据，用于撤销登录后立即断开。
 package broadcast
