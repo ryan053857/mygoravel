@@ -69,16 +69,16 @@ go test -race -count=1 -tags=integration ./...
 <a id="architecture-tests"></a>
 ### 架构测试
 
-`internal/archtest` 检查框架各个包的分层和依赖方向。每个包属于[四层](directory-structure.md#framework-packages)之一：基础、基础设施、入口、功能。包只能引用同层或更低层的包，并且每一个引用都要列在测试的 `rules` 中，例如 `database` 只能引用 `errorx`；基础层还不能引用 HTTP、数据库和命令行组件。
+`internal/checks/archtest` 检查框架各个包的分层和依赖方向。每个包属于[四层](directory-structure.md#framework-packages)之一：基础、基础设施、入口、功能。包只能引用同层或更低层的包，并且每一个引用都要列在测试的 `rules` 中，例如 `database` 只能引用 `errorx`；基础层还不能引用 HTTP、数据库和命令行组件。
 
 规则的键是包路径，对它的子包同样生效；子包需要更多依赖时单独写一条规则，例如 `sheet` 只引用 `errorx` 和 `form`，`sheet/imports` 另外引用 `operation` 和 `filesystem`。如果你的修改引入了新的包依赖，请先确认它符合分层，再相应地更新规则；不再用到的依赖也要从规则中删除，否则测试会失败。
 
-`internal/migrationstest` 检查各个包内嵌的迁移：三种数据库的迁移文件一一对应，并且能通过 `publish` 命令原样发布。新增带迁移的包时在它的 `sources` 中登记，遗漏时测试会失败。
+`internal/checks/migrationstest` 检查各个包内嵌的迁移：三种数据库的迁移文件一一对应，并且能通过 `publish` 命令原样发布。新增带迁移的包时在它的 `sources` 中登记，遗漏时测试会失败。
 
 <a id="doc-tests"></a>
 ### 文档用法测试
 
-有些功能框架不做封装，由文档直接教用户使用社区组件，例如用 gocache 做缓存。`internal/doctest` 在真实环境中验证文档描述的这些行为，例如缓存未命中时返回 `store.NotFound`、Redis store 的 TTL 选项是否生效。依赖升级改变了这些行为时测试会失败，提醒同步修改文档。它还会把文档中博客示例的完整文件（正文写明「完整的 `internal/...`」的代码块）提取出来，和 `internal/doctest/testdata/blog` 中的占位包一起编译；修改这些文件或框架 API 时，测试会指出文档中不再能编译的代码。新增一个完整文件时，把它加入 `blog_test.go` 的 `blogFiles`。
+有些功能框架不做封装，由文档直接教用户使用社区组件，例如用 gocache 做缓存。`internal/checks/doctest` 在真实环境中验证文档描述的这些行为，例如缓存未命中时返回 `store.NotFound`、Redis store 的 TTL 选项是否生效。依赖升级改变了这些行为时测试会失败，提醒同步修改文档。它还会把文档中博客示例的完整文件（正文写明「完整的 `internal/...`」的代码块）提取出来，和 `internal/checks/doctest/testdata/blog` 中的占位包一起编译；修改这些文件或框架 API 时，测试会指出文档中不再能编译的代码。新增一个完整文件时，把它加入 `blog_test.go` 的 `blogFiles`。
 
 <a id="continuous-integration"></a>
 ## 持续集成

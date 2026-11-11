@@ -260,7 +260,7 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/config", "net/http", false},
 		{module + "/i18n", "github.com/spf13/cobra", false},
 		{module + "/logging", module + "/identity", false},
-		{module + "/identity", module + "/internal/archtest", false},
+		{module + "/identity", module + "/internal/checks/archtest", false},
 		// 子包有自己的规则，不放宽所在的包树。
 		{module + "/sheet", module + "/operation", false},
 		{module + "/sheet/imports", module + "/operation", true},

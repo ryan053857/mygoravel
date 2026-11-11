@@ -106,7 +106,7 @@ var goBlock = regexp.MustCompile("(?s)```go\n(.*?)```")
 // TestBlogExampleCompiles 把文档中博客示例的入口代码提取到一个临时 module 中编译，
 // 用 go vet 检查（包含编译），防止文档中的完整文件与框架 API 或彼此之间不一致。
 func TestBlogExampleCompiles(t *testing.T) {
-	root, err := filepath.Abs("../..")
+	root, err := filepath.Abs("../../..")
 	if err != nil {
 		t.Fatal(err)
 	}
