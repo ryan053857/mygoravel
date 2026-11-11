@@ -1,0 +1,225 @@
+package ui
+
+import (
+	"github.com/axadrn/shadcn-templ/v2/components/avatar"
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/card"
+	"github.com/axadrn/shadcn-templ/v2/components/collapsible"
+	"github.com/axadrn/shadcn-templ/v2/components/dropdownmenu"
+	"github.com/axadrn/shadcn-templ/v2/components/icon"
+	"github.com/axadrn/shadcn-templ/v2/components/separator"
+	"github.com/axadrn/shadcn-templ/v2/components/sidebar"
+)
+
+// SidebarID 是 AppShell 侧边栏的 ID。
+const SidebarID = "web-ui-sidebar"
+
+// AppShell 是后台常用的外壳：左侧是可以收起成图标的侧边栏（名称、分组导航、当前用户），
+// 右侧是顶栏（收起按钮、页面标题、Actions）和 children。手机宽度下侧边栏变成抽屉。
+//
+// 导航按当前主体的权限过滤（NavItem.Permission），当前页面（web.CurrentPath）对应的项高亮。
+// 放在 Page 中使用，Modal、Confirm、Toaster 放在它之后：
+//
+//	@ui.Page(ui.PageProps{Title: title}) {
+//		@ui.AppShell(ui.AppShellProps{Brand: "Blog 后台", Nav: nav, Title: title, User: user}) {
+//			{ children... }
+//		}
+//		@ui.Toaster()
+//	}
+templ AppShell(p AppShellProps) {
+	@sidebar.Provider(sidebar.ProviderProps{ID: SidebarID, DisableDefaultOpen: collapsed(ctx, p.Collapsed)}) {
+		@sidebar.Sidebar(sidebar.Props{Collapsible: sidebar.CollapsibleIcon}) {
+			if p.Brand != "" {
+				@sidebar.Header() {
+					@sidebar.Menu() {
+						@sidebar.MenuItem() {
+							@sidebar.MenuButton(sidebar.MenuButtonProps{Size: sidebar.MenuButtonSizeLg, Href: orDefault(p.Home, "/")}) {
+								if p.Logo != nil {
+									<div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+										@p.Logo(icon.Props{Class: "size-4"})
+									</div>
+								}
+								<span class="truncate font-semibold">{ p.Brand }</span>
+							}
+						}
+					}
+				}
+			}
+			@sidebar.Content() {
+				for _, g := range navGroups(ctx, p.Nav) {
+					@sidebar.Group() {
+						if g.label != "" {
+							@sidebar.GroupLabel() {
+								{ g.label }
+							}
+						}
+						@sidebar.Menu() {
+							for _, it := range g.items {
+								@navItem(it)
+							}
+						}
+					}
+				}
+			}
+			if p.User != nil {
+				@sidebar.Footer() {
+					@userMenu(*p.User)
+				}
+			}
+			@sidebar.Rail()
+		}
+		@sidebar.Inset() {
+			<header class="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+				@sidebar.Trigger(sidebar.TriggerProps{Class: "-ml-1", Attributes: templ.Attributes{"aria-label": text(ctx, "ui.sidebar.toggle", "Toggle sidebar")}})
+				if p.Title != "" {
+					@separator.Separator(separator.Props{Orientation: separator.OrientationVertical, Class: "mr-2 data-vertical:h-4 data-vertical:self-auto"})
+					<h1 class="truncate text-sm font-medium">{ p.Title }</h1>
+				}
+				if p.Actions != nil {
+					<div class="ml-auto flex items-center gap-2">
+						@p.Actions
+					</div>
+				}
+			</header>
+			<div class="flex flex-1 flex-col gap-4 p-4 md:p-6">
+				{ children... }
+			</div>
+		}
+	}
+}
+
+templ navItem(it NavItem) {
+	if len(it.Items) == 0 {
+		@sidebar.MenuItem() {
+			@sidebar.MenuButton(sidebar.MenuButtonProps{Href: it.Href, IsActive: navActive(ctx, it), Tooltip: it.Label}) {
+				if it.Icon != nil {
+					@it.Icon()
+				}
+				<span>{ it.Label }</span>
+			}
+			if it.Badge != "" {
+				@sidebar.MenuBadge() {
+					{ it.Badge }
+				}
+			}
+		}
+	} else {
+		@collapsible.Collapsible(collapsible.Props{DefaultOpen: navActive(ctx, it), Class: "group/collapsible"}) {
+			@sidebar.MenuItem() {
+				@sidebar.MenuButton(sidebar.MenuButtonProps{Tooltip: it.Label, Attributes: collapsible.Trigger(ctx)}) {
+					if it.Icon != nil {
+						@it.Icon()
+					}
+					<span>{ it.Label }</span>
+					@icon.ChevronRight(icon.Props{Class: "ml-auto transition-transform duration-200 group-data-open/collapsible:rotate-90"})
+				}
+				@collapsible.Content() {
+					@sidebar.MenuSub() {
+						for _, sub := range it.Items {
+							@sidebar.MenuSubItem() {
+								@sidebar.MenuSubButton(sidebar.MenuSubButtonProps{Href: sub.Href, IsActive: navActive(ctx, sub)}) {
+									<span>{ sub.Label }</span>
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+templ userMenu(u ShellUser) {
+	@sidebar.Menu() {
+		@sidebar.MenuItem() {
+			@dropdownmenu.DropdownMenu(dropdownmenu.Props{ID: "web-ui-user-menu"}) {
+				@sidebar.MenuButton(sidebar.MenuButtonProps{Size: sidebar.MenuButtonSizeLg, Class: "aria-expanded:bg-muted", Attributes: dropdownmenu.Trigger(ctx)}) {
+					@userAvatar(u)
+					<div class="grid flex-1 text-left text-sm leading-tight">
+						<span class="truncate font-medium">{ u.Name }</span>
+						if u.Email != "" {
+							<span class="truncate text-xs">{ u.Email }</span>
+						}
+					</div>
+					@icon.ChevronsUpDown(icon.Props{Class: "ml-auto size-4"})
+				}
+				if len(u.Menu) > 0 {
+					@dropdownmenu.Content(dropdownmenu.ContentProps{Class: "min-w-56", Side: dropdownmenu.SideRight, Align: dropdownmenu.AlignEnd, SideOffset: 4}) {
+						@dropdownmenu.Group() {
+							for _, m := range u.Menu {
+								@dropdownmenu.Item(menuItemProps(m)) {
+									if m.Icon != nil {
+										@m.Icon()
+									}
+									{ m.Label }
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+templ userAvatar(u ShellUser) {
+	@avatar.Avatar(avatar.Props{Class: "size-8 rounded-lg"}) {
+		if u.Avatar != "" {
+			@avatar.Image(avatar.ImageProps{Src: u.Avatar, Alt: u.Name})
+		}
+		@avatar.Fallback(avatar.FallbackProps{Class: "rounded-lg"}) {
+			{ initial(u.Name) }
+		}
+	}
+}
+
+// ThemeToggle 是切换暗色模式的按钮，选择记在浏览器中。放在 AppShellProps.Actions 或页面的任何位置。
+templ ThemeToggle() {
+	@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Attributes: templ.Attributes{"data-web-ui-theme-toggle": "true", "aria-label": text(ctx, "ui.theme.toggle", "Toggle dark mode")}}) {
+		@icon.Moon(icon.Props{Class: "dark:hidden"})
+		@icon.Sun(icon.Props{Class: "hidden dark:block"})
+	}
+}
+
+// AuthCard 是登录、注册、找回密码等页面的居中卡片：上方是名称，卡片中是标题、说明和 children（表单），
+// 下方是 Footer。放在 Page 中使用。
+templ AuthCard(p AuthCardProps) {
+	<div class="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted p-6 md:p-10">
+		<div class="flex w-full max-w-sm flex-col gap-6">
+			if p.Brand != "" {
+				<a href={ templ.SafeURL(orDefault(p.Home, "/")) } class="flex items-center gap-2 self-center font-medium">
+					if p.Logo != nil {
+						<div class="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
+							@p.Logo(icon.Props{Class: "size-4"})
+						</div>
+					}
+					{ p.Brand }
+				</a>
+			}
+			@card.Card() {
+				if p.Title != "" || p.Description != "" {
+					@card.Header(card.HeaderProps{Class: "text-center"}) {
+						if p.Title != "" {
+							@card.Title(card.TitleProps{Class: "text-xl"}) {
+								{ p.Title }
+							}
+						}
+						if p.Description != "" {
+							@card.Description() {
+								{ p.Description }
+							}
+						}
+					}
+				}
+				@card.Content() {
+					{ children... }
+				}
+			}
+			if p.Footer != nil {
+				<div class="text-center text-sm text-muted-foreground">
+					@p.Footer
+				</div>
+			}
+		</div>
+	</div>
+}

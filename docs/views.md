@@ -69,7 +69,7 @@ templ Layout(title string) {
 
 `ui.Page` 输出完整的 HTML 文档，`<head>` 中按[主题](components.md#themes)加载样式表、htmx、Alpine 和组件脚本。`ui.Toaster()` 显示[提示消息](#flash-messages)和局部请求的错误，`ui.Modal()` 是放置[对话框](components.md#dialogs)的位置，`ui.Confirm()` 让 `hx-confirm` 弹出[确认对话框](components.md#confirming)。错误页用 `ui.ErrorPage`，见[装配页面](#assembling-pages)。
 
-这些都可以换成自己的组件：自己写 `<html>` 时，在 `<head>` 中调用 `@ui.Head()`；不用 `web/ui` 时，`@web.Scripts()` 只输出 htmx 与 Alpine 的 `<script>` 标签，样式由应用自己提供。
+运营后台可以用 `ui.AppShell` 加上侧边栏导航，见[后台外壳](components.md#app-shell)。这些都可以换成自己的组件：自己写 `<html>` 时，在 `<head>` 中调用 `@ui.Head()`；不用 `web/ui` 时，`@web.Scripts()` 只输出 htmx 与 Alpine 的 `<script>` 标签，样式由应用自己提供。
 
 <a id="assembling-pages"></a>
 ## 装配页面

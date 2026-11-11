@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -216,15 +217,18 @@ func TestAssetsHandler(t *testing.T) {
 	}
 }
 
-// web/ui 组件中的类名都在每套风格的预编译样式表中；常用工具类也在。
+// web/ui 组件（全部 .templ）中的类名都在每套风格的预编译样式表中；常用工具类也在。
 func TestStylesheetsContainClasses(t *testing.T) {
-	src, err := os.ReadFile("ui.templ")
-	if err != nil {
-		t.Fatal(err)
-	}
+	files, _ := filepath.Glob("*.templ")
 	var classes []string
-	for _, m := range regexp.MustCompile(`class="([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
-		classes = append(classes, strings.Fields(m[1])...)
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range regexp.MustCompile(`(?:class="|Class: ")([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
+			classes = append(classes, strings.Fields(m[1])...)
+		}
 	}
 	classes = append(classes, "px-6", "md:grid-cols-3", "max-w-5xl", "text-right", "bg-primary", "sm:flex-row")
 	h := ui.Assets()

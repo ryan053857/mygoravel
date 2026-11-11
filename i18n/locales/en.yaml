@@ -35,6 +35,8 @@ ui.pagination.previous: Previous
 ui.pagination.next: Next
 ui.confirm.action: Confirm
 ui.confirm.cancel: Cancel
+ui.sidebar.toggle: Toggle sidebar
+ui.theme.toggle: Toggle dark mode
 validation.required: This field is required
 validation.filled: This field must not be empty
 validation.min_length: Must be at least {{.Min}} characters

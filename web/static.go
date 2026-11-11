@@ -171,9 +171,27 @@ func (s *Static) DescribeRoute() httpx.Route { return httpx.Route{Access: httpx.
 
 type staticKey struct{}
 
-// withLook 把 Options.Static 和 Options.Theme 放进 ctx，供 StaticURL、ThemeFrom 使用。
-func (p *Pages) withLook(ctx context.Context) context.Context {
-	return context.WithValue(withStatic(ctx, p.opts.Static), themeKey{}, p.opts.Theme)
+// withLook 把 Options.Static、Options.Theme 和请求本身放进 r 的 context，供 StaticURL、ThemeFrom、RequestFrom 使用。
+func (p *Pages) withLook(r *http.Request) context.Context {
+	ctx := context.WithValue(withStatic(r.Context(), p.opts.Static), themeKey{}, p.opts.Theme)
+	return context.WithValue(ctx, requestKey{}, r)
+}
+
+type requestKey struct{}
+
+// RequestFrom 返回页面路由正在处理的请求，供组件读取路径、cookie 等；不在页面路由中时为 nil。
+func RequestFrom(ctx context.Context) *http.Request {
+	r, _ := ctx.Value(requestKey{}).(*http.Request)
+	return r
+}
+
+// CurrentPath 返回页面路由正在处理的请求的路径（不含查询参数），例如导航用它高亮当前页面；
+// 不在页面路由中时为空。htmx 局部请求的路径是这个请求的地址，不是浏览器地址栏中的页面。
+func CurrentPath(ctx context.Context) string {
+	if r := RequestFrom(ctx); r != nil {
+		return r.URL.Path
+	}
+	return ""
 }
 
 // withStatic 把 s 放进 ctx，供 StaticURL 使用。

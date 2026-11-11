@@ -3,6 +3,8 @@
 - [简介](#introduction)
 - [主题](#themes)
 - [布局](#layouts)
+- [后台外壳](#app-shell)
+- [登录页](#auth-pages)
 - [使用组件](#using-components)
 - [提示消息](#toasts)
 - [对话框](#dialogs)
@@ -103,6 +105,87 @@ templ Layout(title string) {
 - `ui.Toaster()` 显示[提示消息](#toasts)。
 
 需要完全控制文档结构时，不用 `ui.Page`，自己写 `<html class={ ui.Class(ctx) }>`，在 `<head>` 中调用 `@ui.Head()`。
+
+<a id="app-shell"></a>
+## 后台外壳
+
+运营后台常用的外壳是左侧的侧边栏加上右侧的顶栏和正文，`ui.AppShell` 直接提供它。导航是一个切片，`internal/web/nav.go`：
+
+```go
+var AdminNav = []ui.NavItem{
+    {Label: "概览", Href: "/admin", Exact: true, Icon: icon.House},
+    {Label: "文章", Href: "/admin/articles", Icon: icon.FileText, Group: "内容", Permission: "articles"},
+    {Label: "评论", Href: "/admin/comments", Icon: icon.MessageSquare, Group: "内容", Permission: "comments"},
+    {Label: "设置", Icon: icon.Settings, Group: "系统", Items: []ui.NavItem{
+        {Label: "用户", Href: "/admin/users", Permission: "users"},
+        {Label: "角色", Href: "/admin/roles", Permission: "users"},
+    }},
+}
+```
+
+布局把页面放进外壳：
+
+```templ
+templ AdminLayout(title string) {
+	@ui.Page(ui.PageProps{Title: title}) {
+		@ui.AppShell(ui.AppShellProps{
+			Brand:   "Blog 后台",
+			Logo:    icon.Newspaper,
+			Home:    "/admin",
+			Nav:     AdminNav,
+			Title:   title,
+			User:    currentUser(ctx),
+			Actions: ui.ThemeToggle(),
+		}) {
+			{ children... }
+		}
+		@ui.Modal()
+		@ui.Confirm()
+		@ui.Toaster()
+	}
+}
+```
+
+- 导航按当前主体过滤：带 `Permission` 的项只有 `sub.Can` 时才显示，二级导航全部隐藏时整项隐藏。权限与 `web.Require` 使用同一套，见[授权](authorization.md)。
+- 当前页面（`web.CurrentPath`）等于 `Href` 或在它之下时高亮，`Exact` 只比较相等；当前页面在二级导航中时，这一组默认展开。连续的、`Group` 相同的项显示在同一组下，`Badge` 是右侧的小标记。
+- 侧边栏可以收起成图标，用户的选择记在 cookie 中，之后的页面保持收起；`Collapsed` 让它默认收起。手机宽度下侧边栏变成抽屉。
+- `User` 显示在侧边栏底部，点击弹出 `Menu`。退出登录这类改变状态的项写 `Post: true`，发出 `hx-post`：
+
+```go
+func currentUser(ctx context.Context) *ui.ShellUser {
+    sub, _ := identity.FromContext(ctx)
+    return &ui.ShellUser{Name: sub.ID, Menu: []ui.MenuItem{
+        {Label: "个人设置", Href: "/admin/profile", Icon: icon.User},
+        {Label: "退出登录", Href: "/logout", Post: true, Icon: icon.LogOut},
+    }}
+}
+```
+
+`ui.ThemeToggle()` 是暗色模式的开关按钮。外壳不适合时，直接组合 shadcn-templ 的 `sidebar` 组件，或者完全自己写布局。
+
+<a id="auth-pages"></a>
+## 登录页
+
+登录、注册、找回密码这些页面常用居中的卡片。`ui.AuthCard` 只负责布局，表单由应用自己放进去：
+
+```templ
+templ Login(f *web.Form[LoginInput]) {
+	@ui.Page(ui.PageProps{Title: "登录"}) {
+		@ui.AuthCard(ui.AuthCardProps{Title: "登录 Blog 后台", Description: "使用邮箱和密码登录", Brand: "Blog", Logo: icon.Newspaper}) {
+			<form method="post" class="flex flex-col gap-4">
+				@ui.TextField(f, "email", "邮箱", ui.FieldProps{Type: "email", Attributes: templ.Attributes{"autocomplete": "email"}})
+				@ui.TextField(f, "password", "密码", ui.FieldProps{Type: "password", Attributes: templ.Attributes{"autocomplete": "current-password"}})
+				@button.Button(button.Props{Type: button.TypeSubmit, Class: "w-full"}) {
+					登录
+				}
+			</form>
+		}
+		@ui.Toaster()
+	}
+}
+```
+
+`Footer` 是卡片下方的内容，例如「还没有账号？注册」。登录的处理器见[登录](views.md#login)。
 
 <a id="using-components"></a>
 ## 使用组件

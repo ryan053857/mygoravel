@@ -281,7 +281,7 @@ func (p *Pages) handle(fn HandlerFunc) http.HandlerFunc {
 // 并通过 HX-Retarget、HX-Reswap 放进 ErrorTarget；否则不替换页面内容（HX-Reswap: none），
 // 错误作为 Type 为 error 的提示随 FlashEvent 送达。用于中间件等页面处理器之外的场景。
 func (p *Pages) Error(w http.ResponseWriter, r *http.Request, err error) {
-	r = r.WithContext(p.withLook(r.Context()))
+	r = r.WithContext(p.withLook(r))
 	status := httpx.StatusOf(err)
 	if status >= http.StatusInternalServerError {
 		p.logger.ErrorContext(r.Context(), "page handler failed", "error", err)

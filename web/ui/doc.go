@@ -13,6 +13,8 @@
 //   - ErrorPage：web.Options.ErrorPage 的默认实现。
 //   - TextField、SelectField、CheckboxField 等表单字段：读取 web.Form 的输入和错误；
 //   - Pagination：page.Offset 的分页导航。
+//   - AppShell：后台的侧边栏外壳，导航按权限过滤、高亮当前页面；AuthCard：登录等页面的居中卡片；
+//     ThemeToggle：暗色模式开关。
 //
 // 每一项都可以不用：例如租户端用自己的提示组件监听 web:flash，或者自己写 <html> 只调用 Head。
 //
