@@ -17,10 +17,6 @@ authz.invalid: Invalid input
 notification.not_found: Notification not found
 operation.not_found: Operation not found
 operation.failed: The operation was interrupted, please try again
-exports.not_found: Export not found
-exports.failed: The export was interrupted, please export again
-imports.not_found: Import not found
-imports.failed: The import was interrupted, please import again
 imports.errors_column: Errors
 sheet.unsupported_format: Only CSV and XLSX files are supported
 sheet.bad_file: The spreadsheet could not be read

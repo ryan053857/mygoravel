@@ -26,6 +26,7 @@ import (
 	"github.com/ryan053857/mygoravel/i18n"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/sheet"
 )
@@ -38,13 +39,14 @@ var (
 type env struct {
 	db      *bun.DB
 	files   *filesystem.Service
+	ops     *operation.Service
 	exports *exports.Service
 }
 
 func migrations(t *testing.T) fs.FS {
 	t.Helper()
 	merged := fstest.MapFS{}
-	for prefix, src := range map[string]fs.FS{"1": filesystem.Migrations(), "2": queue.Migrations(), "3": exports.Migrations()} {
+	for prefix, src := range map[string]fs.FS{"1": filesystem.Migrations(), "2": queue.Migrations(), "3": operation.Migrations(), "4": exports.Migrations()} {
 		err := fs.WalkDir(src, ".", func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
@@ -76,12 +78,13 @@ func newEnv(t *testing.T, driver database.Driver) env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return env{db: db, files: files, exports: exports.New(db, files)}
+	ops := operation.New(db)
+	return env{db: db, files: files, ops: ops, exports: exports.New(db, ops, files)}
 }
 
 func (e env) start(t *testing.T, format sheet.Format) *exports.Export {
 	t.Helper()
-	exp, err := e.exports.Start(context.Background(), e.db, alice, "articles", format)
+	exp, err := e.exports.Start(context.Background(), e.db, alice, "articles.export", format)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +119,7 @@ func (r *recorder) progress() []string {
 	defer r.mu.Unlock()
 	list := make([]string, len(r.saves))
 	for i, exp := range r.saves {
-		list[i] = fmt.Sprintf("%s:%d/%d", exp.Status, exp.ProcessedRows, exp.TotalRows)
+		list[i] = fmt.Sprintf("%s:%d/%d", exp.Status, exp.Processed, exp.Total)
 	}
 	return list
 }
@@ -144,7 +147,7 @@ func TestProcess(t *testing.T) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		exp := e.start(t, sheet.XLSX)
-		if exp.Status != exports.StatusPending {
+		if exp.Status != operation.StatusPending {
 			t.Fatalf("started: %+v", exp)
 		}
 		rec := &recorder{}
@@ -157,7 +160,7 @@ func TestProcess(t *testing.T) {
 		}
 
 		got := e.get(t, exp.ID)
-		name := "articles-" + time.Now().Format("20060102") + ".xlsx"
+		name := "articles-export-" + time.Now().Format("20060102") + ".xlsx"
 		if !got.Finished() || got.Filename != name || got.ExpiresAt == nil || !strings.HasPrefix(got.URL, "/storage/") || got.CompletedAt == nil {
 			t.Fatalf("completed: %+v", got)
 		}
@@ -209,7 +212,7 @@ func TestProcessErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 		zh := i18n.WithLocale(ctx, languages, "zh-CN")
-		if got.Status != exports.StatusFailed || got.Error != "sheet.unknown_column" || got.ErrorMessage(zh) != "没有这一列：x" {
+		if got.Status != operation.StatusFailed || got.Error != "sheet.unknown_column" || got.ErrorMessage(zh) != "没有这一列：x" {
 			t.Fatalf("failed: %+v", got)
 		}
 		if p := rec.progress(); !slices.Equal(p, []string{"running:0/0", "failed:0/0"}) {
@@ -228,13 +231,13 @@ func TestProcessErrors(t *testing.T) {
 		if err := e.exports.Process(ctx, exp.ID, flaky, nil); !errors.Is(err, down) {
 			t.Fatalf("first run: %v", err)
 		}
-		if got := e.get(t, exp.ID); got.Status != exports.StatusRunning || got.ProcessedRows != 2 {
+		if got := e.get(t, exp.ID); got.Status != operation.StatusRunning || got.Processed != 2 {
 			t.Fatalf("after first run: %+v", got)
 		}
 		if err := e.exports.Process(ctx, exp.ID, rows(2), nil); err != nil {
 			t.Fatal(err)
 		}
-		if got := e.get(t, exp.ID); got.Status != exports.StatusCompleted || got.ProcessedRows != 2 || !strings.HasSuffix(got.Filename, ".csv") {
+		if got := e.get(t, exp.ID); got.Status != operation.StatusCompleted || got.Processed != 2 || !strings.HasSuffix(got.Filename, ".csv") {
 			t.Fatalf("retried: %+v", got)
 		}
 	})
@@ -272,8 +275,8 @@ func TestFinalAttemptFailsExport(t *testing.T) {
 		deadline := time.Now().Add(10 * time.Second)
 		for {
 			got := e.get(t, exp.ID)
-			if got.Status == exports.StatusFailed {
-				if got.Error != "exports.failed" {
+			if got.Status == operation.StatusFailed {
+				if got.Error != "operation.failed" {
 					t.Fatalf("failed: %+v", got)
 				}
 				break
@@ -293,23 +296,30 @@ func TestStartGetCleanup(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
-		if _, err := e.exports.Start(ctx, e.db, alice, "articles", "xls"); !errors.Is(err, sheet.ErrFormat) {
+		if _, err := e.exports.Start(ctx, e.db, alice, "articles.export", "xls"); !errors.Is(err, sheet.ErrFormat) {
 			t.Fatalf("format: %v", err)
 		}
 		old := e.start(t, sheet.CSV)
 		recent := e.start(t, sheet.CSV)
-		if _, err := e.exports.Get(ctx, bob, old.ID); !errors.Is(err, exports.ErrNotFound) {
+		if _, err := e.exports.Get(ctx, bob, old.ID); !errors.Is(err, operation.ErrNotFound) {
 			t.Fatalf("other owner: %v", err)
 		}
-		if _, err := e.db.NewUpdate().Model((*exports.Export)(nil)).Set("created_at = ?", time.Now().Add(-48*time.Hour).UTC()).
+		other, err := e.ops.Start(ctx, e.db, alice, "articles.bulk_publish")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.exports.Get(ctx, alice, other.ID); !errors.Is(err, operation.ErrNotFound) {
+			t.Fatalf("not an export: %v", err)
+		}
+		if _, err := e.db.NewUpdate().Model((*operation.Operation)(nil)).Set("created_at = ?", time.Now().Add(-48*time.Hour).UTC()).
 			Where("id = ?", old.ID).Exec(ctx); err != nil {
 			t.Fatal(err)
 		}
-		n, err := e.exports.Cleanup(24*time.Hour)(ctx, 10)
+		n, err := e.ops.Cleanup(24*time.Hour)(ctx, 10)
 		if err != nil || n != 1 {
 			t.Fatalf("cleanup: %d %v", n, err)
 		}
-		if _, err := e.exports.Get(ctx, alice, old.ID); !errors.Is(err, exports.ErrNotFound) {
+		if _, err := e.exports.Get(ctx, alice, old.ID); !errors.Is(err, operation.ErrNotFound) {
 			t.Fatalf("old: %v", err)
 		}
 		e.get(t, recent.ID)

@@ -13,7 +13,7 @@
 
 有些操作要在后台跑好几分钟：导入几万行表格、导出几十万篇文章、批量发布选中的一百篇文章。用户需要看到进度，结束后知道结果，还希望在一个“任务中心”里看到自己发起过的所有操作。
 
-`operation` 包把这些操作记在 `operations` 表中：谁发起的、是什么操作、当前状态、处理了多少、失败了多少、失败的原因。所有操作出现在同一个列表里，用同一种方式推送进度。支持 PostgreSQL、SQLite 和 MySQL。
+`operation` 包把这些操作记在 `operations` 表中：谁发起的、是什么操作、当前状态、处理了多少、失败了多少、失败的原因。[后台导入和导出](import-export.md#background-imports)也建立在它之上，所以导入、导出和应用自己的批量操作出现在同一个列表里，用同一种方式推送进度。支持 PostgreSQL、SQLite 和 MySQL。
 
 操作只负责记录，执行仍然是普通的[队列](queue.md)任务。
 
@@ -22,7 +22,7 @@
 <a id="installation"></a>
 ## 安装
 
-把 `operation` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`：
+把 `operation` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`。它要排在 `imports`、`exports` 之前，它们的表引用 `operations` 表：
 
 ```go
 migratecmd.Publish(postgres.Driver,
@@ -239,7 +239,7 @@ article.BulkPublishJob.Handle(router, sub, article.NewBulkPublish(a.db, a.hub, a
 
 重试时 `r.Operation()` 是上次保存的操作，`Processed` 就是已经处理过的篇数，回调从下一篇继续。每篇保存一次，所以已经发布的文章不会重复发布。单位很多时可以每 100 个保存一次，这时重试会再处理最多 99 个单位，要保证处理能够重复执行。
 
-`Save` 的参数是与进度一起提交的写入，例如失败单位的明细：进度和这些数据要么一起保存，要么都没有保存。同一个操作的两次执行同时保存时（例如任务的租约过期后被另一个 worker 领取），后保存的那次返回错误，回调应当停下。
+`Save` 的参数是与进度一起提交的写入，例如导入把失败的行和处理到的行号写在里面：进度和这些数据要么一起保存，要么都没有保存。结果要和完成状态一起提交时用 `r.Complete(ctx, write)` 结束操作，例如导出的下载地址。同一个操作的两次执行同时保存时（例如任务的租约过期后被另一个 worker 领取），后保存的那次返回错误，回调应当停下。
 
 > [!NOTE]
 > 每次重试都从头开始的操作，在回调开头调用 `r.Restart()` 把进度清零，例如导出要重新写出整个文件。
@@ -263,7 +263,7 @@ data: {"id":"0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10","kind":"articles.bulk_publish
 <a id="listing"></a>
 ## 任务中心
 
-`List` 按时间从新到旧列出一个人发起的操作：
+`List` 按时间从新到旧列出一个人发起的操作，导入、导出和批量发布都在里面：
 
 ```go
 ops, err := a.ops.List(ctx, subject, operation.Query{Limit: 20})
@@ -274,7 +274,7 @@ ops, err := a.ops.List(ctx, subject, operation.Query{Limit: 20})
 <a id="cleanup"></a>
 ## 清理
 
-操作不会自动删除。用[定时任务](scheduling.md#framework-cleanups)定期删除旧的操作：
+操作不会自动删除。用[定时任务](scheduling.md#framework-cleanups)定期删除旧的操作，导入、导出的记录和导入的失败行随之删除：
 
 ```go
 sched.Add("operations:cleanup", "0 3 * * *", schedule.Cleanup(a.ops.Cleanup(30*24*time.Hour), 1000))

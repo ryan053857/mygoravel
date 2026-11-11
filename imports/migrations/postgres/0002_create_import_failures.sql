@@ -1,6 +1,6 @@
 -- +goose Up
 CREATE TABLE import_failures (
-    import_id uuid NOT NULL,
+    import_id uuid NOT NULL REFERENCES imports (operation_id) ON DELETE CASCADE,
     line integer NOT NULL,
     cells jsonb NOT NULL,
     errors jsonb NOT NULL,

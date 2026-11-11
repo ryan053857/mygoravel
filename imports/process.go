@@ -2,76 +2,66 @@ package imports
 
 import (
 	"context"
-	"database/sql"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/sheet"
 )
 
 // chunk 是两次保存进度之间处理的行数。
 const chunk = 100
 
-// errMoved 表示进度已被另一次执行改变，例如任务的租约过期后被重新领取。本次执行停下，由队列稍后重试。
-var errMoved = errors.New("imports: progress changed by another run")
-
-// Process 处理导入 id，在队列任务中调用。
+// Process 处理导入 id，在队列任务中调用。它用 operation.Service.Run 执行导入，一行是一个单位。
 //
-// 第一次执行时读出表头并统计行数，导入变为 running；然后用 sheet.Decode 逐行解码为 T，
-// 验证通过的行交给 row。row 用 rec.SetError 标出只属于这一行的问题，例如 slug 已被占用；
+// 第一次执行时读出表头并统计行数；然后用 sheet.Decode 逐行解码为 T，验证通过的行交给 row。
+// row 用 rec.SetError 标出只属于这一行的问题，例如 slug 已被占用；
 // row 返回带错误码的业务错误时，这一行同样记为没有导入，提示是错误码的译文。
 // 验证失败和 row 标出错误的行写入失败行，其余的行视为已导入。验证提示和错误的译文使用 Start 时请求的语言。
 //
-// 每处理 100 行保存一次进度。row 返回不带错误码的错误（例如数据库不可用）时，先保存进度再返回这个错误，
-// 队列重试时从中断的地方继续。进程崩溃时，上次保存之后处理过的行会被再次交给 row，所以 row 要能重复执行，
-// 例如按唯一的业务字段判断记录是否已经存在。
+// 每处理 100 行保存一次进度，失败的行和处理到的行号与进度一起提交。row 返回不带错误码的错误（例如数据库不可用）时，
+// 先保存进度再返回这个错误，队列重试时从中断的地方继续。进程崩溃时，上次保存之后处理过的行会被再次交给 row，
+// 所以 row 要能重复执行，例如按唯一的业务字段判断记录是否已经存在。
 //
 // 全部行处理完时导入变为 completed。文件无法读取、缺少必需的列等整个文件的问题使导入变为 failed，
-// Error 是错误码；队列的最后一次执行仍然出错时，导入同样变为 failed，Error 是 imports.failed，
-// 错误照常返回给队列。
+// Error 是错误码；队列的最后一次执行仍然出错时，导入同样变为 failed，Error 是 operation.failed。
+// 导入结束时上传的文件被删除，由 filesystem 的 Cleanup 回收；下载失败的行只用到表头和失败行。
 //
-// 每次保存进度（变为 running、每 100 行、结束）都在同一个事务中调用 saved（可以为 nil），imp 是保存后的导入。
-// 用 tx.AfterCommit 广播进度，供 SSE 推送给正在查看的用户；imp.Status 是 completed 或 failed 时导入已经结束，
-// 例如在这个事务中发送通知。结束的事务提交后 saved 不会再被调用，所以通知不会重复，也不会漏发。
-//
-// 导入不存在（例如已被 Cleanup 删除）或者已经结束时，Process 什么也不做，返回 nil。
+// 每次保存进度都在同一个事务中调用 saved（可以为 nil），imp 是保存后的导入，用法见 operation.Service.Run。
+// 导入不存在（例如已被清理）或者已经结束时，Process 什么也不做，返回 nil。
 func Process[T any](ctx context.Context, s *Service, id uuid.UUID,
 	row func(ctx context.Context, imp *Import, rec *sheet.Record[T]) error,
 	saved func(ctx context.Context, tx database.Tx, imp *Import) error,
 ) error {
-	imp := new(Import)
-	err := s.db.NewSelect().Model(imp).Where("id = ?", id).Scan(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return errors.Wrap(err, "imports: load")
-	}
-	if imp.Status == StatusCompleted || imp.Status == StatusFailed {
-		return nil
+	imp, err := s.load(ctx, id)
+	if err != nil || imp == nil {
+		return err
 	}
 	if s.languages != nil && imp.Locale != "" {
 		ctx = i18n.WithLocale(ctx, s.languages, imp.Locale)
 	}
-	p := &processor[T]{s: s, imp: imp, row: row, saved: saved, lastLine: imp.LastLine}
-	err = p.run(ctx)
-	switch {
-	case err == nil:
-		return nil
-	case !retryable(err):
-		return p.commit(context.WithoutCancel(ctx), StatusFailed, err)
-	}
-	if _, final := queue.AttemptFromContext(ctx); final {
-		return errors.CombineErrors(err, p.commit(context.WithoutCancel(ctx), StatusFailed, err))
-	}
-	return err
+	return s.ops.Run(ctx, id, func(ctx context.Context, r *operation.Run) error {
+		imp.Operation = *r.Operation()
+		p := &processor[T]{s: s, r: r, imp: imp, row: row}
+		return p.run(ctx)
+	}, func(ctx context.Context, tx database.Tx, op *operation.Operation) error {
+		imp.Operation = *op
+		if op.Finished() {
+			err := s.files.WithDB(tx).Delete(ctx, imp.FileID)
+			if err != nil && !errors.Is(err, filesystem.ErrNotFound) {
+				return err
+			}
+		}
+		if saved == nil {
+			return nil
+		}
+		return saved(ctx, tx, imp)
+	})
 }
 
 // retryable 报告 err 是否是重试可能解决的错误：不带错误码的错误、服务不可用和资源暂时不足。
@@ -85,16 +75,16 @@ func retryable(err error) bool {
 
 type processor[T any] struct {
 	s        *Service
+	r        *operation.Run
 	imp      *Import
 	row      func(ctx context.Context, imp *Import, rec *sheet.Record[T]) error
-	saved    func(ctx context.Context, tx database.Tx, imp *Import) error
 	pending  []Failure // 上次保存之后没有导入的行
 	lastLine int       // 处理到的行号，保存后写入 imp.LastLine
 	rows     int       // 上次保存之后处理的行数
 }
 
 func (p *processor[T]) run(ctx context.Context) error {
-	if p.imp.Status == StatusPending {
+	if len(p.imp.Header) == 0 {
 		if err := p.begin(ctx); err != nil {
 			return err
 		}
@@ -114,7 +104,7 @@ func (p *processor[T]) run(ctx context.Context) error {
 			if rec.Valid() {
 				if err := p.row(ctx, p.imp, &rec); err != nil {
 					if retryable(err) {
-						return errors.CombineErrors(err, p.commit(context.WithoutCancel(ctx), StatusRunning, nil))
+						return errors.CombineErrors(err, p.commit(context.WithoutCancel(ctx), false))
 					}
 					rec.SetError("", i18n.T(ctx, errorx.CodeOf(err), errorx.PublicOf(err)))
 				}
@@ -127,12 +117,12 @@ func (p *processor[T]) run(ctx context.Context) error {
 			p.rows++
 			p.lastLine = rec.Line
 			if p.rows == chunk {
-				if err := p.commit(ctx, StatusRunning, nil); err != nil {
+				if err := p.commit(ctx, false); err != nil {
 					return err
 				}
 			}
 		}
-		return p.commit(ctx, StatusCompleted, nil)
+		return p.commit(ctx, true)
 	})
 }
 
@@ -155,103 +145,62 @@ func (p *processor[T]) open(ctx context.Context, fn func(r *sheet.Reader) error)
 	return fn(r)
 }
 
-// begin 检查表头是否包含必需的列、统计行数，把导入变为 running。
+// begin 检查表头是否包含必需的列、统计行数，保存表头和总行数。
 func (p *processor[T]) begin(ctx context.Context) error {
-	imp := *p.imp
+	var header []string
+	total := 0
 	err := p.open(ctx, func(r *sheet.Reader) error {
 		if _, err := sheet.Decode[T](ctx, r); err != nil {
 			return err
 		}
-		imp.Header = r.Header()
+		header = r.Header()
 		for _, err := range r.Rows() {
 			if err != nil {
 				return err
 			}
-			imp.TotalRows++
+			total++
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	imp.Status, imp.UpdatedAt = StatusRunning, time.Now().UTC()
-	err = database.RunInTx(ctx, p.s.db, nil, func(ctx context.Context, tx database.Tx) error {
-		res, err := tx.NewUpdate().Model(&imp).Column("status", "header", "total_rows", "updated_at").
-			WherePK().Where("status = ?", StatusPending).Exec(ctx)
-		if err := moved(res, err); err != nil {
-			return err
-		}
-		return p.callSaved(ctx, tx, &imp)
+	p.r.SetTotal(total)
+	err = p.r.Save(ctx, func(ctx context.Context, tx database.Tx) error {
+		_, err := tx.NewUpdate().Model(&Import{OperationID: p.imp.ID, Header: header}).Column("header").WherePK().Exec(ctx)
+		return errors.Wrap(err, "imports: save header")
 	})
 	if err != nil {
 		return err
 	}
-	*p.imp = imp
+	p.imp.Header = header
 	return nil
 }
 
-func (p *processor[T]) callSaved(ctx context.Context, tx database.Tx, imp *Import) error {
-	if p.saved == nil {
-		return nil
-	}
-	return p.saved(ctx, tx, imp)
-}
-
-// commit 保存进度：写入上次保存之后没有导入的行，更新计数，并调用 saved。status 不是 running 时同时结束导入；
-// cause 是 failed 的原因。进度已被另一次执行改变时返回 errMoved。
-func (p *processor[T]) commit(ctx context.Context, status Status, cause error) error {
-	if status == StatusRunning && p.rows == 0 {
+// commit 保存进度：写入上次保存之后没有导入的行和处理到的行号，更新计数。final 为 true 时同时结束导入。
+func (p *processor[T]) commit(ctx context.Context, final bool) error {
+	if p.rows == 0 && !final {
 		return nil // 上次保存之后没有处理任何行
 	}
-	imp := *p.imp
-	imp.ProcessedRows += p.rows
-	imp.FailedRows += len(p.pending)
-	imp.LastLine = p.lastLine
-	imp.Status = status
-	now := time.Now().UTC()
-	imp.UpdatedAt = now
-	if status != StatusRunning {
-		imp.CompletedAt = &now
+	p.r.Add(p.rows, len(p.pending))
+	pending, lastLine := p.pending, p.lastLine
+	save := p.r.Save
+	if final {
+		save = p.r.Complete
 	}
-	if cause != nil {
-		imp.Error, imp.ErrorData = errorx.CodeOf(cause), errorx.PublicOf(cause)
-		if imp.Error == "" || retryable(cause) {
-			imp.Error, imp.ErrorData = "imports.failed", nil
-		}
-		if imp.ErrorData == nil {
-			imp.ErrorData = map[string]any{}
-		}
-	}
-	err := database.RunInTx(ctx, p.s.db, nil, func(ctx context.Context, tx database.Tx) error {
-		if len(p.pending) > 0 {
-			if _, err := tx.NewInsert().Model(&p.pending).Exec(ctx); err != nil {
+	err := save(ctx, func(ctx context.Context, tx database.Tx) error {
+		if len(pending) > 0 {
+			if _, err := tx.NewInsert().Model(&pending).Exec(ctx); err != nil {
 				return errors.Wrap(err, "imports: save failures")
 			}
 		}
-		res, err := tx.NewUpdate().Model(&imp).
-			Column("status", "processed_rows", "failed_rows", "last_line", "error", "error_data", "updated_at", "completed_at").
-			WherePK().Where("status IN (?)", bun.In([]Status{StatusPending, StatusRunning})).
-			Where("last_line = ?", p.imp.LastLine).Exec(ctx)
-		if err := moved(res, err); err != nil {
-			return err
-		}
-		return p.callSaved(ctx, tx, &imp)
+		_, err := tx.NewUpdate().Model(&Import{OperationID: p.imp.ID, LastLine: lastLine}).Column("last_line").WherePK().Exec(ctx)
+		return errors.Wrap(err, "imports: save progress")
 	})
 	if err != nil {
 		return err
 	}
-	*p.imp = imp
+	p.imp.LastLine = lastLine
 	p.pending, p.rows = nil, 0
-	return nil
-}
-
-// moved 检查条件更新是否改到了一行，没有时返回 errMoved。
-func moved(res sql.Result, err error) error {
-	if err != nil {
-		return errors.Wrap(err, "imports: save progress")
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return errors.CombineErrors(errMoved, err)
-	}
 	return nil
 }

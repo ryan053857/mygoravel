@@ -24,7 +24,7 @@
 
 后台管理系统几乎都要支持用 Excel 批量导入数据，以及把列表导出成表格。`sheet` 包读写 CSV 和 Excel（XLSX）两种格式，导入时按[验证](validation.md)规则检查每一行，规则与 JSON 接口和[页面表单](forms.md)用的是同一个结构体。
 
-本章为博客加上两个功能：从表格批量创建文章，以及把文章列表导出为表格。前两节在一次请求中完成，适合几千行以内的数据；更大的文件放到[后台导入](#background-imports)，进度、断点续跑和失败行的下载由 `imports` 包完成；大量数据同样可以[在后台导出](#background-exports)，由 `exports` 包记录进度，完成后通知用户下载。
+本章为博客加上两个功能：从表格批量创建文章，以及把文章列表导出为表格。前两节在一次请求中完成，适合几千行以内的数据；更大的文件放到[后台导入](#background-imports)，进度、断点续跑和失败行的下载由 `imports` 包完成；大量数据同样可以[在后台导出](#background-exports)，由 `exports` 包记录进度，完成后通知用户下载。后台导入和导出都是[后台操作](operations.md)，和应用自己的批量处理出现在同一个任务列表里。
 
 <a id="importing"></a>
 ## 导入
@@ -350,16 +350,17 @@ func download(name string, format sheet.Format, write func(w *sheet.Writer) erro
 
 文件有几万行时，一次请求处理不完，用户也不应该一直等着。`imports` 包把导入放到[队列](queue.md)中：用户上传文件后马上得到一个导入 ID，前端用它查询进度；任务每处理 100 行保存一次进度，重试时从中断的地方继续；没有导入的行保存下来，用户可以下载、改正后重新导入；结束时在同一个事务中通知用户。
 
-导入记录在 `imports` 和 `import_failures` 两张表中，和文件、队列的迁移一起[发布](migrations.md#publishing-framework-migrations)：
+一次导入是一个[后台操作](operations.md)：状态和进度记在 `operations` 表中，`imports` 表记录上传的文件和处理到的行号，`import_failures` 表记录没有导入的行。和文件、队列的迁移一起[发布](migrations.md#publishing-framework-migrations)，`operation` 排在 `imports` 之前：
 
 ```go
+migrate.Source{Name: "operation", FS: operation.Migrations()},
 migrate.Source{Name: "imports", FS: imports.Migrations()},
 ```
 
-`imports.New` 在[依赖装配](dependencies.md#assembling-the-application)的 `open` 中创建，`files` 是[文件存储](filesystem.md)的 `*filesystem.Service`，`languages` 是应用的[语言目录](localization.md)：
+`imports.New` 在[依赖装配](dependencies.md#assembling-the-application)的 `open` 中创建，`ops` 是 `operation.New(db)`，`files` 是[文件存储](filesystem.md)的 `*filesystem.Service`，`languages` 是应用的[语言目录](localization.md)：
 
 ```go
-importer := imports.New(db, files, languages)
+importer := imports.New(db, ops, files, languages)
 ```
 
 <a id="starting-imports"></a>
@@ -408,7 +409,7 @@ func (a *QueueImport) Handle(ctx context.Context, subject identity.Subject, file
     var imp *imports.Import
     err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         var err error
-        if imp, err = a.importer.Start(ctx, tx, subject, "articles", fileID); err != nil {
+        if imp, err = a.importer.Start(ctx, tx, subject, "articles.import", fileID); err != nil {
             return err
         }
         return ImportJob.Publish(ctx, queue.Database(tx), imp.ID)
@@ -453,24 +454,19 @@ func (a *QueueImport) Job(ctx context.Context, id uuid.UUID) error {
     }, a.saved)
 }
 
-// importTopic 是一次导入的广播主题。每次保存进度后发布一条空消息，提醒正在查看的连接重新读取进度。
-func importTopic(id uuid.UUID) string {
-    return "import:" + id.String()
-}
-
 // saved 在每次保存进度的事务中调用：提交后广播进度；导入结束时在同一个事务中通知发起导入的人。
 func (a *QueueImport) saved(ctx context.Context, tx database.Tx, imp *imports.Import) error {
     tx.AfterCommit(func(ctx context.Context) error {
-        return a.hub.Publish(ctx, importTopic(imp.ID), nil)
+        return a.hub.Publish(ctx, operationTopic(imp.ID), nil)
     })
-    if imp.Status == imports.StatusRunning {
+    if !imp.Finished() {
         return nil
     }
     _, err := notification.Send(ctx, tx, notification.Notification{
         Event: "articles.imported",
         Data: map[string]any{
             "import_id": imp.ID, "status": imp.Status,
-            "created": imp.ProcessedRows - imp.FailedRows, "failed": imp.FailedRows,
+            "created": imp.Processed - imp.Failed, "failed": imp.Failed,
         },
     }, notification.RecipientOf(imp.Owner()))
     return err
@@ -488,7 +484,7 @@ func (a *QueueImport) Progress(ctx context.Context, in *ImportIDInput) (*huma.St
         return nil, err // 还没有开始推送，客户端照常收到 404
     }
     return rest.SSE(func(s *httpx.Stream) error {
-        events := a.hub.Subscribe(importTopic(in.ID)) // 先订阅，再查询，中间保存的进度不会漏掉
+        events := a.hub.Subscribe(operationTopic(in.ID)) // 先订阅，再查询，中间保存的进度不会漏掉
         defer events.Close()
         for {
             imp, err := a.importer.Get(s.Context(), subject, in.ID)
@@ -498,7 +494,7 @@ func (a *QueueImport) Progress(ctx context.Context, in *ImportIDInput) (*huma.St
             if err := s.SendJSON(httpx.Event{Name: "progress"}, progressOf(s.Context(), imp)); err != nil {
                 return nil // 客户端已经离开
             }
-            if imp.Status == imports.StatusCompleted || imp.Status == imports.StatusFailed {
+            if imp.Finished() {
                 return nil
             }
             select {
@@ -542,7 +538,7 @@ worker 注册任务，见[启动 worker](queue.md#running-workers)：
 article.ImportJob.Handle(router, sub, article.NewQueueImport(a.db, a.hub, a.importer, article.NewImport(article.NewCreate(a.db))).Job)
 ```
 
-`imports.Process` 第一次执行时检查表头、统计行数，导入变为 `running`；然后逐行解码，验证通过的行交给回调。回调与同步导入共用 `row`，发起人由 `imp.Owner()` 得到，它只有 ID、类型和租户；`Create` 需要检查权限时，按 ID 重新加载权限；多租户应用中 `Owner` 已经带着租户，见[队列任务](tenancy.md#tenant-jobs)。
+`imports.Process` 用[后台操作](operations.md#running)的 `Run` 执行导入，一行是一个单位：导入变为 `running`，第一次执行时检查表头、统计行数；然后逐行解码，验证通过的行交给回调。回调与同步导入共用 `row`，发起人由 `imp.Owner()` 得到，它只有 ID、类型和租户；`Create` 需要检查权限时，按 ID 重新加载权限；多租户应用中 `Owner` 已经带着租户，见[队列任务](tenancy.md#tenant-jobs)。
 
 每一行的结果有三种：
 
@@ -552,9 +548,9 @@ article.ImportJob.Handle(router, sub, article.NewQueueImport(a.db, a.hub, a.impo
 | 回调返回带错误码的业务错误 | 同样记为没有导入的行，提示是错误码的译文 |
 | 回调返回其他错误，例如数据库不可用 | 保存进度后返回错误，队列稍后重试，从这一行继续 |
 
-验证提示和错误的译文使用登记导入时请求的语言。缺少必需的列、文件损坏等整个文件的问题，导入直接变为 `failed`，`Error` 是错误码；队列的最后一次重试仍然出错时，导入同样变为 `failed`。
+验证提示和错误的译文使用登记导入时请求的语言。缺少必需的列、文件损坏等整个文件的问题，导入直接变为 `failed`，`Error` 是错误码；队列的最后一次重试仍然出错时，导入同样变为 `failed`，`Error` 是 `operation.failed`。导入结束时上传的文件被删除，由文件存储的 `Cleanup` 回收，下载失败的行不需要它。
 
-`Process` 每次保存进度时都在同一个事务中调用 `saved`：导入变为 `running` 时一次，之后每 100 行一次，结束时再一次。`saved` 用 [AfterCommit](database.md#after-commit) 在提交之后发布广播，提醒正在查看进度的连接，见[进度与失败的行](#progress-and-failures)。导入变为 `completed` 或 `failed` 时，`saved` 在这个事务中发送通知，通知和状态一起提交，不会重复发送，也不会漏发。`notification.Send` 的用法见[通知](notifications.md)。
+`Process` 每次保存进度时都在同一个事务中调用 `saved`：导入变为 `running` 时一次，读出表头时一次，之后每 100 行一次，结束时再一次。`saved` 用 [AfterCommit](database.md#after-commit) 在提交之后向 `operationTopic`（见[后台操作](operations.md#starting)）发布广播，提醒正在查看进度的连接，见[进度与失败的行](#progress-and-failures)。导入变为 `completed` 或 `failed` 时，`saved` 在这个事务中发送通知，通知和状态一起提交，不会重复发送，也不会漏发。`notification.Send` 的用法见[通知](notifications.md)。
 
 > [!WARNING]
 > 进度每 100 行保存一次。worker 在两次保存之间崩溃时，这些行会在重试时再次交给回调，所以回调要能重复执行。博客的 `row` 遇到已被占用的 slug 会把这一行记为失败，不会重复创建文章；没有唯一字段的数据，可以先按业务字段查找，存在时更新。
@@ -591,12 +587,12 @@ rest.RegisterSSE(api, progress, map[string]any{"progress": ImportProgress{}}, qu
 
 ```text
 event: progress
-data: {"id":"0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10","kind":"articles","filename":"articles.xlsx","status":"running","total_rows":52000,"processed_rows":18300,"failed_rows":12,"created_at":"2026-11-11T08:00:00Z","updated_at":"2026-11-11T08:00:41Z"}
+data: {"id":"0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10","kind":"articles.import","status":"running","total":52000,"processed":18300,"failed":12,"created_at":"2026-11-11T08:00:00Z","updated_at":"2026-11-11T08:00:41Z","file_id":"0193e7a1-55aa-7c2b-8e3f-9a0b1c2d3e4f","filename":"articles.xlsx"}
 ```
 
-前端用 `processed_rows / total_rows` 显示进度条，收到 `completed` 或 `failed` 后连接关闭，再显示结果和下载失败行的链接。
+前端用 `processed / total` 显示进度条，`processed` 包括没有导入的 `failed` 行；收到 `completed` 或 `failed` 后连接关闭，再显示结果和下载失败行的链接。
 
-进度是状态而不是事件：广播只提醒连接重新读取，连接（包括断线重连）时先推送一次当前进度，所以中间漏掉的广播没有影响，也不需要按 `Last-Event-ID` 补发，与[通知角标](notifications.md#realtime)的做法相同。worker 和 SSE 连接在不同的实例上时，广播由 Hub 的后端送达，见[广播](broadcasting.md)。每次读取都经过 `Get`，只有发起导入的人能看到进度，其他人收到 `imports.ErrNotFound`。
+进度是状态而不是事件：广播只提醒连接重新读取，连接（包括断线重连）时先推送一次当前进度，所以中间漏掉的广播没有影响，也不需要按 `Last-Event-ID` 补发，与[通知角标](notifications.md#realtime)的做法相同。worker 和 SSE 连接在不同的实例上时，广播由 Hub 的后端送达，见[广播](broadcasting.md)。每次读取都经过 `Get`，只有发起导入的人能看到进度，其他人收到 `operation.ErrNotFound`。
 
 浏览器的 `EventSource` 不能设置 `Authorization` 请求头，使用 Bearer 令牌的前端用 `fetch` 读取事件流，见 [JSON API](sse.md#json-api)。
 
@@ -605,25 +601,21 @@ data: {"id":"0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10","kind":"articles","filename":
 <a id="cleanup"></a>
 ### 清理
 
-导入记录、失败的行和上传的文件不会自动删除。用[定时任务](scheduling.md#framework-cleanups)定期清理旧的导入，上传的文件被标记为删除，由文件存储的 `Cleanup` 回收：
-
-```go
-sched.Add("imports:cleanup", "0 3 * * *", schedule.Cleanup(a.importer.Cleanup(30*24*time.Hour), 1000))
-```
+导入记录和失败的行不会自动删除。[清理后台操作](operations.md#cleanup)时，导入和它的失败行随操作一起删除，不需要单独的清理任务。
 
 <a id="background-exports"></a>
 ## 后台导出
 
 导出几十万行要几分钟，同样放到队列中。`exports` 包记录导出的进度，任务把表格写到本地临时文件，完成后上传到[文件存储](filesystem.md)，用户在页面上看到进度，结束后直接下载。
 
-导出记录在 `exports` 表中，与[后台导入](#background-imports)一样发布迁移、创建服务：
+导出同样是一个[后台操作](operations.md)，`exports` 表记录格式和生成的文件。与[后台导入](#background-imports)一样发布迁移、创建服务：
 
 ```go
 migrate.Source{Name: "exports", FS: exports.Migrations()},
 ```
 
 ```go
-exporter := exports.New(db, files)
+exporter := exports.New(db, ops, files)
 ```
 
 <a id="starting-exports"></a>
@@ -683,7 +675,7 @@ func (a *QueueExport) Handle(ctx context.Context, subject identity.Subject, form
     var exp *exports.Export
     err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         var err error
-        if exp, err = a.exporter.Start(ctx, tx, subject, "articles", format); err != nil {
+        if exp, err = a.exporter.Start(ctx, tx, subject, "articles.export", format); err != nil {
             return err
         }
         return ExportJob.Publish(ctx, queue.Database(tx), ExportRequest{ID: exp.ID, Subject: subject, Columns: columns})
@@ -733,15 +725,10 @@ func (a *QueueExport) Job(ctx context.Context, req ExportRequest) error {
     }, a.saved)
 }
 
-// exportTopic 是一次导出的广播主题。每次保存进度后发布一条空消息，提醒正在查看的连接重新读取进度。
-func exportTopic(id uuid.UUID) string {
-    return "export:" + id.String()
-}
-
 // saved 在每次保存进度的事务中调用：提交后广播进度；导出结束时在同一个事务中通知导出的人。
 func (a *QueueExport) saved(ctx context.Context, tx database.Tx, exp *exports.Export) error {
     tx.AfterCommit(func(ctx context.Context) error {
-        return a.hub.Publish(ctx, exportTopic(exp.ID), nil)
+        return a.hub.Publish(ctx, operationTopic(exp.ID), nil)
     })
     if !exp.Finished() {
         return nil
@@ -768,7 +755,7 @@ func (a *QueueExport) Progress(ctx context.Context, in *ExportIDInput) (*huma.St
         return nil, err // 还没有开始推送，客户端照常收到 404
     }
     return rest.SSE(func(s *httpx.Stream) error {
-        events := a.hub.Subscribe(exportTopic(in.ID)) // 先订阅，再查询
+        events := a.hub.Subscribe(operationTopic(in.ID)) // 先订阅，再查询
         defer events.Close()
         for {
             exp, err := a.exporter.Get(s.Context(), subject, in.ID)
@@ -809,9 +796,9 @@ article.ExportJob.Handle(router, sub, article.NewQueueExport(a.db, a.hub, a.expo
 
 `Process` 把导出变为 `running`，回调先用同一个 `query` 统计行数，用 `SetTotal` 告诉前端一共有多少行，再交给 `Export.Handle` 写出。`exports.Writer` 的第一行是表头，之后每写一行计数一次，每秒最多保存一次进度。
 
-写完后文件以 temporary 状态上传，导出变为 `completed`。`URL` 是文件的[公开地址](filesystem.md#accessing-files)，`ExpiresAt` 是它被回收的时间：超过 [`temp_ttl`](filesystem.md#configuration)（默认 24 小时）后文件由文件存储的 `Cleanup` 删除，下载地址随之失效。文件名是 kind 加日期，例如 `articles-20261111.xlsx`。
+写完后文件以 temporary 状态上传，导出变为 `completed`，文件的地址和完成状态在同一个事务中保存，前端看到 `completed` 时一定能拿到地址。`URL` 是文件的[公开地址](filesystem.md#accessing-files)，`ExpiresAt` 是它被回收的时间：超过 [`temp_ttl`](filesystem.md#configuration)（默认 24 小时）后文件由文件存储的 `Cleanup` 删除，下载地址随之失效。文件名是 kind 中的点换成连字符再加日期，例如 `articles-export-20261111.xlsx`。
 
-每次保存进度都在同一个事务中调用 `saved`，与[后台导入](#processing-imports)相同：提交后广播，结束时发送通知。回调返回带错误码的业务错误时，导出直接变为 `failed`；其他错误交给队列重试，重试时从头重新导出；最后一次重试仍然出错时，导出同样变为 `failed`。
+每次保存进度都在同一个事务中调用 `saved`，与[后台导入](#processing-imports)相同：提交后广播，结束时发送通知。回调返回带错误码的业务错误时，导出直接变为 `failed`；其他错误交给队列重试，重试时从头重新导出，进度清零；最后一次重试仍然出错时，导出同样变为 `failed`，`Error` 是 `operation.failed`。
 
 对象键是随机的 UUID 加扩展名，浏览器直接打开公开地址时保存的文件名也是它。前端可以用 `<a href={url} download={filename}>` 指定保存的文件名，这个属性只在与页面同源时生效，例如本地磁盘挂在应用自己的路径下。
 
@@ -847,13 +834,9 @@ rest.RegisterSSE(api, exportProgress, map[string]any{"progress": ExportProgress{
 
 ```text
 event: progress
-data: {"id":"0193e7a2-8a01-7c3e-b1d4-5e6f7a8b9c0d","kind":"articles","format":"xlsx","status":"completed","total_rows":320000,"processed_rows":320000,"file_id":"0193e7a3-1b2c-7d4e-8f90-a1b2c3d4e5f6","filename":"articles-20261111.xlsx","url":"/storage/2026/11/11/0193e7a3-1b2c-7d4e-8f90-a1b2c3d4e5f6.xlsx","expires_at":"2026-11-12T08:03:10Z","created_at":"2026-11-11T08:00:00Z","updated_at":"2026-11-11T08:03:10Z","completed_at":"2026-11-11T08:03:10Z"}
+data: {"id":"0193e7a2-8a01-7c3e-b1d4-5e6f7a8b9c0d","kind":"articles.export","status":"completed","total":320000,"processed":320000,"failed":0,"created_at":"2026-11-11T08:00:00Z","updated_at":"2026-11-11T08:03:10Z","completed_at":"2026-11-11T08:03:10Z","format":"xlsx","file_id":"0193e7a3-1b2c-7d4e-8f90-a1b2c3d4e5f6","filename":"articles-export-20261111.xlsx","url":"/storage/2026/11/11/0193e7a3-1b2c-7d4e-8f90-a1b2c3d4e5f6.xlsx","expires_at":"2026-11-12T08:03:10Z"}
 ```
 
-`total_rows` 为 0 时（回调没有调用 `SetTotal`），前端显示“已导出 N 行”即可。
+`total` 为 0 时（回调没有调用 `SetTotal`），前端显示“已导出 N 行”即可。
 
-导出记录不会自动删除，用[定时任务](scheduling.md#framework-cleanups)定期清理；导出的文件已经由文件存储回收：
-
-```go
-sched.Add("exports:cleanup", "0 3 * * *", schedule.Cleanup(a.exporter.Cleanup(7*24*time.Hour), 1000))
-```
+导出记录随[后台操作的清理](operations.md#cleanup)一起删除，导出的文件已经由文件存储回收。

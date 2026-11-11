@@ -341,9 +341,7 @@ queue.Handle(router, sub, "articles.publish-scheduled", func(ctx context.Context
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
 | [操作日志](activity.md#retention) | `activity.Cleanup(db, 保留期)` | 每天 |
 | [通知](notifications.md#retention) | `notification.Cleanup(db, 保留期)` | 每天 |
-| [后台操作](operations.md#cleanup) | `operation.New(db)` 的 `Cleanup(保留期)` | 每天 |
-| [导入](import-export.md#cleanup) | `imports.New(...)` 的 `Cleanup(保留期)` | 每天 |
-| [导出](import-export.md#export-progress) | `exports.New(...)` 的 `Cleanup(保留期)` | 每天 |
+| [后台操作](operations.md#cleanup)（包括导入和导出） | `operation.New(db)` 的 `Cleanup(保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(ctx, before, limit)` | 每天 |
 
 使用 Redis 存储时过期的数据由 Redis 自动删除，不需要注册清理任务。

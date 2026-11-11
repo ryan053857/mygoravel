@@ -17,10 +17,6 @@ authz.invalid: 输入不合法
 notification.not_found: 通知不存在
 operation.not_found: 操作不存在
 operation.failed: 操作中断，请重新操作
-exports.not_found: 导出不存在
-exports.failed: 导出中断，请重新导出
-imports.not_found: 导入不存在
-imports.failed: 导入中断，请重新导入
 imports.errors_column: 错误
 sheet.unsupported_format: 只支持 CSV 和 XLSX 文件
 sheet.bad_file: 无法读取表格文件

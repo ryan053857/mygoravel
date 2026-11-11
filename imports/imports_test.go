@@ -28,6 +28,7 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/imports"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/sheet"
 )
@@ -47,15 +48,16 @@ type changes struct {
 type env struct {
 	db        *bun.DB
 	files     *filesystem.Service
+	ops       *operation.Service
 	imports   *imports.Service
 	languages *goi18n.Bundle
 }
 
-// migrations 合并文件、队列和导入的迁移。
+// migrations 合并文件、队列、操作和导入的迁移。
 func migrations(t *testing.T) fs.FS {
 	t.Helper()
 	merged := fstest.MapFS{}
-	for prefix, src := range map[string]fs.FS{"1": filesystem.Migrations(), "2": queue.Migrations(), "3": imports.Migrations()} {
+	for prefix, src := range map[string]fs.FS{"1": filesystem.Migrations(), "2": queue.Migrations(), "3": operation.Migrations(), "4": imports.Migrations()} {
 		err := fs.WalkDir(src, ".", func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
@@ -90,7 +92,8 @@ func newEnv(t *testing.T, driver database.Driver) env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return env{db: db, files: files, imports: imports.New(db, files, languages), languages: languages}
+	ops := operation.New(db)
+	return env{db: db, files: files, ops: ops, imports: imports.New(db, ops, files, languages), languages: languages}
 }
 
 // start 以 owner 的身份上传 body 并登记导入，请求的语言是中文。
@@ -101,7 +104,7 @@ func (e env) start(t *testing.T, owner identity.Subject, name, body string) *imp
 	if err != nil {
 		t.Fatal(err)
 	}
-	imp, err := e.imports.Start(ctx, e.db, owner, "articles", f.ID)
+	imp, err := e.imports.Start(ctx, e.db, owner, "articles.import", f.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +167,7 @@ func (r *recorder) progress() []string {
 	defer r.mu.Unlock()
 	list := make([]string, len(r.saves))
 	for i, imp := range r.saves {
-		list[i] = fmt.Sprintf("%s:%d", imp.Status, imp.ProcessedRows)
+		list[i] = fmt.Sprintf("%s:%d", imp.Status, imp.Processed)
 	}
 	return list
 }
@@ -192,7 +195,7 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 		ctx := context.Background()
 		e := newEnv(t, driver)
 		imp := e.start(t, alice, "articles.csv", csv(250))
-		if imp.Status != imports.StatusPending || imp.Locale != "zh-CN" {
+		if imp.Status != operation.StatusPending || imp.Locale != "zh-CN" {
 			t.Fatalf("started: %+v", imp)
 		}
 
@@ -208,7 +211,7 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 			t.Fatalf("first run: %v", err)
 		}
 		got := e.get(t, alice, imp.ID)
-		if got.Status != imports.StatusRunning || got.TotalRows != 250 || got.ProcessedRows != 148 || got.FailedRows != 3 {
+		if got.Status != operation.StatusRunning || got.Total != 250 || got.Processed != 148 || got.Failed != 3 {
 			t.Fatalf("after first run: %+v", got)
 		}
 
@@ -217,7 +220,7 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		got = e.get(t, alice, imp.ID)
-		if got.Status != imports.StatusCompleted || got.ProcessedRows != 250 || got.FailedRows != 3 || got.CompletedAt == nil {
+		if got.Status != operation.StatusCompleted || got.Processed != 250 || got.Failed != 3 || got.CompletedAt == nil {
 			t.Fatalf("completed: %+v", got)
 		}
 		for line := 2; line <= 251; line++ {
@@ -229,18 +232,23 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 				t.Fatalf("line %d handled %d times", line, rec.seen[line])
 			}
 		}
-		// 开始、每 100 行、出错前、结束各保存一次，每次都调用 saved。
-		want := []string{"running:0", "running:100", "running:148", "running:248", "completed:250"}
+		// 变为 running、读出表头、每 100 行、出错前、结束各保存一次，每次都调用 saved。
+		want := []string{"running:0", "running:0", "running:100", "running:148", "running:248", "completed:250"}
 		if got := rec.progress(); !slices.Equal(got, want) {
 			t.Fatalf("saves: %v", got)
 		}
-		if rec.saves[0].TotalRows != 250 || rec.saves[4].FailedRows != 3 {
+		if rec.saves[1].Total != 250 || rec.saves[5].Failed != 3 {
 			t.Fatalf("saves: %+v", rec.saves)
 		}
 
 		// 已经结束的导入再处理一次什么也不做。
-		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.saved); err != nil || len(rec.saves) != 5 {
+		if err := imports.Process(ctx, e.imports, imp.ID, rec.row, rec.saved); err != nil || len(rec.saves) != 6 {
 			t.Fatalf("again: %v %d", err, len(rec.saves))
+		}
+
+		// 导入结束时上传的文件被删除。
+		if _, err := e.files.Get(ctx, imp.FileID); !errors.Is(err, filesystem.ErrNotFound) {
+			t.Fatalf("file after import: %v", err)
 		}
 
 		failures, err := e.imports.Failures(ctx, got, 10)
@@ -287,10 +295,10 @@ func TestProcessRejectsFile(t *testing.T) {
 		}
 		got := e.get(t, alice, imp.ID)
 		zh := i18n.WithLocale(ctx, e.languages, "zh-CN")
-		if got.Status != imports.StatusFailed || got.Error != "sheet.missing_columns" || got.ErrorMessage(zh) != "缺少必需的列：标题、Slug" {
+		if got.Status != operation.StatusFailed || got.Error != "sheet.missing_columns" || got.ErrorMessage(zh) != "缺少必需的列：标题、Slug" {
 			t.Fatalf("failed: %+v %q", got, got.ErrorMessage(zh))
 		}
-		if got := rec.progress(); !slices.Equal(got, []string{"failed:0"}) {
+		if got := rec.progress(); !slices.Equal(got, []string{"running:0", "failed:0"}) {
 			t.Fatalf("saves: %v", got)
 		}
 	})
@@ -304,7 +312,7 @@ func TestStartAndGet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.imports.Start(ctx, e.db, alice, "articles", f.ID); !errors.Is(err, sheet.ErrFormat) {
+		if _, err := e.imports.Start(ctx, e.db, alice, "articles.import", f.ID); !errors.Is(err, sheet.ErrFormat) {
 			t.Fatalf("format: %v", err)
 		}
 		imp := e.start(t, alice, "a.csv", "标题,Slug\n")
@@ -312,8 +320,15 @@ func TestStartAndGet(t *testing.T) {
 		if err != nil || file.Status != filesystem.StatusReady {
 			t.Fatalf("file: %+v %v", file, err)
 		}
-		if _, err := e.imports.Get(ctx, bob, imp.ID); !errors.Is(err, imports.ErrNotFound) {
+		if _, err := e.imports.Get(ctx, bob, imp.ID); !errors.Is(err, operation.ErrNotFound) {
 			t.Fatalf("other owner: %v", err)
+		}
+		other, err := e.ops.Start(ctx, e.db, alice, "articles.bulk_publish")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.imports.Get(ctx, alice, other.ID); !errors.Is(err, operation.ErrNotFound) {
+			t.Fatalf("not an import: %v", err)
 		}
 	})
 }
@@ -351,8 +366,8 @@ func TestFinalAttemptFailsImport(t *testing.T) {
 		deadline := time.Now().Add(10 * time.Second)
 		for {
 			got := e.get(t, alice, imp.ID)
-			if got.Status == imports.StatusFailed {
-				if got.Error != "imports.failed" || got.ProcessedRows != 0 {
+			if got.Status == operation.StatusFailed {
+				if got.Error != "operation.failed" || got.Processed != 0 {
 					t.Fatalf("failed: %+v", got)
 				}
 				break
@@ -362,7 +377,7 @@ func TestFinalAttemptFailsImport(t *testing.T) {
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		if got := rec.progress(); !slices.Equal(got, []string{"running:0", "failed:0"}) {
+		if got := rec.progress(); !slices.Equal(got, []string{"running:0", "running:0", "failed:0"}) {
 			t.Fatalf("saves: %v", got)
 		}
 	})
@@ -377,21 +392,25 @@ func TestCleanup(t *testing.T) {
 		if err := imports.Process(ctx, e.imports, old.ID, newRecorder().row, nil); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := e.db.NewUpdate().Model((*imports.Import)(nil)).Set("created_at = ?", time.Now().Add(-48*time.Hour).UTC()).
+		if _, err := e.db.NewUpdate().Model((*operation.Operation)(nil)).Set("created_at = ?", time.Now().Add(-48*time.Hour).UTC()).
 			Where("id = ?", old.ID).Exec(ctx); err != nil {
 			t.Fatal(err)
 		}
-		n, err := e.imports.Cleanup(24*time.Hour)(ctx, 10)
+		n, err := e.ops.Cleanup(24*time.Hour)(ctx, 10)
 		if err != nil || n != 1 {
 			t.Fatalf("cleanup: %d %v", n, err)
 		}
-		if _, err := e.imports.Get(ctx, alice, old.ID); !errors.Is(err, imports.ErrNotFound) {
+		if _, err := e.imports.Get(ctx, alice, old.ID); !errors.Is(err, operation.ErrNotFound) {
 			t.Fatalf("old import: %v", err)
 		}
 		e.get(t, alice, recent.ID)
+		// 导入和失败行随操作级联删除。
 		left, err := e.db.NewSelect().Model((*imports.Failure)(nil)).Count(ctx)
 		if err != nil || left != 0 {
 			t.Fatalf("failures left: %d %v", left, err)
+		}
+		if n, err := e.db.NewSelect().Model((*imports.Import)(nil)).Count(ctx); err != nil || n != 1 {
+			t.Fatalf("imports left: %d %v", n, err)
 		}
 		if _, err := e.files.Get(ctx, old.FileID); !errors.Is(err, filesystem.ErrNotFound) {
 			t.Fatalf("file: %v", err)

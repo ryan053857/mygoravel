@@ -281,6 +281,39 @@ func TestRunRestart(t *testing.T) {
 	})
 }
 
+func TestComplete(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		e := newEnv(t, driver)
+		op := e.start(t, alice, "articles.export")
+		rec := &recorder{}
+		var written int
+		err := e.ops.Run(ctx, op.ID, func(ctx context.Context, r *operation.Run) error {
+			r.SetTotal(2)
+			r.Add(2, 0)
+			if err := r.Complete(ctx, func(context.Context, database.Tx) error {
+				written++
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := r.Save(ctx, nil); err == nil {
+				t.Error("saved after complete")
+			}
+			return errors.New("late error") // 结果已经保存，不再变为 failed
+		}, rec.saved)
+		if err == nil {
+			t.Fatal("late error dropped")
+		}
+		if p := rec.progress(); !slices.Equal(p, []string{"running:0/0-0", "completed:2/2-0"}) || written != 1 {
+			t.Fatalf("saves: %v written %d", p, written)
+		}
+		if got := e.get(t, op.ID); got.Status != operation.StatusCompleted {
+			t.Fatalf("status: %+v", got)
+		}
+	})
+}
+
 func TestRunBusinessErrorFails(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()

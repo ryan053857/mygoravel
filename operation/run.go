@@ -16,6 +16,9 @@ import (
 // errChanged 表示操作已被另一次执行保存过，例如任务的租约过期后被重新领取。本次执行停下，由队列稍后重试。
 var errChanged = errors.New("operation: changed by another run")
 
+// errFinished 表示调用 Complete 之后又保存进度。
+var errFinished = errors.New("operation: already completed")
+
 // Run 是 Service.Run 的一次执行。SetTotal、Add 和 Restart 只修改内存中的进度，Save 把它保存下来。
 type Run struct {
 	s     *Service
@@ -62,6 +65,13 @@ func (r *Run) Save(ctx context.Context, write func(ctx context.Context, tx datab
 	return r.save(ctx, r.next(StatusRunning), write)
 }
 
+// Complete 结束操作：在一个事务中保存进度、调用 write（可以为 nil）和 saved，操作变为 completed。
+// 结果要和完成状态一起提交时使用，例如导出的下载地址：用户看到 completed 时一定能看到地址。
+// 调用之后回调应当返回 nil。不调用 Complete 时，回调返回 nil 后 Run 自动结束操作。
+func (r *Run) Complete(ctx context.Context, write func(ctx context.Context, tx database.Tx) error) error {
+	return r.save(ctx, r.next(StatusCompleted), write)
+}
+
 // next 返回带着还没有保存的进度、状态为 status 的操作。
 func (r *Run) next(status Status) Operation {
 	op := r.op
@@ -79,6 +89,9 @@ func (r *Run) next(status Status) Operation {
 
 // save 把操作保存为 next，条件是保存期间没有别的执行保存过它。
 func (r *Run) save(ctx context.Context, next Operation, write func(ctx context.Context, tx database.Tx) error) error {
+	if r.op.Finished() {
+		return errFinished
+	}
 	now := time.Now().UTC()
 	next.Version++
 	next.UpdatedAt = now
@@ -117,14 +130,14 @@ func (r *Run) save(ctx context.Context, next Operation, write func(ctx context.C
 // Run 执行操作 id，在队列任务中调用。
 //
 // 操作是 pending 时先变为 running，然后调用 fn。fn 用 r 报告进度，需要时用 r.Save 保存；
-// fn 返回 nil 时操作变为 completed，还没有保存的进度一起保存。
+// fn 返回 nil 时操作变为 completed，还没有保存的进度一起保存，也可以先用 r.Complete 带着结果结束。
 //
 // fn 返回带错误码的业务错误（例如文件缺少必需的列）时，操作变为 failed，Error 是错误码，Run 返回 nil。
 // 其他错误照常返回给队列重试，重试时 Run 再次调用 fn，从上次保存的进度继续，没有保存的进度丢弃；
 // 队列的最后一次执行仍然出错，或者错误被 queue.Permanent 标记时，操作变为 failed，Error 是 operation.failed，
 // 错误照常返回给队列。
 //
-// 每次保存（变为 running、r.Save、结束）都在同一个事务中调用 saved（可以为 nil），op 是保存后的操作。
+// 每次保存（变为 running、r.Save、r.Complete、结束）都在同一个事务中调用 saved（可以为 nil），op 是保存后的操作。
 // 用 tx.AfterCommit 广播进度，供 SSE 推送给正在查看的用户；op.Finished 为 true 时操作已经结束，
 // 例如在这个事务中发送通知。结束的事务提交后 saved 不会再被调用，所以通知不会重复，也不会漏发。
 //
@@ -167,11 +180,17 @@ func (r *Run) run(ctx context.Context, fn func(ctx context.Context, r *Run) erro
 	if err := fn(ctx, r); err != nil {
 		return err
 	}
+	if r.op.Finished() {
+		return nil // 回调调用了 Complete
+	}
 	return r.save(ctx, r.next(StatusCompleted), nil)
 }
 
 // fail 把操作标记为 failed，还没有保存的进度丢弃。
 func (r *Run) fail(ctx context.Context, cause error) error {
+	if r.op.Finished() {
+		return nil // 回调调用了 Complete 之后才出错，结果已经保存
+	}
 	op := r.op
 	op.Status = StatusFailed
 	op.Error, op.ErrorData = errorx.CodeOf(cause), errorx.PublicOf(cause)
