@@ -11,6 +11,8 @@ import (
 const module = "github.com/ryan053857/mygoravel"
 
 // 每个包根可以引用的其他框架包根；同一包树中的引用直接放行。
+// 只列出实际用到的引用，TestDependencyRulesAreUsed 检查没有多余的条目。
+// internal 中是测试辅助包，可以引用任何框架包。
 var dependencies = map[string][]string{
 	"cleanup":      {},
 	"config":       {},
@@ -19,7 +21,7 @@ var dependencies = map[string][]string{
 	"i18n":         {},
 	"identity":     {"errorx"},
 	"page":         {"errorx"},
-	"database":     {"config", "errorx"},
+	"database":     {"errorx"},
 	"filesystem":   {"errorx", "identity"},
 	"mail":         {"i18n"},
 	"ratelimit":    {"errorx"},
@@ -45,11 +47,11 @@ var dependencies = map[string][]string{
 	"feature":      {"errorx", "identity"},
 	"queue":        {"logging"},
 	"broadcast":    {"identity", "logging"},
-	"realtime":     {"broadcast", "errorx", "httpx", "identity", "logging"},
+	"realtime":     {"broadcast", "httpx", "identity", "logging"},
 	"schedule":     {"lock", "logging"},
 	"ai":           {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
-	"command":      {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "crypt", "pdf", "feature", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports", "exports", "operation", "realtime"},
+	"command":      {"cleanup", "config", "errorx", "logging", "database", "httpx"},
+	"internal":     nil,
 }
 
 // 基础包不引用传输、数据库和命令组件。
@@ -90,7 +92,7 @@ func importViolation(from, to string) string {
 		if _, known := dependencies[toRoot]; !known {
 			return "target package has no dependency rule"
 		}
-		if toRoot != fromRoot && !slices.Contains(allowed, toRoot) {
+		if toRoot != fromRoot && fromRoot != "internal" && !slices.Contains(allowed, toRoot) {
 			return "import reverses the framework dependency direction"
 		}
 	}
@@ -126,6 +128,39 @@ func TestPackageGraph(t *testing.T) {
 	}
 }
 
+// TestDependencyRulesAreUsed 确保 dependencies 中没有用不到的条目：放行了却没有用到的引用，
+// 以后被悄悄用上时不会有人注意到。
+func TestDependencyRulesAreUsed(t *testing.T) {
+	cmd := exec.Command("go", "list", "-f", `{{.ImportPath}}{{range .Imports}} {{.}}{{end}}`, module+"/...")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list: %v\n%s", err, out)
+	}
+	used := map[string]map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Fields(line)
+		from, _ := rootOf(fields[0])
+		if used[from] == nil {
+			used[from] = map[string]bool{}
+		}
+		for _, imp := range fields[1:] {
+			if to, internal := rootOf(imp); internal {
+				used[from][to] = true
+			}
+		}
+	}
+	for from, allowed := range dependencies {
+		if used[from] == nil {
+			t.Errorf("%s: dependency rule for a package that does not exist", from)
+		}
+		for _, to := range allowed {
+			if !used[from][to] {
+				t.Errorf("%s may import %s but does not: remove it from dependencies", from, to)
+			}
+		}
+	}
+}
+
 func TestDependencyRules(t *testing.T) {
 	for _, tc := range []struct {
 		from, to string
@@ -133,7 +168,8 @@ func TestDependencyRules(t *testing.T) {
 	}{
 		{module + "/httpx/rest", module + "/errorx", true},
 		{module + "/database/dbtest", module + "/database/migrate", true},
-		{module + "/database", module + "/config", true},
+		{module + "/database", module + "/config", false},
+		{module + "/internal/dbtesting", module + "/database/sqlite", true},
 		{module + "/config", "go.yaml.in/yaml/v4", true},
 		{module + "/errorx", module + "/httpx/rest", false},
 		{module + "/httpx", module + "/command", false},
@@ -323,7 +359,7 @@ func TestCommandCoreIsLight(t *testing.T) {
 }
 
 // TestDatabaseCoreDoesNotLinkDrivers 确保应用只链接自己 import 的数据库驱动：
-// 核心包、迁移与迁移命令不依赖任何驱动，各驱动子包也互不依赖。
+// 核心包、迁移、迁移命令与测试用的 dbtest 不依赖任何驱动，各驱动子包也互不依赖。
 func TestDatabaseCoreDoesNotLinkDrivers(t *testing.T) {
 	drivers := map[string]string{
 		"postgres": "github.com/jackc/pgx",
@@ -334,6 +370,7 @@ func TestDatabaseCoreDoesNotLinkDrivers(t *testing.T) {
 	checks := map[string][]string{
 		module + "/database":           all,
 		module + "/database/migrate":   all,
+		module + "/database/dbtest":    all,
 		module + "/command/migratecmd": all,
 		module + "/ai":                 all,
 	}

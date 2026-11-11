@@ -12,10 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
 
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
@@ -50,9 +47,9 @@ func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 	var db *bun.DB
 	switch driver.Name() {
 	case "postgres":
-		db = openPostgres(ctx, t, driver)
+		db = openServer(ctx, t, driver, " WITH (FORCE)")
 	case "mysql":
-		db = openMySQL(ctx, t, driver)
+		db = openServer(ctx, t, driver, "")
 	case "sqlite":
 		var err error
 		db, err = database.Open(ctx, driver, database.Config{DSN: filepath.Join(t.TempDir(), "test.db")})
@@ -80,7 +77,9 @@ func Open(t testing.TB, driver database.Driver, migrations fs.FS) *bun.DB {
 	return db
 }
 
-func openPostgres(ctx context.Context, t testing.TB, driver database.Driver) *bun.DB {
+// openServer 在 driver 的测试服务器上创建一个临时数据库并打开它，测试结束时删除。
+// 只通过 driver 连接，所以测试只链接应用自己 import 的驱动。
+func openServer(ctx context.Context, t testing.TB, driver database.Driver, drop string) *bun.DB {
 	t.Helper()
 	adminDSN := RequireURL(t, driver)
 	admin, err := database.Open(ctx, driver, database.Config{DSN: adminDSN})
@@ -102,70 +101,36 @@ func openPostgres(ctx context.Context, t testing.TB, driver database.Driver) *bu
 			return
 		}
 		defer db.Close()
-		if _, err := db.ExecContext(cleanCtx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); err != nil {
+		if _, err := db.ExecContext(cleanCtx, "DROP DATABASE IF EXISTS "+name+drop); err != nil {
 			t.Errorf("dbtest: drop database: %v", err)
 		}
 	})
 
-	pgxConfig, err := pgx.ParseConfig(adminDSN)
+	db, err := database.Open(ctx, driver, database.Config{DSN: withDatabase(adminDSN, name)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pgxConfig.Database = name
-	db := bun.NewDB(stdlib.OpenDB(*pgxConfig), pgdialect.New())
 	t.Cleanup(func() {
 		if err := db.Close(); err != nil {
 			t.Errorf("dbtest: close database: %v", err)
 		}
 	})
-	if err := db.PingContext(ctx); err != nil {
-		t.Fatal(err)
-	}
 	return db
 }
 
-func openMySQL(ctx context.Context, t testing.TB, driver database.Driver) *bun.DB {
-	t.Helper()
-	adminURL := RequireURL(t, driver)
-	admin, err := database.Open(ctx, driver, database.Config{DSN: adminURL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer admin.Close()
-
-	name := "test_" + randomName()
-	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cleanCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		db, err := database.Open(cleanCtx, driver, database.Config{DSN: adminURL})
-		if err != nil {
-			t.Errorf("dbtest: reopen admin: %v", err)
-			return
+// withDatabase 返回把 dsn 的数据库换成 name 的连接串。dsn 是 URL（postgres://、mysql://），
+// 或 PostgreSQL 的 key=value 写法：后出现的 dbname 生效。
+func withDatabase(dsn, name string) string {
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" && u.Host != "" {
+		u.Path = "/" + name
+		// PostgreSQL 的 URL 也可以在查询参数中指定数据库，它优先于路径。
+		if q := u.Query(); q.Has("dbname") {
+			q.Del("dbname")
+			u.RawQuery = q.Encode()
 		}
-		defer db.Close()
-		if _, err := db.ExecContext(cleanCtx, "DROP DATABASE IF EXISTS "+name); err != nil {
-			t.Errorf("dbtest: drop database: %v", err)
-		}
-	})
-
-	u, err := url.Parse(adminURL)
-	if err != nil {
-		t.Fatal(err)
+		return u.String()
 	}
-	u.Path = "/" + name
-	db, err := database.Open(ctx, driver, database.Config{DSN: u.String()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("dbtest: close database: %v", err)
-		}
-	})
-	return db
+	return dsn + " dbname=" + name
 }
 
 func randomName() string {
