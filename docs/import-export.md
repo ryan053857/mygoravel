@@ -21,7 +21,7 @@
 
 后台管理系统几乎都要支持用 Excel 批量导入数据，以及把列表导出成表格。`sheet` 包读写 CSV 和 Excel（XLSX）两种格式，导入时按[验证](validation.md)规则检查每一行，规则与 JSON 接口和[页面表单](forms.md)用的是同一个结构体。
 
-本章为博客加上两个功能：从表格批量创建文章，以及把文章列表导出为表格。前两节在一次请求中完成，适合几千行以内的数据；更大的文件放到[后台导入](#background-imports)，进度、断点续跑和失败行的下载由 `imports` 包完成。
+本章为博客加上两个功能：从表格批量创建文章，以及把文章列表导出为表格。前两节在一次请求中完成，适合几千行以内的数据；更大的文件放到[后台导入](#background-imports)，进度、断点续跑和失败行的下载由 `imports` 包完成；大量数据同样可以[在后台导出](#background-exports)，完成后通知用户下载。
 
 <a id="importing"></a>
 ## 导入
@@ -564,4 +564,128 @@ sched.Add("imports:cleanup", "0 3 * * *", schedule.Cleanup(a.importer.Cleanup(30
 <a id="background-exports"></a>
 ## 后台导出
 
-导出的数据量很大时，同样可以放到队列中：任务把 `sheet.Writer` 写入临时文件，再上传到[文件存储](filesystem.md)，完成后[通知](notifications.md)用户下载。
+导出几十万行要几分钟，同样放到队列中：任务把表格写到本地临时文件，上传到[文件存储](filesystem.md)，再[通知](notifications.md)用户下载。导出不需要自己的表：上传的文件处于 temporary 状态，超过 [`temp_ttl`](filesystem.md#configuration)（默认 24 小时）后由文件存储的 `Cleanup` 回收，下载地址也随之失效。
+
+下面是完整的 `internal/article/queue_export.go`，查询和写表仍由[同步导出](#export-action)的 `Export` 完成：
+
+```go
+package article
+
+import (
+    "context"
+    "io"
+    "os"
+    "time"
+
+    "github.com/cockroachdb/errors"
+    "github.com/uptrace/bun"
+
+    "github.com/ryan053857/mygoravel/filesystem"
+    "github.com/ryan053857/mygoravel/identity"
+    "github.com/ryan053857/mygoravel/notification"
+    "github.com/ryan053857/mygoravel/queue"
+    "github.com/ryan053857/mygoravel/sheet"
+)
+
+// ExportRequest 是后台导出的任务：谁在导出，导出成什么格式、哪些列。
+type ExportRequest struct {
+    Subject identity.Subject `json:"subject"`
+    Format  sheet.Format     `json:"format"`
+    Columns []string         `json:"columns"`
+}
+
+// ExportJob 是后台导出文章的任务。
+var ExportJob = queue.Topic[ExportRequest]("articles.export")
+
+// QueueExport 在后台导出文章，完成后通知导出的人下载。
+type QueueExport struct {
+    db     *bun.DB
+    files  *filesystem.Service
+    export *Export
+}
+
+func NewQueueExport(db *bun.DB, files *filesystem.Service, export *Export) *QueueExport {
+    return &QueueExport{db: db, files: files, export: export}
+}
+
+// Handle 检查要导出的列，然后发布导出任务。
+func (a *QueueExport) Handle(ctx context.Context, subject identity.Subject, format sheet.Format, columns []string) error {
+    if _, err := exportColumns.Select(columns); err != nil {
+        return err
+    }
+    return ExportJob.Publish(ctx, queue.Database(a.db), ExportRequest{Subject: subject, Format: format, Columns: columns})
+}
+
+// HTTP 处理 POST /articles/exports，接受请求后立即返回 202。
+func (a *QueueExport) HTTP(ctx context.Context, in *ExportInput) (*struct{}, error) {
+    subject, _ := identity.FromContext(ctx)
+    return nil, a.Handle(ctx, subject, in.Format, in.Columns)
+}
+
+// Job 把文章写到临时文件，上传后通知导出的人。
+func (a *QueueExport) Job(ctx context.Context, req ExportRequest) error {
+    cols, err := exportColumns.Select(req.Columns)
+    if err != nil {
+        return queue.Permanent(err)
+    }
+    tmp, err := os.CreateTemp("", "articles-export-*")
+    if err != nil {
+        return errors.Wrap(err, "create export file")
+    }
+    defer os.Remove(tmp.Name())
+    defer tmp.Close()
+
+    w := sheet.NewWriter(tmp, req.Format)
+    if err := errors.CombineErrors(a.export.Handle(ctx, req.Subject, w, cols), w.Close()); err != nil {
+        return err
+    }
+    size, err := tmp.Seek(0, io.SeekCurrent)
+    if err != nil {
+        return errors.Wrap(err, "export file size")
+    }
+    if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+        return errors.Wrap(err, "rewind export file")
+    }
+    file, err := a.files.Upload(ctx, req.Subject, filesystem.FileInput{
+        Filename:    "articles-" + time.Now().Format("20060102") + "." + string(req.Format),
+        ContentType: req.Format.ContentType(),
+        Size:        size,
+    }, tmp)
+    if err != nil {
+        return err
+    }
+    _, err = notification.Send(ctx, a.db, notification.Notification{
+        Event: "articles.exported",
+        Data:  map[string]any{"filename": file.Filename, "url": file.URL, "expires_at": file.ExpiresAt},
+    }, notification.RecipientOf(req.Subject))
+    return err
+}
+```
+
+`HTTP` 复用同步导出的 `ExportInput`。`Handle` 在发布任务之前检查列名，不存在的列直接返回 `sheet.ErrUnknownColumn`，不会等到任务中才失败。
+
+任务的 payload 带着发起导出的主体，`Export.Handle` 按它的权限限定[查询范围](authorization.md#scoping-queries)，导出的是用户提交请求时能看到的数据；多租户应用中主体也带着租户。
+
+上传的文件不调用 `Confirm`，一直是 temporary 状态，到期后被回收。通知的 `url` 就是文件的[公开地址](filesystem.md#accessing-files)，前端在通知中显示下载链接，`expires_at` 用来提示用户在什么时候之前下载。上传或发通知失败时任务重新执行，重新导出一个文件；没有发出通知的那个文件到期后同样被回收。
+
+对象键是随机的 UUID 加扩展名，浏览器直接打开公开地址时保存的文件名也是它。前端可以用 `<a href={url} download={filename}>` 指定保存的文件名，这个属性只在与页面同源时生效，例如本地磁盘挂在应用自己的路径下。
+
+在 `routes.go` 中注册路由：
+
+```go
+exportLater := huma.Operation{
+    OperationID:   "article-export-queue",
+    Method:        http.MethodPost,
+    Path:          "/articles/exports",
+    Summary:       "在后台导出文章",
+    DefaultStatus: http.StatusAccepted,
+}
+requireArticles(&exportLater)
+rest.Register(api, exportLater, NewQueueExport(db, files, NewExport(db)).HTTP)
+```
+
+worker 注册任务：
+
+```go
+article.ExportJob.Handle(router, sub, article.NewQueueExport(a.db, a.files, article.NewExport(a.db)).Job)
+```
