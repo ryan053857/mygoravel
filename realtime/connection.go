@@ -86,11 +86,10 @@ func (rt *Realtime) connected(client *centrifuge.Client) {
 		return
 	}
 	client.OnSubscribe(func(e centrifuge.SubscribeEvent, cb centrifuge.SubscribeCallback) {
-		// 授权可能要查询数据库，不占用连接的读取循环。
-		go func() {
-			opts, err := rt.authorize(client.Context(), conn, e.Channel)
-			cb(centrifuge.SubscribeReply{Options: opts}, err)
-		}()
+		// 在连接的读取循环中同步授权：Centrifuge 先写出订阅的回复、再把频道标记为已订阅，
+		// 异步回调时客户端收到回复后立即发布或读取成员，会赶在标记之前而被拒绝。
+		opts, err := rt.authorize(client.Context(), conn, e.Channel)
+		cb(centrifuge.SubscribeReply{Options: opts}, err)
 	})
 	client.OnPublish(func(e centrifuge.PublishEvent, cb centrifuge.PublishCallback) {
 		rule, _, ok := rt.match(e.Channel)
