@@ -36,6 +36,7 @@ go get github.com/ryan053857/mygoravel@main
 | 在后台执行任务 | [队列](docs/queue.md) · [定时任务](docs/scheduling.md) |
 | 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |
 | 记录谁改了什么 | [操作日志](docs/activity.md) |
+| 给用户发站内通知 | [通知](docs/notifications.md) |
 | 防止任务重复执行 | [原子锁](docs/locks.md) |
 | 测试与上线 | [测试](docs/testing.md) · [部署](docs/deployment.md) |
 
