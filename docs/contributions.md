@@ -104,10 +104,9 @@ CI 配置位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，每次
 1. `gofmt` 格式检查；
 2. `go vet ./...`；
 3. `go test ./...`；
-4. `go test -race ./...`；
-5. `go test -race -tags=integration ./...`（使用 PostgreSQL 18 和 Redis 8 服务容器）。
+4. `go test -tags=integration ./...`（使用 PostgreSQL 18、MySQL 8.4、Redis 8 和 NATS 服务容器）。
 
-提交之前，请在本地至少运行前四项。
+CI 不运行 `-race`，它让整个流程慢了好几倍。提交之前，请在本地至少运行前三项；改动涉及并发时，另外用 `go test -race` 运行相关的包，时序敏感的测试还要不带 `-race` 多跑几轮。
 
 <a id="coding-style"></a>
 ## 编码风格
