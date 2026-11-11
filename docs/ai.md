@@ -4,6 +4,7 @@
 - [准备数据表](#preparing-tables)
 - [装配](#assembling)
     - [配置模型](#configuring-models)
+    - [按对话选择 agent](#choosing-agents)
 - [对话接口](#conversation-api)
     - [停止回答](#stopping)
     - [中途插话](#steering)
@@ -137,6 +138,37 @@ agent := llmagent.New("writer",
 `ai.NewModel` 不访问网络，各模型共用进程的 HTTP 连接池，每次调用时创建也没有额外开销。后台修改后，下一次调用模型就使用新的配置；审批后继续和插话后补跑的那一轮同样经过这里。
 
 Claude、Gemini 等其他接口的模型直接使用 trpc-agent-go 的对应包创建，`ai` 包的其余部分不受影响。
+
+<a id="choosing-agents"></a>
+### 按对话选择 agent
+
+一个产品里常有多个助手，例如每个「AI 员工」有自己的模型、指令、工具和知识库，每个对话由其中一个负责。这时不在启动时固定 agent，改用 `ai.AgentFor` 按对话选出它，`NewRuns` 的 agent 传 `nil`：
+
+```go
+runs := ai.NewRuns("luway", nil, sessions,
+    ai.AgentFor(func(ctx context.Context, c ai.Conversation) (agent.Agent, error) {
+        emp, err := employees.ForConversation(ctx, c.ID) // 应用自己的表和规则
+        if err != nil {
+            return nil, err
+        }
+        return llmagent.New(emp.AgentName,
+            llmagent.WithModel(ai.NewModel(emp.Model)),
+            llmagent.WithInstruction(emp.Instruction),
+            llmagent.WithTools(emp.Tools()),
+            llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}),
+        ), nil
+    }),
+    ai.RequireApprovalOf("refund_order"),
+)
+```
+
+- 每一轮请求模型之前调用一次，后台修改员工的配置，下一轮就生效。创建 llmagent 不访问网络，开销很小；需要时也可以按配置的版本缓存。
+- 同一个员工的 agent 名称要保持不变：它是消息的作者，trpc-agent-go 把其他名称的 agent 的回答当作其他参与者的话交给模型。
+- 返回错误时这一轮失败，消息流以 `error` 事件结束。
+- 工具由各个员工自己提供，创建 `Runs` 时还不存在，所以用 `ai.RequireApprovalOf` 按名称要求[审批](#approval)；批准后执行这个对话当前的 agent 上的同名工具。
+- 它和[使用应用自己的消息表](#own-history)、[在 worker 中运行](#running-on-workers)可以一起使用，选择在运行所在的进程中进行。
+
+只有模型不同、指令和工具都一样时，用上一节的 `llmagent.WithModelSelector` 就够了。
 
 <a id="conversation-api"></a>
 ## 对话接口

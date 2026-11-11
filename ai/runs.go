@@ -48,8 +48,9 @@ type Runs struct {
 	runner    runner.Runner
 	sessions  session.Service // 对话存储；使用 UseHistory 时为 nil
 	history   HistoryStore
-	ephemeral session.Service // 使用 UseHistory 时，每一轮运行的临时会话
-	approval  map[string]tool.CallableTool
+	ephemeral session.Service              // 使用 UseHistory 时，每一轮运行的临时会话
+	approval  map[string]tool.CallableTool // 需要审批的工具；RequireApprovalOf 只登记名称，值为 nil
+	choose    func(ctx context.Context, c Conversation) (agent.Agent, error)
 	keep      time.Duration
 	logger    *slog.Logger
 
@@ -77,6 +78,28 @@ func RequireApproval(tools ...tool.CallableTool) Option {
 	}
 }
 
+// RequireApprovalOf 按名称要求审批，用于工具由 AgentFor 按对话提供、创建 Runs 时还不存在的情况。
+// 批准后执行这个对话当前的 agent 上同名的工具。
+func RequireApprovalOf(names ...string) Option {
+	return func(rs *Runs) {
+		for _, name := range names {
+			if _, ok := rs.approval[name]; !ok {
+				rs.approval[name] = nil
+			}
+		}
+	}
+}
+
+// AgentFor 按对话选择运行的 agent，例如按会话所属的 AI 员工取出它的模型、指令和工具。
+// 每一轮请求模型之前调用，配置的修改在下一轮生效；这时 NewRuns 的 ag 传 nil。
+// choose 返回错误时这一轮失败，运行以 error 事件结束。创建 llmagent 的开销很小，也可以由应用按配置缓存。
+func AgentFor(choose func(ctx context.Context, c Conversation) (agent.Agent, error)) Option {
+	if choose == nil {
+		panic("ai: nil agent chooser")
+	}
+	return func(rs *Runs) { rs.choose = choose }
+}
+
 // KeepFinished 设置运行结束后保留的时间，期间重连的客户端仍能取得剩余的事件。
 func KeepFinished(d time.Duration) Option { return func(rs *Runs) { rs.keep = d } }
 
@@ -90,6 +113,7 @@ func RunnerOptions(opts ...runner.Option) Option {
 
 // NewRuns 为 agent 创建 Runs，对话保存在 sessions 中。app 是应用名，用于区分同一个存储中不同应用的对话。
 // 使用 UseHistory 时对话保存在应用自己的存储中，sessions 传 nil。两者都没有或者同时提供时 panic。
+// 使用 AgentFor 按对话选择 agent 时 ag 传 nil；两者都没有或者同时提供时 panic。
 func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Option) *Runs {
 	rs := &Runs{
 		app:      app,
@@ -115,8 +139,22 @@ func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Optio
 	if rs.workers && rs.cluster == nil {
 		panic("ai: RunOnWorkers needs Cluster")
 	}
+	switch {
+	case ag == nil && rs.choose == nil:
+		panic("ai: NewRuns needs an agent or AgentFor")
+	case ag != nil && rs.choose != nil:
+		panic("ai: pass a nil agent with AgentFor")
+	}
 	rs.logger = logging.Or(rs.logger).With(logging.AttrComponent, "ai")
-	rs.runner = runner.NewRunner(app, ag, append([]runner.Option{runner.WithSessionService(sessions)}, rs.runnerOpts...)...)
+	runnerOpts := append([]runner.Option{runner.WithSessionService(sessions)}, rs.runnerOpts...)
+	if ag != nil {
+		rs.runner = runner.NewRunner(app, ag, runnerOpts...)
+	} else {
+		// 每一轮用 agent.WithAgent 指定 AgentFor 选出的 agent，默认的 agent 不会被用到。
+		rs.runner = runner.NewRunnerWithAgentFactory(app, app, func(context.Context, agent.RunOptions) (agent.Agent, error) {
+			return nil, errors.New("ai: no agent chosen for the run")
+		}, runnerOpts...)
+	}
 	return rs
 }
 
@@ -394,8 +432,13 @@ func (rs *Runs) Approve(ctx context.Context, userID, sessionID, callID string, o
 }
 
 func (rs *Runs) approveLocal(ctx context.Context, userID, sessionID, callID string, opts []agent.RunOption) (*Run, error) {
-	return rs.resolve(ctx, rs.key(userID, sessionID), callID, opts, func(call ToolCall) string {
-		out, err := rs.approval[call.Name].Call(ctx, []byte(call.Arguments))
+	key := rs.key(userID, sessionID)
+	return rs.resolve(ctx, key, callID, opts, func(call ToolCall) string {
+		t, err := rs.approvalTool(ctx, key, call.Name)
+		if err != nil {
+			return "Error: " + err.Error()
+		}
+		out, err := t.Call(ctx, []byte(call.Arguments))
 		if err != nil {
 			return "Error: " + err.Error()
 		}
@@ -470,6 +513,26 @@ func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opt
 		}
 	}
 	return rs.start(ctx, key, &msg, opts, results)
+}
+
+// approvalTool 返回批准后执行的工具：RequireApproval 登记的工具；使用 AgentFor 时，
+// 优先取这个对话当前的 agent 上同名的工具。
+func (rs *Runs) approvalTool(ctx context.Context, key session.Key, name string) (tool.CallableTool, error) {
+	if rs.choose != nil {
+		ag, err := rs.choose(ctx, rs.conversation(key))
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range ag.Tools() {
+			if c, ok := t.(tool.CallableTool); ok && t.Declaration().Name == name {
+				return c, nil
+			}
+		}
+	}
+	if t := rs.approval[name]; t != nil {
+		return t, nil
+	}
+	return nil, errors.Newf("ai: tool %q is not available", name)
 }
 
 // rejection 是 Reject 写给模型的调用结果。
@@ -711,14 +774,22 @@ func (r *Run) round(ctx context.Context, msg *model.Message, reqID string, opts 
 	rs := r.rs
 	cleanup = func() {}
 	opts = append(opts, agent.WithRequestID(reqID))
-	if rs.history == nil {
-		ch, err := rs.runner.Run(ctx, r.key.UserID, r.key.SessionID, *msg, opts...)
-		return ch, "", cleanup, err
-	}
-	if msg != nil {
+	if rs.history != nil && msg != nil {
+		// 先保存输入：选择 agent 失败时，用户的消息也不会丢失。
 		if err := rs.save(ctx, r.key, Entry{Message: *msg, RunID: r.ID}); err != nil {
 			return nil, "", cleanup, err
 		}
+	}
+	if rs.choose != nil {
+		ag, err := rs.choose(ctx, rs.conversation(r.key))
+		if err != nil {
+			return nil, "", cleanup, errors.Wrap(err, "ai: choose agent")
+		}
+		opts = append(opts, agent.WithAgent(ag))
+	}
+	if rs.history == nil {
+		ch, err := rs.runner.Run(ctx, r.key.UserID, r.key.SessionID, *msg, opts...)
+		return ch, "", cleanup, err
 	}
 	t, err := rs.load(ctx, r.key)
 	if err != nil {
