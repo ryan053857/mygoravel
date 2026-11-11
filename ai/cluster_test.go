@@ -235,3 +235,34 @@ func TestClusterAppendWhileRunningElsewhere(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// 同一个对话在保留期内再次运行：上一次运行的 owner 关闭，其他实例镜像到的是这一次运行。
+func TestClusterRerunWithinKeepMirrorsLatest(t *testing.T) {
+	m := aitest.NewModel(aitest.Text("第一次"), aitest.Reply{Text: "第二次", Delay: 500 * time.Millisecond})
+	a, b := twoInstances(t, m, nil)
+	ctx := context.Background()
+	first, err := a.Start(ctx, "u1", "c1", model.NewUserMessage("一"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-first.Done()
+	var second *ai.Run
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if second, err = a.Start(ctx, "u1", "c1", model.NewUserMessage("二")); err == nil {
+			break
+		}
+		if !errors.Is(err, ai.ErrBusy) || time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+	}
+	for range 5 {
+		mirrored, err := b.Get(ctx, "u1", "c1")
+		if err != nil || mirrored == nil {
+			t.Fatalf("get: %v", err)
+		}
+		if mirrored.ID != second.ID {
+			t.Fatalf("mirrored run %s, want %s", mirrored.ID, second.ID)
+		}
+	}
+	<-second.Done()
+}

@@ -55,6 +55,12 @@ func (c *cluster) id(key session.Key) string {
 	return hex.EncodeToString(h[:16])
 }
 
+// appID 是应用在广播主题中的标识，同一个广播后端上的不同应用互不干扰。
+func (c *cluster) appID() string {
+	h := sha256.Sum256([]byte(c.rs.app))
+	return hex.EncodeToString(h[:8])
+}
+
 func (c *cluster) lockName(key session.Key) string { return "ai:run:" + c.id(key) }
 func (c *cluster) runTopic(key session.Key) string { return "ai.run." + c.id(key) }
 func (c *cluster) ctlTopic(key session.Key) string { return "ai.ctl." + c.id(key) }
@@ -212,6 +218,10 @@ func (o *owner) serve(r *Run) {
 	o.run = r
 	r.own = o
 	sub := o.c.hub.Subscribe(o.c.ctlTopic(o.key))
+	go func() {
+		<-o.closing // close 之后不再回应控制请求
+		sub.Close()
+	}()
 	go o.publishLoop()
 	go o.control(sub)
 }
@@ -309,6 +319,9 @@ func (o *owner) control(sub *broadcast.Subscription) {
 			case "cancel":
 				o.run.Cancel()
 			}
+		}
+		if errors.Is(sub.Err(), broadcast.ErrClosed) {
+			return // Hub 已关闭
 		}
 		select {
 		case <-o.closing:

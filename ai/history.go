@@ -80,6 +80,13 @@ func (rs *Runs) Notify(ctx context.Context, userID, sessionID string) (*Run, err
 	if rs.history == nil {
 		return nil, ErrNeedsHistory
 	}
+	if rs.workers {
+		return rs.dispatch(ctx, dispatchReq{Op: opNotify, UserID: userID, Session: sessionID}, nil)
+	}
+	return rs.notifyLocal(ctx, userID, sessionID)
+}
+
+func (rs *Runs) notifyLocal(ctx context.Context, userID, sessionID string) (*Run, error) {
 	key := rs.key(userID, sessionID)
 	for {
 		if len(rs.approval) > 0 {

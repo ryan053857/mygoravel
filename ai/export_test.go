@@ -8,3 +8,10 @@ func SetClusterTiming(ping, idle time.Duration) func() {
 	pingInterval, idleTimeout = ping, idle
 	return func() { pingInterval, idleTimeout = oldPing, oldIdle }
 }
+
+// SetReplyTimeout 供测试缩短等待回执的时间，返回恢复函数。
+func SetReplyTimeout(d time.Duration) func() {
+	old := replyTimeout
+	replyTimeout = d
+	return func() { replyTimeout = old }
+}

@@ -18,6 +18,7 @@
 - [决策](#decisions)
 - [部署](#deployment)
     - [多个实例](#multiple-instances)
+    - [在 worker 中运行](#running-on-workers)
 - [测试](#testing)
 
 <a id="introduction"></a>
@@ -596,6 +597,33 @@ runs := ai.NewRuns("blog", agent, sessions,
 - 广播使用数据库后端时，事件多一个轮询间隔（100 毫秒）的延迟。
 
 审批读写的是对话存储，本来就不依赖实例。
+
+<a id="running-on-workers"></a>
+### 在 worker 中运行
+
+默认情况下，回答在接到请求的 HTTP 实例上运行。把它们交给 worker 进程，HTTP 实例的部署和扩缩容就不会打断回答，AI 的负载也不占用 HTTP 进程：
+
+```go
+runs := ai.NewRuns("blog", agent, sessions,
+    ai.RequireApproval(publish),
+    ai.Cluster(hub, locker),
+    ai.RunOnWorkers(),
+)
+```
+
+worker 进程在处理队列的同时调用 `runs.Serve`，`a.handleJobs` 是原来 `Worker` 中处理[队列](queue.md#running-workers)的部分：
+
+```go
+func (a *App) Worker(ctx context.Context) error {
+    return command.Concurrently(ctx, a.handleJobs, a.runs.Serve)
+}
+```
+
+HTTP 实例上的 `Submit`、`Start`、`Notify`、`Approve`、`Reject` 把请求转交给某一个 worker，在那里开始运行，返回的是这次运行的镜像，`UIStream`、插话、停止的用法都不变。多个 worker 同时 `Serve` 时，每个请求只由其中一个处理；需要审批的工具也在 worker 上执行。用 `start` 在一个进程中运行全部部分时，同一个进程里的 `Serve` 接手请求，不需要改代码。
+
+- **没有 worker：** 请求经由广播转交、不排队。没有 worker 在 `Serve`，或者它们都在停止时，返回 `ai.ErrNoWorker`（`503`），由前端稍后重试。
+- **停止与崩溃：** worker 收到停止信号后不再接手新的请求，进行中的回答由 `runs.Shutdown` 等它说完。worker 崩溃时进行中的回答随之结束，不会在其他实例上接着运行，这与在 HTTP 进程中运行时相同。
+- **运行选项：** `agent.RunOption` 不能跨进程传递，传入时返回 `ai.ErrRunOptions`。需要的设置放在 worker 创建的 agent 上。
 
 <a id="testing"></a>
 ## 测试

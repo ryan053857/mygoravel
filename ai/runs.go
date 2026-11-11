@@ -55,6 +55,7 @@ type Runs struct {
 
 	runnerOpts []runner.Option
 	cluster    *cluster // 多实例协作，见 Cluster；nil 表示单实例
+	workers    bool     // RunOnWorkers：开始运行的请求转交给调用 Serve 的实例
 
 	mu        sync.Mutex
 	runs      map[session.Key]*Run
@@ -110,6 +111,9 @@ func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Optio
 	case rs.history != nil:
 		rs.ephemeral = inmemory.NewSessionService()
 		sessions = rs.ephemeral
+	}
+	if rs.workers && rs.cluster == nil {
+		panic("ai: RunOnWorkers needs Cluster")
 	}
 	rs.logger = logging.Or(rs.logger).With(logging.AttrComponent, "ai")
 	rs.runner = runner.NewRunner(app, ag, append([]runner.Option{runner.WithSessionService(sessions)}, rs.runnerOpts...)...)
@@ -214,6 +218,13 @@ func (rs *Runs) Send(ctx context.Context, userID, sessionID string, msg model.Me
 // 运行不受 ctx 取消的影响，但保留其中的值（例如日志字段）。对话正在运行时返回 ErrBusy，
 // 等待审批时返回 ErrAwaitingApproval。
 func (rs *Runs) Start(ctx context.Context, userID, sessionID string, msg model.Message, opts ...agent.RunOption) (*Run, error) {
+	if rs.workers {
+		return rs.dispatch(ctx, dispatchReq{Op: opStart, UserID: userID, Session: sessionID, Message: &msg}, opts)
+	}
+	return rs.startLocal(ctx, userID, sessionID, msg, opts)
+}
+
+func (rs *Runs) startLocal(ctx context.Context, userID, sessionID string, msg model.Message, opts []agent.RunOption) (*Run, error) {
 	key := rs.key(userID, sessionID)
 	if rs.localBusy(key) {
 		return nil, ErrBusy.New()
@@ -264,6 +275,10 @@ func (rs *Runs) start(ctx context.Context, key session.Key, msg *model.Message, 
 		// 取得了锁，说明镜像的那次运行已经结束。
 		prev.remote.close()
 		prev = nil
+	}
+	if ok && prev != nil && prev.own != nil {
+		// 上一次运行被这次取代，它的 owner 不再回应控制请求；否则它会一直订阅控制主题。
+		prev.own.close()
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	r := &Run{
@@ -372,6 +387,13 @@ func (rs *Runs) Pending(ctx context.Context, userID, sessionID string) ([]ToolCa
 // Approve 执行一个等待审批的工具调用，把结果写回对话。
 // 这是最后一个等待审批的调用时，对话在后台继续运行并返回该运行；否则返回 nil，等待其余调用的决定。
 func (rs *Runs) Approve(ctx context.Context, userID, sessionID, callID string, opts ...agent.RunOption) (*Run, error) {
+	if rs.workers {
+		return rs.dispatch(ctx, dispatchReq{Op: opApprove, UserID: userID, Session: sessionID, CallID: callID}, opts)
+	}
+	return rs.approveLocal(ctx, userID, sessionID, callID, opts)
+}
+
+func (rs *Runs) approveLocal(ctx context.Context, userID, sessionID, callID string, opts []agent.RunOption) (*Run, error) {
 	return rs.resolve(ctx, rs.key(userID, sessionID), callID, opts, func(call ToolCall) string {
 		out, err := rs.approval[call.Name].Call(ctx, []byte(call.Arguments))
 		if err != nil {
@@ -390,6 +412,13 @@ func (rs *Runs) Approve(ctx context.Context, userID, sessionID, callID string, o
 
 // Reject 拒绝一个等待审批的工具调用，把 reason 作为调用结果告诉模型，其余同 Approve。
 func (rs *Runs) Reject(ctx context.Context, userID, sessionID, callID, reason string, opts ...agent.RunOption) (*Run, error) {
+	if rs.workers {
+		return rs.dispatch(ctx, dispatchReq{Op: opReject, UserID: userID, Session: sessionID, CallID: callID, Reason: reason}, opts)
+	}
+	return rs.rejectLocal(ctx, userID, sessionID, callID, reason, opts)
+}
+
+func (rs *Runs) rejectLocal(ctx context.Context, userID, sessionID, callID, reason string, opts []agent.RunOption) (*Run, error) {
 	return rs.resolve(ctx, rs.key(userID, sessionID), callID, opts, func(ToolCall) string {
 		return rejection(reason)
 	})
