@@ -25,20 +25,23 @@ go get github.com/ryan053857/mygoravel@main
 | 运行第一个应用 | [安装](docs/installation.md) |
 | 读取配置与密钥 | [配置](docs/configuration.md) |
 | 组织项目代码 | [目录结构](docs/directory-structure.md) · [依赖装配](docs/dependencies.md) · [业务动作](docs/actions.md) |
-| 渲染页面 | [视图](docs/views.md) · [表单](docs/forms.md) · [服务端推送](docs/sse.md) · [广播](docs/broadcasting.md) |
 | 编写接口 | [路由](docs/routing.md) · [请求](docs/requests.md) · [验证](docs/validation.md) · [响应](docs/responses.md) · [会话](docs/session.md) |
+| 渲染页面 | [视图](docs/views.md) · [表单](docs/forms.md) · [服务端推送](docs/sse.md) · [广播](docs/broadcasting.md) |
 | 查看全部路由 | [routes 命令](docs/commands.md#routes-command) |
 | 处理错误与日志 | [错误处理](docs/errors.md) · [日志](docs/logging.md) · [指标与链路追踪](docs/telemetry.md) |
+| 在后台执行任务 | [队列](docs/queue.md) · [定时任务](docs/scheduling.md) |
+| 防止任务重复执行 | [原子锁](docs/locks.md) |
+| 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |
+| 发送邮件 | [邮件](docs/mail.md) |
+| 请求用户填写的地址 | [出站请求](docs/outbound.md) |
+| 给用户发站内通知 | [通知](docs/notifications.md) |
+| 记录谁改了什么 | [操作日志](docs/activity.md) |
+| 导入导出 Excel 和 CSV | [导入与导出](docs/import-export.md) |
+| 向租户推送事件 | [Webhook](docs/webhooks.md) |
+| 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |
+| 让 AI 引用 PDF、Word 等文档 | [文档转换与切分](docs/documents.md) |
 | 保护接口 | [认证](docs/authentication.md) · [授权](docs/authorization.md) · [哈希](docs/hashing.md) · [限流](docs/rate-limiting.md) |
 | 使用数据库 | [数据库](docs/database.md) · [迁移](docs/migrations.md) |
-| 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |
-| 导入导出 Excel 和 CSV | [导入与导出](docs/import-export.md) |
-| 发送邮件 | [邮件](docs/mail.md) |
-| 在后台执行任务 | [队列](docs/queue.md) · [定时任务](docs/scheduling.md) |
-| 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |
-| 记录谁改了什么 | [操作日志](docs/activity.md) |
-| 给用户发站内通知 | [通知](docs/notifications.md) |
-| 防止任务重复执行 | [原子锁](docs/locks.md) |
 | 测试与上线 | [测试](docs/testing.md) · [部署](docs/deployment.md) |
 
 ## 参与开发

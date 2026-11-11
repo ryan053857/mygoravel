@@ -39,24 +39,34 @@
 
 ## 深入了解
 
+应用常用的基础设施，其他功能也建立在它们之上。
+
 - [命令行](commands.md)
 - [缓存](cache.md)
 - [原子锁](locks.md)
 - [限流](rate-limiting.md)
+- [队列](queue.md)
+- [定时任务](scheduling.md)
 - [服务端推送](sse.md)
 - [广播](broadcasting.md)
 - [文件存储与上传](filesystem.md)
-- [导入与导出](import-export.md)
 - [邮件](mail.md)
-- [队列](queue.md)
-- [AI 助手](ai.md)
-- [文档转换与切分](documents.md)
-- [定时任务](scheduling.md)
-- [操作日志](activity.md)
-- [通知](notifications.md)
-- [Webhook](webhooks.md)
 - [出站请求](outbound.md)
 - [本地化](localization.md)
+
+## 应用功能
+
+现成的业务功能，各自带有数据表，按需引入。
+
+- [通知](notifications.md)
+- [操作日志](activity.md)
+- [导入与导出](import-export.md)
+- [Webhook](webhooks.md)
+
+## AI
+
+- [AI 助手](ai.md)
+- [文档转换与切分](documents.md)
 
 ## 安全
 

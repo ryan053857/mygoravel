@@ -127,4 +127,4 @@ CI 配置位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，每次
 - 使用第二人称“你”，先说明“为什么”，再说明“怎么做”；
 - 补充说明使用 `> [!NOTE]`，实用建议使用 `> [!TIP]`，需要特别注意的风险使用 `> [!WARNING]`；
 - 代码示例要么是可以直接保存运行的完整文件，要么是片段——片段中出现的变量从哪里来，正文需要交代清楚；
-- 新增文档后，记得在 [docs/README.md](README.md) 的目录中添加链接。
+- 新增文档后，记得在 [docs/README.md](README.md) 的目录中添加链接：应用普遍用到的基础设施放在“深入了解”，自带数据表、按需引入的业务功能放在“应用功能”，AI 相关的放在“AI”；新增的包同时加入[框架包一览](directory-structure.md#framework-packages)中同一分类的表格。
