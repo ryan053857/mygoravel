@@ -3,6 +3,7 @@ auth.forbidden: Permission denied
 url.invalid_signature: Invalid link
 url.expired: This link has expired
 pdf.unavailable: PDF service is temporarily unavailable, please try again later
+feature.invalid: Invalid feature flag setting
 page.invalid_cursor: Invalid pagination cursor
 rate_limit.exceeded: Too many requests, please try again later
 ai.busy: The conversation is in progress, please try again later

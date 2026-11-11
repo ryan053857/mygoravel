@@ -42,13 +42,14 @@ var dependencies = map[string][]string{
 	"hashing":      {},
 	"crypt":        {"errorx"},
 	"pdf":          {"errorx"},
+	"feature":      {"errorx", "identity"},
 	"queue":        {"logging"},
 	"broadcast":    {"identity", "logging"},
 	"realtime":     {"broadcast", "errorx", "httpx", "identity", "logging"},
 	"schedule":     {"lock", "logging"},
 	"ai":           {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
 	"command":      {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "crypt", "pdf", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports", "exports", "operation", "realtime"},
+	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "crypt", "pdf", "feature", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet", "imports", "exports", "operation", "realtime"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
