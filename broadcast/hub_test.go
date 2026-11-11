@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
@@ -143,23 +144,18 @@ func TestSubscribeAfterClose(t *testing.T) {
 }
 
 func TestListenReceivesEveryTopic(t *testing.T) {
-	h := broadcast.New(broadcast.Memory(), nil)
+	h := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer h.Close()
+	broadcasttest.Ready(t, h) // 之后的 Publish 在返回之前投递
 	var got []string
-	stop := h.Listen(func(m broadcast.Message) {
-		got = append(got, m.Topic+"="+string(m.Data))
-		// 回调中可以再发布：Memory 后端会直接回到投递。
-		if m.Topic == "room:1" {
-			_ = h.Publish(context.Background(), "echo", m.Data)
-		}
-	}, nil)
+	stop := h.Listen(func(m broadcast.Message) { got = append(got, m.Topic+"="+string(m.Data)) }, nil)
 	sub := h.Subscribe("room:1")
 	for _, topic := range []string{"room:1", "room:2"} {
 		if err := h.Publish(context.Background(), topic, []byte("x")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if want := []string{"room:1=x", "echo=x", "room:2=x"}; !slices.Equal(got, want) {
+	if want := []string{"room:1=x", "room:2=x"}; !slices.Equal(got, want) {
 		t.Fatalf("listener received %v, want %v", got, want)
 	}
 	broadcasttest.Receive(t, sub) // 订阅照常收到
@@ -167,7 +163,7 @@ func TestListenReceivesEveryTopic(t *testing.T) {
 	stop()
 	stop()
 	_ = h.Publish(context.Background(), "room:1", []byte("y"))
-	if len(got) != 3 {
+	if len(got) != 2 {
 		t.Fatalf("listener received %v after stop", got)
 	}
 }

@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/centrifugal/centrifuge"
@@ -40,7 +41,56 @@ type bridge struct {
 	node *centrifuge.Node
 	pubs centrifuge.BrokerEventHandler
 	ctl  centrifuge.ControlEventHandler
+
+	// 控制消息和丢失消息的处理可能再向 Hub 发布（例如断开连接时的离开事件），
+	// 而 deliver 在 Hub 的投递中调用，不能发布，所以它们排队交给 run 处理，保持先后顺序。
+	mu    sync.Mutex
+	tasks []func()
+	wake  chan struct{}
+	done  chan struct{}
+	once  sync.Once
 }
+
+func newBridge(hub *broadcast.Hub, node *centrifuge.Node) *bridge {
+	return &bridge{hub: hub, node: node, wake: make(chan struct{}, 1), done: make(chan struct{})}
+}
+
+// later 把 task 排到 run 中执行，不阻塞。
+func (b *bridge) later(task func()) {
+	b.mu.Lock()
+	b.tasks = append(b.tasks, task)
+	b.mu.Unlock()
+	select {
+	case b.wake <- struct{}{}:
+	default:
+	}
+}
+
+// run 依次执行 later 排入的任务，直到 stop。
+func (b *bridge) run() {
+	for {
+		select {
+		case <-b.done:
+			return
+		case <-b.wake:
+		}
+		for {
+			b.mu.Lock()
+			tasks := b.tasks
+			b.tasks = nil
+			b.mu.Unlock()
+			if len(tasks) == 0 {
+				break
+			}
+			for _, task := range tasks {
+				task()
+			}
+		}
+	}
+}
+
+// stop 结束 run，可以重复调用。
+func (b *bridge) stop() { b.once.Do(func() { close(b.done) }) }
 
 func (b *bridge) RegisterBrokerEventHandler(h centrifuge.BrokerEventHandler) error {
 	b.pubs = h
@@ -110,7 +160,7 @@ func (b *bridge) deliver(msg broadcast.Message) {
 	switch e.Kind {
 	case kindControl:
 		if e.Node == "" || e.Node == b.node.ID() {
-			_ = b.ctl.HandleControl(e.Data)
+			b.later(func() { _ = b.ctl.HandleControl(e.Data) })
 		}
 	case kindPublish:
 		_ = b.pubs.HandlePublication(e.Channel, &centrifuge.Publication{Data: e.Data, Info: e.Info}, centrifuge.StreamPosition{}, false, nil)
@@ -124,7 +174,9 @@ func (b *bridge) deliver(msg broadcast.Message) {
 // lost 在 Hub 的后端可能丢了消息时调用：断开本实例的全部客户端，SDK 会自动重连，
 // 应用在重新订阅成功后取回期间的数据。
 func (b *bridge) lost(error) {
-	for _, c := range b.node.Hub().Connections() {
-		c.Disconnect(centrifuge.DisconnectInsufficientState)
-	}
+	b.later(func() {
+		for _, c := range b.node.Hub().Connections() {
+			c.Disconnect(centrifuge.DisconnectInsufficientState)
+		}
+	})
 }

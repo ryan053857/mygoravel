@@ -105,7 +105,9 @@ type tap struct {
 // Listen 登记 deliver 接收本实例收到的每一条消息，不区分主题；Backend 可能丢了消息时调用 lost。
 // 它供需要自己按主题分发的组件使用，例如 realtime 把消息转给 WebSocket 客户端；业务代码用 Subscribe。
 //
-// 两个回调按消息到达的顺序依次调用，不能阻塞：慢的回调会拖住本实例的全部订阅。lost 可以为 nil。
+// 两个回调按消息到达的顺序依次调用，不能阻塞：慢的回调会拖住本实例的全部订阅。
+// 回调中不能直接调用 Publish：有的后端在 Publish 返回之前投递给本进程，回调又在投递中，会互相等待；
+// 需要发布时交给另一个 goroutine。lost 可以为 nil。
 // 返回的函数取消登记，可以重复调用。
 func (h *Hub) Listen(deliver func(Message), lost func(error)) (stop func()) {
 	if deliver == nil {
@@ -147,7 +149,7 @@ func (h *Hub) deliver(msg Message) {
 	}
 	taps := h.taps
 	h.mu.Unlock()
-	// 在锁外调用：回调可以再调用 Publish（Memory 后端会直接回到 deliver）。
+	// 在锁外调用，回调可以订阅或取消登记。
 	for _, t := range taps {
 		t.deliver(msg)
 	}

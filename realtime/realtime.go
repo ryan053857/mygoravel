@@ -93,7 +93,7 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 		return nil, errors.Wrap(err, "realtime: create node")
 	}
 	rt.node = node
-	b := &bridge{hub: hub, node: node}
+	b := newBridge(hub, node)
 	node.SetBroker(b)
 	node.SetController(b)
 	node.OnConnecting(rt.connecting)
@@ -101,7 +101,12 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 	if err := node.Run(); err != nil {
 		return nil, errors.Wrap(err, "realtime: run node")
 	}
-	rt.stop = hub.Listen(b.deliver, b.lost)
+	go b.run()
+	unlisten := hub.Listen(b.deliver, b.lost)
+	rt.stop = func() {
+		unlisten()
+		b.stop()
+	}
 	if opts.MeterProvider != nil {
 		if rt.metrics, err = rt.observe(opts.MeterProvider); err != nil {
 			_ = rt.Shutdown(context.Background())

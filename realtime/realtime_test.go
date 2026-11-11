@@ -143,7 +143,7 @@ func (s *tokens) setDown(down bool) {
 }
 
 func TestHubPublishReachesClientsAndSubscribers(t *testing.T) {
-	n := start(t, broadcast.Memory(), realtime.Options{}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{}, nil)
 	n.rt.Channel("articles", realtime.Public())
 	c := mustConnect(t, n.url, "", nil)
 	c.mustSubscribe("articles")
@@ -246,7 +246,7 @@ func TestUnsubscribeAcrossInstances(t *testing.T) {
 func TestChannelRules(t *testing.T) {
 	store := &tokens{}
 	var down atomic.Bool
-	n := start(t, broadcast.Memory(), realtime.Options{Authenticate: store.validate}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate}, nil)
 	n.rt.Channel("articles", realtime.Public())
 	n.rt.Channel("chat:{conversation}", realtime.Private(func(ctx context.Context, sub identity.Subject, p realtime.Params) (bool, error) {
 		if got, ok := identity.FromContext(ctx); !ok || got.ID != sub.ID {
@@ -291,7 +291,7 @@ func TestChannelRules(t *testing.T) {
 }
 
 func TestClientPublishNeedsRuleAndSubscription(t *testing.T) {
-	n := start(t, broadcast.Memory(), realtime.Options{}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{}, nil)
 	n.rt.Channel("articles", realtime.Public())
 	n.rt.Channel("typing:{room}", realtime.Public().ClientPublish())
 	c := mustConnect(t, n.url, "", nil)
@@ -311,7 +311,7 @@ func TestClientPublishNeedsRuleAndSubscription(t *testing.T) {
 func TestTokenAuthentication(t *testing.T) {
 	store := &tokens{}
 	store.revoke("revoked")
-	n := start(t, broadcast.Memory(), realtime.Options{Authenticate: store.validate}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate}, nil)
 
 	if rejected(t, n.url, "revoked", nil) != 3500 {
 		t.Fatal("revoked token was not rejected as invalid")
@@ -325,14 +325,14 @@ func TestTokenAuthentication(t *testing.T) {
 	mustConnect(t, n.url, "alice", nil)
 
 	// 没有配置 Authenticate 时，带 token 的连接一律拒绝。
-	plain := start(t, broadcast.Memory(), realtime.Options{}, nil)
+	plain := start(t, broadcasttest.NewBackend(), realtime.Options{}, nil)
 	if rejected(t, plain.url, "alice", nil) != 3500 {
 		t.Fatal("token was accepted without Authenticate")
 	}
 }
 
 func TestTokenBoundToAnotherTenantIsRejected(t *testing.T) {
-	n := start(t, broadcast.Memory(), realtime.Options{
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{
 		Authenticate: func(context.Context, string) (identity.Subject, error) {
 			return identity.Subject{ID: "alice", Tenant: "acme"}, nil
 		},
@@ -350,10 +350,10 @@ func TestTokenBoundToAnotherTenantIsRejected(t *testing.T) {
 func TestRevokedTokenDisconnects(t *testing.T) {
 	store := &tokens{}
 	// 复查信号经由另一个 Hub 传递也可以：Credentials 只负责提醒。
-	signals := broadcast.New(broadcast.Memory(), nil)
+	signals := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer signals.Close()
 	creds := broadcast.NewCredentials(signals)
-	n := start(t, broadcast.Memory(), realtime.Options{Authenticate: store.validate, Credentials: creds}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, Credentials: creds}, nil)
 	alice, bob := mustConnect(t, n.url, "alice", nil), mustConnect(t, n.url, "bob", nil)
 
 	// 后端故障时的复查不会断开连接。
@@ -379,7 +379,7 @@ func TestRevokedTokenDisconnects(t *testing.T) {
 func TestPeriodicRecheckDisconnects(t *testing.T) {
 	defer realtime.SetCredentialInterval(50 * time.Millisecond)()
 	store := &tokens{}
-	n := start(t, broadcast.Memory(), realtime.Options{Authenticate: store.validate}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate}, nil)
 	c := mustConnect(t, n.url, "alice", nil)
 	time.Sleep(150 * time.Millisecond) // 有效的凭据经过几次复查仍然保持连接
 	n.rt.Channel("articles", realtime.Public())
@@ -416,7 +416,7 @@ func TestBehindMiddleware(t *testing.T) {
 		})
 	}
 	timeout := httpx.Timeout(httpx.TimeoutConfig{Duration: 100 * time.Millisecond})
-	n := start(t, broadcast.Memory(), realtime.Options{
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{
 		// 中间件已经识别出主体时不使用 token。
 		Authenticate: func(context.Context, string) (identity.Subject, error) {
 			t.Error("Authenticate called for a request that already has a subject")
@@ -445,7 +445,7 @@ func TestBehindMiddleware(t *testing.T) {
 }
 
 func TestOrigin(t *testing.T) {
-	n := start(t, broadcast.Memory(), realtime.Options{TrustedOrigins: []string{"https://app.example.com"}}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{TrustedOrigins: []string{"https://app.example.com"}}, nil)
 	if _, resp, err := dial(t, n.url, http.Header{"Origin": {"https://evil.example.com"}}); err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("cross-origin connection: err=%v resp=%v", err, resp)
 	}
@@ -480,7 +480,7 @@ func TestLostMessagesDisconnectClients(t *testing.T) {
 }
 
 func TestShutdownDisconnectsClients(t *testing.T) {
-	hub := broadcast.New(broadcast.Memory(), nil)
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer hub.Close()
 	rt, err := realtime.New(hub, realtime.Options{})
 	if err != nil {
@@ -538,14 +538,17 @@ func TestAcrossInstancesOnDatabase(t *testing.T) {
 		ca.mustSubscribe("room:1")
 		cb.mustSubscribe("room:1")
 
+		// 不同实例发布的消息没有确定的先后，所以等前一条到达之后再发布下一条。
 		publish(t, a.hub, "room:1", map[string]int{"n": 1})
-		if reply := cb.publish("room:1", map[string]bool{"typing": true}); reply.Error != nil {
-			t.Fatalf("client publish: %+v", reply.Error)
-		}
 		for _, c := range []*client{ca, cb} {
 			if p := c.push(); string(p.Pub.Data) != `{"n":1}` || p.Pub.Info != nil {
 				t.Fatalf("first push = %+v", p.Pub)
 			}
+		}
+		if reply := cb.publish("room:1", map[string]bool{"typing": true}); reply.Error != nil {
+			t.Fatalf("client publish: %+v", reply.Error)
+		}
+		for _, c := range []*client{ca, cb} {
 			if p := c.push(); string(p.Pub.Data) != `{"typing":true}` || p.Pub.Info == nil {
 				t.Fatalf("second push = %+v", p.Pub)
 			}
@@ -555,7 +558,7 @@ func TestAcrossInstancesOnDatabase(t *testing.T) {
 
 func TestMetrics(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
-	n := start(t, broadcast.Memory(), realtime.Options{MeterProvider: sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{MeterProvider: sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))}, nil)
 	n.rt.Channel("room:{id}", realtime.Public())
 	c := mustConnect(t, n.url, "", nil)
 	mustConnect(t, n.url, "", nil)
