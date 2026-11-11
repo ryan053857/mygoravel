@@ -48,18 +48,18 @@ type Device struct {
 
 // Token 是已签发 token 的信息，不包含 token 本身。
 type Token struct {
-	ID         string
-	Kind       Kind
-	Name       string   // 个人访问令牌的名称；登录 token 为空
-	Scopes     []string // 个人访问令牌的权限限制；登录 token 为空
-	Tenant     string   // token 绑定的租户；"" 表示不绑定
-	Actor      string   // 代为登录时签发 token 的实际操作者，见 identity.Subject.Actor；"" 表示用户本人
-	IP         string
-	UserAgent  string
-	CreatedAt  time.Time
-	LastUsedAt time.Time
-	ExpiresAt  time.Time // 零值表示不过期
-	Current    bool      // 是否为 List 传入的主体本次请求所用的 token
+	ID           string
+	Kind         Kind
+	Name         string   // 个人访问令牌的名称；登录 token 为空
+	Scopes       []string // 个人访问令牌的权限限制；登录 token 为空
+	Tenant       string   // token 绑定的租户；"" 表示不绑定
+	Impersonator string   // 代为登录时签发 token 的实际操作者，见 identity.Subject.Impersonator；"" 表示用户本人
+	IP           string
+	UserAgent    string
+	CreatedAt    time.Time
+	LastUsedAt   time.Time
+	ExpiresAt    time.Time // 零值表示不过期
+	Current      bool      // 是否为 List 传入的主体本次请求所用的 token
 }
 
 // touchInterval 是 Validate 两次写入 last_used_at 的最小间隔：每个 token 每分钟最多写一次库，
@@ -84,21 +84,21 @@ type Store struct {
 type row struct {
 	bun.BaseModel `bun:"table:api_tokens,alias:t"`
 
-	ID          uuid.UUID `bun:"id,pk,type:uuid"`
-	TokenHash   string    `bun:"token_hash,notnull"`
-	SubjectID   string    `bun:"subject_id,notnull"`
-	SubjectType string    `bun:"subject_type,notnull"`
-	Tenant      string    `bun:"tenant,notnull"`
-	Actor       string    `bun:"actor,notnull"`
-	Kind        Kind      `bun:"kind,notnull"`
-	Name        string    `bun:"name,notnull"`
-	Scopes      string    `bun:"scopes,notnull"`
-	Remember    bool      `bun:"remember,notnull"`
-	IP          string    `bun:"ip,notnull"`
-	UserAgent   string    `bun:"user_agent,notnull"`
-	CreatedAt   time.Time `bun:"created_at,notnull"`
-	LastUsedAt  time.Time `bun:"last_used_at,notnull"`
-	ExpiresAt   time.Time `bun:"expires_at,nullzero"`
+	ID           uuid.UUID `bun:"id,pk,type:uuid"`
+	TokenHash    string    `bun:"token_hash,notnull"`
+	SubjectID    string    `bun:"subject_id,notnull"`
+	SubjectType  string    `bun:"subject_type,notnull"`
+	Tenant       string    `bun:"tenant,notnull"`
+	Impersonator string    `bun:"impersonator,notnull"`
+	Kind         Kind      `bun:"kind,notnull"`
+	Name         string    `bun:"name,notnull"`
+	Scopes       string    `bun:"scopes,notnull"`
+	Remember     bool      `bun:"remember,notnull"`
+	IP           string    `bun:"ip,notnull"`
+	UserAgent    string    `bun:"user_agent,notnull"`
+	CreatedAt    time.Time `bun:"created_at,notnull"`
+	LastUsedAt   time.Time `bun:"last_used_at,notnull"`
+	ExpiresAt    time.Time `bun:"expires_at,nullzero"`
 }
 
 // NewStore 创建 token 存储。db 必须已执行 api_tokens 迁移。cfg 不合法或 db 为 nil 时 panic。
@@ -116,7 +116,7 @@ func NewStore(db bun.IDB, cfg Config) *Store {
 //
 // 登录 token 代表用户本人，不限制权限：校验得到的主体 Scopes 为 nil，权限由 Resolve 按用户当前的角色加载。
 // sub.Tenant 不为空时，token 只能在这个租户中使用，例如只属于某个租户的终端客户账号。
-// sub.Actor 不为空时签发的是代为登录的 token，校验得到的主体带有同样的 Actor。
+// sub.Impersonator 不为空时签发的是代为登录的 token，校验得到的主体带有同样的 Impersonator。
 func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (string, error) {
 	now := s.now().UTC()
 	r := &row{
@@ -144,7 +144,7 @@ type Personal struct {
 }
 
 // Create 为 sub 创建个人访问令牌，返回 token 明文，明文只在这里返回一次。
-// 代为登录期间（sub.Actor 不为空）创建的令牌记录 Actor，之后每次使用都归于这个操作者。
+// 代为登录期间（sub.Impersonator 不为空）创建的令牌记录 Impersonator，之后每次使用都归于这个操作者。
 func (s *Store) Create(ctx context.Context, sub identity.Subject, p Personal) (string, error) {
 	now := s.now().UTC()
 	name := strings.TrimSpace(p.Name)
@@ -179,7 +179,7 @@ func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now tim
 	}
 	plain := base64.RawURLEncoding.EncodeToString(b)
 	r.ID, r.TokenHash = id, hash(plain)
-	r.SubjectID, r.SubjectType, r.Actor = sub.ID, string(sub.Type), sub.Actor
+	r.SubjectID, r.SubjectType, r.Impersonator = sub.ID, string(sub.Type), sub.Impersonator
 	r.CreatedAt, r.LastUsedAt = now, now
 	if _, err := s.db.NewInsert().Model(r).Exec(ctx); err != nil {
 		return "", errors.Wrap(err, "apitoken: insert")
@@ -188,7 +188,7 @@ func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now tim
 }
 
 // Validate 实现 rest.TokenValidator：返回 token 代表的主体，Method 为 bearer，Credential 为 token 的 ID，
-// Tenant 为 token 绑定的租户，Actor 为签发时的代为登录者。登录 token 的 Scopes 为 nil，个人访问令牌的 Scopes 是创建时的限制；
+// Tenant 为 token 绑定的租户，Impersonator 为签发时的代为登录者。登录 token 的 Scopes 为 nil，个人访问令牌的 Scopes 是创建时的限制；
 // 两者的 Permissions 都为空，由 Resolve 加载。token 不存在、已撤销或已过期时返回 ErrInvalid。
 //
 // 距上次记录使用超过一分钟时，更新最近使用时间，并延长登录 token 的有效期。
@@ -211,12 +211,12 @@ func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, e
 		}
 	}
 	sub := identity.Subject{
-		ID:         r.SubjectID,
-		Type:       identity.SubjectType(r.SubjectType),
-		Method:     "bearer",
-		Credential: r.ID.String(),
-		Tenant:     r.Tenant,
-		Actor:      r.Actor,
+		ID:           r.SubjectID,
+		Type:         identity.SubjectType(r.SubjectType),
+		Method:       "bearer",
+		Credential:   r.ID.String(),
+		Tenant:       r.Tenant,
+		Impersonator: r.Impersonator,
 	}
 	if r.Kind == KindPersonal {
 		sub.Scopes = strings.Fields(r.Scopes)
@@ -246,18 +246,18 @@ func (s *Store) List(ctx context.Context, sub identity.Subject) ([]Token, error)
 	out := make([]Token, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, Token{
-			ID:         r.ID.String(),
-			Kind:       r.Kind,
-			Name:       r.Name,
-			Scopes:     strings.Fields(r.Scopes),
-			Tenant:     r.Tenant,
-			Actor:      r.Actor,
-			IP:         r.IP,
-			UserAgent:  r.UserAgent,
-			CreatedAt:  r.CreatedAt,
-			LastUsedAt: r.LastUsedAt,
-			ExpiresAt:  r.ExpiresAt,
-			Current:    r.ID.String() == sub.Credential,
+			ID:           r.ID.String(),
+			Kind:         r.Kind,
+			Name:         r.Name,
+			Scopes:       strings.Fields(r.Scopes),
+			Tenant:       r.Tenant,
+			Impersonator: r.Impersonator,
+			IP:           r.IP,
+			UserAgent:    r.UserAgent,
+			CreatedAt:    r.CreatedAt,
+			LastUsedAt:   r.LastUsedAt,
+			ExpiresAt:    r.ExpiresAt,
+			Current:      r.ID.String() == sub.Credential,
 		})
 	}
 	return out, nil

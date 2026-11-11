@@ -22,22 +22,23 @@ const DefaultLimit = 50
 type Activity struct {
 	bun.BaseModel `bun:"table:activity_log,alias:al"`
 
-	ID         uuid.UUID            `bun:"id,pk,type:uuid"` // UUIDv7，按时间递增
-	Tenant     string               `bun:"tenant,notnull"`  // 操作所在的租户，"" 为平台本身
-	ActorType  identity.SubjectType `bun:"actor_type,notnull"`
-	ActorID    string               `bun:"actor_id,notnull"` // 操作人，可以为空
-	Event      string               `bun:"event,notnull"`    // 发生了什么，例如 article.published
-	TargetType string               `bun:"target_type,notnull"`
-	TargetID   string               `bun:"target_id,notnull"`  // 被操作的对象，例如 article 和文章 ID；可以为空
-	Properties map[string]any       `bun:"properties,notnull"` // 展示这条记录需要的其他数据，保存为 JSON
-	RequestID  string               `bun:"request_id,notnull"` // 产生这条记录的请求，队列任务中是发布任务的请求
-	CreatedAt  time.Time            `bun:"created_at,notnull"`
+	ID             uuid.UUID            `bun:"id,pk,type:uuid"` // UUIDv7，按时间递增
+	Tenant         string               `bun:"tenant,notnull"`  // 操作所在的租户，"" 为平台本身
+	ActorType      identity.SubjectType `bun:"actor_type,notnull"`
+	ActorID        string               `bun:"actor_id,notnull"`        // 操作人，可以为空
+	ImpersonatorID string               `bun:"impersonator_id,notnull"` // 代为登录时实际操作的人，见 identity.Subject.Impersonator；可以为空
+	Event          string               `bun:"event,notnull"`           // 发生了什么，例如 article.published
+	TargetType     string               `bun:"target_type,notnull"`
+	TargetID       string               `bun:"target_id,notnull"`  // 被操作的对象，例如 article 和文章 ID；可以为空
+	Properties     map[string]any       `bun:"properties,notnull"` // 展示这条记录需要的其他数据，保存为 JSON
+	RequestID      string               `bun:"request_id,notnull"` // 产生这条记录的请求，队列任务中是发布任务的请求
+	CreatedAt      time.Time            `bun:"created_at,notnull"`
 }
 
 // Record 在 db 中写入一条操作记录。db 通常是业务修改所在的事务，记录与修改一起提交或回滚。
 //
 // a 只需要填写 Event、TargetType、TargetID 和 Properties，其余字段由 Record 填写：
-// 操作人和租户来自 actor（它的 ID、Type 和 Tenant），队列和定时任务传入代表系统的主体；
+// 操作人和租户来自 actor（它的 ID、Type、Impersonator 和 Tenant），队列和定时任务传入代表系统的主体；
 // RequestID 来自 ctx 中的 request_id 日志字段，HTTP 请求和由它发布的队列任务都带有这个字段。
 func Record(ctx context.Context, db bun.IDB, actor identity.Subject, a Activity) error {
 	id, err := uuid.NewV7()
@@ -45,7 +46,7 @@ func Record(ctx context.Context, db bun.IDB, actor identity.Subject, a Activity)
 		return errors.Wrap(err, "activity: new id")
 	}
 	a.ID, a.CreatedAt = id, time.Now().UTC()
-	a.Tenant, a.ActorType, a.ActorID = actor.Tenant, actor.Type, actor.ID
+	a.Tenant, a.ActorType, a.ActorID, a.ImpersonatorID = actor.Tenant, actor.Type, actor.ID, actor.Impersonator
 	a.RequestID = requestID(ctx)
 	if a.Properties == nil {
 		a.Properties = map[string]any{}
@@ -65,7 +66,8 @@ func check(a Activity) error {
 		return errors.Newf("activity: target id %q without target type", a.TargetID)
 	}
 	for field, v := range map[string]string{
-		"tenant": a.Tenant, "actor type": string(a.ActorType), "actor id": a.ActorID, "event": a.Event,
+		"tenant": a.Tenant, "actor type": string(a.ActorType), "actor id": a.ActorID,
+		"impersonator id": a.ImpersonatorID, "event": a.Event,
 		"target type": a.TargetType, "target id": a.TargetID, "request id": a.RequestID,
 	} {
 		if len(v) > maxKey {

@@ -43,7 +43,7 @@ func TestRecordFillsActorTenantAndRequestID(t *testing.T) {
 			Event: "article.published", TargetType: "article", TargetID: "a1",
 			Properties: map[string]any{"title": "Hello", "tags": []any{"go"}},
 			// 由 Record 填写的字段会被覆盖。
-			Tenant: "other", ActorID: "forged", RequestID: "forged",
+			Tenant: "other", ActorID: "forged", ImpersonatorID: "forged", RequestID: "forged",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -56,7 +56,7 @@ func TestRecordFillsActorTenantAndRequestID(t *testing.T) {
 			t.Fatalf("list=%+v", list)
 		}
 		a := list[0]
-		if a.ID.Version() != 7 || a.Tenant != "acme" || a.ActorType != identity.SubjectUser || a.ActorID != "u1" ||
+		if a.ID.Version() != 7 || a.Tenant != "acme" || a.ActorType != identity.SubjectUser || a.ActorID != "u1" || a.ImpersonatorID != "" ||
 			a.Event != "article.published" || a.TargetType != "article" || a.TargetID != "a1" || a.RequestID != "req-1" {
 			t.Fatalf("activity=%+v", a)
 		}
@@ -65,6 +65,23 @@ func TestRecordFillsActorTenantAndRequestID(t *testing.T) {
 		}
 		if a.CreatedAt.Before(before) || a.CreatedAt.After(time.Now().Add(time.Second)) {
 			t.Fatalf("created_at=%v", a.CreatedAt)
+		}
+	})
+}
+
+// 代为登录时，操作人是被代为登录的用户，ImpersonatorID 记下实际操作的人。
+func TestRecordImpersonation(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := dbtesting.Open(t, driver, activity.Migrations())
+		asAlice := alice
+		asAlice.Impersonator = "staff"
+		record(t, db, asAlice, activity.Activity{Event: "article.published"})
+		list, err := activity.List(context.Background(), db, activity.Query{Tenant: "acme"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 1 || list[0].ActorID != "u1" || list[0].ImpersonatorID != "staff" {
+			t.Fatalf("list=%+v", list)
 		}
 	})
 }

@@ -358,19 +358,19 @@ func TestTenantBinding(t *testing.T) {
 	})
 }
 
-func TestActor(t *testing.T) {
+func TestImpersonation(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		s, _ := newStore(t, driver)
-		asAlice := identity.Subject{ID: "alice", Type: identity.SubjectUser, Actor: "staff"}
+		asAlice := identity.Subject{ID: "alice", Type: identity.SubjectUser, Impersonator: "staff"}
 		own := login(t, s, alice, apitoken.Device{})
 		impersonating := login(t, s, asAlice, apitoken.Device{})
 		personal := create(t, s, asAlice, apitoken.Personal{Name: "排查", Scopes: read})
-		if sub, ok := valid(t, s, own); !ok || sub.Actor != "" {
-			t.Fatalf("own token actor=%q ok=%v", sub.Actor, ok)
+		if sub, ok := valid(t, s, own); !ok || sub.Impersonator != "" {
+			t.Fatalf("own token impersonator=%q ok=%v", sub.Impersonator, ok)
 		}
 		for _, token := range []string{impersonating, personal} {
-			if sub, ok := valid(t, s, token); !ok || sub.ID != "alice" || sub.Actor != "staff" {
+			if sub, ok := valid(t, s, token); !ok || sub.ID != "alice" || sub.Impersonator != "staff" {
 				t.Fatalf("impersonation token sub=%+v ok=%v", sub, ok)
 			}
 		}
@@ -378,12 +378,12 @@ func TestActor(t *testing.T) {
 		if err != nil || len(list) != 3 {
 			t.Fatalf("list=%+v err=%v", list, err)
 		}
-		actors := map[string]int{}
+		impersonators := map[string]int{}
 		for _, tok := range list {
-			actors[tok.Actor]++
+			impersonators[tok.Impersonator]++
 		}
-		if actors[""] != 1 || actors["staff"] != 2 {
-			t.Fatalf("actors=%v", actors)
+		if impersonators[""] != 1 || impersonators["staff"] != 2 {
+			t.Fatalf("impersonators=%v", impersonators)
 		}
 	})
 }

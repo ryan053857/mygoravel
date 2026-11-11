@@ -30,14 +30,14 @@ mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API K
 
 ```go
 type Subject struct {
-    ID          string
-    Type        SubjectType
-    Actor       string
-    Method      string
-    Credential  string
-    Tenant      string
-    Permissions []string
-    Scopes      []string
+    ID           string
+    Type         SubjectType
+    Impersonator string
+    Method       string
+    Credential   string
+    Tenant       string
+    Permissions  []string
+    Scopes       []string
 }
 ```
 
@@ -45,7 +45,7 @@ type Subject struct {
 | --- | --- |
 | `ID` | 调用者的唯一标识，是一个不透明的字符串，例如用户 ID |
 | `Type` | 调用者类别：`identity.SubjectUser`（用户）或 `identity.SubjectService`（服务） |
-| `Actor` | 代为登录时实际操作的人，例如客服的 ID；为空表示调用者本人，见[代为登录](#impersonation) |
+| `Impersonator` | 代为登录时实际操作的人，例如客服的 ID；为空表示调用者本人，见[代为登录](#impersonation) |
 | `Method` | 认证方式，例如 `bearer` 或 `session` |
 | `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)的 ID；用于登出当前设备，可以为空 |
 | `Tenant` | 本次请求所在的租户，`""` 表示平台本身；由凭据设置时，凭据只能在这个租户中使用，见[多租户](#tenants) |
@@ -241,7 +241,7 @@ api := rest.New(rest.Options{
 | 其他 4xx 类错误 | 按错误分类响应，错误码就是你定义的业务错误码，例如不是租户成员时返回 `errorx.NotFound` 得到 `404` |
 | 5xx 类错误 | 与校验器的 5xx 相同 |
 
-`Resolve` 只负责加载权限和租户：返回的主体中 `Method`、`Credential`、`Scopes` 和 `Actor` 总是取自凭据，像上面这样修改收到的主体，或者新建一个主体返回，结果都一样。
+`Resolve` 只负责加载权限和租户：返回的主体中 `Method`、`Credential`、`Scopes` 和 `Impersonator` 总是取自凭据，像上面这样修改收到的主体，或者新建一个主体返回，结果都一样。
 
 页面使用同样签名的 [`web.Options.Resolve`](views.md#login)，所以同一个函数可以同时交给 API 和页面。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
 
@@ -278,17 +278,17 @@ func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error
 <a id="impersonation"></a>
 ## 代为登录
 
-客服排查问题时常常需要“以用户的身份看一看”。代为登录得到的主体就是这个用户，权限也是他的，`Actor` 记录实际操作的人。`Actor` 和其他字段一起保存在会话或令牌中，之后的每个请求都带着它。
+客服排查问题时常常需要“以用户的身份看一看”。代为登录得到的主体就是这个用户，权限也是他的，`Impersonator` 记录实际操作的人。`Impersonator` 和其他字段一起保存在会话或令牌中，之后的每个请求都带着它。
 
 运营后台的“以此用户登录”按钮提交到一个要求 `users:impersonate` 的页面路由：
 
 ```go
 func (h *Handlers) Impersonate(w http.ResponseWriter, r *http.Request) error {
     staff, _ := identity.FromContext(r.Context())
-    if staff.Actor != "" {
+    if staff.Impersonator != "" {
         return web.ErrForbidden.New() // 先回到自己的账号，不能层层代为登录
     }
-    target := identity.Subject{ID: chi.URLParam(r, "id"), Type: identity.SubjectUser, Actor: staff.ID}
+    target := identity.Subject{ID: chi.URLParam(r, "id"), Type: identity.SubjectUser, Impersonator: staff.ID}
     if err := h.pages.Login(r.Context(), target); err != nil {
         return err
     }
@@ -298,8 +298,8 @@ func (h *Handlers) Impersonate(w http.ResponseWriter, r *http.Request) error {
 
 func (h *Handlers) StopImpersonating(w http.ResponseWriter, r *http.Request) error {
     sub, _ := identity.FromContext(r.Context())
-    if sub.Actor != "" {
-        if err := h.pages.Login(r.Context(), identity.Subject{ID: sub.Actor, Type: identity.SubjectUser}); err != nil {
+    if sub.Impersonator != "" {
+        if err := h.pages.Login(r.Context(), identity.Subject{ID: sub.Impersonator, Type: identity.SubjectUser}); err != nil {
             return err
         }
     }
@@ -308,21 +308,21 @@ func (h *Handlers) StopImpersonating(w http.ResponseWriter, r *http.Request) err
 }
 ```
 
-`StopImpersonating` 注册为只要求登录的路由，页面顶部在 `sub.Actor` 不为空时显示“正在代 {用户} 操作”和退出按钮。`pages.Login` 每次都更换会话 token，代为登录期间的会话在退出后不能继续使用。
+`StopImpersonating` 注册为只要求登录的路由，页面顶部在 `sub.Impersonator` 不为空时显示“正在代 {用户} 操作”和退出按钮。`pages.Login` 每次都更换会话 token，代为登录期间的会话在退出后不能继续使用。
 
-单页应用用[登录令牌](api-tokens.md#login-and-logout)完成同样的事：后台接口为目标用户签发一个带 `Actor` 的令牌，前端保留客服自己的令牌，退出时[撤销](api-tokens.md#revoking-tokens)代为登录的令牌，换回自己的：
+单页应用用[登录令牌](api-tokens.md#login-and-logout)完成同样的事：后台接口为目标用户签发一个带 `Impersonator` 的令牌，前端保留客服自己的令牌，退出时[撤销](api-tokens.md#revoking-tokens)代为登录的令牌，换回自己的：
 
 ```go
-plain, err := tokens.Login(ctx, identity.Subject{ID: userID, Type: identity.SubjectUser, Actor: staff.ID}, device)
+plain, err := tokens.Login(ctx, identity.Subject{ID: userID, Type: identity.SubjectUser, Impersonator: staff.ID}, device)
 ```
 
 几件需要应用自己决定的事：
 
-- **操作者仍然有效**：在 `Resolve` 中检查 `Actor` 仍然拥有代为登录的权限。客服离职或被收回权限后，他代为登录的会话和令牌在下一个请求就失效：
+- **操作者仍然有效**：在 `Resolve` 中检查 `Impersonator` 仍然拥有代为登录的权限。客服离职或被收回权限后，他代为登录的会话和令牌在下一个请求就失效：
 
   ```go
-  if sub.Actor != "" {
-      perms, _, err := roles.Permissions(ctx, sub.Actor, "")
+  if sub.Impersonator != "" {
+      perms, _, err := roles.Permissions(ctx, sub.Impersonator, "")
       if err != nil {
           return identity.Subject{}, err
       }
@@ -334,8 +334,8 @@ plain, err := tokens.Login(ctx, identity.Subject{ID: userID, Type: identity.Subj
   ```
 
 - **谁可以被代为登录**：通常不允许代为登录其他运营人员，在 `Impersonate` 中用 `roles.Permissions(ctx, target, "")` 确认目标在平台中没有角色；
-- **哪些操作不允许代为执行**：修改密码和邮箱、管理设备和令牌、付款等，在对应的 action 中拒绝 `subject.Actor != ""` 的主体。代为登录期间创建的[个人访问令牌](api-tokens.md#personal-access-tokens)会记录 `Actor`，令牌的每次使用都归于这个操作者；
-- **审计**：日志和审计记录同时写下 `subject.ID` 和 `subject.Actor`，例如 `slog.InfoContext(ctx, "article published", "subject", subject.ID, "actor", subject.Actor)`。
+- **哪些操作不允许代为执行**：修改密码和邮箱、管理设备和令牌、付款等，在对应的 action 中拒绝 `subject.Impersonator != ""` 的主体。代为登录期间创建的[个人访问令牌](api-tokens.md#personal-access-tokens)会记录 `Impersonator`，令牌的每次使用都归于这个操作者；
+- **审计**：[操作日志](activity.md)自动记下 `Impersonator`；自己写日志时同样同时写下两者，例如 `slog.InfoContext(ctx, "article published", "subject", subject.ID, "impersonator", subject.Impersonator)`。
 
 <a id="retrieving-the-subject"></a>
 ## 获取已认证的主体

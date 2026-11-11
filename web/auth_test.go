@@ -284,8 +284,8 @@ func TestTenantPages(t *testing.T) {
 	}
 }
 
-// 代为登录：会话记录 Actor，Resolve 新建主体时它也不会丢失；回到本人账号需要重新登录。
-func TestActor(t *testing.T) {
+// 代为登录：会话记录 Impersonator，Resolve 新建主体时它也不会丢失；回到本人账号需要重新登录。
+func TestImpersonation(t *testing.T) {
 	resolve := func(_ context.Context, stored identity.Subject) (identity.Subject, error) {
 		return identity.Subject{ID: stored.ID, Type: stored.Type}, nil
 	}
@@ -295,11 +295,11 @@ func TestActor(t *testing.T) {
 	pages := web.New(o)
 	router := chi.NewRouter()
 	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		return pages.Login(r.Context(), identity.Subject{ID: r.FormValue("user"), Actor: r.FormValue("actor")})
+		return pages.Login(r.Context(), identity.Subject{ID: r.FormValue("user"), Impersonator: r.FormValue("impersonator")})
 	})
 	pages.Routes(router, web.Require()).Get("/me", func(w http.ResponseWriter, r *http.Request) error {
 		sub, _ := identity.FromContext(r.Context())
-		_, err := fmt.Fprintf(w, "%s actor=%s", sub.ID, sub.Actor)
+		_, err := fmt.Fprintf(w, "%s impersonator=%s", sub.ID, sub.Impersonator)
 		return err
 	})
 	srv := httptest.NewServer(router)
@@ -314,12 +314,12 @@ func TestActor(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	signIn(map[string][]string{"user": {"alice"}, "actor": {"staff"}})
-	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 || body != "alice actor=staff" {
+	signIn(map[string][]string{"user": {"alice"}, "impersonator": {"staff"}})
+	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 || body != "alice impersonator=staff" {
 		t.Fatalf("impersonating: %d %q", resp.StatusCode, body)
 	}
 	signIn(map[string][]string{"user": {"staff"}})
-	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 || body != "staff actor=" {
+	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 || body != "staff impersonator=" {
 		t.Fatalf("back: %d %q", resp.StatusCode, body)
 	}
 }

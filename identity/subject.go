@@ -18,17 +18,17 @@ const (
 // Permissions 是主体在 Tenant 中拥有的权限，Scopes 是本次请求所用凭据被限制在内的权限，
 // 两者共同决定 Can：例如用户拥有 articles:*，他创建的只读令牌的 Scopes 为 articles:read。
 //
-// Actor 不为空表示代为登录：实际操作的人是 Actor，他以 ID 的身份和权限操作，例如客服代用户登录排查问题。
-// Actor 由凭据记录，审计日志应同时记录 ID 和 Actor。
+// Impersonator 不为空表示代为登录：实际操作的人是 Impersonator，他以 ID 的身份和权限操作，例如客服代用户登录排查问题。
+// Impersonator 由凭据记录，审计日志应同时记录 ID 和 Impersonator。
 type Subject struct {
-	ID          string
-	Type        SubjectType
-	Actor       string   // 代为登录时实际操作者的 ID；为空表示主体本人
-	Method      string   // 认证方式，如 bearer、session
-	Credential  string   // 本次请求所用凭据的 ID，如 API token 的 ID；用于登出当前设备、在设备列表中标出当前设备，可为空
-	Tenant      string   // 本次请求所在的租户，"" 表示平台本身；由凭据设置时，凭据只能在这个租户中使用
-	Permissions []string // 主体在 Tenant 中拥有的权限，支持通配符，见 Can
-	Scopes      []string // 凭据的权限限制，支持通配符；nil 表示不限制，空切片表示什么都不允许
+	ID           string
+	Type         SubjectType
+	Impersonator string   // 代为登录时实际操作者的 ID；为空表示主体本人
+	Method       string   // 认证方式，如 bearer、session
+	Credential   string   // 本次请求所用凭据的 ID，如 API token 的 ID；用于登出当前设备、在设备列表中标出当前设备，可为空
+	Tenant       string   // 本次请求所在的租户，"" 表示平台本身；由凭据设置时，凭据只能在这个租户中使用
+	Permissions  []string // 主体在 Tenant 中拥有的权限，支持通配符，见 Can
+	Scopes       []string // 凭据的权限限制，支持通配符；nil 表示不限制，空切片表示什么都不允许
 }
 
 // Can 报告主体能否执行 perm：Permissions 授予了它，并且 Scopes 为 nil 或也允许它。

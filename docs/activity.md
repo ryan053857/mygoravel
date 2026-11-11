@@ -63,6 +63,7 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
 | `ID` | 新的 UUIDv7，按时间递增 |
 | `Tenant` | 主体的 `Tenant`，`""` 为平台本身，见[多租户](tenancy.md) |
 | `ActorType`、`ActorID` | 主体的 `Type` 和 `ID` |
+| `ImpersonatorID` | 主体的 `Impersonator`：[代为登录](authentication.md#impersonation)时实际操作的人，例如客服；平时为空 |
 | `RequestID` | 本次请求的[请求 ID](middleware.md#request-id)，可以用它在日志中找到这次请求的全部日志 |
 | `CreatedAt` | 当前时间 |
 

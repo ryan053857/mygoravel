@@ -1,6 +1,6 @@
 -- +goose Up
 -- 操作日志：谁（actor）在哪个租户中对什么（target）做了什么（event）。
--- tenant 为空字符串时是平台本身；actor_id 为空字符串表示没有操作人。
+-- tenant 为空字符串时是平台本身；actor_id 为空字符串表示没有操作人，impersonator_id 是代为登录时实际操作的人，空字符串表示操作人本人。
 -- 索引写在 CREATE TABLE 中：MySQL 的 DDL 会隐式提交，一个迁移只执行一条 DDL。
 -- utf8mb4_bin 让字符串比较区分大小写，与 PostgreSQL 和 SQLite 一致；
 -- 参与索引的字符串列为 VARCHAR(191)，使组合索引不超过 InnoDB 的 3072 字节上限。
@@ -9,6 +9,7 @@ CREATE TABLE activity_log (
     tenant VARCHAR(191) NOT NULL,
     actor_type VARCHAR(191) NOT NULL,
     actor_id VARCHAR(191) NOT NULL,
+    impersonator_id VARCHAR(191) NOT NULL,
     event VARCHAR(191) NOT NULL,
     target_type VARCHAR(191) NOT NULL,
     target_id VARCHAR(191) NOT NULL,

@@ -4,6 +4,7 @@ CREATE TABLE activity_log (
     tenant text NOT NULL,
     actor_type text NOT NULL,
     actor_id text NOT NULL,
+    impersonator_id text NOT NULL,
     event text NOT NULL,
     target_type text NOT NULL,
     target_id text NOT NULL,
@@ -18,6 +19,7 @@ CREATE INDEX activity_log_created_at ON activity_log (created_at);
 COMMENT ON TABLE activity_log IS '操作日志：谁（actor）在哪个租户中对什么（target）做了什么（event）';
 COMMENT ON COLUMN activity_log.tenant IS '空字符串为平台本身';
 COMMENT ON COLUMN activity_log.actor_id IS '空字符串表示没有操作人';
+COMMENT ON COLUMN activity_log.impersonator_id IS '代为登录时实际操作的人；空字符串表示操作人本人';
 
 -- +goose Down
 DROP TABLE activity_log;

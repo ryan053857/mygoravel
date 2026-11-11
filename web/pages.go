@@ -58,7 +58,7 @@ type Options struct {
 	// 例如重新查询用户的状态、按 identity.TenantFromContext 加载用户在租户中的权限；nil 时直接使用保存的主体。
 	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效：销毁会话并按未登录处理；
 	// 其他错误按分类呈现错误页，例如不是租户成员时返回 errorx.NotFound 得到 404。
-	// 权限检查使用返回的主体；其中 Method、Credential、Scopes、Actor 总是取自会话，Resolve 改变它们不起作用。
+	// 权限检查使用返回的主体；其中 Method、Credential、Scopes、Impersonator 总是取自会话，Resolve 改变它们不起作用。
 	Resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
 	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求。
 	// message 来自 httpx.ErrorDetail：业务错误的译文，或状态描述。
@@ -143,7 +143,7 @@ func (p *Pages) recheck(ctx context.Context, token string, want identity.Subject
 	if err != nil {
 		return err
 	}
-	if !ok || stored.ID != want.ID || stored.Actor != want.Actor {
+	if !ok || stored.ID != want.ID || stored.Impersonator != want.Impersonator {
 		return errUnauthenticated.New()
 	}
 	if stored.Tenant != "" && stored.Tenant != identity.TenantFromContext(ctx) {
@@ -204,7 +204,7 @@ func (p *Pages) subject(r *http.Request) (identity.Subject, bool, error) {
 		return identity.Subject{}, false, err
 	}
 	// Resolve 加载权限和租户；认证方式、凭据、凭据的限制和代为登录者由会话决定，不随 Resolve 改变。
-	sub.Method, sub.Credential, sub.Scopes, sub.Actor = stored.Method, stored.Credential, stored.Scopes, stored.Actor
+	sub.Method, sub.Credential, sub.Scopes, sub.Impersonator = stored.Method, stored.Credential, stored.Scopes, stored.Impersonator
 	return sub, true, nil
 }
 

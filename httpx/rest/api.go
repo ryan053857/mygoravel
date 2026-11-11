@@ -55,7 +55,7 @@ type Options struct {
 	// 加载用户在租户中的权限；nil 时直接使用凭据给出的主体。
 	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体时响应 401，其他 4xx 类错误按其分类响应，
 	// 例如不是租户成员时返回 errorx.NotFound 得到 404；5xx 类错误响应对应的状态码。
-	// 返回的主体中 Method、Credential、Scopes、Actor 总是取自凭据，Resolve 改变它们不起作用。
+	// 返回的主体中 Method、Credential、Scopes、Impersonator 总是取自凭据，Resolve 改变它们不起作用。
 	Resolve func(ctx context.Context, sub identity.Subject) (identity.Subject, error)
 }
 
