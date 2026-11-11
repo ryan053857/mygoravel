@@ -9,6 +9,7 @@
     - [访问日志](#access-log)
 - [限流](#rate-limiting)
 - [跨域请求](#cors)
+- [响应压缩](#compression)
 - [指标](#metrics)
 - [自行组装](#custom-stack)
 - [自定义中间件](#custom-middleware)
@@ -58,6 +59,7 @@ api := rest.New(rest.Options{Router: router})
 | --- | --- |
 | `Timeout(cfg.Timeout)` | 为请求 context 设置超时，见[请求超时](#request-timeout) |
 | `RateLimit(limiter, key)` | 按客户端限流，超出时返回 429，见[限流](rate-limiting.md) |
+| `Compress()` | 按 `Accept-Encoding` 用 zstd 或 gzip 压缩文本类响应，见[响应压缩](#compression) |
 
 框架的其他部分不依赖这些中间件是否安装。没有 `AccessLog` 时，`httpx.AddAccessLogAttrs` 什么也不做；没有 `Locale` 时，错误消息不翻译，`i18n.T` 原样返回消息 ID；没有 `AssignRequestID` 时，`httpx.RequestID` 返回空字符串。
 
@@ -260,6 +262,26 @@ http:
 API 只用 [Bearer token](api-tokens.md) 认证，不使用 cookie，所以 `CORS` 从不允许携带凭据：其他网站的网页拿不到用户的 token，允许任何来源也是安全的。请求头按预检请求声明的原样允许，`Authorization` 不需要单独配置。
 
 预检请求（`OPTIONS`）直接以 `204` 应答，不进入路由、认证和限流，所以要把 `CORS` 安装在它们之前。`401`、`429` 等错误响应同样带有 CORS 头，前端能读到错误内容。
+
+<a id="compression"></a>
+## 响应压缩
+
+应用直接对外提供服务、前面没有负责压缩的反向代理或 CDN 时，在 `httpx.Defaults` 之后安装 `httpx.Compress`：
+
+```go
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+router.Use(httpx.Compress())
+```
+
+浏览器同时接受两种编码时使用 zstd，否则使用 gzip。JSON、HTML 片段和样式表通常压缩到原来的几分之一。
+
+只有文本类响应会被压缩：`text/*`、JSON、JavaScript、XML、SVG 和 WebAssembly。图片、字体、PDF、压缩包等原样发送。以下响应也不压缩：
+
+- 小于 1 KiB 的响应；
+- 已经带 `Content-Encoding` 的响应，例如[界面组件](components.md)预先压缩的样式表和脚本；
+- `Range` 请求的部分响应。
+
+[服务端推送](sse.md)和 [WebSocket](realtime.md) 不受影响：`text/event-stream` 直接写出，每条事件立即送达；带 `Upgrade` 请求头的握手原样交给处理器。[静态资源](assets.md)的 `ETag` 保持不变，浏览器协商时照常得到 `304`。
 
 <a id="metrics"></a>
 ## 指标
