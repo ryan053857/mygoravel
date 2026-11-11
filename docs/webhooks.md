@@ -1,0 +1,266 @@
+# Webhook
+
+- [简介](#introduction)
+- [安装](#installation)
+- [发送事件](#sending)
+    - [请求的格式](#request-format)
+- [管理端点](#endpoints)
+    - [轮换密钥](#rotating-secrets)
+    - [投递记录与重发](#deliveries)
+- [运行投递](#delivering)
+    - [重试](#retries)
+    - [拒绝内网地址](#private-addresses)
+- [接收 webhook](#receiving)
+- [测试](#testing)
+- [保留期限](#retention)
+
+<a id="introduction"></a>
+## 简介
+
+SaaS 的租户常常要把你的应用接进他们自己的系统：文章发布后同步到公司官网，订单付款后通知 ERP。webhook 就是在事件发生时，向租户配置的地址发一个 HTTP 请求。
+
+`webhook` 包负责发送这一端：租户管理自己的**端点**（接收地址和订阅的事件），业务代码发出事件，worker 签名并投递，失败时重试，每次投递都留下**投递记录**供租户排查。签名遵循 [Standard Webhooks](https://www.standardwebhooks.com/) 规范，租户可以直接用 Svix 等现成的库校验。它也提供 `Verify`，用来校验别人按这个规范发给你的 webhook。
+
+支持 PostgreSQL、SQLite 和 MySQL。本章的例子：文章发布后，通知租户配置的端点。
+
+<a id="installation"></a>
+## 安装
+
+webhook 的投递任务使用[数据库队列](queue.md)，把两者的迁移都加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`：
+
+```go
+migratecmd.Publish(postgres.Driver,
+    migrate.Source{Name: "queue", FS: queue.Migrations()},
+    migrate.Source{Name: "webhook", FS: webhook.Migrations()},
+)
+```
+
+<a id="sending"></a>
+## 发送事件
+
+在[发布文章](actions.md#writing-actions)的事务中调用 `webhook.Send`：
+
+```go
+// PublishedHook 是 article.published 事件的内容。它是给租户系统的公开接口，字段一旦发布就不要随意修改。
+type PublishedHook struct {
+    ID          uuid.UUID `json:"id"`
+    Title       string    `json:"title"`
+    URL         string    `json:"url"`
+    PublishedAt time.Time `json:"published_at"`
+}
+
+err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+    // ……读取、检查并更新文章，与原来相同
+    return webhook.Send(ctx, tx, subject, webhook.Event{
+        Type: "article.published",
+        Data: PublishedHook{ID: item.ID, Title: item.Title, URL: a.baseURL + "/articles/" + item.Slug, PublishedAt: *item.PublishedAt},
+    })
+})
+```
+
+`Send` 找出 `subject.Tenant` 中订阅了这个事件的端点，为每个端点写入一条投递记录，并在同一个事务中发布投递任务：事务提交后才会投递，回滚时一起取消。租户没有配置端点时什么也不写，所以可以放心地在每个事件上调用它。
+
+事件内容用专门的结构体，不要直接传入数据库模型：模型以后加的字段会悄悄发给所有租户，改名也会破坏他们的集成。
+
+<a id="request-format"></a>
+### 请求的格式
+
+每个端点收到一个 `POST` 请求（签名为示意）：
+
+```http
+POST /hooks HTTP/1.1
+Content-Type: application/json
+webhook-id: 0193a5c2-7d1e-7b3a-9f61-2c4e8d0a1b2c
+webhook-timestamp: 1767225600
+webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=
+
+{"type":"article.published","timestamp":"2026-01-01T00:00:00Z","data":{"id":"…","title":"…","url":"…","published_at":"…"}}
+```
+
+- `webhook-id` 是事件 ID：同一个事件发给不同的端点、重试多少次都相同，接收方用它去重。
+- `webhook-signature` 是用端点密钥对 `id.timestamp.body` 计算的 HMAC-SHA256，接收方据此确认请求来自你、内容没有被改过。
+- 投递**至少一次**，不保证顺序。接收方应当按 `webhook-id` 去重，按 `timestamp` 判断先后。
+
+<a id="endpoints"></a>
+## 管理端点
+
+端点属于租户，由租户管理员在设置页中维护，路由用 `webhooks:manage` 这类权限保护。所有函数都接收租户，其他租户的端点 ID 返回 `webhook.ErrEndpointNotFound`：
+
+| 操作 | 调用 |
+| --- | --- |
+| 列出端点 | `webhook.ListEndpoints(ctx, db, sub.Tenant)` |
+| 创建端点 | `webhook.CreateEndpoint(ctx, db, sub.Tenant, webhook.EndpointInput{URL, Events, Description})` |
+| 查看、修改、停用 | `webhook.GetEndpoint`、`webhook.UpdateEndpoint`（`Disabled: true` 停用） |
+| 删除端点和它的投递记录 | `webhook.DeleteEndpoint(ctx, db, sub.Tenant, id)` |
+
+和[成员管理](tenancy.md#managing-members)一样，**租户只能取自 `sub.Tenant`**，不能来自表单。
+
+`Events` 是订阅的事件：完整的类型如 `article.published`，以 `.*` 结尾的前缀如 `article.*`，或者 `*` 表示全部。可订阅的事件由应用决定，在模块中列出来，订阅表单用它显示选项，提交时用它校验：
+
+```go
+// WebhookEvents 是租户可以订阅的事件。
+var WebhookEvents = []string{"article.published", "article.deleted"}
+```
+
+地址不是 http 或 https 的绝对地址时返回 `webhook.ErrInvalidURL`，`Events` 为空或写法不合法时返回 `webhook.ErrInvalidEvents`，它们都是[业务错误](errors.md)，API 返回 400。
+
+创建时生成的 `Secret`（`whsec_` 开头）在端点详情页展示给租户，他们用它校验签名。
+
+<a id="rotating-secrets"></a>
+### 轮换密钥
+
+密钥泄露或定期更换时，调用 `webhook.RotateSecret`。之后 24 小时内，每个请求同时带有新旧两个密钥的签名，租户先换上新密钥，旧密钥到期后自动失效，中间不会有请求校验失败。
+
+<a id="deliveries"></a>
+### 投递记录与重发
+
+端点详情页列出最近的投递，帮助租户排查他们的接收程序：
+
+```go
+list, err := webhook.ListDeliveries(ctx, a.db, webhook.DeliveryQuery{Tenant: sub.Tenant, EndpointID: id, Before: before})
+```
+
+每条记录有状态（`pending` 等待或重试中、`succeeded`、`failed`）、已发送的次数、最后一次的 HTTP 状态码，以及失败原因（包括响应体的开头）。`DeliveryQuery` 还可以按 `EventID`、`Status` 筛选，翻页方式与[通知](notifications.md#listing)相同。
+
+租户修好接收程序后，可以在页面上重发失败的投递：
+
+```go
+d, err := webhook.Resend(ctx, a.db, sub.Tenant, deliveryID)
+```
+
+`Resend` 以相同的事件 ID 和请求体写入一条新记录并立即投递，原记录保持不变。
+
+<a id="delivering"></a>
+## 运行投递
+
+投递任务总是在数据库队列中，即使应用的其他任务使用 Redis 或 NATS。它们用一个单独的 `Subscriber` 处理，重试次数单独配置。在应用配置中加一段：
+
+```go
+type Config struct {
+    // ...
+    Queue   queue.Config `yaml:"queue"`
+    Webhook queue.Config `yaml:"webhook"` // 投递 webhook 的队列
+}
+```
+
+```yaml
+webhook:
+  max_attempts: 16 # 最后一次重试约在 2 天后
+```
+
+在 [worker](queue.md#running-workers) 中注册：
+
+```go
+hooks := queue.NewSubscriber(queue.Database(a.db), a.cfg.Webhook, nil)
+defer hooks.Close()
+webhook.NewDeliverer(a.db, webhook.Options{}).Handle(router, hooks)
+```
+
+`webhook.Options` 的零值即可：每次请求 10 秒超时，不跟随重定向。
+
+<a id="retries"></a>
+### 重试
+
+| 端点的响应 | 结果 |
+| --- | --- |
+| 2xx | 投递成功 |
+| 其他状态码（包括 3xx）、超时、连接失败 | 按队列的[退避时间](queue.md#failures-and-retries)重试，第 n 次失败后约等 n⁴ 秒 |
+| 429、503 带有 `Retry-After` | 按它的要求等待后重试 |
+| 最后一次仍然失败 | 投递记录标记为 `failed` |
+| 端点已停用 | 不再发送，投递记录标记为 `failed` |
+
+最后一次失败的投递**不进入**[失败任务表](queue.md#failed-jobs)：接收方出错不是你的系统故障，不应该触发你的告警。投递记录就是它的结果，租户在页面上看到并重发。
+
+<a id="private-addresses"></a>
+### 拒绝内网地址
+
+端点地址由租户填写。部署在云上时，有人可能填 `http://169.254.169.254/` 或内网服务的地址，借你的 worker 访问它们。需要防范时，传入一个在连接前检查地址的客户端：
+
+```go
+dialer := &net.Dialer{
+    Timeout: 5 * time.Second,
+    Control: func(_, address string, _ syscall.RawConn) error {
+        host, _, _ := net.SplitHostPort(address)
+        ip, err := netip.ParseAddr(host)
+        ip = ip.Unmap() // ::ffff:10.0.0.1 按 IPv4 检查
+        if err != nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
+            return fmt.Errorf("webhook: refusing to connect to %s", address)
+        }
+        return nil
+    },
+}
+client := &http.Client{
+    Transport:     &http.Transport{DialContext: dialer.DialContext},
+    CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+webhook.NewDeliverer(a.db, webhook.Options{Client: client}).Handle(router, hooks)
+```
+
+`Control` 在域名解析之后、建立连接之前执行，检查的是真正要连接的 IP，域名临时解析到内网地址也会被拒绝。自己传入客户端时，记得保留 `CheckRedirect`，否则重定向可以绕过地址检查。
+
+<a id="receiving"></a>
+## 接收 webhook
+
+越来越多的服务按 Standard Webhooks 发送 webhook，例如 Resend。用 `webhook.Verify` 校验，校验通过后把内容交给队列处理，立即返回 2xx：
+
+```go
+// EmailEvent 是收到的邮件事件，由任务处理。
+var EmailEvent = queue.Topic[Inbound]("resend.event")
+
+type Inbound struct {
+    ID   string          `json:"id"` // webhook-id，任务按它去重
+    Body json.RawMessage `json:"body"`
+}
+
+func (h *Handlers) ResendWebhook(w http.ResponseWriter, r *http.Request) {
+    body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+    if err != nil {
+        http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+        return
+    }
+    if err := webhook.Verify(h.secret, r.Header, body); err != nil {
+        http.Error(w, "invalid signature", http.StatusUnauthorized)
+        return
+    }
+    in := Inbound{ID: r.Header.Get(webhook.HeaderID), Body: body}
+    if err := EmailEvent.Publish(r.Context(), queue.Database(h.db), in); err != nil {
+        http.Error(w, "try again", http.StatusServiceUnavailable) // 对方会重发
+        return
+    }
+    w.WriteHeader(http.StatusNoContent)
+}
+```
+
+- 签名针对原始请求体计算，必须先读出原始字节再校验，校验之后再解析 JSON。
+- 对方会重发，同一个事件可能收到多次。任务处理前按 `webhook-id` 去重，例如插入一张以它为主键的表，冲突时跳过。
+- 处理器不做业务逻辑，尽快返回，对方等待超时也会重发。
+- webhook 路由挂在页面的会话和跨站请求防护之外，与[接收 Telegram 的消息](notifications.md#telegram)相同。
+
+不按这个规范签名的服务，用它们自己 SDK 中的校验函数，接收的流程不变：Stripe 是 `stripe-go` 的 `webhook.ConstructEvent`（包名与本包相同，导入时起个别名），GitHub 是 `go-github` 的 `github.ValidatePayloadFromBody`。
+
+<a id="testing"></a>
+## 测试
+
+测试发送端时，用 `httptest.Server` 作为端点，用 `webhook.Verify` 检查收到的请求。测试接收端的处理器时，用 `webhook.Sign` 构造签名：
+
+```go
+body := `{"type":"email.delivered","timestamp":"2026-01-01T00:00:00Z","data":{}}`
+now := time.Now()
+sig, err := webhook.Sign(secret, "msg_1", now, []byte(body))
+if err != nil {
+    t.Fatal(err)
+}
+req := httptest.NewRequest(http.MethodPost, "/hooks/resend", strings.NewReader(body))
+req.Header.Set(webhook.HeaderID, "msg_1")
+req.Header.Set(webhook.HeaderTimestamp, strconv.FormatInt(now.Unix(), 10))
+req.Header.Set(webhook.HeaderSignature, sig)
+```
+
+<a id="retention"></a>
+## 保留期限
+
+`webhook.Cleanup` 返回删除保留期以前的投递记录的清理函数，交给[定时任务](scheduling.md#framework-cleanups)：
+
+```go
+sched.Add("webhooks:cleanup", "0 4 * * *", schedule.Cleanup(webhook.Cleanup(a.db, 30*24*time.Hour), 1000))
+```
