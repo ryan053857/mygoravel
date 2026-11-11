@@ -55,7 +55,7 @@ if err := a.hub.PublishJSON(ctx, "articles", ArticlePublished{ID: item.ID, Title
 - **在事务提交之后发布。** `Publish` 不参与数据库事务，提交之前发布，浏览器可能收到一条随后被回滚的通知。
 - **发布失败不影响业务结果。** 通知是尽力而为的，文章已经发布成功，发布事件失败时记录日志即可。
 
-主题由字母、数字和 `_ - : .` 组成，最长 200 字节。
+主题由字母、数字和 `_ - : .` 组成，最长 200 字节。多租户应用中主题要带上租户，见[缓存、广播与其他资源](tenancy.md#other-resources)。
 
 <a id="pushing-to-browsers"></a>
 ## 推送给浏览器
