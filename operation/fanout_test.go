@@ -212,10 +212,21 @@ func TestRetryFailedUnit(t *testing.T) {
 		mu.Lock()
 		down = false
 		mu.Unlock()
+		// 单位先在 settle 中记为失败、操作随之结束，处理函数返回之后队列才把任务移进失败任务表，
+		// 所以操作结束时失败任务可能还没出现。
 		failed := queue.NewFailedJobs(e.db)
-		jobs, err := failed.List(ctx, queue.FailedQuery{Topic: string(unitTopic)})
-		if err != nil || len(jobs) != 1 {
-			t.Fatalf("failed jobs: %+v %v", jobs, err)
+		var jobs []queue.FailedJob
+		for deadline := time.Now().Add(10 * time.Second); len(jobs) == 0; time.Sleep(20 * time.Millisecond) {
+			var err error
+			if jobs, err = failed.List(ctx, queue.FailedQuery{Topic: string(unitTopic)}); err != nil {
+				t.Fatal(err)
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("failed job never appeared")
+			}
+		}
+		if len(jobs) != 1 {
+			t.Fatalf("failed jobs: %+v", jobs)
 		}
 		if err := failed.Retry(ctx, jobs[0].ID); err != nil {
 			t.Fatal(err)

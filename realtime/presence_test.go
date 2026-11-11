@@ -168,13 +168,16 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 			t.Fatalf("members = %+v, %v", members, err)
 		}
 
-		// alice 断开后在宽限期内重连到另一个实例：bob 看不到离开和加入，alice 也收不到自己的 join。
+		// alice 换到另一个实例：先在 b 上订阅，再关闭 a 上的连接。bob 看不到加入（a 上还有她的记录），
+		// 也看不到离开（a 的宽限期满时 b 上有她的记录），alice 也收不到自己的 join。
+		// 先建新连接再关旧连接，结果不依赖重连有多快；如果先断开再重连，重连慢于宽限期时离开事件是正确的。
 		if kind, m := bob.membership(); kind != "join" || m.User != "bob" {
 			t.Fatalf("bob's own join = %s %+v", kind, m)
 		}
-		alice.close()
+		old := alice
 		alice = mustConnect(t, b.url, "alice", nil)
-		alice.mustSubscribe("editing:7")
+		alice.mustSubscribe("editing:7") // 回复订阅之前在线记录已经写入
+		old.close()
 		bob.noMembership(600 * time.Millisecond)
 
 		if err := a.rt.Unsubscribe("bob", "editing:7"); err != nil {
