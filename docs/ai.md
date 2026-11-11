@@ -302,6 +302,10 @@ return web.SSE(w, r, func(s *web.Stream) error {
 
 `ai/openai` 通过 OpenAI 兼容接口实现这四种能力。`openai.New` 和 `ai.NewModel` 一样接收 `ai.ModelConfig`，不访问网络，可以在每次使用时按当时的配置创建。OpenAI、火山方舟、硅基流动、通义千问的兼容模式等都提供这类接口，但每家支持的能力不同，以厂商文档为准。
 
+[OpenRouter](https://openrouter.ai) 使用 `ai/openrouter`，用法与 `ai/openai` 相同。它的语音和向量是 OpenAI 兼容接口，图片则使用 OpenRouter 自己的接口，所以单独提供一个包；`BaseURL` 可以不填。
+
+`openai.Client` 的 `OpenAI()` 返回底层的 openai-go 客户端，已经设置好地址和密钥，可以用它调用厂商自己的其他接口。
+
 为文章生成封面，存进[文件存储](filesystem.md)：
 
 ```go
@@ -319,7 +323,7 @@ file, err := files.Upload(ctx, owner, filesystem.FileInput{
 }, bytes.NewReader(img.Data))
 ```
 
-- `Aspect` 是 `ai.Square`、`ai.Portrait` 或 `ai.Landscape`，按 OpenAI 的尺寸换算。尺寸规格不同的模型用 `openai.WithImageSizes` 指定，例如 `{ai.Square: "2048x2048"}`。
+- `Aspect` 是 `ai.Square`、`ai.Portrait` 或 `ai.Landscape`，`ai/openai` 按 OpenAI 的尺寸换算，尺寸规格不同的模型用 `openai.WithImageSizes` 指定，例如 `{ai.Square: "2048x2048"}`；`ai/openrouter` 换算为 1:1、2:3 和 3:2。
 - 模型服务只返回临时链接时，`Image` 会下载图片，结果同样是图片内容。
 
 朗读文章，以及把编辑的语音输入转成文字：

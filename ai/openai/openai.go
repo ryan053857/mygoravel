@@ -88,6 +88,12 @@ func New(cfg ai.ModelConfig, opts ...Option) *Client {
 	return c
 }
 
+// Model 返回模型名。
+func (c *Client) Model() string { return c.model }
+
+// OpenAI 返回底层的 openai-go 客户端，已经设置好接口地址和密钥，用于调用厂商自己的接口。
+func (c *Client) OpenAI() *oa.Client { return &c.client }
+
 func isDallE(model string) bool { return strings.HasPrefix(model, "dall-e") }
 
 func imageSizes(model string) map[ai.Aspect]string {
