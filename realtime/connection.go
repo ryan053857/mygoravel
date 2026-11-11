@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -86,7 +87,10 @@ func (rt *Realtime) connected(client *centrifuge.Client) {
 	}
 	client.OnSubscribe(func(e centrifuge.SubscribeEvent, cb centrifuge.SubscribeCallback) {
 		// 授权可能要查询数据库，不占用连接的读取循环。
-		go func() { cb(centrifuge.SubscribeReply{}, rt.authorize(client.Context(), conn, e.Channel)) }()
+		go func() {
+			opts, err := rt.authorize(client.Context(), conn, e.Channel)
+			cb(centrifuge.SubscribeReply{Options: opts}, err)
+		}()
 	})
 	client.OnPublish(func(e centrifuge.PublishEvent, cb centrifuge.PublishCallback) {
 		rule, _, ok := rt.match(e.Channel)
@@ -96,36 +100,68 @@ func (rt *Realtime) connected(client *centrifuge.Client) {
 		}
 		cb(centrifuge.PublishReply{Options: centrifuge.PublishOptions{ClientInfo: e.ClientInfo}}, nil)
 	})
+	// 只有 presence 频道的订阅者可以读取成员列表；结果留空时由 Centrifuge 从 PresenceStore 读取。
+	member := func(channel string) error {
+		if rule, _, ok := rt.match(channel); !ok || rule.presence == nil || !client.IsSubscribed(channel) {
+			return centrifuge.ErrorPermissionDenied
+		}
+		return nil
+	}
+	client.OnPresence(func(e centrifuge.PresenceEvent, cb centrifuge.PresenceCallback) {
+		cb(centrifuge.PresenceReply{}, member(e.Channel))
+	})
+	client.OnPresenceStats(func(e centrifuge.PresenceStatsEvent, cb centrifuge.PresenceStatsCallback) {
+		cb(centrifuge.PresenceStatsReply{}, member(e.Channel))
+	})
 	if conn.sub.ID != "" {
 		go rt.watch(client, conn)
 	}
 }
 
-// authorize 按频道规则决定连接能否订阅 channel，返回 nil 表示允许。
-func (rt *Realtime) authorize(ctx context.Context, conn *connection, channel string) error {
+// authorize 按频道规则决定连接能否订阅 channel，返回订阅的选项；错误为 nil 表示允许。
+func (rt *Realtime) authorize(ctx context.Context, conn *connection, channel string) (centrifuge.SubscribeOptions, error) {
+	var opts centrifuge.SubscribeOptions
 	rule, params, ok := rt.match(channel)
 	if !ok {
-		return centrifuge.ErrorUnknownChannel
+		return opts, centrifuge.ErrorUnknownChannel
 	}
-	if rule.authorize == nil {
-		return nil
+	if rule.authorize == nil && rule.presence == nil {
+		return opts, nil
 	}
 	if conn.sub.ID == "" {
-		return centrifuge.ErrorPermissionDenied
+		return opts, centrifuge.ErrorPermissionDenied
 	}
 	ctx, cancel := context.WithTimeout(ctx, credentialTimeout)
 	defer cancel()
-	allowed, err := rule.authorize(ctx, conn.sub, params)
+	var (
+		info    any
+		allowed bool
+		err     error
+	)
+	if rule.presence != nil {
+		info, allowed, err = rule.presence(ctx, conn.sub, params)
+	} else {
+		allowed, err = rule.authorize(ctx, conn.sub, params)
+	}
 	switch {
 	case err != nil && httpx.StatusOf(err) >= http.StatusInternalServerError:
 		if ctx.Err() == nil || context.Cause(ctx) == context.DeadlineExceeded {
 			rt.logger.ErrorContext(ctx, "channel authorization failed", "channel", channel, "error", err)
 		}
-		return centrifuge.ErrorInternal
+		return opts, centrifuge.ErrorInternal
 	case err != nil || !allowed:
-		return centrifuge.ErrorPermissionDenied
+		return opts, centrifuge.ErrorPermissionDenied
 	}
-	return nil
+	if rule.presence != nil {
+		opts.EmitPresence, opts.EmitJoinLeave, opts.PushJoinLeave = true, true, true
+		if info != nil {
+			if opts.ChannelInfo, err = json.Marshal(info); err != nil {
+				rt.logger.ErrorContext(ctx, "encode presence info", "channel", channel, "error", err)
+				return opts, centrifuge.ErrorInternal
+			}
+		}
+	}
+	return opts, nil
 }
 
 // watch 在连接期间定期复查凭据，收到 Options.Credentials 的信号时立即复查；凭据失效后断开连接，客户端不再重连。

@@ -31,7 +31,10 @@ type frame struct {
 	Connect   json.RawMessage `json:"connect"`
 	Subscribe json.RawMessage `json:"subscribe"`
 	Publish   json.RawMessage `json:"publish"`
-	Push      *push           `json:"push"`
+	Presence  *struct {
+		Presence map[string]memberInfo `json:"presence"`
+	} `json:"presence"`
+	Push *push `json:"push"`
 }
 
 type protoError struct {
@@ -39,9 +42,22 @@ type protoError struct {
 	Message string `json:"message"`
 }
 
+// memberInfo 是 presence 结果和 join/leave 事件中的一个连接。
+type memberInfo struct {
+	User     string          `json:"user"`
+	Client   string          `json:"client"`
+	ChanInfo json.RawMessage `json:"chan_info"`
+}
+
+type membership struct {
+	Info memberInfo `json:"info"`
+}
+
 type push struct {
 	Channel     string          `json:"channel"`
 	Unsubscribe json.RawMessage `json:"unsubscribe"`
+	Join        *membership     `json:"join"`
+	Leave       *membership     `json:"leave"`
 	Pub         *struct {
 		Data json.RawMessage `json:"data"`
 		Info *struct {
@@ -168,6 +184,48 @@ func (c *client) unsubscribed() string {
 			c.t.Fatalf("waiting for unsubscribe: %v", err)
 		}
 	}
+}
+
+// membership 等待下一个 join 或 leave 事件，返回事件类型和成员。
+func (c *client) membership() (kind string, info memberInfo) {
+	c.t.Helper()
+	deadline := time.Now().Add(wait)
+	for {
+		for i, f := range c.pending {
+			if f.Push == nil || (f.Push.Join == nil && f.Push.Leave == nil) {
+				continue
+			}
+			c.pending = append(c.pending[:i], c.pending[i+1:]...)
+			if f.Push.Join != nil {
+				return "join", f.Push.Join.Info
+			}
+			return "leave", f.Push.Leave.Info
+		}
+		if err := c.read(time.Until(deadline)); err != nil {
+			c.t.Fatalf("waiting for join or leave: %v", err)
+		}
+	}
+}
+
+// presence 读取频道的在线成员，返回每个主体的连接数。
+func (c *client) presence(channel string) (map[string]int, *protoError) {
+	c.t.Helper()
+	reply := c.call(map[string]any{"presence": map[string]any{"channel": channel}})
+	if reply.Error != nil {
+		return nil, reply.Error
+	}
+	users := map[string]int{}
+	if reply.Presence != nil {
+		for _, m := range reply.Presence.Presence {
+			users[m.User]++
+		}
+	}
+	return users, nil
+}
+
+// close 主动断开连接。
+func (c *client) close() {
+	_ = c.conn.Close(websocket.StatusNormalClosure, "")
 }
 
 // noPush 确认 d 之内没有推送。

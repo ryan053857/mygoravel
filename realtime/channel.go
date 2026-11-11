@@ -18,9 +18,10 @@ type Params map[string]string
 // 返回 false 或 4xx 类错误表示拒绝；返回 5xx 类错误表示暂时无法判断，客户端稍后会重新订阅。
 type Authorizer func(ctx context.Context, sub identity.Subject, p Params) (bool, error)
 
-// Rule 是一类频道的订阅规则，由 Public 或 Private 创建。
+// Rule 是一类频道的订阅规则，由 Public、Private 或 Presence 创建。
 type Rule struct {
-	authorize Authorizer // nil 表示公开
+	authorize Authorizer         // Private
+	presence  PresenceAuthorizer // Presence；两者都为 nil 表示公开
 	publish   bool
 }
 

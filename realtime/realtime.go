@@ -42,6 +42,9 @@ type Options struct {
 	// TrustedOrigins 是允许跨站建立连接的来源，例如 https://app.example.com。
 	// 浏览器发起的连接默认只接受同源请求，没有 Origin 请求头的客户端（移动端、服务器）不受限制。
 	TrustedOrigins []string
+	// Presence 保存 presence 频道的在线成员，所有实例共用同一个存储：NewDatabasePresence 或 redispresence.New。
+	// nil 时保存在进程内存中，只适合单实例部署。
+	Presence PresenceStore
 	// MeterProvider 非 nil 时记录 realtime.connections 和 realtime.subscriptions 两个指标。
 	MeterProvider metric.MeterProvider
 	// Logger 记录连接和授权中的错误；nil 表示 slog.Default()。
@@ -50,14 +53,15 @@ type Options struct {
 
 // Realtime 是嵌入的 Centrifuge 节点。每个进程创建一个，可以并发使用。
 type Realtime struct {
-	opts    Options
-	hub     *broadcast.Hub
-	node    *centrifuge.Node
-	logger  *slog.Logger
-	origins map[string]struct{}
-	recheck time.Duration // 凭据复查的间隔，创建时取自 credentialInterval
-	stop    func()
-	metrics metric.Registration
+	opts     Options
+	hub      *broadcast.Hub
+	node     *centrifuge.Node
+	logger   *slog.Logger
+	origins  map[string]struct{}
+	presence PresenceStore
+	recheck  time.Duration // 凭据复查的间隔，创建时取自 credentialInterval
+	stop     func()
+	metrics  metric.Registration
 
 	mu    sync.RWMutex
 	rules []channelRule
@@ -75,6 +79,9 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 		logger:  logging.Or(opts.Logger).With(logging.AttrComponent, "realtime"),
 		origins: map[string]struct{}{},
 		recheck: credentialInterval,
+	}
+	if rt.presence = opts.Presence; rt.presence == nil {
+		rt.presence = newMemoryPresence()
 	}
 	for _, origin := range opts.TrustedOrigins {
 		u, err := url.Parse(origin)
@@ -96,6 +103,7 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 	b := newBridge(hub, node)
 	node.SetBroker(b)
 	node.SetController(b)
+	node.SetPresenceManager(presenceManager{store: rt.presence})
 	node.OnConnecting(rt.connecting)
 	node.OnConnect(rt.connected)
 	if err := node.Run(); err != nil {
