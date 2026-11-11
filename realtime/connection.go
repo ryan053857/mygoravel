@@ -135,7 +135,7 @@ func (rt *Realtime) watch(client *centrifuge.Client, conn *connection) {
 	if rt.opts.Credentials != nil {
 		changed = rt.opts.Credentials.Watch(ctx, conn.sub)
 	}
-	t := time.NewTicker(credentialInterval)
+	t := time.NewTicker(rt.recheck)
 	defer t.Stop()
 	for {
 		select {

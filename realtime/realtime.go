@@ -55,6 +55,7 @@ type Realtime struct {
 	node    *centrifuge.Node
 	logger  *slog.Logger
 	origins map[string]struct{}
+	recheck time.Duration // 凭据复查的间隔，创建时取自 credentialInterval
 	stop    func()
 	metrics metric.Registration
 
@@ -73,6 +74,7 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 		hub:     hub,
 		logger:  logging.Or(opts.Logger).With(logging.AttrComponent, "realtime"),
 		origins: map[string]struct{}{},
+		recheck: credentialInterval,
 	}
 	for _, origin := range opts.TrustedOrigins {
 		u, err := url.Parse(origin)

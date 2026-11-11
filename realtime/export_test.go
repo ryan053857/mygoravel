@@ -2,7 +2,7 @@ package realtime
 
 import "time"
 
-// SetCredentialInterval 临时修改凭据复查的间隔，返回恢复函数。
+// SetCredentialInterval 临时修改之后创建的 Realtime 复查凭据的间隔，返回恢复函数。
 func SetCredentialInterval(d time.Duration) (restore func()) {
 	old := credentialInterval
 	credentialInterval = d
