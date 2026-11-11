@@ -8,16 +8,16 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// DBStore 是基于 Bun 的锁存储。查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供三种数据库的表结构。
+// Database 是基于 Bun 的锁存储。查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供三种数据库的表结构。
 // 过期时间按应用服务器时钟计算，各实例的时钟需要同步。
 //
-// DBStore 不在后台清理过期的锁：过期的锁会被下一次 Acquire 直接取得，残留行由应用定时调用 Cleanup 删除。
+// Database 不在后台清理过期的锁：过期的锁会被下一次 Acquire 直接取得，残留行由应用定时调用 Cleanup 删除。
 // 锁名最长 MaxNameLength 字节，所有数据库一致。
-type DBStore struct {
+type Database struct {
 	db bun.IDB
 }
 
-// MaxNameLength 是 DBStore 中锁名的最大字节数，与 locks 表 name 列的长度一致。
+// MaxNameLength 是 Database 中锁名的最大字节数，与 locks 表 name 列的长度一致。
 const MaxNameLength = 255
 
 type row struct {
@@ -28,16 +28,16 @@ type row struct {
 	ExpiresAt time.Time `bun:"expires_at,notnull"`
 }
 
-// NewDBStore 创建数据库锁存储。db 必须已执行 locks 迁移。
-func NewDBStore(db bun.IDB) *DBStore {
+// NewDatabase 创建数据库锁存储。db 必须已执行 locks 迁移。
+func NewDatabase(db bun.IDB) *Database {
 	if db == nil {
 		panic("lock: nil database")
 	}
-	return &DBStore{db: db}
+	return &Database{db: db}
 }
 
 // Acquire 实现 Store：先插入，name 已存在时只接管已过期的锁。两步各自原子，并发时最多一方成功。
-func (s *DBStore) Acquire(ctx context.Context, name, owner string, ttl time.Duration) (bool, error) {
+func (s *Database) Acquire(ctx context.Context, name, owner string, ttl time.Duration) (bool, error) {
 	if len(name) > MaxNameLength {
 		return false, errors.Newf("lock: name longer than %d bytes", MaxNameLength)
 	}
@@ -60,7 +60,7 @@ func (s *DBStore) Acquire(ctx context.Context, name, owner string, ttl time.Dura
 }
 
 // Refresh 实现 Store。
-func (s *DBStore) Refresh(ctx context.Context, name, owner string, ttl time.Duration) (bool, error) {
+func (s *Database) Refresh(ctx context.Context, name, owner string, ttl time.Duration) (bool, error) {
 	res, err := s.db.NewUpdate().Model((*row)(nil)).
 		Set("expires_at = ?", time.Now().UTC().Add(ttl)).
 		Where("name = ?", name).Where("owner = ?", owner).Exec(ctx)
@@ -71,7 +71,7 @@ func (s *DBStore) Refresh(ctx context.Context, name, owner string, ttl time.Dura
 }
 
 // Release 实现 Store。
-func (s *DBStore) Release(ctx context.Context, name, owner string) (bool, error) {
+func (s *Database) Release(ctx context.Context, name, owner string) (bool, error) {
 	res, err := s.db.NewDelete().Model((*row)(nil)).
 		Where("name = ?", name).Where("owner = ?", owner).Exec(ctx)
 	if err != nil {
@@ -81,13 +81,13 @@ func (s *DBStore) Release(ctx context.Context, name, owner string) (bool, error)
 }
 
 // Held 实现 Store。
-func (s *DBStore) Held(ctx context.Context, name string) (bool, error) {
+func (s *Database) Held(ctx context.Context, name string) (bool, error) {
 	return s.db.NewSelect().Model((*row)(nil)).
 		Where("name = ?", name).Where("expires_at > ?", time.Now().UTC()).Exists(ctx)
 }
 
 // Cleanup 删除最多 limit 条已过期的锁，返回删除的条数。由应用定时调用。
-func (s *DBStore) Cleanup(ctx context.Context, limit int) (int, error) {
+func (s *Database) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("lock: cleanup limit must be positive")
 	}

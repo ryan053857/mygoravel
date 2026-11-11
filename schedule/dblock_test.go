@@ -17,7 +17,7 @@ import (
 
 func openLockDB(t *testing.T, driver database.Driver) *lock.Locker {
 	t.Helper()
-	return lock.New(lock.NewDBStore(dbtesting.Open(t, driver, lock.Migrations())))
+	return lock.New(lock.NewDatabase(dbtesting.Open(t, driver, lock.Migrations())))
 }
 
 // 最长的任务名在最大的触发时刻生成的锁名，也不超过数据库锁存储的上限。
@@ -44,7 +44,7 @@ func TestDatabaseLockRunsOncePerTick(t *testing.T) {
 		var n atomic.Int64
 		scheds := make([]*schedule.Scheduler, 3)
 		for i := range scheds {
-			scheds[i] = schedule.New(lock.New(lock.NewDBStore(db)), schedule.DefaultConfig(), nil)
+			scheds[i] = schedule.New(lock.New(lock.NewDatabase(db)), schedule.DefaultConfig(), nil)
 			scheds[i].Add("cleanup", "@everysecond", counter(&n))
 		}
 		for tick := range 3 {

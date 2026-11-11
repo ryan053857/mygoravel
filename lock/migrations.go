@@ -8,7 +8,7 @@ import (
 //go:embed migrations
 var migrationFiles embed.FS
 
-// Migrations 返回DBStore 使用的 locks 表的迁移，供应用发布。
+// Migrations 返回 Database 使用的 locks 表的迁移，供应用发布。
 // 根目录下按数据库类型分为 postgres 和 sqlite 两个目录，由 migrate.Publish 按应用的数据库选择。
 func Migrations() fs.FS {
 	f, err := fs.Sub(migrationFiles, "migrations")

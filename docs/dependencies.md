@@ -96,7 +96,7 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
     return &App{
         cfg:    cfg,
         db:     db,
-        locker: lock.New(lock.NewDBStore(db)),
+        locker: lock.New(lock.NewDatabase(db)),
     }, nil
 }
 

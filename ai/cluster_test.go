@@ -67,7 +67,7 @@ func TestClusterOnDatabase(t *testing.T) {
 			aitest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []aitest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
 			aitest.Text("都 查好了"),
 		)
-		a, b := twoInstancesOn(t, m, []tool.Tool{getOrder(1500 * time.Millisecond)}, broadcast.NewDatabase(bdb, nil), lock.NewDBStore(ldb))
+		a, b := twoInstancesOn(t, m, []tool.Tool{getOrder(1500 * time.Millisecond)}, broadcast.NewDatabase(bdb, nil), lock.NewDatabase(ldb))
 		mirrorScenario(t, m, a, b)
 	})
 }

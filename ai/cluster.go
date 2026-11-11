@@ -34,7 +34,7 @@ var (
 //
 // 对话正在运行时，运行所在的实例持有 locker 中这个对话的锁，其他实例据此判断对话是否忙；
 // 运行的事件经由 hub 广播，其他实例的 Runs.Get 返回它的镜像。hub 和 locker 由应用创建和关闭，
-// 所有实例必须使用相同的后端，例如 broadcast.NewDatabase 和 lock.NewDBStore。
+// 所有实例必须使用相同的后端，例如 broadcast.NewDatabase 和 lock.NewDatabase。
 func Cluster(hub *broadcast.Hub, locker *lock.Locker) Option {
 	return func(rs *Runs) {
 		rs.cluster = &cluster{hub: hub, locker: locker, rs: rs, ping: pingInterval, idle: idleTimeout}

@@ -12,9 +12,9 @@ import (
 	"github.com/ryan053857/mygoravel/lock/locktest"
 )
 
-var _ lock.Store = (*lock.DBStore)(nil)
+var _ lock.Store = (*lock.Database)(nil)
 
-func TestDBStore(t *testing.T) {
+func TestDatabase(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := dbtesting.Open(t, driver, lock.Migrations())
 		ctx := context.Background()
@@ -22,16 +22,16 @@ func TestDBStore(t *testing.T) {
 			if _, err := db.NewTruncateTable().Table("locks").Exec(ctx); err != nil {
 				t.Fatal(err)
 			}
-			return lock.NewDBStore(db)
+			return lock.NewDatabase(db)
 		})
 	})
 }
 
-func TestDBStoreCleanup(t *testing.T) {
+func TestDatabaseCleanup(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		db := dbtesting.Open(t, driver, lock.Migrations())
-		store := lock.NewDBStore(db)
+		store := lock.NewDatabase(db)
 		for _, name := range []string{"x1", "x2", "x3"} {
 			if ok, err := store.Acquire(ctx, name, "o", time.Millisecond); !ok || err != nil {
 				t.Fatalf("acquire %s ok=%v err=%v", name, ok, err)
@@ -56,9 +56,9 @@ func TestDBStoreCleanup(t *testing.T) {
 	})
 }
 
-func TestDBStoreRejectsLongNames(t *testing.T) {
+func TestDatabaseRejectsLongNames(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		store := lock.NewDBStore(dbtesting.Open(t, driver, lock.Migrations()))
+		store := lock.NewDatabase(dbtesting.Open(t, driver, lock.Migrations()))
 		ctx := context.Background()
 		if ok, err := store.Acquire(ctx, strings.Repeat("n", lock.MaxNameLength), "o", time.Minute); !ok || err != nil {
 			t.Fatalf("max length ok=%v err=%v", ok, err)

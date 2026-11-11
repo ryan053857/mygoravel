@@ -30,7 +30,7 @@
 ```go
 import "github.com/ryan053857/mygoravel/lock"
 
-locker := lock.New(lock.NewDBStore(db))
+locker := lock.New(lock.NewDatabase(db))
 publishScheduled := article.NewPublishScheduled(db, locker)
 ```
 
@@ -116,10 +116,10 @@ if err := lk.Refresh(ctx, time.Minute); err != nil {
 <a id="database-store"></a>
 ## 使用数据库存储
 
-`lock.NewDBStore` 把锁保存在应用的数据库中，接收应用的 `*bun.DB`，支持 PostgreSQL、SQLite 和 MySQL：
+`lock.NewDatabase` 把锁保存在应用的数据库中，接收应用的 `*bun.DB`，支持 PostgreSQL、SQLite 和 MySQL：
 
 ```go
-locker := lock.New(lock.NewDBStore(db))
+locker := lock.New(lock.NewDatabase(db))
 ```
 
 使用前先发布 `locks` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：

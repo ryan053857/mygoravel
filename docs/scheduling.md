@@ -92,7 +92,7 @@ func (a *App) tasks(opts ...schedule.SchedulerOption) *schedule.Scheduler {
         schedule.Describe("发布到了预定时间的文章"))
     sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000),
         schedule.Describe("删除过期的会话"))
-    sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDBStore(a.db).Cleanup, 1000),
+    sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDatabase(a.db).Cleanup, 1000),
         schedule.Describe("删除过期的锁"))
     sched.Add("queue:prune-failed", "@daily", func(ctx context.Context) error {
         _, err := queue.NewFailedJobs(a.db).Cleanup(ctx, time.Now().AddDate(0, 0, -30), 1000)
@@ -125,7 +125,7 @@ root.AddCommand(command.Run("schedule", "执行定时任务", bootstrap.Schedule
 
 部署多个实例时，每个实例上的调度器都会在同一时刻触发同一个任务。调度器在执行之前取得一把锁，锁名包含任务名和触发时刻，例如 `schedule:sessions:cleanup:1794366000`，只有取得锁的实例执行这一次触发。锁不会主动释放，一分钟后过期，所以各实例的时钟偏差小于一分钟时就不会重复执行。
 
-所有进程共用 `lock.NewDBStore(db)` 或 [Redis 存储](locks.md#redis-store)，去重就覆盖全部实例。单机部署也一样：[不停机升级](deployment.md#upgrade-overlap)时新旧两个调度器会同时运行。
+所有进程共用 `lock.NewDatabase(db)` 或 [Redis 存储](locks.md#redis-store)，去重就覆盖全部实例。单机部署也一样：[不停机升级](deployment.md#upgrade-overlap)时新旧两个调度器会同时运行。
 
 使用数据库存储时，每次触发都会在 `locks` 表中留下一行，由上面的 `locks:cleanup` 定期删除。秒级任务每秒都会写一次 `locks` 表，这类任务较多时建议改用 Redis 存储，过期的键由 Redis 自动删除。
 
@@ -334,7 +334,7 @@ queue.Handle(router, sub, "articles.publish-scheduled", func(ctx context.Context
 | 数据 | 清理方法 | 建议频率 |
 | --- | --- | --- |
 | [会话](session.md#cleanup) | `session.NewStore(db).Cleanup` | 每 10 分钟 |
-| [锁](locks.md#cleanup) | `lock.NewDBStore(db).Cleanup` | 每小时 |
+| [锁](locks.md#cleanup) | `lock.NewDatabase(db).Cleanup` | 每小时 |
 | [广播](broadcasting.md#database-backend) | `broadcast.NewDatabase(db, nil).Cleanup` | 每 10 分钟 |
 | [实时频道](realtime.md#presence-stores) | `realtime.NewDatabasePresence(db).Cleanup` | 每 10 分钟 |
 | [限流](rate-limiting.md#cleanup) | 任意一个 `ratelimit.NewDatabase(...)` 的 `Cleanup` | 每小时 |

@@ -33,4 +33,4 @@ func TestWaitHonorsContext(t *testing.T) {
 	}
 }
 
-// testStore 是所有 Store 实现共同遵守的契约，集成测试用它验证 DBStore。
+// testStore 是所有 Store 实现共同遵守的契约，集成测试用它验证 Database。
