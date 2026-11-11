@@ -177,7 +177,8 @@ mygoravel 的每个包都可以单独使用，按需引入即可：
 | `webhook` | 向租户的端点推送事件，按 Standard Webhooks 签名与校验 | [Webhook](webhooks.md) |
 | `ai` | 对话式 agent：后台运行、插话、工具审批、事件推送 | [AI 助手](ai.md) |
 | `ai/postgres`、`ai/sqlite`、`ai/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
-| `ai/openai`、`ai/openrouter` | 生成图片、合成与识别语音、计算向量和重排 | [媒体](ai.md#media) |
+| `ai/openai`、`ai/openrouter` | 生成图片、合成与识别语音、计算向量和重排；`ai/openai` 还能调用决策模型 | [媒体](ai.md#media)、[决策](ai.md#decisions) |
+| `ai/systemone` | 用 System One 格式调用决策模型 | [决策](ai.md#decisions) |
 | `ai/aitest` | 按脚本回复的模型，测试 agent 时不访问真实服务 | [测试](ai.md#testing) |
 | `command` | 根命令、`Run`、`Bind`、`config` 命令、退出码 | [命令行](commands.md) |
 | `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
