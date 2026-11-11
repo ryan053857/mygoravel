@@ -136,7 +136,7 @@ func TestPresenceChannel(t *testing.T) {
 }
 
 // 两个实例使用数据库的广播和在线成员存储：成员互相可见，重连到另一个实例时没有事件，
-// 在另一个实例上取消订阅时（宽限期之后）发出 leave。
+// 在另一个实例上取消订阅时立即发出 leave，而且只发一次。
 // 取消订阅的控制消息在 Hub 的投递中到达，离开事件又要发布到 Hub，这里确认两者不会互相等待。
 func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
@@ -186,6 +186,8 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 		if kind, m := alice.membership(); kind != "leave" || m.User != "bob" {
 			t.Fatalf("leave from the other instance = %s %+v", kind, m)
 		}
+		// 连接所在的实例宽限期满时不再重复发出 leave。
+		alice.noMembership(700 * time.Millisecond)
 		if members, err := b.rt.Members(context.Background(), "editing:7"); err != nil || len(members) != 1 || members[0].ID != "alice" {
 			t.Fatalf("members after unsubscribe = %+v, %v", members, err)
 		}
@@ -294,4 +296,54 @@ func TestShutdownDoesNotAnnounceLeaves(t *testing.T) {
 	alice = mustConnect(t, other.url, "alice", nil)
 	alice.mustSubscribe("editing:7")
 	bob.noMembership(300 * time.Millisecond)
+}
+
+// Unsubscribe 把主体移出频道：离开事件立即发出，不等宽限期，之后也不重复。
+func TestUnsubscribeAnnouncesLeaveImmediately(t *testing.T) {
+	const grace = 1500 * time.Millisecond
+	store := &tokens{}
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, PresenceGrace: grace}, nil)
+	n.rt.Channel("editing:{article}", realtime.Presence(editors))
+	bob := mustConnect(t, n.url, "bob", nil)
+	bob.mustSubscribe("editing:7")
+	bob.membership() // 自己的 join
+	// alice 有两个连接，都被移出。
+	alice, tab := mustConnect(t, n.url, "alice", nil), mustConnect(t, n.url, "alice", nil)
+	alice.mustSubscribe("editing:7")
+	tab.mustSubscribe("editing:7")
+	if kind, m := bob.membership(); kind != "join" || m.User != "alice" {
+		t.Fatalf("join = %s %+v", kind, m)
+	}
+
+	removed := time.Now()
+	if err := n.rt.Unsubscribe("alice", "editing:7"); err != nil {
+		t.Fatal(err)
+	}
+	if kind, m := bob.membership(); kind != "leave" || m.User != "alice" || string(m.ChanInfo) != `{"article":"7","name":"user alice"}` {
+		t.Fatalf("leave = %s %+v", kind, m)
+	}
+	if waited := time.Since(removed); waited > grace/2 {
+		t.Fatalf("leave arrived after %v, the grace period is %v", waited, grace)
+	}
+	if m, err := n.rt.Members(context.Background(), "editing:7"); err != nil || len(m) != 1 || m[0].ID != "bob" {
+		t.Fatalf("members right after unsubscribe = %+v, %v", m, err)
+	}
+	bob.noMembership(grace + 500*time.Millisecond) // 宽限期满时没有第二个 leave
+
+	// 没有在线记录的主体和频道：什么也不发生。
+	if err := n.rt.Unsubscribe("nobody", "editing:7"); err != nil {
+		t.Fatal(err)
+	}
+	bob.noMembership(100 * time.Millisecond)
+}
+
+func TestPresenceGraceIsCapped(t *testing.T) {
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
+	defer hub.Close()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a grace period longer than MaxPresenceGrace did not panic")
+		}
+	}()
+	_, _ = realtime.New(hub, realtime.Options{PresenceGrace: realtime.MaxPresenceGrace + time.Second})
 }

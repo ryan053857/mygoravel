@@ -46,7 +46,8 @@ type Options struct {
 	// nil 时保存在进程内存中，只适合单实例部署。
 	Presence PresenceStore
 	// PresenceGrace 是连接离开 presence 频道后保留在线记录的时间：期间主体重新加入时，
-	// 其他成员看不到离开和加入。零值为 DefaultPresenceGrace（10 秒），负数表示不保留。
+	// 其他成员看不到离开和加入。零值为 DefaultPresenceGrace（10 秒），负数表示不保留，
+	// 最长 MaxPresenceGrace（30 秒）。
 	PresenceGrace time.Duration
 	// MeterProvider 非 nil 时记录 realtime.connections 和 realtime.subscriptions 两个指标。
 	MeterProvider metric.MeterProvider
@@ -62,6 +63,7 @@ type Realtime struct {
 	logger   *slog.Logger
 	origins  map[string]struct{}
 	presence PresenceStore
+	members  *membership
 	recheck  time.Duration // 凭据复查的间隔，创建时取自 credentialInterval
 	stop     func()
 	metrics  metric.Registration
@@ -71,7 +73,7 @@ type Realtime struct {
 }
 
 // New 创建 Realtime 并开始把 hub 收到的消息转给客户端，直到 Shutdown。hub 由应用创建和关闭，
-// 所有实例必须使用相同的后端。hub 为 nil 或 TrustedOrigins 格式不正确时 panic。
+// 所有实例必须使用相同的后端。hub 为 nil、TrustedOrigins 格式不正确或 PresenceGrace 超过上限时 panic。
 func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 	if hub == nil {
 		panic("realtime: nil hub")
@@ -82,6 +84,9 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 		logger:  logging.Or(opts.Logger).With(logging.AttrComponent, "realtime"),
 		origins: map[string]struct{}{},
 		recheck: credentialInterval,
+	}
+	if opts.PresenceGrace > MaxPresenceGrace {
+		panic("realtime: PresenceGrace is longer than MaxPresenceGrace")
 	}
 	if rt.presence = opts.Presence; rt.presence == nil {
 		rt.presence = newMemoryPresence()
@@ -107,6 +112,7 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 	node.SetBroker(b)
 	node.SetController(b)
 	b.members = newMembership(opts.PresenceGrace, rt.presence, b.sendNow, rt.logger)
+	rt.members = b.members
 	node.SetPresenceManager(presenceManager{store: rt.presence, members: b.members})
 	node.OnConnecting(rt.connecting)
 	node.OnConnect(rt.connected)
@@ -157,12 +163,16 @@ func (rt *Realtime) match(channel string) (Rule, Params, bool) {
 }
 
 // Unsubscribe 取消主体 subjectID 在所有实例上对 channel 的订阅，用于主体失去访问权限之后，
-// 例如被移出会话。客户端收到通知后不会自动重新订阅。它不参与数据库事务，在业务数据提交之后调用。
+// 例如被移出会话。客户端收到通知后不会自动重新订阅。presence 频道中，其他成员立即收到离开事件，
+// 不经过 Options.PresenceGrace。它不参与数据库事务，在业务数据提交之后调用。
 func (rt *Realtime) Unsubscribe(subjectID, channel string) error {
 	if subjectID == "" {
 		return errors.New("realtime: empty subject id")
 	}
-	return errors.Wrap(rt.node.Unsubscribe(subjectID, channel), "realtime: unsubscribe")
+	if err := rt.node.Unsubscribe(subjectID, channel); err != nil {
+		return errors.Wrap(err, "realtime: unsubscribe")
+	}
+	return errors.Wrap(rt.members.expel(channel, subjectID), "realtime: remove presence")
 }
 
 // Handler 返回接受 WebSocket 连接的处理器，客户端 SDK 连接到它所在的地址。
