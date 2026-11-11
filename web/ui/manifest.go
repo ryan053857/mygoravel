@@ -23,12 +23,12 @@ var extraScripts = map[string]string{
 
 // stylesheets 是每套风格预编译的样式表。
 var stylesheets = map[string]string{
-	"luma": "style-luma-eb627224bdb9e25f.css",
-	"lyra": "style-lyra-657a496bc6bb1610.css",
-	"maia": "style-maia-1f1123d0f2b255f1.css",
-	"mira": "style-mira-871d7fbd5392289d.css",
-	"nova": "style-nova-6087e74c19ee6f1c.css",
-	"rhea": "style-rhea-dea159d782f9f5f3.css",
-	"sera": "style-sera-a47016f35ee1838f.css",
-	"vega": "style-vega-f3c0eaa945ef6883.css",
+	"luma": "style-luma-1f1a60c70985b68f.css",
+	"lyra": "style-lyra-bfd3cb184eddd20b.css",
+	"maia": "style-maia-d448f513ece3319f.css",
+	"mira": "style-mira-c94f424f9db84577.css",
+	"nova": "style-nova-38bcb666c3bfc484.css",
+	"rhea": "style-rhea-7f69e8b9a986b52b.css",
+	"sera": "style-sera-330141603c186404.css",
+	"vega": "style-vega-f202743428e8b5f9.css",
 }

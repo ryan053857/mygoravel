@@ -3230,6 +3230,7 @@ ${width}px
 -maxThumbOffsetX,
 -minAbsDelta
 -ml-1
+-ml-2.5
 -ml-4
 -mobile
 -mt-4
@@ -3380,6 +3381,7 @@ ${width}px
 ...SetProps)
 ...ShortcutProps)
 ...SlotProps)
+...SortHeadProps)
 ...StyleProps)
 ...SubContentProps)
 ...SubProps)
@@ -3790,6 +3792,7 @@ ${width}px
 /^i(os$|p)/.test(lowerPlatform)
 /^i(os$|p)/.test(platform)
 /admin/articles/1
+/admin/articles/new
 /auto|scroll/;
 /auto|scroll|overlay|hidden|clip/.test(overflow
 /hidden|clip/.test(win.getComputedStyle(getViewportScroller(html,
@@ -11292,6 +11295,7 @@ ${width}px
 @base-ui/utils/visuallyHidden.ts
 @button.Button(button.Props{
 @button.Button(button.Props{Attributes:
+@button.Button(button.Props{Href:
 @button.Button(button.Props{Type:
 @button.Button(button.Props{Variant:
 @c
@@ -11346,6 +11350,12 @@ ${width}px
 @dropdownmenu.Sub()
 @dropdownmenu.SubContent()
 @dropdownmenu.SubTrigger()
+@empty.Content()
+@empty.Description()
+@empty.Empty(empty.Props{Class:
+@empty.Header()
+@empty.Media(empty.MediaProps{Variant:
+@empty.Title()
 @example.Example(example.Props{Title:
 @example.Wrapper()
 @field.Content()
@@ -11372,6 +11382,8 @@ ${width}px
 @formExample()
 @formExampleMenu()
 @icon.ArrowDown()
+@icon.ArrowDown(icon.Props{Attributes:
+@icon.ArrowUp(icon.Props{Attributes:
 @icon.Bell()
 @icon.Bluetooth()
 @icon.Check()
@@ -11458,6 +11470,7 @@ ${width}px
 @p.Actions
 @p.Footer
 @p.Head
+@p.Icon()
 @p.Logo(icon.Props{Class:
 @pagination.Content()
 @pagination.Ellipsis()
@@ -11509,6 +11522,7 @@ ${width}px
 @skeleton.Skeleton(skeleton.Props{
 @supports
 @switchcomp.Switch(switchcomp.Props{ID:
+@table.Head(table.HeadProps{Class:
 @templ.Raw(
 @templ.Raw(ModelScript(m))
 @templ.Raw(childrenHTML)
@@ -11528,9 +11542,11 @@ ${width}px
 @tooltip.Content(tooltip.ContentProps{Side:
 @tooltip.Tooltip()
 @ui.AppShell(ui.AppShellProps{Brand:
+@ui.Empty(ui.EmptyProps{Icon:
 @ui.FileField(f,
 @ui.Page(ui.PageProps{Title:
 @ui.Pagination(list,
+@ui.SortHead(q.Sort,
 @ui.TextField(f,
 @ui.Toaster()
 @userAvatar(u)
@@ -12909,8 +12925,10 @@ Email
 Embla
 Embla-pendant
 Empty
+Empty(p
 Empty(props
 EmptyProps
+EmptyProps)
 End
 End,
 End:
@@ -15794,6 +15812,8 @@ SolarPanel
 Solve
 Sometimes
 Sort
+SortHead
+SortHead(current,
 Sorts
 Soup
 Space
@@ -17957,6 +17977,7 @@ aria-selected,
 aria-selected:text-muted-foreground
 aria-selected=
 aria-selected={
+aria-sort。
 aria-valuemax
 aria-valuemax={
 aria-valuemin
@@ -18084,6 +18105,7 @@ asValues(p.DefaultValue)
 asValues(p.Value)
 asValues(v
 ascend
+ascending
 aspect
 aspect-(--ratio)
 aspect-ratio
@@ -21529,6 +21551,7 @@ data-[side=right]:top-1/2!
 data-[side=top]:-bottom-2.5
 data-[side=top]:data-ending-style:translate-y-[-2.5rem]
 data-[side=top]:data-starting-style:translate-y-[-2.5rem]
+data-[sorted]:text-foreground
 data-[state=error]:border-destructive/30
 data-[state=idle]:border-dashed
 data-[swipe-axis=x]:[--drawer-content-width:75%]
@@ -23249,6 +23272,7 @@ empty-header
 empty-icon
 empty-title
 empty.
+empty.MediaVariantIcon})
 empty.hidden
 empty:hidden
 emptyLines
@@ -23839,6 +23863,7 @@ firstRect.right
 firstRect.right;
 firstRect.top,
 firstRect.top;
+firstSortProps(props)
 firstThursday
 firstVisibleIndex
 firstWeekContainsDate
@@ -24313,6 +24338,7 @@ func(any)
 func(i,
 func(index
 func(props
+func(sort
 func(v
 func(value
 function
@@ -24907,6 +24933,7 @@ github.com/axadrn/shadcn-templ/v2/components/collapsible
 github.com/axadrn/shadcn-templ/v2/components/combobox
 github.com/axadrn/shadcn-templ/v2/components/dialog
 github.com/axadrn/shadcn-templ/v2/components/dropdownmenu
+github.com/axadrn/shadcn-templ/v2/components/empty
 github.com/axadrn/shadcn-templ/v2/components/example
 github.com/axadrn/shadcn-templ/v2/components/field
 github.com/axadrn/shadcn-templ/v2/components/icon
@@ -24921,6 +24948,7 @@ github.com/axadrn/shadcn-templ/v2/components/sheet
 github.com/axadrn/shadcn-templ/v2/components/sidebar
 github.com/axadrn/shadcn-templ/v2/components/skeleton
 github.com/axadrn/shadcn-templ/v2/components/switch
+github.com/axadrn/shadcn-templ/v2/components/table
 github.com/axadrn/shadcn-templ/v2/components/textarea
 github.com/axadrn/shadcn-templ/v2/components/toast
 github.com/axadrn/shadcn-templ/v2/components/toggle
@@ -25698,6 +25726,7 @@ hovering);
 hovering:
 how
 href
+href,
 href={
 html
 html,
@@ -25815,6 +25844,7 @@ icon-prop
 icon-sm
 icon-xs
 icon.
+icon.FileText,
 icon/offcanvas
 icon:
 iconCheck
@@ -27169,6 +27199,7 @@ kept.reverse();
 key
 key)
 key),
+key)})
 key,
 key-round
 key-square
@@ -28703,6 +28734,7 @@ merge
 merge(invalid(
 merge(merge(invalid(
 merge(requiredAttr(p.Required),
+merge(sortLinkAttrs(href,
 merge,
 merged
 merged...
@@ -30538,6 +30570,7 @@ p.Class
 p.Class)
 p.Class),
 p.Class,
+p.Class})
 p.CloseDelay
 p.CloseDelay})
 p.CloseOnClick
@@ -30568,6 +30601,7 @@ p.DefaultValue
 p.DefaultValues
 p.Delay
 p.Delay,
+p.DescFirst))
 p.Description
 p.Dir
 p.Direction
@@ -30592,6 +30626,7 @@ p.Form
 p.Form,
 p.Form})
 p.GroupResizeBehavior
+p.HTMX),
 p.Head
 p.Heading
 p.Href
@@ -30600,6 +30635,7 @@ p.ID
 p.ID)
 p.ID,
 p.ID})
+p.Icon
 p.Indeterminate
 p.Index
 p.InnerRadius,
@@ -32088,6 +32124,7 @@ p})
 p（page.Offset）的分页导航，只有一页时不显示。
 q
 q.PageURL,
+q.SortURL,
 qr-code
 query
 query)
@@ -34866,7 +34903,10 @@ sort.SliceStable(out,
 sort.Strings(keys)
 sortByElementOffset(orientation,
 sortByElementOffset(state.orientation,
+sortDirection(current,
+sortHeadAttrs(current,
 sorted
+sortedAttr(dir))})
 sortedRects
 sortedRects.length;
 sortedRects[i];
@@ -37519,6 +37559,7 @@ ui.Class(ctx)
 ui.FieldProps{Type:
 ui.FileFieldProps{Upload:
 ui.PaginationProps{URL:
+ui.SortHeadProps{HTMX:
 ui.confirm.action
 ui.confirm.cancel
 ui.file.failed
@@ -37698,6 +37739,7 @@ url(#
 url(#${id})
 url(#${state.uid}-
 url(#fillDesktop)
+url(nextSort(current,
 url,
 usable
 usable;
@@ -38371,6 +38413,7 @@ web-ui-user-menu
 web.Flashes
 web.Flashes(ctx)
 web.Options.ErrorPage。
+web.QueryURL
 web:flash（包括局部请求的错误）。放在布局的
 webcam
 webhook
@@ -39063,14 +39106,18 @@ zooming
 中使用，Modal、Confirm、Toaster
 中，props
 中：
+为升序，-key
+为降序），url
 仍然使用浏览器的确认框。
 以及
 传给
 侧边栏的
+写下第一篇文章吧。
 删除
 删除后无法恢复。
 删除这篇文章？
 加上序号。
+升序，再点击改为降序；当前排序的列显示方向箭头并带
 取出的提示，
 右侧是顶栏（收起按钮、页面标题、Actions）和
 后台
@@ -39079,6 +39126,7 @@ zooming
 导航按当前主体的权限过滤（NavItem.Permission），当前页面（web.CurrentPath）对应的项高亮。
 封面
 带当前主题的风格，<head>
+并回到第一页。
 并调用
 或点击遮罩时放弃。
 或页面的任何位置。
@@ -39086,6 +39134,7 @@ zooming
 放在
 放在它之后：
 文档：<html>
+新建文章
 时，hx-confirm
 是
 是一个复选框，标签在右侧，对应表单结构体中的布尔字段。
@@ -39094,13 +39143,17 @@ zooming
 是一组复选框，对应表单结构体中的字符串切片字段：选中的每一项提交一个同名的值。
 是上传文件的字段：用户选择文件后立即上传到
 是切换暗色模式的按钮，选择记在浏览器中。放在
+是列表没有数据时的提示：图标、标题、说明，children
 是原生的下拉选择。Placeholder
+是可以点击排序的表头：点击按
 是后台常用的外壳：左侧是可以收起成图标的侧边栏（名称、分组导航、当前用户），
 是多行文本的
 是字段
 是对话框的标题；元素上可选的
 是带标签、说明和错误提示的输入框，值和错误取自
 是开关，标签在左侧，对应表单结构体中的布尔字段。
+是当前的排序参数（key
+是操作，例如「新建文章」按钮。
 是放置服务端渲染的对话框的位置，放在布局的
 是登录、注册、找回密码等页面的居中卡片：上方是名称，卡片中是标题、说明和
 是确认按钮的文字，
@@ -39112,6 +39165,7 @@ zooming
 末尾的内容，例如应用自己的脚本。
 标题
 渲染的确认对话框的
+生成，
 生成，children
 用
 用当前主题渲染整页错误，可以直接作为
@@ -39125,6 +39179,8 @@ zooming
 确认。
 让确认按钮显示为危险操作。点击确认后才发出请求；取消、按
 请求带来的
+返回按某个排序参数排列的地址，通常由
+还没有文章
 邮箱
 配置
 需要完全控制文档结构时不用

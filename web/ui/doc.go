@@ -12,7 +12,7 @@
 //   - 请求进行中的按钮自动禁用并显示加载图标（衔接脚本，不需要组件）；
 //   - ErrorPage：web.Options.ErrorPage 的默认实现。
 //   - TextField、SelectField、CheckboxField 等表单字段：读取 web.Form 的输入和错误；
-//   - Pagination：page.Offset 的分页导航。
+//   - Pagination：page.Offset 的分页导航；SortHead：点击排序的表头；Empty：没有数据时的提示。
 //   - FileField：选择后立即上传的文件字段，配合 web/upload；
 //   - AppShell：后台的侧边栏外壳，导航按权限过滤、高亮当前页面；AuthCard：登录等页面的居中卡片；
 //     ThemeToggle：暗色模式开关。

@@ -350,7 +350,7 @@ func (h *Handlers) Preview(w http.ResponseWriter, r *http.Request) error {
 type ListQuery struct {
     Q      string `query:"q" json:"q,omitempty"`
     Status string `query:"status" json:"status,omitempty" enum:"draft,published"`
-    Sort   string `query:"sort" json:"sort,omitempty" default:"-created" enum:"-created,title,-title"`
+    Sort   string `query:"sort" json:"sort,omitempty" default:"-created" enum:"-created,created,title,-title"`
     page.OffsetParams
 }
 ```
@@ -389,13 +389,12 @@ func pageURL(q article.ListQuery, p int) string {
     return listURL(q)
 }
 
-// sortURL 按 key 排序，已经按它升序时改为降序，并回到第一页。
-func sortURL(q article.ListQuery, key string) string {
-    if q.Sort == key {
-        key = "-" + key
+// sortURL 返回按某个排序参数排列、回到第一页的地址，交给 ui.SortHead。
+func sortURL(q article.ListQuery) func(sort string) string {
+    return func(sort string) string {
+        q.Sort, q.Page = sort, 1
+        return listURL(q)
     }
-    q.Sort, q.Page = key, 1
-    return listURL(q)
 }
 ```
 
@@ -413,16 +412,27 @@ templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
 			</select>
 			<input type="hidden" name="sort" value={ q.Sort }/>
 		</form>
-		<table>
-			<tr><th><a href={ templ.SafeURL(sortURL(q, "title")) } hx-get={ sortURL(q, "title") }>标题</a></th></tr>
-			for _, item := range list.Items {
-				<tr><td>{ item.Title }</td></tr>
-			}
-		</table>
+		if len(list.Items) == 0 {
+			@ui.Empty(ui.EmptyProps{Icon: icon.FileText, Title: "没有符合条件的文章", Description: "换个关键词或状态试试。"})
+		} else {
+			<table>
+				<tr>
+					@ui.SortHead(q.Sort, "title", "标题", sortURL(q), ui.SortHeadProps{HTMX: true})
+					@ui.SortHead(q.Sort, "created", "创建时间", sortURL(q), ui.SortHeadProps{HTMX: true, DescFirst: true})
+				</tr>
+				for _, item := range list.Items {
+					<tr><td>{ item.Title }</td><td>{ item.CreatedAt.Format("2006-01-02") }</td></tr>
+				}
+			</table>
+		}
 		@ui.Pagination(list, ui.PaginationProps{URL: func(p int) string { return pageURL(q, p) }, HTMX: true})
 	</section>
 }
 ```
+
+`ui.SortHead` 是可以点击排序的表头：点击按这一列升序，再点击改为降序，当前排序的列显示方向箭头并带 `aria-sort`；`DescFirst` 让第一次点击按降序，适合时间、数量。它按 `q.Sort` 判断当前的方向（`title` 为升序，`-title` 为降序），用 `sortURL(q)` 生成下一次点击的地址。`ListQuery` 的 `enum` 要包含每一列的两个方向，例如 `title,-title,created,-created`。
+
+`ui.Empty` 是没有数据时的提示，children 可以放操作，例如「新建文章」按钮。
 
 `ui.Pagination` 显示上一页、下一页、首页、末页，以及当前页两侧各 1 页，中间省略；只有一页时不显示。`HTMX` 让链接同时带 `hx-get`，沿用区域上的 `hx-target`；链接也写了 `href`，不支持 htmx 的场景（例如在新标签页打开）也能正常访问。自己写分页导航时，`list.Links(1)` 返回要显示的页码，省略的部分用 `0` 表示，例如 `[1 0 9 10 11 0 20]`，`list.LastPage()` 是最后一页的页码。
 
