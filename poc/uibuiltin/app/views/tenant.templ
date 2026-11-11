@@ -1,0 +1,107 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/card"
+	"github.com/ryan053857/mygoravel/poc/uibuiltin/app/article"
+	"github.com/ryan053857/mygoravel/poc/uibuiltin/webui"
+	"github.com/ryan053857/mygoravel/web"
+)
+
+// 租户端：自己的 Tailwind 样式表（导入框架的风格入口，加上品牌令牌），自己写 <html>，
+// 不用 webui.Toaster，用 Alpine 写的提示条显示 web.Flash。
+
+templ tenantLayout(title string) {
+	<!DOCTYPE html>
+	<html lang="zh-CN" class={ webui.ThemeFrom(ctx).Class() }>
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title } · Acme</title>
+			@webui.Head()
+		</head>
+		<body class="min-h-svh bg-brand-50/40">
+			<div id="app-errors"></div>
+			{ children... }
+			@tenantToasts()
+		</body>
+	</html>
+}
+
+// tenantToasts 是租户端自己的提示：顶部居中的品牌色提示条。
+templ tenantToasts() {
+	<div
+		id="app-toasts"
+		class="pointer-events-none fixed inset-x-0 top-4 z-50 flex flex-col items-center gap-2"
+		x-data="{ items: [] }"
+		x-on:web:flash.window="$event.detail.messages.forEach(m => { items.push(m); setTimeout(() => items.shift(), 4000) })"
+	>
+		for _, m := range web.Flashes(ctx) {
+			<p class="app-toast rounded-full bg-brand-600 px-4 py-2 text-sm text-white shadow-lg">{ m.Title }</p>
+		}
+		<template x-for="m in items">
+			<p class="app-toast rounded-full bg-brand-600 px-4 py-2 text-sm text-white shadow-lg" x-text="m.title"></p>
+		</template>
+	</div>
+}
+
+// TenantErrorFragment 是租户端局部请求的错误：页面顶部的一条红色横幅。
+templ TenantErrorFragment(status int, message string) {
+	<p class="app-error bg-destructive px-4 py-2 text-center text-sm text-white">{ message }</p>
+}
+
+templ TenantLogin(f *web.Form[LoginForm]) {
+	@tenantLayout("登录") {
+		<main class="grid min-h-svh md:grid-cols-2">
+			<section class="hidden flex-col justify-end bg-brand-600 p-12 text-white md:flex">
+				<h1 class="font-display text-5xl leading-tight">Acme 内容中心</h1>
+				<p class="mt-4 max-w-sm text-brand-100">为你的团队写作、审阅和发布。</p>
+			</section>
+			<section class="flex items-center justify-center p-8">
+				<form id="login" method="post" class="flex w-full max-w-sm flex-col gap-5">
+					<h2 class="font-display text-3xl">欢迎回来</h2>
+					@webui.TextField(f, "email", "邮箱", webui.FieldProps{Type: "email"})
+					@webui.TextField(f, "password", "密码", webui.FieldProps{Type: "password"})
+					// Class 中的工具类覆盖风格：方角、品牌色。
+					@button.Button(button.Props{ID: "login-submit", Type: button.TypeSubmit, Size: button.SizeLg, Class: "rounded-none bg-brand-600 hover:bg-brand-700"}) {
+						登录
+					}
+				</form>
+			</section>
+		</main>
+	}
+}
+
+templ TenantHome(items []article.Article) {
+	@tenantLayout("首页") {
+		<header class="flex items-center justify-between px-8 py-5">
+			<span class="font-display text-2xl">Acme</span>
+			<form method="post" action="/app/logout">
+				@button.Button(button.Props{Variant: button.VariantGhost, Type: button.TypeSubmit}) {
+					退出
+				}
+			</form>
+		</header>
+		<main class="mx-auto grid max-w-5xl gap-6 px-8 pb-16 sm:grid-cols-2 lg:grid-cols-3">
+			for _, a := range items {
+				@card.Card(card.Props{Class: "transition hover:-translate-y-0.5 hover:shadow-lg"}) {
+					@card.Header() {
+						@card.Title() {
+							{ a.Title }
+						}
+						@card.Description() {
+							{ strconv.Itoa(a.Views) } 次阅读
+						}
+					}
+					@card.Footer() {
+						@button.Button(button.Props{Variant: button.VariantOutline, Size: button.SizeSm, Attributes: templ.Attributes{"hx-post": "/app/articles/" + strconv.Itoa(a.ID) + "/star", "hx-swap": "none", "data-star": strconv.Itoa(a.ID)}}) {
+							收藏
+						}
+					}
+				}
+			}
+		</main>
+	}
+}

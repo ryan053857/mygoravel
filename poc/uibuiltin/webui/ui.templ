@@ -1,0 +1,180 @@
+package webui
+
+import (
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/field"
+	"github.com/axadrn/shadcn-templ/v2/components/input"
+	"github.com/axadrn/shadcn-templ/v2/components/pagination"
+	"github.com/axadrn/shadcn-templ/v2/components/textarea"
+	"github.com/axadrn/shadcn-templ/v2/components/toast"
+	"github.com/ryan053857/mygoravel/web"
+)
+
+// PageProps 配置 Page。
+type PageProps struct {
+	Title string
+	// Lang 是 <html lang>，默认 zh-CN。
+	Lang string
+	// Head 是额外的 <head> 内容，例如应用自己的脚本。
+	Head      templ.Component
+	BodyClass string
+}
+
+// Page 是一个完整的 HTML 文档：<html> 带区域主题的风格 class，<head> 由 Head 生成，children 是 <body> 的内容。
+// 需要完全控制文档结构时，不用 Page，自己写 <html class={ webui.ThemeFrom(ctx).Class() }> 并调用 Head。
+templ Page(p PageProps) {
+	<!DOCTYPE html>
+	<html lang={ or(p.Lang, "zh-CN") } class={ ThemeFrom(ctx).Class() }>
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ p.Title }</title>
+			@Head()
+			if p.Head != nil {
+				@p.Head
+			}
+		</head>
+		<body class={ p.BodyClass }>
+			{ children... }
+		</body>
+	</html>
+}
+
+// Toaster 用 shadcn-templ 的 toast 显示提示：整页渲染时取出的 web.Flashes、htmx 请求带来的 web:flash，
+// 以及 ErrorFragment 渲染的错误。放在布局的 <body> 中；不用它的区域自己处理 web:flash。
+templ Toaster(props ...toast.ToasterProps) {
+	@toast.Toaster(props...)
+	<template data-webui-toaster></template>
+	<div id="webui-errors"></div>
+	for _, m := range web.Flashes(ctx) {
+		@toast.Toast(toast.Props{Title: m.Title, Description: m.Description, Type: toast.Type(m.Type)})
+	}
+}
+
+// ModalTarget 是 Modal 的选择器：打开对话框的按钮用 hx-target={ webui.ModalTarget } 把对话框加载进来。
+const ModalTarget = "#modal"
+
+// Modal 是放置服务端渲染的对话框的位置，放在布局的 <body> 中。
+templ Modal() {
+	<div id="modal"></div>
+}
+
+// ErrorFragment 把局部 htmx 请求的错误渲染为 toast，交给 web.Options.ErrorFragment，
+// ErrorTarget 设为 webui.ErrorTarget。
+func ErrorFragment(status int, message string) templ.Component {
+	return toast.Toast(toast.Props{Title: message, Type: toast.TypeError})
+}
+
+// ErrorPage 用区域主题渲染整页错误，交给 web.Options.ErrorPage。区域可以用自己的错误页替换它。
+templ ErrorPage(status int, message string) {
+	@Page(PageProps{Title: message}) {
+		<main class="flex min-h-svh flex-col items-center justify-center gap-2 p-6 text-center">
+			<p class="text-muted-foreground text-sm">{ strconv.Itoa(status) }</p>
+			<h1 class="text-2xl font-semibold">{ message }</h1>
+			<a class="text-primary text-sm underline-offset-4 hover:underline" href="/">返回首页</a>
+		</main>
+	}
+}
+
+// FieldProps 是表单字段的可选参数。
+type FieldProps struct {
+	// ID 默认等于字段名。
+	ID string
+	// Type 是 input 的类型，默认 text。password 类型不回填输入。
+	Type        string
+	Placeholder string
+	// Description 是字段说明，字段有错误时由错误提示代替。
+	Description string
+	// Rows 是 TextareaField 的行数。
+	Rows  int
+	Class string
+	// Attributes 加在 input 或 textarea 上，例如 autocomplete、hx-preserve。
+	Attributes templ.Attributes
+}
+
+// TextField 是一个带标签、说明和错误提示的输入框，值和错误取自 f（*web.Form[T]）。
+templ TextField(f FormState, name, label string, props ...FieldProps) {
+	{{ p := first(props) }}
+	{{ id := or(p.ID, name) }}
+	{{ msg := f.Error(name) }}
+	{{ value := f.Value(name) }}
+	if p.Type == "password" {
+		{{ value = "" }}
+	}
+	@field.Field(field.Props{Class: p.Class, Attributes: invalid("data-invalid", msg)}) {
+		@field.Label(field.LabelProps{For: id}) {
+			{ label }
+		}
+		@input.Input(input.Props{ID: id, Name: name, Type: or(p.Type, "text"), Placeholder: p.Placeholder, Value: value, Attributes: merge(invalid("aria-invalid", msg), p.Attributes)})
+		@fieldHint(p.Description, msg)
+	}
+}
+
+// TextareaField 是多行文本的 TextField。
+templ TextareaField(f FormState, name, label string, props ...FieldProps) {
+	{{ p := first(props) }}
+	{{ id := or(p.ID, name) }}
+	{{ msg := f.Error(name) }}
+	@field.Field(field.Props{Class: p.Class, Attributes: invalid("data-invalid", msg)}) {
+		@field.Label(field.LabelProps{For: id}) {
+			{ label }
+		}
+		@textarea.Textarea(textarea.Props{ID: id, Name: name, Placeholder: p.Placeholder, Rows: p.Rows, Value: f.Value(name), Attributes: merge(invalid("aria-invalid", msg), p.Attributes)})
+		@fieldHint(p.Description, msg)
+	}
+}
+
+templ fieldHint(description, msg string) {
+	if msg != "" {
+		@field.Error() {
+			{ msg }
+		}
+	} else if description != "" {
+		@field.Description() {
+			{ description }
+		}
+	}
+}
+
+// PaginationProps 配置 Pagination。
+type PaginationProps struct {
+	// URL 返回第 n 页的地址，通常由 web.QueryURL 生成。必填。
+	URL func(n int) string
+	// HTMX 为 true 时链接同时带 hx-get，只替换列表区域（区域上用 hx-target:inherited）。
+	HTMX bool
+	// OnEachSide 是当前页两侧显示的页数，默认 1。
+	OnEachSide     int
+	Previous, Next string
+}
+
+// Pagination 是 page.Offset 的分页导航，只有一页时不显示。current 是当前页码。
+templ Pagination(pg Pager, current int, p PaginationProps) {
+	if pg.LastPage() > 1 {
+		{{ side := p.OnEachSide }}
+		if side == 0 {
+			{{ side = 1 }}
+		}
+		@pagination.Pagination() {
+			@pagination.Content() {
+				@pagination.Item() {
+					@pagination.Previous(pagination.PreviousProps{Href: p.URL(max(current-1, 1)), Disabled: current <= 1, Text: or(p.Previous, "上一页"), Attributes: hxGet(p, max(current-1, 1))})
+				}
+				for _, n := range pg.Links(side) {
+					@pagination.Item() {
+						if n == 0 {
+							@pagination.Ellipsis()
+						} else {
+							@pagination.Link(pagination.LinkProps{Href: p.URL(n), IsActive: n == current, Attributes: hxGet(p, n)}) {
+								{ strconv.Itoa(n) }
+							}
+						}
+					}
+				}
+				@pagination.Item() {
+					@pagination.Next(pagination.NextProps{Href: p.URL(min(current+1, pg.LastPage())), Disabled: current >= pg.LastPage(), Text: or(p.Next, "下一页"), Attributes: hxGet(p, min(current+1, pg.LastPage()))})
+				}
+			}
+		}
+	}
+}

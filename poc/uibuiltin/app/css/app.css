@@ -1,0 +1,14 @@
+/* 租户端的 Tailwind 入口。导入框架的 maia 风格入口：组件、风格和默认主题与租户端自己的类名一起生成，
+   只有一份样式表。真实项目中框架在模块缓存里，这个路径由 dev 命令解析。 */
+@import "tailwindcss";
+@import "../../webui/css/style-maia.css";
+
+/* 租户端自己的设计令牌。 */
+@theme {
+  --color-brand-50: oklch(0.97 0.02 275);
+  --color-brand-100: oklch(0.93 0.04 275);
+  --color-brand-500: oklch(0.62 0.2 275);
+  --color-brand-600: oklch(0.55 0.22 275);
+  --color-brand-700: oklch(0.48 0.2 275);
+  --font-display: "Iowan Old Style", "Palatino Linotype", "Songti SC", serif;
+}

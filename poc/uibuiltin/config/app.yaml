@@ -1,0 +1,19 @@
+addr: 127.0.0.1:8080
+
+# 运营后台：nova 风格，框架预编译的样式表，默认中性色。
+ops:
+  theme:
+    style: nova
+
+# 租户端：maia 风格、品牌主色、大圆角，用自己的 Tailwind 样式表。
+tenant:
+  theme:
+    style: maia
+    radius: 1rem
+    stylesheet: css/app.css
+    vars:
+      primary: "oklch(0.55 0.22 275)"
+      primary-foreground: "oklch(0.98 0 0)"
+      ring: "oklch(0.62 0.2 275)"
+    dark_vars:
+      primary: "oklch(0.7 0.16 275)"
