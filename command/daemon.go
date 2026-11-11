@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/cloudflare/tableflip"
 	"github.com/cockroachdb/errors"
@@ -182,8 +183,24 @@ func (d *Daemon) upgrade(ctx context.Context) error {
 		return err
 	}
 	d.log().Info("upgrading")
-	return d.upg.Upgrade()
+	// WaitForParent 返回时 tableflip 内部可能还没有记下旧进程已经退出（它在另一个 goroutine 中、
+	// 稍后才处理这个信号），此时 Upgrade 会拒绝。旧进程确实已经退出，稍等再试即可。
+	deadline := time.Now().Add(parentExitGrace)
+	for {
+		err := d.upg.Upgrade()
+		if err == nil || !strings.Contains(err.Error(), "parent hasn't exited") || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
+
+// parentExitGrace 是 WaitForParent 返回后，等 tableflip 记下旧进程已经退出的最长时间。
+const parentExitGrace = 5 * time.Second
 
 // Stop 停止处理 SIGHUP，释放升级用到的资源。
 func (d *Daemon) Stop() {
