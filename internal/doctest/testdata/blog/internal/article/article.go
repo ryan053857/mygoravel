@@ -1,5 +1,5 @@
 // Package article 声明文档中只以片段给出的部分：模型、业务错误、共享函数，以及 Create、PublishScheduled。
-// publish.go、get.go、routes.go 和 dto.go 从文档中提取。
+// publish.go、get.go、routes.go、dto.go、import.go 和 export.go 从文档中提取。
 package article
 
 import (
@@ -38,9 +38,9 @@ var (
 )
 
 type Changes struct {
-	Title   string `json:"title" minLength:"1" maxLength:"200"`
-	Slug    string `json:"slug" maxLength:"100" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$"`
-	Content string `json:"content"`
+	Title   string `json:"title" sheet:"标题" minLength:"1" maxLength:"200"`
+	Slug    string `json:"slug" sheet:"Slug" maxLength:"100" pattern:"^[a-z0-9]+(-[a-z0-9]+)*$"`
+	Content string `json:"content" sheet:"正文,内容"`
 }
 
 func find(ctx context.Context, db bun.IDB, id uuid.UUID) (*Article, error) {

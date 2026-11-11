@@ -1,0 +1,56 @@
+package form_test
+
+import (
+	"context"
+	"reflect"
+	"testing"
+
+	"github.com/ryan053857/mygoravel/form"
+	"github.com/ryan053857/mygoravel/i18n"
+)
+
+type input struct {
+	Title  string   `json:"title" minLength:"1"`
+	Level  int8     `json:"level,omitempty"`
+	Active bool     `json:"active"`
+	Tags   []string `json:"tags,omitempty"`
+}
+
+func zh(t *testing.T) context.Context {
+	t.Helper()
+	b, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return i18n.WithLocale(context.Background(), b, "zh-CN")
+}
+
+func TestDecode(t *testing.T) {
+	data, errs := form.Decode[input](zh(t), map[string][]string{
+		"title": {"Hello"}, "level": {" 3 "}, "active": {"TRUE"}, "tags": {"a", "b"},
+	})
+	if errs != nil {
+		t.Fatalf("errors: %v", errs)
+	}
+	if want := (input{Title: "Hello", Level: 3, Active: true, Tags: []string{"a", "b"}}); !reflect.DeepEqual(data, want) {
+		t.Fatalf("data: %+v", data)
+	}
+}
+
+func TestDecodeErrors(t *testing.T) {
+	data, errs := form.Decode[input](zh(t), map[string][]string{"title": {""}, "level": {"300"}, "active": {"yes"}})
+	want := map[string]string{"title": "不能为空", "level": "不能大于 127", "active": "必须是 true、false、1 或 0"}
+	if !reflect.DeepEqual(errs, want) {
+		t.Fatalf("errors: %v", errs)
+	}
+	if data.Level != 0 || data.Active {
+		t.Fatalf("data: %+v", data)
+	}
+}
+
+func TestSchemaRequired(t *testing.T) {
+	s := form.Schema(reflect.TypeFor[input]())
+	if !reflect.DeepEqual(s.Required, []string{"title", "active"}) {
+		t.Fatalf("required: %v", s.Required)
+	}
+}

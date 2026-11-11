@@ -12,6 +12,11 @@ authz.role_not_found: 角色不存在
 authz.role_exists: 已有同名角色
 authz.invalid: 输入不合法
 notification.not_found: 通知不存在
+sheet.unsupported_format: 只支持 CSV 和 XLSX 文件
+sheet.bad_file: 无法读取表格文件
+sheet.no_header: 表格中没有表头
+sheet.missing_columns: 缺少必需的列：{{.columns}}
+sheet.unknown_column: 没有这一列：{{.column}}
 web.not_found: 页面不存在
 web.bad_form: 无法解析提交的表单
 web.cross_origin: 跨站请求被拒绝
@@ -29,6 +34,7 @@ validation.max_items: 最多选择 {{.Max}} 项
 validation.unique: 不能有重复项
 validation.integer: 必须是整数
 validation.number: 必须是数字
+validation.boolean: 必须是 true、false、1 或 0
 validation.one_of: 不是可选的值
 validation.email: 邮箱格式不正确
 validation.url: 网址格式不正确

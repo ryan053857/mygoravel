@@ -30,7 +30,9 @@ var dependencies = map[string][]string{
 	"activity":     {"identity", "logging"},
 	"notification": {"errorx", "identity"},
 	"webhook":      {"errorx", "identity", "queue"},
-	"web":          {"errorx", "httpx", "i18n", "identity", "logging", "session"},
+	"form":         {"i18n"},
+	"sheet":        {"errorx", "form"},
+	"web":          {"errorx", "form", "httpx", "i18n", "identity", "logging", "session"},
 	"lock":         {},
 	"hashing":      {},
 	"queue":        {"logging"},
@@ -38,7 +40,7 @@ var dependencies = map[string][]string{
 	"schedule":     {"lock", "logging"},
 	"ai":           {"errorx", "httpx", "logging", "database", "broadcast", "lock"},
 	"command":      {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page"},
-	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast"},
+	"internal":     {"cleanup", "config", "errorx", "logging", "i18n", "identity", "database", "httpx", "page", "command", "filesystem", "mail", "ratelimit", "session", "lock", "hashing", "queue", "web", "schedule", "ai", "apitoken", "authz", "activity", "notification", "webhook", "broadcast", "form", "sheet"},
 }
 
 // 基础包不引用传输、数据库和命令组件。
@@ -54,7 +56,6 @@ var infrastructure = []string{
 // 后期应用形态使用的组件，当前 module 保持 HTTP API 依赖范围。
 var laterFormModules = []string{
 	"github.com/gorilla/websocket", "google.golang.org/grpc",
-	"github.com/xuri/excelize",
 }
 
 func under(pkg, prefix string) bool {

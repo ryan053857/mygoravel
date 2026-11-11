@@ -1,4 +1,4 @@
-package web
+package form
 
 import (
 	"context"
@@ -46,6 +46,7 @@ var rules = []rule{
 	on(validation.MsgExpectedArrayItemsUnique, "validation.unique", nil),
 	on(validation.MsgExpectedInteger, "validation.integer", nil),
 	on(validation.MsgExpectedNumber, "validation.number", nil),
+	on(validation.MsgExpectedBoolean, "validation.boolean", nil),
 	on(validation.MsgExpectedOneOf, "validation.one_of", nil),
 	on(validation.MsgExpectedRFC5322Email, "validation.email", nil),
 	on(validation.MsgExpectedRFC5322EmailBare, "validation.email", nil),

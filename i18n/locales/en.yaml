@@ -12,6 +12,11 @@ authz.role_not_found: Role not found
 authz.role_exists: A role with this name already exists
 authz.invalid: Invalid input
 notification.not_found: Notification not found
+sheet.unsupported_format: Only CSV and XLSX files are supported
+sheet.bad_file: The spreadsheet could not be read
+sheet.no_header: The spreadsheet has no header row
+sheet.missing_columns: "Missing required columns: {{.columns}}"
+sheet.unknown_column: "Unknown column: {{.column}}"
 web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
 web.cross_origin: Cross-origin request rejected
@@ -29,6 +34,7 @@ validation.max_items: Select at most {{.Max}} items
 validation.unique: Items must be unique
 validation.integer: Must be an integer
 validation.number: Must be a number
+validation.boolean: Must be true, false, 1 or 0
 validation.one_of: Not an allowed value
 validation.email: Must be a valid email address
 validation.url: Must be a valid URL

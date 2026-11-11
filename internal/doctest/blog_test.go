@@ -34,6 +34,8 @@ var blogFiles = []docFile{
 	{"internal/article/get.go", "routing.md"},
 	{"internal/article/routes.go", "routing.md"},
 	{"internal/article/dto.go", "routing.md"},
+	{"internal/article/import.go", "import-export.md"},
+	{"internal/article/export.go", "import-export.md"},
 	{"internal/article/article_test.go", "testing.md"},
 	{"internal/article/commands_test.go", "testing.md"},
 	{"internal/article/commands.go", "actions.md"},
@@ -72,6 +74,16 @@ import (
 
 // system 在文档中与 Job 一起给出。
 var system identity.Subject
+`},
+	{"internal/article/import_template.go", "import-export.md", "type TemplateInput struct", `package article
+
+import (
+	"context"
+
+	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/ryan053857/mygoravel/sheet"
+)
 `},
 	{"internal/bootstrap/mailer.go", "mail.md", "func newMailer(", `package bootstrap
 

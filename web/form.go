@@ -4,14 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strconv"
 	"strings"
-	"sync"
-
-	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/ryan053857/mygoravel/form"
 )
 
 // ErrBadForm 表示请求体不是可以解析的表单。
@@ -65,67 +62,18 @@ func text(v any) string {
 	}
 }
 
-// ParseForm 解析请求体中的表单（urlencoded 或 multipart），按 T 的 Huma 标签验证并解码。
+// ParseForm 解析请求体中的表单（urlencoded 或 multipart），用 form.Decode 按 T 的 Huma 标签验证并解码。
 //
-// T 应当是只有一层字段的结构体，字段为字符串、数字、布尔或它们的切片。按 schema 的类型转换：
-// 数字字段的空字符串视为未填写；布尔字段没有提交时为 false（未勾选的复选框），on、true、1 为 true。
-// 请求中多余的字段被忽略。验证提示按 context 中的语言翻译，见 i18n 的 validation.* 消息。
+// T 应当是只有一层字段的结构体，字段为字符串、数字、布尔或它们的切片，转换规则见 form.Decode。
+// 布尔字段没有提交时为 false（未勾选的复选框）。验证提示按 context 中的语言翻译。
 //
 // 只有请求体无法解析时返回错误（ErrBadForm）；验证失败通过 Form.Valid 判断。
 func ParseForm[T any](r *http.Request) (*Form[T], error) {
 	if err := r.ParseMultipartForm(maxMemory); err != nil && err != http.ErrNotMultipart {
 		return nil, ErrBadForm.Wrap(err)
 	}
-	var data T
-	s := schemaOf(reflect.TypeOf(data))
-	f := &Form[T]{values: r.PostForm}
-	input := map[string]any{}
-	for name, prop := range s.Properties {
-		prop = resolve(prop)
-		raw, present := r.PostForm[name]
-		switch {
-		case prop.Type == huma.TypeArray:
-			items := resolve(prop.Items)
-			list := make([]any, 0, len(raw))
-			for _, v := range raw {
-				list = append(list, convert(items.Type, v))
-			}
-			input[name] = list
-		case prop.Type == huma.TypeBoolean && !present:
-			input[name] = false
-		case !present || isNumber(prop.Type) && strings.TrimSpace(raw[0]) == "":
-		default:
-			input[name] = convert(prop.Type, raw[0])
-		}
-	}
-
-	res := &huma.ValidateResult{}
-	huma.Validate(registry, s, huma.NewPathBuffer(nil, 0), huma.ModeWriteToServer, input, res)
-	for _, e := range res.Errors {
-		d, ok := e.(*huma.ErrorDetail)
-		if !ok {
-			continue
-		}
-		field, msg := describe(r.Context(), d)
-		if f.Error(field) == "" {
-			f.SetError(field, msg)
-		}
-	}
-	// 没能转换成目标类型的值不参与解码，其余字段照常写入 Data。
-	for field := range f.errors {
-		if _, isText := input[field].(string); isText && resolve(s.Properties[field]).Type != huma.TypeString {
-			delete(input, field)
-		}
-	}
-	b, err := json.Marshal(input)
-	if err == nil {
-		err = json.Unmarshal(b, &data)
-	}
-	if err != nil {
-		return nil, ErrBadForm.Wrap(err)
-	}
-	f.Data = data
-	return f, nil
+	data, errs := form.Decode[T](r.Context(), r.PostForm)
+	return &Form[T]{Data: data, values: r.PostForm, errors: errs}, nil
 }
 
 // Valid 报告表单没有任何字段错误。
@@ -139,7 +87,7 @@ func (f *Form[T]) Values(field string) []string { return f.values[field] }
 
 // Checked 报告布尔字段是否选中。
 func (f *Form[T]) Checked(field string) bool {
-	switch f.values.Get(field) {
+	switch strings.ToLower(f.values.Get(field)) {
 	case "on", "true", "1":
 		return true
 	}
@@ -158,52 +106,4 @@ func (f *Form[T]) SetError(field, message string) {
 		f.errors = map[string]string{}
 	}
 	f.errors[field] = message
-}
-
-var (
-	registry = huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
-	regMu    sync.Mutex
-	schemas  sync.Map // reflect.Type -> *huma.Schema
-)
-
-func schemaOf(t reflect.Type) *huma.Schema {
-	if s, ok := schemas.Load(t); ok {
-		return s.(*huma.Schema)
-	}
-	regMu.Lock()
-	defer regMu.Unlock()
-	s := resolve(registry.Schema(t, false, ""))
-	schemas.Store(t, s)
-	return s
-}
-
-func resolve(s *huma.Schema) *huma.Schema {
-	if s != nil && s.Ref != "" {
-		return registry.SchemaFromRef(s.Ref)
-	}
-	return s
-}
-
-func isNumber(typ string) bool { return typ == huma.TypeInteger || typ == huma.TypeNumber }
-
-// convert 把表单文本转换为 schema 类型；无法转换时保留原文，由验证报出类型错误。
-func convert(typ, v string) any {
-	switch typ {
-	case huma.TypeInteger:
-		if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
-			return n
-		}
-	case huma.TypeNumber:
-		if n, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
-			return n
-		}
-	case huma.TypeBoolean:
-		switch v {
-		case "on", "true", "1":
-			return true
-		case "", "off", "false", "0":
-			return false
-		}
-	}
-	return v
 }

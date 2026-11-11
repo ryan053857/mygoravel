@@ -32,6 +32,7 @@ go get github.com/ryan053857/mygoravel@main
 | 保护接口 | [认证](docs/authentication.md) · [授权](docs/authorization.md) · [哈希](docs/hashing.md) · [限流](docs/rate-limiting.md) |
 | 使用数据库 | [数据库](docs/database.md) · [迁移](docs/migrations.md) |
 | 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |
+| 导入导出 Excel 和 CSV | [导入与导出](docs/import-export.md) |
 | 发送邮件 | [邮件](docs/mail.md) |
 | 在后台执行任务 | [队列](docs/queue.md) · [定时任务](docs/scheduling.md) |
 | 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |

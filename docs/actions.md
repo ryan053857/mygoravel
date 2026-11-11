@@ -304,7 +304,7 @@ item, err := article.NewCreate(db).Handle(ctx, alice, changes)
 
 页面处理器不放在 `article` 包中，因为 templ 组件要导入 `article` 包的类型，放在一起会造成循环导入。
 
-一个 action 需要另一个 action 时，通过构造函数接收它，而不是在内部构造。例如导入文章时复用 `Create` 的规则：
+一个 action 需要另一个 action 时，通过构造函数接收它，而不是在内部构造。例如[导入文章](import-export.md#import-action)时复用 `Create` 的规则：
 
 ```go
 type Import struct {
@@ -325,6 +325,7 @@ Laravel 的 [laravel-data](https://github.com/spatie/laravel-data) 用一个类�
 | --- | --- |
 | 验证并读取请求 | 带验证标签的结构体，例如 `Changes`；HTTP 输入类型写成 `Body Changes`，见[请求](requests.md#json-body) |
 | 页面表单 | 同一个结构体：`web.ParseForm[article.Changes](r)`，见[表单](forms.md) |
+| 表格导入 | 同一个结构体：`sheet.Decode[article.Changes](ctx, r)`，见[导入与导出](import-export.md) |
 | 业务参数 | `Handle` 直接接收 `Changes`，验证标签对它没有影响 |
 | 响应 | `ArticleDTO` 和转换函数 `toDTO`，见[共享响应结构](routing.md#shared-responses) |
 | 前端类型 | 由导出的 [OpenAPI 文档](routing.md#exporting-openapi)生成，例如用 openapi-typescript |
