@@ -254,9 +254,13 @@ func (d *Driver) claims(topic string, m jetstream.Msg) []queue.Claim {
 		_ = m.Term()
 		return nil
 	}
-	return []queue.Claim{&claimed{m: m, job: queue.Job{
-		ID: id, Topic: topic, Payload: b.Payload, Metadata: b.Metadata, Attempt: int(meta.NumDelivered),
-	}}}
+	job := queue.Job{ID: id, Topic: topic, Payload: b.Payload, Metadata: b.Metadata, Attempt: int(meta.NumDelivered)}
+	// 首次投递时，消息写入流的时间就是任务可以被领取的时间（延迟任务在到期时才写入）；
+	// 重新投递的时间 NATS 不提供。
+	if meta.NumDelivered == 1 {
+		job.AvailableAt = meta.Timestamp.UTC()
+	}
+	return []queue.Claim{&claimed{m: m, job: job}}
 }
 
 type claimed struct {
@@ -280,9 +284,9 @@ func (c *claimed) Retry(_ context.Context, at time.Time) error {
 
 func (c *claimed) Release(context.Context) error { return c.m.Nak() }
 
-// Stats 实现 queue.StatsReporter。有消费者的 topic 取消费者的状态：Ready 是等待投递的任务，
-// Running 是已投递、等待确认的任务（包括等待带延迟重试的任务）；还没有被领取过、没有消费者的 topic，
-// 流中的消息都算作 Ready。NATS 不区分延迟和等待重试的任务，Delayed 和 Retrying 为 queue.Unknown，
+// Stats 实现 queue.Driver。有消费者的 topic 取消费者的状态：StateReady 是等待投递的任务，
+// StateRunning 是已投递、等待确认的任务（包括等待带延迟重试的任务）；还没有被领取过、没有消费者的 topic，
+// 流中的消息都算作 StateReady。NATS 不区分延迟和等待重试的任务，结果中没有 StateDelayed 和 StateRetrying，
 // OldestReadyAt 为零值。
 func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 	if err := d.ensureStream(ctx); err != nil {
@@ -296,7 +300,7 @@ func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 	byTopic := map[string]*queue.TopicStats{}
 	get := func(topic string) *queue.TopicStats {
 		if byTopic[topic] == nil {
-			byTopic[topic] = &queue.TopicStats{Topic: topic, Delayed: queue.Unknown, Retrying: queue.Unknown}
+			byTopic[topic] = &queue.TopicStats{Topic: topic, Jobs: map[queue.State]int{queue.StateReady: 0, queue.StateRunning: 0}}
 		}
 		return byTopic[topic]
 	}
@@ -310,7 +314,7 @@ func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 		}
 		consumed[topic] = true
 		s := get(topic)
-		s.Ready, s.Running = int(info.NumPending), info.NumAckPending
+		s.Jobs[queue.StateReady], s.Jobs[queue.StateRunning] = int(info.NumPending), info.NumAckPending
 	}
 	if err := consumers.Err(); err != nil {
 		return nil, errors.Wrap(err, "natsqueue: stats")
@@ -322,13 +326,13 @@ func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
 	}
 	for subject, n := range info.State.Subjects {
 		if topic, ok := strings.CutPrefix(subject, prefix); ok && !consumed[topic] {
-			get(topic).Ready = int(n)
+			get(topic).Jobs[queue.StateReady] = int(n)
 		}
 	}
 
 	var out []queue.TopicStats
 	for _, s := range byTopic {
-		if s.Ready+s.Running > 0 {
+		if s.Jobs[queue.StateReady]+s.Jobs[queue.StateRunning] > 0 {
 			out = append(out, *s)
 		}
 	}

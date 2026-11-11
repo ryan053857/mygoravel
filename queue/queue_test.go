@@ -50,6 +50,8 @@ func (r *recorder) Enqueue(ctx context.Context, jobs ...queue.Job) error {
 
 func (r *recorder) Claim(context.Context, queue.ClaimRequest) ([]queue.Claim, error) { return nil, nil }
 
+func (r *recorder) Stats(context.Context) ([]queue.TopicStats, error) { return nil, nil }
+
 func TestPublish(t *testing.T) {
 	type welcome struct {
 		Email string `json:"email"`
