@@ -181,7 +181,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | --- | --- | --- |
 | `lock` | 带过期时间的原子锁，数据库存储；`lock/redislock` 是 Redis 存储，`lock/locktest` 是测试用的内存存储与存储的契约测试 | [原子锁](locks.md)、[Redis 存储](locks.md#redis-store) |
 | `outbound` | 只能访问公网地址的 HTTP 客户端，防止服务端请求伪造 | [出站请求](outbound.md) |
-| `database` | 用应用选定的驱动打开连接池，`RunInTx` 与提交后回调，查询链路用的 `ChildSpans` | [数据库](database.md)、[数据库的链路](telemetry.md#database-tracing) |
+| `database` | 用应用选定的驱动打开连接池，`RunInTx` 与提交后回调 | [数据库](database.md) |
 | `database/postgres`、`database/sqlite`、`database/mysql` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |

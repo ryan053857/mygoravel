@@ -7,23 +7,21 @@
     - [队列](#queue-metrics)
     - [定时任务](#schedule-metrics)
     - [限流](#ratelimit-metrics)
-    - [数据库](#database-metrics)
-    - [Redis](#redis-metrics)
-    - [NATS](#nats-metrics)
+    - [实时频道](#realtime-metrics)
     - [告警示例](#alerting)
 - [链路追踪](#tracing)
     - [创建 TracerProvider](#tracer-provider)
     - [HTTP 请求](#http-tracing)
     - [队列](#queue-tracing)
     - [定时任务](#schedule-tracing)
-    - [数据库](#database-tracing)
-    - [Redis](#redis-tracing)
     - [日志](#trace-logs)
 
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、队列、调度器和限流器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路，数据库和 Redis 的指标和链路由 Bun、go-redis 自带的扩展报告，NATS 见[这一节](#nats-metrics)。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
+框架的 HTTP 服务、队列、调度器、限流器和实时频道都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，前三者还报告链路。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
+
+这里只有框架自己的组件。数据库、Redis、NATS 这些依赖由各自的生态报告，例如 Bun 的 [bunotel](https://pkg.go.dev/github.com/uptrace/bun/extra/bunotel)、go-redis 的 [redisotel](https://pkg.go.dev/github.com/redis/go-redis/extra/redisotel/v9)，或者服务器一侧的 exporter，把同一个 Provider 交给它们即可。
 
 和其他功能一样，两者都需要显式开启：把同一个 `MeterProvider`、`TracerProvider` 交给需要报告的部分即可，没有传入的部分不报告。
 
@@ -105,116 +103,10 @@ attempts := ratelimit.Observe(a.meters, "login", ratelimit.NewDatabase(a.db, "lo
 
 被拒绝的请求同时以 `429` 出现在 HTTP 请求的指标中。用法和查询示例见[限流的指标](rate-limiting.md#metrics)。
 
-<a id="database-metrics"></a>
-### 数据库
+<a id="realtime-metrics"></a>
+### 实时频道
 
-数据库的指标不需要框架提供，Bun 自带的 [bunotel](https://pkg.go.dev/github.com/uptrace/bun/extra/bunotel) 就能报告。它是一个单独的模块：
-
-```shell
-go get github.com/uptrace/bun/extra/bunotel
-```
-
-在 `open` 中打开数据库之后，给它加上查询钩子：
-
-```go
-import "github.com/uptrace/bun/extra/bunotel"
-
-db.AddQueryHook(bunotel.NewQueryHook(bunotel.WithMeterProvider(meters)))
-```
-
-最有用的是**连接池**的指标，它们每次导出时从 `db.Stats()` 读取，带有 `db.system` 属性：
-
-| 指标 | 类型 | 含义 |
-| --- | --- | --- |
-| `go.sql.connections_in_use` | 仪表 | 正在使用的连接数 |
-| `go.sql.connections_max_open` | 仪表 | 连接数上限，即配置中的 [`max_open_conns`](database.md#configuration) |
-| `go.sql.connections_wait_count` | 计数器 | 因为没有空闲连接而等待的总次数 |
-| `go.sql.connections_wait_duration` | 计数器，纳秒 | 等待连接的总时长 |
-| `go.sql.connections_open`、`go.sql.connections_idle` | 仪表 | 已建立的连接数、其中空闲的连接数 |
-
-数据库变慢时，最先出现的往往不是查询报错，而是请求开始排队等连接：慢查询或忘记提交的事务占住连接，连接池用满，后面的请求都在 `database/sql` 中等待。`wait_count` 开始增长就是这个信号。
-
-每条查询的耗时记录在直方图 `go.sql.query_timing` 中，属性是 `db.operation`（`SELECT`、`INSERT` 等）和 `db.sql.table`。它适合发现慢查询，但有几点限制：
-
-- 以**整毫秒**记录，1 毫秒以内的查询都记为 0，看不出细微的变化；
-- 不区分成功和失败；
-- 指标名和属性名来自旧版的语义约定，现成的数据库仪表盘需要调整查询。
-
-同一个钩子还可以报告链路，见[数据库的链路](#database-tracing)。
-
-<a id="redis-metrics"></a>
-### Redis
-
-go-redis 自带的 [redisotel](https://pkg.go.dev/github.com/redis/go-redis/extra/redisotel/v9) 报告 [Redis](redis.md) 客户端的指标，版本与 go-redis 相同：
-
-```shell
-go get github.com/redis/go-redis/extra/redisotel/v9
-```
-
-在 `open` 中[创建客户端](redis.md#connecting)之后：
-
-```go
-import "github.com/redis/go-redis/extra/redisotel/v9"
-
-err := redisotel.InstrumentMetrics(rdb,
-    redisotel.WithMeterProvider(meters),
-    redisotel.WithSemConvCompliantMetrics(true),
-)
-```
-
-`WithSemConvCompliantMetrics(true)` 让等待、超时这几个累计值按 OpenTelemetry 的约定报告为计数器。不开启时它们是可增可减的数值，Prometheus 中没有 `_total` 后缀，不能用 `rate` 计算。这个选项默认关闭只是为了兼容已有的用户，新应用直接开启。
-
-指标带有 `db.system=redis` 和 `pool.name`（Redis 的地址）属性：
-
-| 指标 | 类型 | 含义 |
-| --- | --- | --- |
-| `db.client.connections.usage` | 仪表 | 连接数，`state` 为 `used` 或 `idle` |
-| `db.client.connections.max` | 仪表 | 连接池上限，即 go-redis 的 `PoolSize` |
-| `db.client.connections.waits` | 计数器 | 因为没有空闲连接而等待的总次数 |
-| `db.client.connections.timeouts` | 计数器 | 等待超过 `PoolTimeout`、命令因此失败的总次数 |
-| `db.client.connections.use_time` | 直方图，毫秒 | 每条命令或管道的耗时，`status` 为 `ok`、`nil`（键不存在）或 `error` |
-
-和数据库一样，连接池的等待是 Redis 变慢的第一个信号，`timeouts` 增长时已经有命令失败了。`use_time` 以小数毫秒记录，区分成败，比数据库的查询耗时好用；键不存在（`redis.Nil`）记为 `nil`，统计错误率时只看 `error`。
-
-<a id="nats-metrics"></a>
-### NATS
-
-nats.go 没有官方的 OpenTelemetry 扩展，大部分时候也不需要：[NATS 队列](queue.md#nats-driver)的任务和其他驱动一样报告[队列的指标](#queue-metrics)，积压和处理中的任务数来自 JetStream 的 consumer；链路随任务的元数据传递，见[队列的链路](#queue-tracing)。[广播](broadcasting.md#redis-and-nats)是尽力而为的通知，不需要指标。
-
-还缺的是客户端与服务器的连接状态。nats.go 的 `nc.Stats()` 记录了重连次数，在 `open` 中用 `nats.Connect` 创建连接 `nc` 之后，注册两个指标：
-
-```go
-meter := meters.Meter("nats")
-_, err = meter.Int64ObservableGauge("nats.client.connected",
-    metric.WithDescription("是否已连接到 NATS 服务器，1 为已连接"),
-    metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
-        var v int64
-        if nc.IsConnected() {
-            v = 1
-        }
-        o.Observe(v)
-        return nil
-    }))
-if err != nil {
-    return nil, err
-}
-_, err = meter.Int64ObservableCounter("nats.client.reconnects",
-    metric.WithDescription("与 NATS 服务器重新建立连接的次数"),
-    metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
-        o.Observe(int64(nc.Stats().Reconnects))
-        return nil
-    }))
-```
-
-`metric` 是 `go.opentelemetry.io/otel/metric`。导出到 Prometheus 后是 `nats_client_connected` 和 `nats_client_reconnects_total`。
-
-服务器本身的状态，例如慢消费者、内存、JetStream 占用的存储，在服务器上而不在客户端。用 NATS 官方的 [prometheus-nats-exporter](https://github.com/nats-io/prometheus-nats-exporter) 从服务器的监控接口抓取，服务器用 `-m 8222` 开启监控接口：
-
-```shell
-prometheus-nats-exporter -varz -jsz=consumers http://nats:8222
-```
-
-它在 `:7777/metrics` 提供 Prometheus 格式的指标，例如 `gnatsd_varz_slow_consumers`（处理不过来、被服务器断开的客户端数）和 `jetstream_consumer_num_redelivered`（按 `stream_name`、`consumer_name` 区分的重新投递数）。这些指标不经过 OpenTelemetry，由 Prometheus 直接抓取。
+设置 `realtime.Options.MeterProvider` 后报告本实例的连接数 `realtime.connections` 和订阅数 `realtime.subscriptions`，见[实时频道的指标](realtime.md#metrics)。
 
 <a id="alerting"></a>
 ### 告警示例
@@ -235,15 +127,6 @@ sum by (ratelimit_name) (rate(ratelimit_requests_total{ratelimit_result="error"}
 # 登录被拒绝的比例超过 20%，可能有人在暴力尝试
 sum(rate(ratelimit_requests_total{ratelimit_name="login", ratelimit_result="exceeded"}[5m]))
   / sum(rate(ratelimit_requests_total{ratelimit_name="login"}[5m])) > 0.2
-
-# 有请求在排队等数据库连接
-rate(go_sql_connections_wait_count_total[5m]) > 0
-
-# 等不到 Redis 连接，命令已经失败
-rate(db_client_connections_timeouts_total{db_system="redis"}[5m]) > 0
-
-# 与 NATS 断开超过 1 分钟
-max_over_time(nats_client_connected[1m]) == 0
 
 # 每天凌晨的报表任务 25 小时内没有成功过
 increase(schedule_task_duration_seconds_count{schedule_task="reports:daily", schedule_task_outcome="succeeded"}[25h]) == 0
@@ -310,39 +193,6 @@ sched := schedule.New(a.locker, a.cfg.Schedule, nil,
 ```
 
 每次执行创建一个 `schedule <任务名>` span，是一条新链路的起点，任务中发布的队列任务接在它之后。被跳过或由其他实例执行的触发没有 span。
-
-<a id="database-tracing"></a>
-### 数据库
-
-把 `TracerProvider` 也交给[数据库指标](#database-metrics)中的钩子，每条查询就成为一个 span，接在请求或任务的 span 下面，一个请求慢在哪条 SQL 上一目了然：
-
-```go
-db.AddQueryHook(bunotel.NewQueryHook(
-    bunotel.WithMeterProvider(meters),
-    bunotel.WithTracerProvider(database.ChildSpans(tracers)),
-))
-```
-
-span 的名称是操作（如 `SELECT`），带有 SQL 语句和发起查询的代码位置。语句中的参数保持为占位符，例如 `WHERE (id = ?)`，用户数据不会进入链路。
-
-`database.ChildSpans` 让查询只在已有上级 span 时创建 span。不要直接传入 `tracers`：bunotel 为每条查询都创建 span，不管 `ctx` 中有没有上级 span；而队列轮询、调度器加锁这些后台查询不属于任何请求，每秒都会各自成为一条只有一个 span 的链路，淹没真正有用的数据。
-
-查询要接在请求的链路上，前提是把请求的 `ctx` 一路传给 Bun 的 `Scan`、`Exec`；用 `context.Background()` 发起的查询不会出现在链路中。
-
-<a id="redis-tracing"></a>
-### Redis
-
-```go
-err := redisotel.InstrumentTracing(rdb,
-    redisotel.WithTracerProvider(database.ChildSpans(tracers)),
-    redisotel.WithDBStatement(false),
-)
-```
-
-每条命令是一个 span，名称是命令名，例如 `get`；管道是一个 `redis.pipeline` span。
-
-- 和数据库一样，要套上 `database.ChildSpans`：redisotel 也为每条命令创建 span，而 [Redis 队列](queue.md#redis-driver)按 `poll_interval` 轮询、调度器用 [Redis 锁](locks.md#redis-store)去重这些后台命令不属于任何请求。
-- redisotel 默认把**完整的命令**写进 span，包括值：会话内容、缓存的 JSON、队列任务的 payload 都会进入链路系统，span 也会变得很大。`WithDBStatement(false)` 只保留命令名。
 
 <a id="trace-logs"></a>
 ### 日志
