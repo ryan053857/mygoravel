@@ -9,6 +9,7 @@
     - [断线重连](#reconnecting)
 - [审批](#approval)
 - [在页面中使用](#pages)
+- [图片、语音和向量](#media)
 - [部署](#deployment)
     - [多个实例](#multiple-instances)
 - [测试](#testing)
@@ -24,6 +25,7 @@ agent 本身由 [trpc-agent-go](https://github.com/trpc-group/trpc-agent-go) 提
 - **中途插话**：模型还在查资料时，用户可以继续发消息，不需要等它答完，也不会打断它。
 - **审批**：退款、发布这类操作，模型调用工具后先停下，由人确认后才执行。审批可以在几小时后、在另一个进程中进行。
 - **前端协议**：实现 Vercel AI SDK 的 UI 消息流协议，前端直接使用 `useChat`。
+- **图片、语音和向量**：生成图片、合成和识别语音、计算向量，接口统一，测试时有替身。
 
 本章为博客的编辑后台加一个写作助手：它可以搜索已有文章，帮编辑发布草稿。发布之前需要编辑确认。
 
@@ -88,7 +90,9 @@ func SearchTool(search *article.Search) tool.CallableTool {
 <a id="configuring-models"></a>
 ### 配置模型
 
-`ai.ModelConfig` 描述一个 OpenAI 兼容接口的模型。DeepSeek、通义千问、Kimi、OpenAI 等都提供这种接口。把它加进应用配置：
+`ai.ModelConfig` 描述 OpenAI 兼容接口上的一个模型，DeepSeek、通义千问、Kimi、OpenAI 等都提供这种接口。它只是一个普通的结构体，`ai.NewModel` 按传进来的值创建模型，不关心这些值从哪里来。
+
+模型固定时，把它加进应用配置：
 
 ```go
 type Config struct {
@@ -103,6 +107,23 @@ ai:
   base_url: https://api.deepseek.com
   api_key: ${DEEPSEEK_API_KEY}
 ```
+
+如果模型由管理员在后台维护，或者让用户在对话中挑选，就不在启动时固定模型，改用 `llmagent.WithModelSelector`。它在每次调用模型之前执行，从应用自己的数据中查出这一次使用的模型：
+
+```go
+agent := llmagent.New("writer",
+    llmagent.WithModelSelector(func(ctx context.Context, inv *agent.Invocation) (model.Model, error) {
+        p, err := settings.WriterModel(ctx, inv.Session.UserID) // 应用自己的表和规则
+        if err != nil {
+            return nil, err
+        }
+        return ai.NewModel(ai.ModelConfig{Model: p.Model, BaseURL: p.BaseURL, APIKey: p.APIKey}), nil
+    }),
+    // ...
+)
+```
+
+`ai.NewModel` 不访问网络，各模型共用进程的 HTTP 连接池，每次调用时创建也没有额外开销。后台修改后，下一次调用模型就使用新的配置；审批后继续和插话后补跑的那一轮同样经过这里。
 
 Claude、Gemini 等其他接口的模型直接使用 trpc-agent-go 的对应包创建，`ai` 包的其余部分不受影响。
 
@@ -265,6 +286,61 @@ return web.SSE(w, r, func(s *web.Stream) error {
 })
 ```
 
+<a id="media"></a>
+## 图片、语音和向量
+
+除了对话，`ai` 包还定义了四种能力，每种是一个只有一个方法的接口：
+
+| 接口 | 方法 | 用途 |
+| --- | --- | --- |
+| `ai.Imager` | `Image(ctx, ai.ImageRequest) (ai.Media, error)` | 按描述生成图片，给出参考图时编辑或改绘 |
+| `ai.Speaker` | `Speak(ctx, ai.SpeechRequest) (ai.Media, error)` | 把文字合成为语音 |
+| `ai.Transcriber` | `Transcribe(ctx, ai.TranscriptionRequest) (string, error)` | 把语音识别为文字 |
+| `ai.Embedder` | `Embed(ctx, texts []string) ([][]float32, error)` | 把文本转换为向量 |
+
+`ai.Media` 是图片或音频的内容和 MIME 类型。
+
+`ai/openai` 通过 OpenAI 兼容接口实现这四种能力。`openai.New` 和 `ai.NewModel` 一样接收 `ai.ModelConfig`，不访问网络，可以在每次使用时按当时的配置创建。OpenAI、火山方舟、硅基流动、通义千问的兼容模式等都提供这类接口，但每家支持的能力不同，以厂商文档为准。
+
+为文章生成封面，存进[文件存储](filesystem.md)：
+
+```go
+img, err := openai.New(cfg.Cover).Image(ctx, ai.ImageRequest{
+    Prompt: "为这篇文章画一张扁平风格的封面：" + post.Title,
+    Aspect: ai.Landscape,
+})
+if err != nil {
+    return err
+}
+file, err := files.Upload(ctx, owner, filesystem.FileInput{
+    Filename:    "cover.png",
+    ContentType: img.MIME,
+    Size:        int64(len(img.Data)),
+}, bytes.NewReader(img.Data))
+```
+
+- `Aspect` 是 `ai.Square`、`ai.Portrait` 或 `ai.Landscape`，按 OpenAI 的尺寸换算。尺寸规格不同的模型用 `openai.WithImageSizes` 指定，例如 `{ai.Square: "2048x2048"}`。
+- 模型服务只返回临时链接时，`Image` 会下载图片，结果同样是图片内容。
+
+朗读文章，以及把编辑的语音输入转成文字：
+
+```go
+audio, err := openai.New(cfg.Voice).Speak(ctx, ai.SpeechRequest{Text: post.Body, Voice: "alloy"})
+
+text, err := openai.New(cfg.Dictation).Transcribe(ctx, ai.TranscriptionRequest{
+    Audio:    ai.Media{Data: data, MIME: "audio/webm"}, // 浏览器 MediaRecorder 录的音
+    Language: "zh",
+})
+```
+
+计算向量时一次传入多段文本。有的厂商限制每批的数量，用 `openai.WithBatchSize` 让它分批请求；支持缩减维度的模型用 `openai.WithDimensions` 指定维度：
+
+```go
+vecs, err := openai.New(cfg.Embedding, openai.WithBatchSize(10)).Embed(ctx, []string{post.Title, post.Body})
+```
+
+生成图片和语音通常要十几秒到几十秒，不需要立即返回结果时，放进[队列](queue.md)执行。
+
 <a id="deployment"></a>
 ## 部署
 
@@ -305,3 +381,14 @@ m := aitest.NewModel(
 ```
 
 模型依次给出这两个回复：先调用 `search_articles`，拿到结果后回答。`m.Requests()` 返回模型收到的请求，可以检查发给模型的历史和工具结果。会话存储使用 trpc-agent-go 的 `inmemory.NewSessionService()`。
+
+图片、语音和向量也有对应的替身：
+
+```go
+img := aitest.NewImager()            // 每次返回 aitest.PNG
+emb := aitest.NewEmbedder(1024)      // 相同的文本总是得到相同的向量
+sp := aitest.NewSpeaker()            // 把朗读的文字当作音频内容返回
+tr := aitest.NewTranscriber("你好")  // 依次返回预设的文字
+```
+
+传入预设结果时按顺序返回，用完后再收到请求就返回错误；`Requests()` 返回收到的请求，`FailWith(err)` 让之后的请求失败，用于测试出错的处理。

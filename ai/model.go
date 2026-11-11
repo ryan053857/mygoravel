@@ -6,7 +6,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
 )
 
-// ModelConfig 是一个 OpenAI 兼容接口的模型，DeepSeek、通义千问、Kimi、OpenAI 等都提供这种接口。
+// ModelConfig 描述 OpenAI 兼容接口上的一个模型，DeepSeek、通义千问、Kimi、OpenAI 等都提供这种接口。
+// 它是普通的值：可以放进配置文件，也可以由应用从数据库等处查出后现场构造。
 type ModelConfig struct {
 	// Model 是模型名，例如 deepseek-chat。
 	Model string `yaml:"model"`
