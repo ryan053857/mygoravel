@@ -49,6 +49,7 @@
 - [定时任务](scheduling.md)
 - [服务端推送](sse.md)
 - [广播](broadcasting.md)
+- [实时频道](realtime.md)
 - [文件存储与上传](filesystem.md)
 - [邮件](mail.md)
 - [出站请求](outbound.md)

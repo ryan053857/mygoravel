@@ -15,7 +15,7 @@
 
 有些页面需要服务端主动推送内容：长时间任务的进度、其他人刚发布的文章、聊天消息。mygoravel 使用 [Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_events)（SSE）：服务端保持一个 HTTP 响应不结束，持续写出事件；浏览器端由内嵌的 htmx [hx-sse 扩展](https://four.htmx.org/extensions/hx-sse)接收，把事件中的 HTML 放进页面。
 
-SSE 只负责服务端到浏览器。浏览器发给服务端的仍然是普通请求，所以认证、跨站请求伪造防护、验证和限流都和其他页面一样。
+SSE 只负责服务端到浏览器。浏览器发给服务端的仍然是普通请求，所以认证、跨站请求伪造防护、验证和限流都和其他页面一样。需要在线成员、「正在输入」或移动端 SDK 时，使用基于 WebSocket 的[实时频道](realtime.md)。
 
 页面使用 `web.SSE` 写出事件流，事件内容是 HTML 片段；JSON API 使用 `rest.RegisterSSE`，事件内容是 JSON，见 [JSON API](#json-api)。两者共用 `httpx.SSE` 管理连接：心跳、超时、停机和断线重连的行为都相同。
 

@@ -243,7 +243,7 @@ func (a *ScheduleDigests) Handle(ctx context.Context) error {
 | 资源 | 做法 |
 | --- | --- |
 | [缓存](cache.md) | 键带上租户：`blog:article:v1:<tenant>:<id>`。缓存一章的 `load` 只按 ID 读取，命中后会跳过 `find` 的租户条件，把其他租户的文章返回出去；它要和 `find` 一样接收主体，用 `subject.Tenant` 组成键 |
-| [广播](broadcasting.md) | 主题带上租户：`t:<tenant>:articles`。SSE 处理器用 `sub.Tenant` 订阅，不要从查询参数中取租户 |
+| [广播](broadcasting.md) | 主题带上租户：`t:<tenant>:articles`。SSE 处理器用 `sub.Tenant` 订阅，不要从查询参数中取租户；[实时频道](realtime.md#private-channels)的授权函数把频道名中的租户与 `sub.Tenant` 比较 |
 | [限流](rate-limiting.md) | 按用户或 IP 的限流不用改；按租户限额时，key 用 `tenant:<id>` |
 | [锁](locks.md) | 锁名中的 ID 全局唯一（如 UUID）时不用改；按 slug 等租户内唯一的值加锁时，带上租户 |
 | [Webhook](webhooks.md) | 不用改。端点属于租户，`webhook.Send` 只发给 `subject.Tenant` 的端点 |

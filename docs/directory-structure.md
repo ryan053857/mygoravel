@@ -180,6 +180,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。下面按文�
 | `queue/redisqueue`、`queue/natsqueue` | Redis 与 NATS JetStream 队列驱动 | [Redis 驱动](queue.md#redis-driver)、[NATS 驱动](queue.md#nats-driver) |
 | `schedule` | 按 cron 表达式定时执行任务，多个实例之间去重 | [定时任务](scheduling.md) |
 | `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端，`broadcast/broadcasttest` 是测试用的内存后端与后端的契约测试 | [广播](broadcasting.md) |
+| `realtime` | 嵌入 Centrifuge 的 WebSocket 实时频道：公开、私有与 presence 频道，频道就是广播的主题；`realtime/redispresence` 是在线成员的 Redis 存储，`realtime/realtimetest` 是存储的契约测试 | [实时频道](realtime.md) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |
 | `filesystem/local`、`filesystem/s3` | 本地与 S3 磁盘 | [文件存储与上传](filesystem.md#disks) |
 | `mail` | 邮件消息、发送接口与模板渲染 | [邮件](mail.md) |

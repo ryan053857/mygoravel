@@ -336,6 +336,7 @@ queue.Handle(router, sub, "articles.publish-scheduled", func(ctx context.Context
 | [会话](session.md#cleanup) | `session.NewStore(db).Cleanup` | 每 10 分钟 |
 | [锁](locks.md#cleanup) | `lock.NewDBStore(db).Cleanup` | 每小时 |
 | [广播](broadcasting.md#database-backend) | `broadcast.NewDatabase(db, nil).Cleanup` | 每 10 分钟 |
+| [实时频道](realtime.md#presence-stores) | `realtime.NewDatabasePresence(db).Cleanup` | 每 10 分钟 |
 | [限流](rate-limiting.md#cleanup) | 任意一个 `ratelimit.NewDatabase(...)` 的 `Cleanup` | 每小时 |
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
 | [操作日志](activity.md#retention) | `activity.Cleanup(db, 保留期)` | 每天 |
