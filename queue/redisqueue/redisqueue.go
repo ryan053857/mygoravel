@@ -11,6 +11,7 @@ package redisqueue
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"time"
 
@@ -33,6 +34,7 @@ const Name = "redis"
 //   - reserved：哈希，处理中的任务 ID 到领取时间。
 //
 // 每个操作是一次脚本调用，时间取 Redis 服务端时钟。任务完成后四个键中的记录都被删除，不需要清理。
+// 另有一个集合 prefix:topics 记录出现过的 topic，供 Stats 使用。
 type Driver struct {
 	rdb    redis.UniversalClient
 	prefix string
@@ -99,8 +101,57 @@ func (d *Driver) Enqueue(ctx context.Context, jobs ...queue.Job) error {
 		if added == 0 {
 			return errors.Newf("redisqueue: job %s already exists", j.ID)
 		}
+		// topic 集合与任务的键不在同一个集群槽位，单独写入；写入失败只影响 Stats。
+		if err := d.rdb.SAdd(ctx, d.prefix+":topics", j.Topic).Err(); err != nil {
+			return errors.Wrapf(err, "redisqueue: record topic %q", j.Topic)
+		}
 	}
 	return nil
+}
+
+// stats 返回 {ready, delayed, retrying, running, 最早到期的分数或 -1}。
+var stats = redis.NewScript(`
+local t = redis.call("TIME")
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local ready = redis.call("ZCOUNT", KEYS[1], "-inf", now)
+local oldest = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", now, "WITHSCORES", "LIMIT", 0, 1)
+local delayed, retrying, running = 0, 0, 0
+for _, id in ipairs(redis.call("ZRANGEBYSCORE", KEYS[1], "(" .. now, "+inf")) do
+	if redis.call("HEXISTS", KEYS[4], id) == 1 then
+		running = running + 1
+	elseif tonumber(redis.call("HGET", KEYS[3], id) or "0") > 0 then
+		retrying = retrying + 1
+	else
+		delayed = delayed + 1
+	end
+end
+return {ready, delayed, retrying, running, oldest[2] or "-1"}
+`)
+
+// Stats 实现 queue.StatsReporter。每个 topic 一次脚本调用，会遍历未到期的任务。
+func (d *Driver) Stats(ctx context.Context) ([]queue.TopicStats, error) {
+	topics, err := d.rdb.SMembers(ctx, d.prefix+":topics").Result()
+	if err != nil {
+		return nil, errors.Wrap(err, "redisqueue: stats")
+	}
+	slices.Sort(topics)
+	var out []queue.TopicStats
+	for _, topic := range topics {
+		res, err := stats.Run(ctx, d.rdb, d.keys(topic)).Slice()
+		if err != nil {
+			return nil, errors.Wrapf(err, "redisqueue: stats of %q", topic)
+		}
+		s := queue.TopicStats{Topic: topic, Ready: int(res[0].(int64)), Delayed: int(res[1].(int64)),
+			Retrying: int(res[2].(int64)), Running: int(res[3].(int64))}
+		if s.Ready+s.Delayed+s.Retrying+s.Running == 0 {
+			continue
+		}
+		if ms, _ := strconv.ParseInt(res[4].(string), 10, 64); ms >= 0 {
+			s.OldestReadyAt = time.UnixMilli(ms).UTC()
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // claim 领取最多 ARGV[1] 个到期的任务，租约 ARGV[2] 毫秒；返回 {id, attempts, body, ...}。

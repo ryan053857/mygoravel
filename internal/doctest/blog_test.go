@@ -39,6 +39,24 @@ var blogFiles = []docFile{
 var blogFragments = []struct {
 	path, doc, prefix, header string
 }{
+	{"internal/cli/queue.go", "queue.md", "func queueCmd(", `package cli
+
+import (
+	"fmt"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"example.com/blog/internal/settings"
+	"github.com/ryan053857/mygoravel/command"
+	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/postgres"
+	"github.com/ryan053857/mygoravel/queue"
+)
+
+var _ = queueCmd
+`},
 	{"internal/bootstrap/mailer.go", "mail.md", "func newMailer(", `package bootstrap
 
 import (

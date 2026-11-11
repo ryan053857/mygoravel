@@ -213,3 +213,50 @@ func TestCleanupFailedJobs(t *testing.T) {
 		}
 	})
 }
+
+func TestFailedJobsQueries(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := openDB(t, driver)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		ids := make([]uuid.UUID, 3)
+		for i, topic := range []string{"mail", "mail", "report"} {
+			ids[i] = uuid.New()
+			_, err := db.ExecContext(ctx, `INSERT INTO queue_failed_jobs (id, driver, topic, payload, metadata, attempts, error, failed_at)
+				VALUES (?, 'database', ?, ?, '{"request_id":"r1"}', 3, 'boom', ?)`, ids[i], topic, []byte("{}"), now.Add(time.Duration(i)*time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		failed := queue.NewFailedJobs(db)
+
+		all, err := failed.List(ctx, queue.FailedQuery{})
+		if err != nil || len(all) != 3 || all[0].ID != ids[2] || all[2].ID != ids[0] {
+			t.Fatalf("list %+v err %v", all, err)
+		}
+		if j := all[0]; j.Topic != "report" || j.Attempts != 3 || j.Error != "boom" || j.Metadata["request_id"] != "r1" || j.Driver != "database" {
+			t.Fatalf("job %+v", j)
+		}
+		mail, err := failed.List(ctx, queue.FailedQuery{Topic: "mail", Limit: 1, Offset: 1})
+		if err != nil || len(mail) != 1 || mail[0].ID != ids[0] {
+			t.Fatalf("mail page %+v err %v", mail, err)
+		}
+		counts, err := failed.Count(ctx)
+		if err != nil || counts["mail"] != 2 || counts["report"] != 1 || len(counts) != 2 {
+			t.Fatalf("counts %v err %v", counts, err)
+		}
+
+		if j, err := failed.Get(ctx, ids[1]); err != nil || j.ID != ids[1] || j.Topic != "mail" {
+			t.Fatalf("get %+v err %v", j, err)
+		}
+		if err := failed.Delete(ctx, ids[1]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := failed.Get(ctx, ids[1]); !errors.Is(err, queue.ErrFailedJobNotFound) {
+			t.Fatalf("get deleted: %v", err)
+		}
+		if err := failed.Delete(ctx, ids[1]); !errors.Is(err, queue.ErrFailedJobNotFound) {
+			t.Fatalf("delete twice: %v", err)
+		}
+	})
+}
