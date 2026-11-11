@@ -205,7 +205,8 @@ http:
 | `user_agent` | 记录 `User-Agent` | `false` |
 | `request_header`、`response_header` | 记录请求头、响应头 | `false` |
 | `request_body`、`response_body` | 记录请求体、响应体，各最多 64 KiB | `false` |
-| `trace_id` | 记录 OpenTelemetry 的 `trace_id` 和 `span_id` | `false` |
+
+安装了 [`httpx.Tracing`](telemetry.md#http-tracing) 时，访问日志和其他日志一样自动带有 `trace_id` 和 `span_id`。
 
 记录请求头时，`Authorization`、`Cookie`、`X-Auth-Token`、`X-CSRF-Token`、`X-XSRF-Token` 始终隐藏，记录响应头时 `Set-Cookie` 始终隐藏。还需要隐藏其他字段时，见[敏感信息脱敏](logging.md#redacting-sensitive-data)。
 
@@ -234,7 +235,7 @@ router.Use(httpx.Metrics(a.meters))
 router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 ```
 
-`a.meters` 的创建和指标的属性见[指标与链路追踪](telemetry.md#http-metrics)。
+`a.meters` 的创建和指标的属性见[指标与链路追踪](telemetry.md#http-metrics)。为每个请求创建链路的 `httpx.Tracing` 也在那里介绍。
 
 <a id="custom-stack"></a>
 ## 自行组装

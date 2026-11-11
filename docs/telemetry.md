@@ -7,13 +7,19 @@
     - [队列](#queue-metrics)
     - [定时任务](#schedule-metrics)
     - [告警示例](#alerting)
+- [链路追踪](#tracing)
+    - [创建 TracerProvider](#tracer-provider)
+    - [HTTP 请求](#http-tracing)
+    - [队列](#queue-tracing)
+    - [定时任务](#schedule-tracing)
+    - [日志](#trace-logs)
 
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Grafana Cloud、Datadog 等都能接收。
+框架的 HTTP 服务、队列和调度器都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标和链路。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
 
-和其他功能一样，指标需要显式开启：把同一个 `MeterProvider` 交给需要报告指标的部分即可，没有传入的部分不报告。
+和其他功能一样，两者都需要显式开启：把同一个 `MeterProvider`、`TracerProvider` 交给需要报告的部分即可，没有传入的部分不报告。
 
 <a id="metrics"></a>
 ## 指标
@@ -96,3 +102,71 @@ max by (queue_topic) (queue_job_oldest_ready_age_seconds) > 300
 # 每天凌晨的报表任务 25 小时内没有成功过
 increase(schedule_task_duration_seconds_count{schedule_task="reports:daily", schedule_task_outcome="succeeded"}[25h]) == 0
 ```
+
+<a id="tracing"></a>
+## 链路追踪
+
+一个请求发布了任务、任务又调用了其他服务时，链路追踪把它们串成一条链路，可以看到每一步的耗时和在哪一步出错。
+
+<a id="tracer-provider"></a>
+### 创建 TracerProvider
+
+和 `MeterProvider` 一样在 `open` 中创建，保存在 `App` 中：
+
+```go
+import (
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+traceExporter, err := otlptracehttp.New(ctx)
+if err != nil {
+    return nil, err
+}
+tracers := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExporter))
+stack.MustAdd("tracing", tracers.Shutdown)
+```
+
+接收地址、服务名和采样率同样来自标准环境变量，例如 `OTEL_TRACES_SAMPLER=parentbased_traceidratio`、`OTEL_TRACES_SAMPLER_ARG=0.1` 只记录 10% 的链路。
+
+框架按 [W3C Trace Context](https://www.w3.org/TR/trace-context/) 读写链路，不需要设置全局的 propagator。
+
+<a id="http-tracing"></a>
+### HTTP 请求
+
+`httpx.Tracing` 为每个请求创建一个服务端 span，名称是方法和路由模板，例如 `GET /articles/{id}`。它安装在最外层，访问日志才能带上 `trace_id`：
+
+```go
+router.Use(httpx.Tracing(a.tracers), httpx.Metrics(a.meters))
+router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
+```
+
+请求头带有 `traceparent` 时（例如来自前端或另一个服务），span 接在调用方的链路之后。`5xx` 的请求标记为错误。处理器从请求的 `ctx` 中拿到这个 span，用 `tracers.Tracer(...)` 创建的 span 都会接在它下面。
+
+<a id="queue-tracing"></a>
+### 队列
+
+`queue.Publish` 把 `ctx` 中的链路写入任务的元数据（`traceparent`），不需要任何设置。订阅者传入 `queue.WithTracerProvider` 后，为每次执行创建一个 `process <topic>` span，接在发布任务的 span 之后：
+
+```go
+sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil,
+    queue.WithMeterProvider(a.meters), queue.WithTracerProvider(a.tracers))
+```
+
+这样，发布文章的请求和随后发送通知邮件的任务出现在同一条链路中，中间隔了多久、邮件为什么失败都能看到。每次重试是一个新的 span，失败、重试和租约丢失时标记为错误。
+
+<a id="schedule-tracing"></a>
+### 定时任务
+
+```go
+sched := schedule.New(a.locker, a.cfg.Schedule, nil,
+    schedule.WithMeterProvider(a.meters), schedule.WithTracerProvider(a.tracers))
+```
+
+每次执行创建一个 `schedule <任务名>` span，是一条新链路的起点，任务中发布的队列任务接在它之后。被跳过或由其他实例执行的触发没有 span。
+
+<a id="trace-logs"></a>
+### 日志
+
+`ctx` 中有 span 时，用它记录的日志自动带上 `trace_id` 和 `span_id`，包括访问日志、队列和调度器的日志，以及处理函数里 `slog.InfoContext(ctx, ...)` 记录的业务日志。在链路追踪系统中可以按 `trace_id` 找到一条链路的全部日志。
+

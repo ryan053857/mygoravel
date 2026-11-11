@@ -8,6 +8,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/ryan053857/mygoravel/logging"
 )
@@ -56,10 +57,11 @@ func validUnique(key string) error {
 }
 
 // propagated 是从发布方 context 带到处理函数 context 的日志字段。
-var propagated = []string{logging.AttrRequestID, logging.AttrTraceID}
+var propagated = []string{logging.AttrRequestID}
 
 // Publish 把 payload 编码为 JSON，以新的 UUIDv7 作为任务 ID 交给驱动 d，发布到 topic。
-// ctx 中的 request_id 和 trace_id 日志字段会写入任务元数据，处理任务时还原到处理函数的 context 中。
+// ctx 中的 request_id 日志字段和 OpenTelemetry 链路（W3C traceparent）会写入任务元数据，
+// 处理任务时还原到处理函数的 context 中。
 //
 //	err := queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
 func Publish[T any](ctx context.Context, d Driver, topic string, payload T, opts ...PublishOption) error {
@@ -87,6 +89,7 @@ func Publish[T any](ctx context.Context, d Driver, topic string, payload T, opts
 			}
 		}
 	}
+	traceContext.Inject(ctx, propagation.MapCarrier(j.Metadata))
 	return errors.Wrapf(d.Enqueue(ctx, j), "queue: publish to %q", topic)
 }
 
@@ -108,7 +111,7 @@ func NewPublisher(d Driver) *Publisher {
 
 // Publish 实现 message.Publisher：把 msgs 作为 topic 的任务入队，使用第一条消息的 context。
 // 消息的 UUID 是任务 ID，必须是合法的 UUID。元数据 _queue_available_at（RFC 3339）指定最早处理时间，
-// _queue_unique 指定 Unique 键。
+// _queue_unique 指定 Unique 键。元数据中没有 traceparent 时，写入消息 context 中的 OpenTelemetry 链路。
 func (p *Publisher) Publish(topic string, msgs ...*message.Message) error {
 	if topic == "" {
 		return errors.New("queue: empty topic")
@@ -137,6 +140,9 @@ func (p *Publisher) Publish(topic string, msgs ...*message.Message) error {
 			default:
 				j.Metadata[k] = v
 			}
+		}
+		if j.Metadata["traceparent"] == "" {
+			traceContext.Inject(msg.Context(), propagation.MapCarrier(j.Metadata))
 		}
 		jobs = append(jobs, j)
 	}

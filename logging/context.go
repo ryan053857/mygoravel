@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 type ctxKey struct{}
@@ -35,14 +37,19 @@ type contextHandler struct {
 	slog.Handler
 }
 
+// Handle 追加 context 中的字段；ctx 中有 OpenTelemetry span 时还追加 trace_id 和 span_id。
 func (h contextHandler) Handle(ctx context.Context, r slog.Record) error {
 	if ctx != nil {
-		if attrs, ok := ctx.Value(ctxKey{}).([]slog.Attr); ok {
-			r.AddAttrs(attrs...)
+		attrs, _ := ctx.Value(ctxKey{}).([]slog.Attr)
+		r.AddAttrs(attrs...)
+		if sc := trace.SpanContextFromContext(ctx); sc.IsValid() && !slices.ContainsFunc(attrs, isTraceID) {
+			r.AddAttrs(slog.String(AttrTraceID, sc.TraceID().String()), slog.String(AttrSpanID, sc.SpanID().String()))
 		}
 	}
 	return h.Handler.Handle(ctx, r)
 }
+
+func isTraceID(a slog.Attr) bool { return a.Key == AttrTraceID }
 
 func (h contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return contextHandler{h.Handler.WithAttrs(attrs)}

@@ -28,6 +28,7 @@ const (
 	AttrComponent = "component"
 	AttrRequestID = "request_id"
 	AttrTraceID   = "trace_id"
+	AttrSpanID    = "span_id"
 	AttrMessageID = "message_id"
 	AttrAttempt   = "attempt"
 )

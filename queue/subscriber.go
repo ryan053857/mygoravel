@@ -9,6 +9,7 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/logging"
 )
@@ -46,6 +47,7 @@ type Subscriber struct {
 	cfg       Config
 	logger    *slog.Logger
 	observers []Observer
+	tracer    trace.Tracer // 为 nil 时不创建 span
 
 	mu     sync.Mutex
 	closed bool
@@ -233,7 +235,7 @@ func (s *Subscriber) deliver(ctx context.Context, out chan<- *message.Message, c
 		}
 	}
 	o := &outcome{}
-	msgCtx := logging.WithAttrs(context.Background(), attrs...)
+	msgCtx := logging.WithAttrs(s.startSpan(context.Background(), j), attrs...)
 	msgCtx = context.WithValue(msgCtx, attemptKey{}, attemptInfo{j.Attempt, s.cfg.MaxAttempts})
 	msgCtx, cancel := context.WithCancelCause(context.WithValue(msgCtx, outcomeKey{}, o))
 	msg.SetContext(msgCtx)
@@ -242,6 +244,9 @@ func (s *Subscriber) deliver(ctx context.Context, out chan<- *message.Message, c
 	case out <- msg:
 	case <-ctx.Done():
 		cancel(nil)
+		if s.tracer != nil {
+			trace.SpanFromContext(msgCtx).End() // 没有交给处理函数，任务由调用方放回
+		}
 		return false
 	}
 	l.inflight.Add(1)

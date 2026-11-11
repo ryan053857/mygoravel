@@ -20,8 +20,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/queue"
@@ -70,6 +74,7 @@ func Run(t *testing.T, b Backend) {
 		{"unique delayed job holds its key", uniqueDelayed},
 		{"unique within one batch", uniqueBatch},
 		{"unique concurrent publishes", uniqueConcurrent},
+		{"tracing", tracing},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
 			d, db := b.New(t)
@@ -804,6 +809,59 @@ func metrics(t *testing.T, s *setup) {
 		_, hasAge := gaugeValue[float64](got["queue.job.oldest_ready_age"], topic)
 		return ok1 && ok2 && ready == 1 && failed == 1 && hasAge != s.backend.PartialStats
 	})
+}
+
+// tracing 检查任务带着发布方的链路：处理函数的 ctx 在同一条链路中，每次执行一个 consumer span，失败时标记为错误。
+func tracing(t *testing.T, s *setup) {
+	spans := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
+	var mu sync.Mutex
+	handled := map[int]trace.SpanContext{}
+	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
+		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+			mu.Lock()
+			handled[p.N] = trace.SpanContextFromContext(ctx)
+			mu.Unlock()
+			if p.N == 2 {
+				return queue.Permanent(errors.New("gone"))
+			}
+			return nil
+		})
+	}, queue.WithTracerProvider(tp))
+
+	ctx, request := tp.Tracer("test").Start(context.Background(), "request")
+	if err := queue.Publish(ctx, s.driver, "jobs", payload{N: 1}); err != nil {
+		t.Fatal(err)
+	}
+	request.End()
+	s.publish(t, "jobs", 2) // 没有链路的发布
+	eventually(t, 5*time.Second, func() bool { return len(spans.Ended()) == 3 })
+
+	var process []sdktrace.ReadOnlySpan
+	for _, sp := range spans.Ended() {
+		if sp.Name() == "process jobs" {
+			process = append(process, sp)
+		}
+	}
+	if len(process) != 2 {
+		t.Fatalf("%d process spans", len(process))
+	}
+	traced, untraced := process[0], process[1]
+	if traced.Parent().SpanID() != request.SpanContext().SpanID() {
+		traced, untraced = untraced, traced
+	}
+	if traced.Parent().SpanID() != request.SpanContext().SpanID() || traced.SpanKind() != trace.SpanKindConsumer ||
+		traced.Status().Code == codes.Error {
+		t.Fatalf("traced span parent %v kind %v status %v", traced.Parent(), traced.SpanKind(), traced.Status())
+	}
+	if untraced.Parent().IsValid() || untraced.Status().Code != codes.Error {
+		t.Fatalf("untraced span parent %v status %v", untraced.Parent(), untraced.Status())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if handled[1].TraceID() != request.SpanContext().TraceID() || handled[1].SpanID() != traced.SpanContext().SpanID() {
+		t.Fatalf("handler span %v, want child of %v", handled[1], request.SpanContext())
+	}
 }
 
 // collect 读取一次指标，按名称返回。
