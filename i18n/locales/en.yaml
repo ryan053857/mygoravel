@@ -22,6 +22,10 @@ sheet.bad_file: The spreadsheet could not be read
 sheet.no_header: The spreadsheet has no header row
 sheet.missing_columns: "Missing required columns: {{.columns}}"
 sheet.unknown_column: "Unknown column: {{.column}}"
+document.unsupported_format: This file format is not supported
+document.encrypted: The document is password-protected and cannot be read
+document.corrupt: The document is damaged or not in the expected format
+document.too_large: The document is too large to process
 web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
 web.bad_query: "Invalid query parameter {{.field}}: {{.message}}"

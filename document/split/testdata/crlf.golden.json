@@ -1,0 +1,15 @@
+[
+  {
+    "Start": 0,
+    "End": 203,
+    "Length": 80,
+    "Text": "# Windows 文档\r\n\r\n第一段使用 CRLF 换行。这一行比较长，需要被切分成多个片段，以检查字节偏移和长度计算是否正确。\r\n第二行紧跟在后面，没有空行。\r\n\r\n"
+  },
+  {
+    "Start": 203,
+    "End": 230,
+    "Length": 12,
+    "Context": "Windows 文档",
+    "Text": "## 第二节\r\n\r\n内容。\r\n"
+  }
+]

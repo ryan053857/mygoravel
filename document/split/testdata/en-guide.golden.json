@@ -1,0 +1,84 @@
+[
+  {
+    "Start": 0,
+    "End": 46,
+    "Length": 46,
+    "Text": "---\ntitle: Getting started\ntags: [guide]\n---\n\n"
+  },
+  {
+    "Start": 46,
+    "End": 191,
+    "Length": 145,
+    "Text": "Getting Started\n===============\n\nThis guide walks you through installing the tool, configuring it for your\nproject and running your first build. "
+  },
+  {
+    "Start": 161,
+    "End": 370,
+    "Length": 209,
+    "Context": "Getting Started",
+    "Text": "and running your first build. It assumes you are comfortable with a\nterminal and have Go installed. If you are new to Go, read the official tour\nfirst; the rest of this guide will make more sense afterwards.\n\n"
+  },
+  {
+    "Start": 370,
+    "End": 524,
+    "Length": 154,
+    "Context": "Getting Started",
+    "Text": "Installation\n------------\n\nInstall the command with `go install example.com/tool@latest`. The binary lands\nin `$GOBIN`, which defaults to `$HOME/go/bin`. "
+  },
+  {
+    "Start": 496,
+    "End": 662,
+    "Length": 166,
+    "Context": "Getting Started \u003e Installation",
+    "Text": "defaults to `$HOME/go/bin`. Make sure that directory is on\nyour `PATH`, otherwise your shell will not find the command.\n\n- On macOS, add the directory in `~/.zshrc`.\n"
+  },
+  {
+    "Start": 633,
+    "End": 777,
+    "Length": 144,
+    "Context": "Getting Started \u003e Installation",
+    "Text": "the directory in `~/.zshrc`.\n- On Linux, add it in `~/.profile` or your shell's equivalent.\n- On Windows, edit the user environment variables.\n\n"
+  },
+  {
+    "Start": 777,
+    "End": 980,
+    "Length": 203,
+    "Context": "Getting Started",
+    "Text": "Configuration\n-------------\n\nCreate `tool.yaml` in the project root:\n\n    name: demo\n    targets:\n      - linux/amd64\n      - darwin/arm64\n\n\u003c!-- The schema is documented separately.\n# Not a heading\n--\u003e\n\n"
+  },
+  {
+    "Start": 959,
+    "End": 1162,
+    "Length": 203,
+    "Context": "Getting Started \u003e Configuration",
+    "Text": "# Not a heading\n--\u003e\n\nOptions can also come from the environment. Variables override the file, and\nflags override both. This lets CI change a single setting without editing the\nchecked-in configuration.\n\n"
+  },
+  {
+    "Start": 1135,
+    "End": 1291,
+    "Length": 156,
+    "Context": "Getting Started \u003e Configuration",
+    "Text": "checked-in configuration.\n\n| Option | Default | Description |\n|--------|---------|-------------|\n| name | directory name | Project name used in artefacts |\n"
+  },
+  {
+    "Start": 1291,
+    "End": 1395,
+    "Length": 104,
+    "Context": "Getting Started \u003e Configuration\n| Option | Default | Description |\n|--------|---------|-------------|",
+    "Text": "| targets | host platform | Platforms to build for |\n| parallel | number of CPUs | Concurrent builds |\n\n"
+  },
+  {
+    "Start": 1395,
+    "End": 1553,
+    "Length": 158,
+    "Context": "Getting Started",
+    "Text": "## Running a build\n\nRun `tool build`. The first build downloads dependencies and may take a\nminute; later builds reuse the cache. Pass `-v` to see each step. "
+  },
+  {
+    "Start": 1525,
+    "End": 1667,
+    "Length": 142,
+    "Context": "Getting Started \u003e Running a build",
+    "Text": "Pass `-v` to see each step. When a build\nfails, the tool prints the failing step and exits with a non-zero status, so\nscripts can stop early.\n"
+  }
+]

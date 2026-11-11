@@ -22,6 +22,10 @@ sheet.bad_file: 无法读取表格文件
 sheet.no_header: 表格中没有表头
 sheet.missing_columns: 缺少必需的列：{{.columns}}
 sheet.unknown_column: 没有这一列：{{.column}}
+document.unsupported_format: 不支持这种文件格式
+document.encrypted: 文档设置了密码，无法读取
+document.corrupt: 文档已损坏或格式不正确
+document.too_large: 文档太大，超出了处理上限
 web.not_found: 页面不存在
 web.bad_form: 无法解析提交的表单
 web.bad_query: 查询参数 {{.field}} 不正确：{{.message}}

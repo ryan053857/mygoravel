@@ -31,6 +31,7 @@ var dependencies = map[string][]string{
 	"notification": {"errorx", "identity"},
 	"webhook":      {"errorx", "identity", "outbound", "queue"},
 	"outbound":     {},
+	"document":     {"errorx"},
 	"form":         {"i18n"},
 	"sheet":        {"errorx", "form"},
 	"imports":      {"database", "errorx", "filesystem", "i18n", "identity", "queue", "sheet"},
