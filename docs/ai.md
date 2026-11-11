@@ -8,6 +8,7 @@
     - [停止回答](#stopping)
     - [中途插话](#steering)
     - [断线重连](#reconnecting)
+    - [加入其他消息](#appending-messages)
 - [审批](#approval)
 - [在页面中使用](#pages)
 - [图片、语音和向量](#media)
@@ -276,6 +277,29 @@ await fetch(`/api/v1/assistant/chat/${conversationId}/steer`, { method: 'POST', 
 `useChat` 设置了 `resume: true` 时，页面打开和网络恢复后会请求 `GET {api}/{id}/stream`。回答还在进行时，`ai.UIResume` 从头重放它，`useChat` 用重放的内容重建这条回答；没有进行中的回答时返回 `204`。
 
 已经完成的内容由 `Runs.UIMessages` 从对话存储中读出，作为 `useChat` 的初始消息。
+
+<a id="appending-messages"></a>
+### 加入其他消息
+
+对话中有时需要加入不是模型生成的消息：人写的回复、系统通知（「订单已发货」）、从邮件等其他渠道同步来的消息。`Runs.Append` 把它写进对话，模型在之后的回答中能看到：
+
+```go
+err := runs.Append(ctx, userID, conversationID, "staff:42", model.NewAssistantMessage("已为你补发，请留意短信"))
+```
+
+第三个参数是作者，由应用决定怎样命名。trpc-agent-go 把作者不是当前 agent 的消息作为用户消息交给模型；创建 agent 时加上 `llmagent.WithAddContextPrefix(true)`，消息前会带上 `[staff:42] said:`，模型才知道这句话是谁说的。
+
+`UIMessages` 把这样的消息作为单独的一条返回，`metadata.author` 是作者，不会并入前后的回答，前端据此用不同的样式显示：
+
+```tsx
+{message.metadata?.author ? <StaffBubble message={message} /> : <Bubble message={message} />}
+```
+
+几条规则：
+
+- 对话正在回答时返回 `ai.ErrBusy`，回答过程中要让模型看到用户的新消息用[插话](#steering)；有等待[审批](#approval)的工具调用时返回 `ai.ErrAwaitingApproval`。部署了多个实例时，这两种判断都对整个集群生效。
+- trpc-agent-go 丢弃对话中第一条用户消息之前的内容，所以对话里还没有用户消息时，只能加入 `user` 角色的消息，否则返回错误。
+- `Append` 只写入对话，不会推送给已经打开的页面。需要实时显示时，由应用通过[广播](broadcasting.md)通知页面，页面重新读取 `GET /assistant/chat/{id}/messages`。
 
 <a id="approval"></a>
 ## 审批

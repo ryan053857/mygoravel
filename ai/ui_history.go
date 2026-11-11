@@ -22,6 +22,19 @@ func (rs *Runs) UIMessages(ctx context.Context, userID, sessionID string) ([]UIM
 		if ev.Response == nil || ev.IsPartial || ev.Error != nil {
 			continue
 		}
+		if author, ok := appendedBy(&ev); ok {
+			// Append 加入的消息单独成为一条，前后的回答不合并到一起。
+			for _, c := range ev.Choices {
+				role := "assistant"
+				if c.Message.Role == model.RoleUser {
+					role = "user"
+				}
+				out = append(out, UIMessage{ID: ev.ID, Role: role, Parts: []UIPart{{Type: "text", Text: c.Message.Content}},
+					Metadata: &UIMetadata{Author: author}})
+			}
+			assistant = -1
+			continue
+		}
 		for _, c := range ev.Choices {
 			m := c.Message
 			switch m.Role {

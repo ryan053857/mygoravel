@@ -52,10 +52,11 @@ type Runs struct {
 	runnerOpts []runner.Option
 	cluster    *cluster // 多实例协作，见 Cluster；nil 表示单实例
 
-	mu       sync.Mutex
-	runs     map[session.Key]*Run
-	wg       sync.WaitGroup
-	draining bool // Shutdown 或 Close 开始后不再开始新的运行
+	mu        sync.Mutex
+	runs      map[session.Key]*Run
+	appending map[session.Key]bool // Append 正在写入的对话，期间不开始运行
+	wg        sync.WaitGroup
+	draining  bool // Shutdown 或 Close 开始后不再开始新的运行
 }
 
 // Option 配置 Runs。
@@ -90,6 +91,8 @@ func NewRuns(app string, ag agent.Agent, sessions session.Service, opts ...Optio
 		approval: map[string]tool.CallableTool{},
 		keep:     time.Minute,
 		runs:     map[session.Key]*Run{},
+
+		appending: map[session.Key]bool{},
 	}
 	for _, opt := range opts {
 		opt(rs)
@@ -232,6 +235,9 @@ func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, o
 	if rs.draining {
 		return nil, ErrShuttingDown.New()
 	}
+	if rs.appending[key] {
+		return nil, ErrBusy.New() // Append 正在写入这个对话
+	}
 	prev, ok := rs.runs[key]
 	if ok && prev.remote == nil && !prev.isFinished() {
 		return nil, ErrBusy.New()
@@ -297,9 +303,9 @@ func (rs *Runs) start(ctx context.Context, key session.Key, msg model.Message, o
 // localBusy 报告本实例上是否有这个对话正在进行的运行。
 func (rs *Runs) localBusy(key session.Key) bool {
 	rs.mu.Lock()
+	defer rs.mu.Unlock()
 	r, ok := rs.runs[key]
-	rs.mu.Unlock()
-	return ok && r.remote == nil && !r.isFinished()
+	return rs.appending[key] || (ok && r.remote == nil && !r.isFinished())
 }
 
 // Get 返回对话当前的运行，或者刚结束、仍在保留期内的运行；没有时返回 nil。

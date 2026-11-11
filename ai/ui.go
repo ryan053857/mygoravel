@@ -48,6 +48,15 @@ type UIMessage struct {
 	ID    string   `json:"id"`
 	Role  string   `json:"role" enum:"system,user,assistant"`
 	Parts []UIPart `json:"parts"`
+	// Metadata 是消息的附加信息。Runs.Append 加入的消息带有 author，模型的回答和用户发送的消息没有。
+	Metadata *UIMetadata `json:"metadata,omitempty"`
+}
+
+// UIMetadata 是 UIMessage 的附加信息。
+type UIMetadata struct {
+	_ struct{} `additionalProperties:"true"`
+	// Author 是 Runs.Append 加入消息时给出的作者。
+	Author string `json:"author,omitempty"`
 }
 
 // UIPart 是消息的一部分：文本、思考过程、工具调用、插话等。

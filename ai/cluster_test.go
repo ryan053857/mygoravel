@@ -208,3 +208,30 @@ func TestClusterShutdownFinishesRunsMirroredElsewhere(t *testing.T) {
 	}
 	collect(t, next, "")
 }
+
+// 对话在其他实例上回答时，Append 返回 ErrBusy。
+func TestClusterAppendWhileRunningElsewhere(t *testing.T) {
+	m := aitest.NewModel(aitest.Reply{Text: "慢", Delay: 300 * time.Millisecond})
+	a, b := twoInstances(t, m, nil)
+	ctx := context.Background()
+	r, err := a.Start(ctx, "u1", "c1", model.NewUserMessage("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x")); !errors.Is(err, ai.ErrBusy) {
+		t.Fatalf("append on other instance: %v", err)
+	}
+	<-r.Done()
+	// 运行所在的实例随后释放对话锁。
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := b.Append(ctx, "u1", "c1", "system", model.NewUserMessage("x"))
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ai.ErrBusy) || time.Now().After(deadline) {
+			t.Fatalf("append after the run: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
