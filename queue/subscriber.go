@@ -322,7 +322,7 @@ func (s *Subscriber) nack(ctx context.Context, c Claim, cause error, started tim
 		cause = errors.New("queue: message nacked")
 	}
 	if !IsPermanent(cause) && j.Attempt < s.cfg.MaxAttempts {
-		delay := backoff(j.Attempt)
+		delay := retryDelay(cause, j.Attempt)
 		at := time.Now().Add(delay)
 		err := withTimeout(func(ctx context.Context) error { return c.Retry(ctx, at) })
 		if err != nil {

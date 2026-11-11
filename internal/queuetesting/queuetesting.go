@@ -48,6 +48,7 @@ func Run(t *testing.T, b Backend) {
 		{"publish and handle", publishAndHandle},
 		{"delay", delay},
 		{"retry with backoff", retryWithBackoff},
+		{"retry after", retryAfter},
 		{"failed jobs", failedJobs},
 		{"permanent failures", permanentFailures},
 		{"concurrent failures", concurrentFailures},
@@ -271,6 +272,27 @@ func retryWithBackoff(t *testing.T, s *setup) {
 	defer mu.Unlock()
 	if len(attempts) != 2 || attempts[0] != "1" || attempts[1] != "2" {
 		t.Fatalf("attempts %v", attempts)
+	}
+}
+
+// RetryAfter 指定的等待时间代替按执行次数计算的退避时间（第一次失败后约 1 秒）。
+func retryAfter(t *testing.T, s *setup) {
+	var calls atomic.Int32
+	var retried atomic.Int64
+	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
+		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+			if calls.Add(1) == 1 {
+				return queue.RetryAfter(errors.New("rate limited"), 2*time.Second)
+			}
+			retried.Store(time.Now().UnixNano())
+			return nil
+		})
+	})
+	begin := time.Now()
+	s.publish(t, "jobs", 1)
+	eventually(t, 5*time.Second, func() bool { return retried.Load() != 0 })
+	if d := time.Unix(0, retried.Load()).Sub(begin); d < 1900*time.Millisecond {
+		t.Fatalf("retried after %v, want about 2s", d)
 	}
 }
 

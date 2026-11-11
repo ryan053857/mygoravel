@@ -121,3 +121,17 @@ func TestPermanent(t *testing.T) {
 		t.Fatal("plain error reported permanent")
 	}
 }
+
+func TestRetryAfter(t *testing.T) {
+	if queue.RetryAfter(nil, time.Second) != nil {
+		t.Fatal("RetryAfter(nil) != nil")
+	}
+	base := errors.New("rate limited")
+	err := errors.Wrap(queue.RetryAfter(base, time.Second), "send")
+	if !errors.Is(err, base) || err.Error() != "send: rate limited" || queue.IsPermanent(err) {
+		t.Fatalf("err = %v", err)
+	}
+	if !queue.IsPermanent(queue.Permanent(queue.RetryAfter(base, time.Second))) {
+		t.Fatal("Permanent(RetryAfter(...)) is not permanent")
+	}
+}

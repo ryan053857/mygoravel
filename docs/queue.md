@@ -213,6 +213,17 @@ if errors.Is(err, article.ErrNotFound) {
 
 任务内容无法解码为处理函数的参数类型时，同样视为永久失败。
 
+第三方服务限流时往往会告诉你多久之后再试，例如 HTTP 429 响应的 `Retry-After`。用 `queue.RetryAfter` 包装错误，任务在指定的时间之后重试，而不是按上表等待：
+
+```go
+if resp.StatusCode == http.StatusTooManyRequests {
+    wait, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
+    return queue.RetryAfter(errors.New("rate limited"), time.Duration(wait)*time.Second)
+}
+```
+
+这次重试同样计入执行次数，次数用完时照常转入失败任务表。
+
 <a id="failed-jobs"></a>
 ### 失败任务
 

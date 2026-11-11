@@ -26,6 +26,19 @@ func TestBackoff(t *testing.T) {
 	}
 }
 
+func TestRetryDelay(t *testing.T) {
+	base := errors.New("rate limited")
+	if got := retryDelay(errors.Wrap(RetryAfter(base, 30*time.Second), "send"), 1); got != 30*time.Second {
+		t.Fatalf("wrapped RetryAfter = %v", got)
+	}
+	if got := retryDelay(RetryAfter(base, -time.Second), 3); got != 0 {
+		t.Fatalf("negative RetryAfter = %v", got)
+	}
+	if got := retryDelay(base, 1); got < 900*time.Millisecond || got > 1100*time.Millisecond {
+		t.Fatalf("plain error = %v, want backoff", got)
+	}
+}
+
 func TestRecordError(t *testing.T) {
 	boom := errors.New("boom")
 	h := recordError(func(*message.Message) ([]*message.Message, error) { return nil, boom })

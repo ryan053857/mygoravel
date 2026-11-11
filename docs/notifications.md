@@ -8,6 +8,7 @@
 - [查看通知](#listing)
     - [标记已读](#marking-as-read)
 - [同时发送邮件](#mail)
+- [其他渠道：Telegram](#telegram)
 - [实时推送](#realtime)
 - [保留期限](#retention)
 
@@ -154,7 +155,117 @@ msg.To = []mail.Address{{Name: authorUser.Name, Address: authorUser.Email}}
 return queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
 ```
 
-`authorUser` 是事务中查出的作者。用户是否接收邮件这类偏好保存在应用自己的表中，由 action 判断。短信、Slack 等其他渠道也是同样的写法：实现一个发送接口，交给队列执行。
+`authorUser` 是事务中查出的作者。用户是否接收邮件这类偏好保存在应用自己的表中，由 action 判断。
+
+<a id="telegram"></a>
+## 其他渠道：Telegram
+
+短信、Slack、Telegram 等渠道都按邮件的方式实现：在事务中把消息交给队列，由一个任务调用第三方接口。下面以 Telegram 为例，框架不提供它的客户端，[Bot API](https://core.telegram.org/bots/api) 发一条消息只是一次 HTTP 请求。
+
+**绑定。** bot 不能主动给陌生人发消息，用户要先在 Telegram 中启动它，应用才能拿到他的 `chat_id`：
+
+1. 设置页的「绑定 Telegram」生成一个一次性 token（保存在表中，10 分钟过期），跳转到 `https://t.me/<bot 用户名>?start=<token>`。token 只能由 `A-Za-z0-9_-` 组成，最长 64 个字符。
+2. 用户点击「Start」后，Telegram 把消息 `/start <token>` 推送到应用的 webhook。
+3. webhook 校验 `X-Telegram-Bot-Api-Secret-Token` 请求头，用 token 找到用户，把 `chat_id` 和 `from.language_code` 保存到应用的 `telegram_links` 表。
+
+```go
+func (h *Handlers) Webhook(w http.ResponseWriter, r *http.Request) {
+    if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Telegram-Bot-Api-Secret-Token")), []byte(h.secret)) != 1 {
+        http.NotFound(w, r)
+        return
+    }
+    var u struct {
+        Message struct {
+            Text string `json:"text"`
+            Chat struct {
+                ID int64 `json:"id"`
+            } `json:"chat"`
+            From struct {
+                LanguageCode string `json:"language_code"`
+            } `json:"from"`
+        } `json:"message"`
+    }
+    if json.NewDecoder(r.Body).Decode(&u) == nil {
+        if token, ok := strings.CutPrefix(u.Message.Text, "/start "); ok {
+            if err := h.link.Handle(r.Context(), token, u.Message.Chat.ID, u.Message.From.LanguageCode); err != nil {
+                slog.WarnContext(r.Context(), "link telegram", "error", err)
+            }
+        }
+    }
+    w.WriteHeader(http.StatusOK) // 不是 200 时 Telegram 会一直重发
+}
+```
+
+webhook 路由挂在页面的会话和跨站请求防护之外。webhook 的地址和 `secret` 用 `setWebhook` 注册一次，可以写成一个[命令](commands.md)。
+
+**发送。** 发布文章时，作者绑定了 Telegram，就在同一个事务中把消息交给队列，文案用作者绑定时的语言渲染：
+
+```go
+var SendTopic = queue.Topic[Message]("telegram.send")
+
+type Message struct {
+    ChatID int64  `json:"chat_id"`
+    Text   string `json:"text"`
+}
+```
+
+```go
+if link != nil { // link 是事务中查出的作者的绑定
+    lctx := i18n.WithLocale(ctx, a.languages, i18n.Match(a.languages, link.Language))
+    err = telegram.SendTopic.Publish(ctx, queue.Database(tx), telegram.Message{
+        ChatID: link.ChatID,
+        Text:   i18n.T(lctx, n.Event, n.Data),
+    })
+}
+```
+
+任务调用 `sendMessage`，按 Telegram 返回的错误决定是否重试：
+
+```go
+func (a *Send) Job(ctx context.Context, m Message) error {
+    body, _ := json.Marshal(map[string]any{"chat_id": m.ChatID, "text": m.Text, "parse_mode": "HTML"})
+    req, _ := http.NewRequestWithContext(ctx, http.MethodPost, a.api+"/bot"+a.token+"/sendMessage", bytes.NewReader(body))
+    req.Header.Set("Content-Type", "application/json")
+    resp, err := a.client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    var r struct {
+        OK          bool   `json:"ok"`
+        ErrorCode   int    `json:"error_code"`
+        Description string `json:"description"`
+        Parameters  struct {
+            RetryAfter int `json:"retry_after"`
+        } `json:"parameters"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+        return err
+    }
+    if r.OK {
+        return nil
+    }
+    err = errors.Newf("telegram: %d %s", r.ErrorCode, r.Description)
+    switch r.ErrorCode {
+    case http.StatusForbidden: // 用户屏蔽了 bot 或注销了账号
+        if err := Unlink(ctx, a.db, m.ChatID); err != nil {
+            return err
+        }
+        return queue.Permanent(err)
+    case http.StatusBadRequest: // chat 不存在、文本格式错误
+        return queue.Permanent(err)
+    case http.StatusTooManyRequests:
+        return queue.RetryAfter(err, time.Duration(r.Parameters.RetryAfter)*time.Second)
+    }
+    return err // 5xx 等：按退避时间重试
+}
+```
+
+- 用户屏蔽 bot 后再发送会返回 403，这时删除绑定，以后不再给他发。
+- 用 HTML 格式时，文案中的文章标题等内容要先经过 `html.EscapeString`，否则一个 `<` 就会让消息被拒绝。
+- Telegram 限制同一个聊天每秒约 1 条、全部聊天每秒约 30 条，超出时返回 429 和 `retry_after`，由 [`queue.RetryAfter`](queue.md#failures-and-retries) 按它的要求等待。给大量用户群发时，再用[限流](rate-limiting.md)控制发送速度。
+- `a.api` 平时是 `https://api.telegram.org`，测试时换成 `httptest.Server` 的地址。
+- 任务至少执行一次，极少数情况下用户会收到两条相同的消息。
 
 <a id="realtime"></a>
 ## 实时推送
