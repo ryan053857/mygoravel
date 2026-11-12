@@ -74,6 +74,10 @@ const (
 // Store 是基于 Bun 的 token 存储，查询兼容 PostgreSQL、MySQL 与 SQLite，
 // Migrations 提供三种数据库的表结构。可以并发使用。
 //
+// Config 只在 Login 签发时使用：登录 token 的空闲时长和最长期限写入 token 本身，Validate、List、Revoke 等不读取它。
+// 所以多个 Store 可以共用一张表，例如每套账号体系用自己的 Config 创建一个 Store 签发 token，
+// 校验交给其中任何一个都得到相同的结果。
+//
 // Store 不在后台清理过期 token：过期 token 校验不通过，由应用定时调用 Cleanup 删除。
 type Store struct {
 	db  bun.IDB
@@ -94,7 +98,8 @@ type row struct {
 	Kind             Kind      `bun:"kind,notnull"`
 	Name             string    `bun:"name,notnull"`
 	Scopes           string    `bun:"scopes,notnull"`
-	Remember         bool      `bun:"remember,notnull"`
+	IdleTimeout      int64     `bun:"idle_timeout,notnull"` // 秒；0 表示不按空闲延长
+	EndsAt           time.Time `bun:"ends_at,nullzero"`     // 登录 token 的最长期限，滑动延长不超过它
 	IP               string    `bun:"ip,notnull"`
 	UserAgent        string    `bun:"user_agent,notnull"`
 	CreatedAt        time.Time `bun:"created_at,notnull"`
@@ -113,20 +118,23 @@ func NewStore(db bun.IDB, cfg Config) *Store {
 	return &Store{db: db, cfg: cfg, now: time.Now}
 }
 
-// Login 为 sub 签发登录 token，返回 token 明文，明文只在这里返回一次。有效期按 Config 滑动。
+// Login 为 sub 签发登录 token，返回 token 明文，明文只在这里返回一次。
+// 有效期按此刻的 Config 确定并写入 token：最长 Lifetime，空闲时长为 IdleTimeout（Device.Remember 时为 RememberIdleTimeout）。
 //
 // 登录 token 代表用户本人，不限制权限：校验得到的主体 Scopes 为 nil，权限由 Resolve 按用户当前的角色加载。
 // sub.Tenant 不为空时，token 只能在这个租户中使用，例如只属于某个租户的终端客户账号。
 // sub.Impersonator 不为零值时签发的是代为登录的 token，校验得到的主体带有同样的 Impersonator。
 func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (string, error) {
 	now := s.now().UTC()
+	idle, end := s.cfg.idle(d.Remember), now.Add(s.cfg.Lifetime)
 	r := &row{
-		Kind:      KindLogin,
-		Tenant:    sub.Tenant,
-		Remember:  d.Remember,
-		IP:        d.IP,
-		UserAgent: truncate(d.UserAgent, maxUserAgent),
-		ExpiresAt: s.cfg.deadline(now, now, d.Remember),
+		Kind:        KindLogin,
+		Tenant:      sub.Tenant,
+		IdleTimeout: int64(idle / time.Second),
+		EndsAt:      end,
+		IP:          d.IP,
+		UserAgent:   truncate(d.UserAgent, maxUserAgent),
+		ExpiresAt:   deadline(end, idle, now),
 	}
 	return s.issue(ctx, sub, r, now)
 }
@@ -230,8 +238,8 @@ func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, e
 func (s *Store) touch(ctx context.Context, r *row, now time.Time) error {
 	q := s.db.NewUpdate().Model((*row)(nil)).Set("last_used_at = ?", now).
 		Where("id = ?", r.ID).Where("last_used_at < ?", now.Add(-touchInterval))
-	if r.Kind == KindLogin {
-		q = q.Set("expires_at = ?", s.cfg.deadline(r.CreatedAt, now, r.Remember))
+	if r.IdleTimeout > 0 {
+		q = q.Set("expires_at = ?", deadline(r.EndsAt, time.Duration(r.IdleTimeout)*time.Second, now))
 	}
 	_, err := q.Exec(ctx)
 	return errors.Wrap(err, "apitoken: touch")

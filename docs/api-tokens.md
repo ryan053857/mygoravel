@@ -46,6 +46,8 @@ api_token:
 
 上面是默认值。登录 token 的截止时间是“签发时间 + `lifetime`”与“最近使用时间 + 空闲时长”中较早的一个，与[会话](session.md#configuration)的 `lifetime`、`idle_timeout` 含义相同。客户端不需要刷新 token：每次使用都会延长它的有效期，收到 `401` 时让用户重新登录即可。
 
+有效期在签发时写入 token：修改配置只影响之后签发的 token，已经签发的 token 仍然按签发时的有效期滑动。
+
 <a id="assembling"></a>
 ## 装配
 
@@ -63,6 +65,16 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 tokens := apitoken.NewStore(a.db, a.cfg.APIToken)
 requireArticles := rest.RequireBearer(api, tokens.Validate, "articles")
 ```
+
+产品有多套账号、需要不同的有效期时，例如运营人员空闲 1 天失效、移动端的客户 90 天才过期，每套账号用自己的配置创建一个 `Store` 签发。它们共用 `api_tokens` 表，`Validate` 不读取配置，用其中任何一个校验都可以：
+
+```go
+staffTokens := apitoken.NewStore(a.db, a.cfg.StaffToken)
+customerTokens := apitoken.NewStore(a.db, a.cfg.CustomerToken)
+plain, err := customerTokens.Login(ctx, sub, device)
+```
+
+每个 API 接受哪些账号的 token 由 [`rest.Options.Accounts`](authentication.md#protecting-routes) 决定，与签发它的 `Store` 无关。
 
 `Validate` 返回的主体 `Method` 为 `bearer`，`Credential` 是 token 的 ID。token 只说明“这是谁”，不携带用户的权限：权限在每个请求中[加载](#loading-permissions)。它每分钟最多为一个 token 写一次库，记录最近使用时间并延长登录 token 的有效期，因此空闲时长的精度约为一分钟。
 

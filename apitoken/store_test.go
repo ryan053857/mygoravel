@@ -192,6 +192,48 @@ func TestLoginSlidingExpiry(t *testing.T) {
 	})
 }
 
+// 有效期在签发时写入 token：校验用的 Store 配置不同、或配置之后被修改，都不改变已签发 token 的有效期。
+// 不同账号体系可以各用自己的 Config 签发，共用一个校验器。
+func TestLifetimeFixedAtIssue(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := dbtesting.Open(t, driver, apitoken.Migrations())
+		c := &clock{t: time.Now().UTC().Truncate(time.Second)}
+		staff := apitoken.NewStore(db, apitoken.Config{Lifetime: 2 * time.Hour, IdleTimeout: 10 * time.Minute})
+		mobile := apitoken.NewStore(db, apitoken.Config{Lifetime: 90 * 24 * time.Hour, IdleTimeout: 30 * 24 * time.Hour})
+		for _, s := range []*apitoken.Store{staff, mobile} {
+			apitoken.SetClock(s, c.now)
+		}
+		staffToken := login(t, staff, identity.Subject{Type: "staff", ID: "s1"}, apitoken.Device{})
+		customerToken := login(t, mobile, identity.Subject{Type: "customer", ID: "c1"}, apitoken.Device{})
+
+		// 用 staff 的 Store 校验移动端的 token：仍然按签发时的 30 天空闲滑动。
+		c.add(9 * time.Minute)
+		for _, token := range []string{staffToken, customerToken} {
+			if _, ok := valid(t, staff, token); !ok {
+				t.Fatal("token expired early")
+			}
+		}
+		c.add(20 * time.Minute)
+		if _, ok := valid(t, mobile, staffToken); ok {
+			t.Fatal("staff token outlived its 10 minute idle timeout")
+		}
+		if _, ok := valid(t, staff, customerToken); !ok {
+			t.Fatal("customer token used the validating store's idle timeout")
+		}
+		// 每天使用一次，滑动延长不超过签发时的 Lifetime（90 天）。
+		var lasted time.Duration
+		for lasted = 0; lasted < 100*24*time.Hour; lasted += 24 * time.Hour {
+			c.add(24 * time.Hour)
+			if _, ok := valid(t, staff, customerToken); !ok {
+				break
+			}
+		}
+		if lasted < 89*24*time.Hour || lasted > 90*24*time.Hour {
+			t.Fatalf("customer token stopped after %v", lasted)
+		}
+	})
+}
+
 func TestCreatePersonal(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()

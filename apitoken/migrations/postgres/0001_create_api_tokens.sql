@@ -10,7 +10,8 @@ CREATE TABLE api_tokens (
     kind text NOT NULL CHECK (kind IN ('login', 'personal')),
     name text NOT NULL,
     scopes text NOT NULL,
-    remember boolean NOT NULL,
+    idle_timeout bigint NOT NULL,
+    ends_at timestamptz,
     ip text NOT NULL,
     user_agent text NOT NULL,
     created_at timestamptz NOT NULL,
@@ -21,11 +22,13 @@ CREATE TABLE api_tokens (
 CREATE INDEX api_tokens_subject ON api_tokens (subject_type, subject_id);
 CREATE INDEX api_tokens_expires_at ON api_tokens (expires_at) WHERE expires_at IS NOT NULL;
 COMMENT ON TABLE api_tokens IS 'API token；只存 token 的 SHA-256；过期行由 apitoken.Store.Cleanup 删除';
-COMMENT ON COLUMN api_tokens.kind IS 'login：登录时签发，按配置滑动过期；personal：个人访问令牌，过期时间由创建者指定';
+COMMENT ON COLUMN api_tokens.kind IS 'login：登录时签发，按签发时的配置滑动过期；personal：个人访问令牌，过期时间由创建者指定';
 COMMENT ON COLUMN api_tokens.tenant IS 'token 绑定的租户；空字符串表示不绑定';
 COMMENT ON COLUMN api_tokens.impersonator_type IS '代为登录时签发 token 的实际操作者，与 impersonator_id 一起引用；空字符串表示用户本人';
 COMMENT ON COLUMN api_tokens.scopes IS '个人访问令牌的权限限制，空格分隔；登录 token 为空字符串，表示不限制';
-COMMENT ON COLUMN api_tokens.expires_at IS '实际截止时间；login 在使用时滑动延长，不超过创建时间加 lifetime；personal 为空表示不过期';
+COMMENT ON COLUMN api_tokens.idle_timeout IS '登录 token 签发时确定的空闲时长（秒），使用时据此滑动延长；0 表示不延长，个人访问令牌为 0';
+COMMENT ON COLUMN api_tokens.ends_at IS '登录 token 签发时确定的最长期限（签发时间加 lifetime）；个人访问令牌为空';
+COMMENT ON COLUMN api_tokens.expires_at IS '实际截止时间；login 在使用时滑动为使用时间加 idle_timeout，不超过 ends_at；personal 为空表示不过期';
 
 -- +goose Down
 DROP TABLE api_tokens;
