@@ -15,6 +15,7 @@
 - [限流与防探测](#limits)
     - [人机验证](#captcha)
 - [清理](#cleanup)
+- [测试](#testing)
 
 <a id="introduction"></a>
 ## 简介
@@ -462,3 +463,26 @@ bots, err := captcha.New(captcha.Config{Secret: "test"}, fake.Client())
 ```go
 n, err := users.Cleanup(ctx, 1000)
 ```
+
+<a id="testing"></a>
+## 测试
+
+`login/logintest` 提供两个工具。`Outbox` 记录发出的验证码，测试中把 `outbox.Send` 作为 `Options.Send`：
+
+```go
+outbox := logintest.NewOutbox()
+users := login.New(db, login.Options{Type: user.Type, Hasher: hasher, Crypt: c, Send: outbox.Send})
+
+requestID, err := users.SendCode(ctx, login.SignIn, login.Email("alice@example.com"))
+code, _ := outbox.Last(login.Email("alice@example.com"))
+out, err := users.VerifyCode(ctx, requestID, code.Code)
+```
+
+`FailWith` 让之后的发送都返回错误，模拟邮件或短信服务故障。`TOTP` 计算验证器上显示的数字：
+
+```go
+setup, err := users.SetupTOTP(ctx, db, ref, "alice@example.com")
+codes, err := users.ConfirmTOTP(ctx, db, ref, logintest.TOTP(setup.Secret))
+```
+
+同一个 30 秒内的验证码只能用一次，测试接着还要输入时（例如启用后重新登录），在 [`synctest`](testing.md#controlling-time) 中 `time.Sleep(30 * time.Second)`。密码哈希按生产配置计算很慢，测试中把 bcrypt 的 `cost` 调到最低值 4。

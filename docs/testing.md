@@ -22,7 +22,7 @@
 
 mygoravel 在设计时就考虑了测试。由于所有依赖都是显式传入的，你可以在测试中轻松构造 API、action 和命令，而不需要启动整个应用。
 
-mygoravel 不引入额外的测试框架，直接使用 Go 标准库的 `testing`、`net/http/httptest` 和 `go test` 命令。需要断言日志时，使用 `logging/logtest` 捕获，见[测试日志](logging.md#testing-logs)。代码请求外部 HTTP 服务时，用 `outbound/outboundtest` 登记响应并检查发出的请求，见[出站请求](outbound.md#testing)。
+mygoravel 不引入额外的测试框架，直接使用 Go 标准库的 `testing`、`net/http/httptest` 和 `go test` 命令。需要断言日志时，使用 `logging/logtest` 捕获，见[测试日志](logging.md#testing-logs)。代码请求外部 HTTP 服务时，用 `outbound/outboundtest` 登记响应并检查发出的请求，见[出站请求](outbound.md#testing)。测试登录流程时，用 `login/logintest` 读取发出的验证码、计算二次验证的数字，见[登录与注册](login.md#testing)。
 
 <a id="running-tests"></a>
 ## 运行测试
