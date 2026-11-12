@@ -8,6 +8,7 @@
 - [找回密码](#reset)
 - [管理登录方式](#managing)
 - [二次验证](#two-factor)
+- [Passkey](#passkeys)
 - [确认身份](#confirming)
 - [后台创建账号](#admin-accounts)
 - [注销账号](#forget)
@@ -246,6 +247,61 @@ plain, err := tokens.Login(ctx, out.Subject, device)
 `Pending` 15 分钟内有效，最多输错 5 次，之后要重新登录。同一个验证码不能用两次；验证器与服务器的时钟允许相差 30 秒。`DisableTwoFactor` 关闭二次验证，之前先[确认身份](#confirming)。
 
 运营后台通常要求员工都启用二次验证。这由应用决定：员工登录后，`TwoFactorEnabled` 为 `false` 时只允许访问启用二次验证的页面。
+
+<a id="passkeys"></a>
+## Passkey
+
+Passkey（通行密钥，WebAuthn）用手机或电脑的指纹、面容、设备密码登录：不需要密码，私钥不离开设备，也不会被钓鱼网站骗走。`login/passkey` 把每个 passkey 作为一个登录标识（`Kind` 为 `passkey`）加到 `Realm` 上，所以它与邮箱、第三方账号一样可以绑定、解除、按租户隔离；用 passkey 登录不再要求[二次验证](#two-factor)，它本身就同时验证了设备和使用者。
+
+发布 `passkey` 的迁移（`passkey.Migrations()`），在入口中为博客用户创建：
+
+```go
+passkeys, err := passkey.New(a.db, users, a.crypt, passkey.Config{
+    RPID:    "blog.example.com",
+    RPName:  "Blog",
+    Origins: []string{"https://blog.example.com"},
+})
+```
+
+`RPID` 是 passkey 绑定的域名，之后不能更改，否则已经创建的 passkey 全部失效。`Origins` 是允许发起登录的网页地址；Android App 加上 `android:apk-key-hash:<签名证书的哈希>`，iOS App 通过关联域名使用网站的地址。
+
+每个操作分两步：`Begin*` 返回交给浏览器或 App 的 `Options` 和一个 `Token`，客户端完成后把结果连同 `Token` 交给 `Finish*`。`Token` 是用应用密钥加密的这次操作的状态，5 分钟内有效，服务器不需要保存它。
+
+**登录**不需要先输入账号，浏览器列出这个网站的 passkey 让用户选择：
+
+```go
+c, err := passkeys.BeginLogin(ctx) // 返回 c 给客户端
+```
+
+```go
+out, err := passkeys.FinishLogin(ctx, in.Body.Token, in.Body.Credential) // Credential 是 json.RawMessage
+if err != nil {
+    return nil, err // passkey.ErrInvalid
+}
+plain, err := tokens.Login(ctx, out.Subject, device)
+```
+
+浏览器中用 `navigator.credentials.get` 完成中间一步：
+
+```js
+const { options, token } = await api.post("/auth/passkey/begin")
+const credential = await navigator.credentials.get({
+  publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options.publicKey),
+})
+await api.post("/auth/passkey/finish", { token, credential: credential.toJSON() })
+```
+
+**创建**也是两步，客户端用 `navigator.credentials.create` 和 `parseCreationOptionsFromJSON`。`FinishRegistration` 返回完成凭证：已登录的用户添加 passkey 时交给 `Link`，用 passkey 注册新账号时交给注册 action 中的 `Register`，与[验证码注册](#codes)相同：
+
+```go
+c, err := passkeys.BeginRegistration(ctx, sub.Ref(), email) // 注册新账号时 ref 传零值
+proof, err := passkeys.FinishRegistration(ctx, in.Body.Token, in.Body.Credential, in.Body.Name)
+err = users.Link(ctx, a.db, sub.Ref(), proof)
+```
+
+`email` 是系统在保存 passkey 时显示的账号名，`in.Body.Name` 是给这个 passkey 起的名称，例如“iPhone”。同一个账号已有的 passkey 不会在同一个设备上重复创建。
+
+账号设置中，`List` 列出账号的 passkey（名称、是否在设备之间同步、最近使用时间），`Rename` 改名，`Remove` 移除；不能移除最后一种登录方式。签名计数倒退（疑似 passkey 被复制）时登录失败。创建后没有绑定到账号的 passkey，以及账号[注销](#forget)后留下的公钥，由 `passkeys.Cleanup` 定时删除。
 
 <a id="confirming"></a>
 ## 确认身份

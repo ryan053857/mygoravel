@@ -238,6 +238,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `apitoken` | 存在数据库中的 API 令牌，用作 JSON API 的 Bearer 凭据 | [API 令牌](api-tokens.md) |
 | `login` | 登录标识、密码、验证码登录与注册、找回密码、二次验证 | [登录与注册](login.md) |
 | `login/oauth` | Google、Apple、GitHub 等第三方账号登录（OpenID Connect、OAuth 2.0） | [第三方登录](social-login.md) |
+| `login/passkey` | 用 passkey（WebAuthn）登录和注册 | [登录与注册](login.md#passkeys) |
 | `authz` | 基于角色的权限：代码中声明的权限目录，角色按租户分配 | [授权](authorization.md)、[多租户](tenancy.md) |
 | `notification` | 站内通知收件箱，带已读状态 | [通知](notifications.md) |
 | `feature` | 功能开关：代码中声明，按全员、租户、用户或比例开启 | [功能开关](features.md) |

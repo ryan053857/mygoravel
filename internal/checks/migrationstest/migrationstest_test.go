@@ -28,6 +28,7 @@ import (
 	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/login"
+	"github.com/ryan053857/mygoravel/login/passkey"
 	"github.com/ryan053857/mygoravel/monitor"
 	"github.com/ryan053857/mygoravel/notification"
 	"github.com/ryan053857/mygoravel/operation"
@@ -55,6 +56,7 @@ var sources = map[string]migrate.Source{
 	"sheet/imports": {Name: "imports", FS: imports.Migrations()},
 	"lock":          {Name: "lock", FS: lock.Migrations()},
 	"login":         {Name: "login", FS: login.Migrations()},
+	"login/passkey": {Name: "passkey", FS: passkey.Migrations()},
 	"monitor":       {Name: "monitor", FS: monitor.Migrations()},
 	"notification":  {Name: "notification", FS: notification.Migrations()},
 	"operation":     {Name: "operation", FS: operation.Migrations()},

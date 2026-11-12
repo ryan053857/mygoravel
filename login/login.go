@@ -173,6 +173,9 @@ type Outcome struct {
 	Proof string
 }
 
+// Type 返回这套账号体系，即 Options.Type。
+func (r *Realm) Type() identity.SubjectType { return r.opts.Type }
+
 // tenant 返回本次操作所在的租户：PerTenant 时取自 ctx，否则为空。
 func (r *Realm) tenant(ctx context.Context) string {
 	if r.opts.PerTenant {

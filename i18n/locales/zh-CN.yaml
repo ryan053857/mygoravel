@@ -23,6 +23,8 @@ login.two_factor_enabled: 已经启用了二次验证
 login.two_factor_disabled: 没有启用二次验证
 oauth.invalid: 第三方登录失败，请重试
 oauth.denied: 已取消第三方登录
+passkey.invalid: 通行密钥验证失败，请重试
+passkey.not_found: 通行密钥不存在
 authz.not_member: 不存在或没有访问权限
 authz.role_not_found: 角色不存在
 authz.role_exists: 已有同名角色
