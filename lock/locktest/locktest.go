@@ -15,7 +15,7 @@ import (
 var _ lock.Store = (*Store)(nil)
 
 // Store 把锁保存在进程内存中，只在同一进程内互斥，供测试使用：生产环境中，
-// 不停机升级和多实例部署时同时运行的进程需要共用 lock.Database 或 Redis 存储。
+// 不停机升级和多实例部署时同时运行的进程需要共用 Redis 存储（lock/redislock）。
 // 过期的锁在 Acquire 时清除，每分钟最多扫描一次。
 type Store struct {
 	mu    sync.Mutex

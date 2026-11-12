@@ -22,11 +22,16 @@ type Config struct {
 	Logs      logging.Config   `yaml:"logs"`
 	Telemetry telemetry.Config `yaml:"telemetry"`
 	Database  database.Config  `yaml:"database"`
+	Redis     RedisConfig      `yaml:"redis"`
 	Auth      auth.Config      `yaml:"auth"`
 	Crypt     crypt.Config     `yaml:"crypt"`
 	Mail      MailConfig       `yaml:"mail"`
 	Queue     queue.Config     `yaml:"queue"`
 	Schedule  schedule.Config  `yaml:"schedule"`
+}
+
+type RedisConfig struct {
+	URL string `yaml:"url"`
 }
 
 type MailConfig struct {

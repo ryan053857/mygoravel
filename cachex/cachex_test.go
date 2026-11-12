@@ -2,8 +2,10 @@ package cachex_test
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,10 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/eko/gocache/lib/v4/cache"
-	"github.com/eko/gocache/lib/v4/store"
-	gocachestore "github.com/eko/gocache/store/go_cache/v4"
-	memory "github.com/patrickmn/go-cache"
+	"github.com/bradfitz/gomemcache/memcache"
 
 	"github.com/ryan053857/mygoravel/cachex"
 )
@@ -24,56 +23,70 @@ type article struct {
 	Title string `json:"title"`
 }
 
-// fake 是记录写入的过期时间、可以让读写出错的缓存。
+// fake 是记录写入的过期时间、可以让读写出错的 Memcached。
 type fake struct {
-	cache.CacheInterface[string]
-
 	mu      sync.Mutex
 	values  map[string]string
-	ttls    map[string]time.Duration
+	ttls    map[string]int32
 	getErr  error
 	setErr  error
 	deleted []string
 }
 
-func newFake() *fake { return &fake{values: map[string]string{}, ttls: map[string]time.Duration{}} }
+func newFake() *fake { return &fake{values: map[string]string{}, ttls: map[string]int32{}} }
 
-func (f *fake) Get(_ context.Context, key any) (string, error) {
+func (f *fake) Get(key string) (*memcache.Item, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.getErr != nil {
-		return "", f.getErr
+		return nil, f.getErr
 	}
-	v, ok := f.values[key.(string)]
+	v, ok := f.values[key]
 	if !ok {
-		return "", store.NotFound{}
+		return nil, memcache.ErrCacheMiss
 	}
-	return v, nil
+	return &memcache.Item{Key: key, Value: []byte(v)}, nil
 }
 
-func (f *fake) Set(_ context.Context, key any, v string, options ...store.Option) error {
+func (f *fake) Set(item *memcache.Item) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.setErr != nil {
 		return f.setErr
 	}
-	f.values[key.(string)] = v
-	f.ttls[key.(string)] = store.ApplyOptions(options...).Expiration
+	f.values[item.Key] = string(item.Value)
+	f.ttls[item.Key] = item.Expiration
 	return nil
 }
 
-func (f *fake) Delete(_ context.Context, key any) error {
+func (f *fake) Delete(key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.values, key.(string))
-	f.deleted = append(f.deleted, key.(string))
+	if _, ok := f.values[key]; !ok {
+		return memcache.ErrCacheMiss
+	}
+	delete(f.values, key)
+	f.deleted = append(f.deleted, key)
 	return nil
 }
 
+// ttl 返回 key 写入时的过期时间。
 func (f *fake) ttl(key string) time.Duration {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.ttls[key]
+	return time.Duration(f.ttls[key]) * time.Second
+}
+
+// openMemcached 连接 MEMCACHED_TEST_ADDR 指向的 Memcached。
+func openMemcached(t *testing.T) *memcache.Client {
+	t.Helper()
+	addr := os.Getenv("MEMCACHED_TEST_ADDR")
+	if addr == "" {
+		t.Fatal("MEMCACHED_TEST_ADDR is required for this test")
+	}
+	mc := memcache.New(addr)
+	t.Cleanup(func() { _ = mc.Close() })
+	return mc
 }
 
 // counter 返回计数的加载函数。
@@ -86,7 +99,7 @@ func counter(n *atomic.Int64, v *article, err error) func(context.Context) (*art
 
 func TestRemember(t *testing.T) {
 	ctx := context.Background()
-	c := cachex.New[*article](cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0))), "article:", 10*time.Minute)
+	c := cachex.New[*article](openMemcached(t), "test:"+rand.Text()+":article:", 10*time.Minute)
 	var loads atomic.Int64
 	load := counter(&loads, &article{ID: 1, Title: "hello"}, nil)
 	for range 3 {
@@ -101,8 +114,43 @@ func TestRemember(t *testing.T) {
 	if err := c.Forget(ctx, "1"); err != nil {
 		t.Fatal(err)
 	}
+	if err := c.Forget(ctx, "1"); err != nil {
+		t.Fatalf("forget a missing key: %v", err)
+	}
 	if _, err := c.Remember(ctx, "1", load); err != nil || loads.Load() != 2 {
 		t.Fatalf("after forget: loaded %d times, err %v", loads.Load(), err)
+	}
+}
+
+// 超过 250 字节或含有空白的 key 以摘要保存，仍然按 key 区分。
+func TestIllegalKeys(t *testing.T) {
+	ctx := context.Background()
+	c := cachex.New[*article](openMemcached(t), "test:"+rand.Text()+":", time.Minute)
+	var loads atomic.Int64
+	for i, key := range []string{strings.Repeat("k", 300), strings.Repeat("k", 299) + "x", "with space", "with\nnewline"} {
+		for range 2 {
+			if got, err := c.Remember(ctx, key, counter(&loads, &article{ID: i}, nil)); err != nil || got.ID != i {
+				t.Fatalf("%q: got %+v err %v", key[:10], got, err)
+			}
+		}
+	}
+	if loads.Load() != 4 {
+		t.Fatalf("loaded %d times", loads.Load())
+	}
+}
+
+// 超过 30 天的过期时间写成 Unix 时间。
+func TestLongTTL(t *testing.T) {
+	ctx := context.Background()
+	f := newFake()
+	c := cachex.New[*article](f, "", 60*24*time.Hour)
+	var loads atomic.Int64
+	if _, err := c.Remember(ctx, "1", counter(&loads, &article{ID: 1}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(int64(f.ttls["1"]), 0)
+	if until := time.Until(at); until < 59*24*time.Hour || until > 67*24*time.Hour {
+		t.Fatalf("expires at %v", at)
 	}
 }
 
@@ -151,9 +199,11 @@ func TestConcurrentLoadsMerge(t *testing.T) {
 func TestCallerCancellation(t *testing.T) {
 	c := cachex.New[*article](newFake(), "", time.Minute)
 	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
 	var loadErr atomic.Value
 	load := func(ctx context.Context) (*article, error) {
-		close(started)
+		// 第二个调用者可能在加载结束之后才到达，再加载一次，所以只关闭一次。
+		once.Do(func() { close(started) })
 		<-release
 		loadErr.Store(ctx.Err() == nil)
 		return &article{ID: 1}, nil
@@ -215,7 +265,7 @@ func TestTTL(t *testing.T) {
 			t.Fatal(err)
 		}
 		ttl := f.ttl(key)
-		if ttl < 10*time.Minute || ttl >= 11*time.Minute {
+		if ttl < 10*time.Minute || ttl > 11*time.Minute { // 抖动至多 10%，再向上取整到秒
 			t.Fatalf("ttl %v", ttl)
 		}
 		seen[ttl] = true
@@ -252,7 +302,7 @@ func TestMissing(t *testing.T) {
 			t.Fatalf("err %v", err)
 		}
 	}
-	if ttl := f.ttl("article:404"); loads.Load() != 1 || ttl < time.Minute || ttl >= time.Minute+6*time.Second {
+	if ttl := f.ttl("article:404"); loads.Load() != 1 || ttl < time.Minute || ttl > time.Minute+6*time.Second {
 		t.Fatalf("missing: loaded %d times, ttl %v", loads.Load(), ttl)
 	}
 
@@ -310,7 +360,7 @@ func TestDegradation(t *testing.T) {
 
 func TestInvalidArguments(t *testing.T) {
 	for name, f := range map[string]func(){
-		"nil cache":   func() { cachex.New[int](nil, "", time.Minute) },
+		"nil client":  func() { cachex.New[int](nil, "", time.Minute) },
 		"ttl":         func() { cachex.New[int](newFake(), "", 0) },
 		"nil missing": func() { cachex.Missing(nil) },
 	} {

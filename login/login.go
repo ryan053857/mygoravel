@@ -40,7 +40,7 @@ var (
 	ErrTwoFactorDisabled = errorx.Define(errorx.Conflict, "login.two_factor_disabled")
 )
 
-// Options 是一套账号体系的登录配置。Type、Hasher、Crypt 必填，其余有默认值。
+// Options 是一套账号体系的登录配置。Type、Hasher、Crypt、Attempts、Sends 必填，其余有默认值。
 type Options struct {
 	// Type 是这套账号体系，Realm 只管理这个类型的主体。
 	Type identity.SubjectType
@@ -78,9 +78,9 @@ type Options struct {
 	// ProofTTL 是完成凭证的有效期，默认 15 分钟。
 	ProofTTL time.Duration
 	// Attempts 限制同一个标识的密码登录失败次数：每次尝试前消耗一次，成功后清零。
-	// 默认是数据库限流器，每 15 分钟 5 次，需要 ratelimit 的迁移。
+	// 多个实例共享配额时使用 redislimit，例如每 15 分钟 5 次。
 	Attempts ratelimit.Limiter
-	// Sends 限制向同一个标识发送验证码的次数，默认是数据库限流器，每 15 分钟 5 次。
+	// Sends 限制向同一个标识发送验证码的次数，例如每 15 分钟 5 次。
 	Sends ratelimit.Limiter
 }
 
@@ -95,8 +95,8 @@ type Realm struct {
 	now          func() time.Time
 }
 
-// New 创建 Realm。db 必须已执行 login 的迁移；使用默认限流器时还需要 ratelimit 的迁移。
-// db 为 nil、Type 无效、Hasher 或 Crypt 为 nil 时 panic。
+// New 创建 Realm。db 必须已执行 login 的迁移。
+// db 为 nil、Type 无效、Hasher、Crypt、Attempts 或 Sends 为 nil 时 panic。
 func New(db bun.IDB, opts Options) *Realm {
 	switch {
 	case db == nil:
@@ -105,6 +105,8 @@ func New(db bun.IDB, opts Options) *Realm {
 		panic("login: Options.Hasher is required")
 	case opts.Crypt == nil:
 		panic("login: Options.Crypt is required")
+	case opts.Attempts == nil || opts.Sends == nil:
+		panic("login: Options.Attempts and Options.Sends are required")
 	}
 	if err := opts.Type.Validate(); err != nil {
 		panic(errors.Wrap(err, "login: Options.Type"))
@@ -121,13 +123,6 @@ func New(db bun.IDB, opts Options) *Realm {
 	opts.ProofTTL = cmp(opts.ProofTTL, 15*time.Minute)
 	if opts.CodeLength < 4 || opts.CodeLength > 12 || opts.CodeTTL < 0 || opts.CodeAttempts < 0 || opts.ProofTTL < 0 {
 		panic("login: CodeLength must be 4 to 12, and durations and attempts must not be negative")
-	}
-	every15 := ratelimit.Config{Rate: 5, Interval: 15 * time.Minute, Burst: 5}
-	if opts.Attempts == nil {
-		opts.Attempts = ratelimit.NewDatabase(db, "login:"+string(opts.Type)+":attempts", every15)
-	}
-	if opts.Sends == nil {
-		opts.Sends = ratelimit.NewDatabase(db, "login:"+string(opts.Type)+":sends", every15)
 	}
 	hasher := opts.Hasher
 	return &Realm{

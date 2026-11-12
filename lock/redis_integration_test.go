@@ -3,19 +3,17 @@ package lock_test
 import (
 	"context"
 	"crypto/rand"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-
+	"github.com/ryan053857/mygoravel/internal/redistest"
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/lock/locktest"
 	"github.com/ryan053857/mygoravel/lock/redislock"
 )
 
 func TestRedisStore(t *testing.T) {
-	rdb := openRedis(t)
+	rdb := redistest.Open(t)
 	locktest.TestStore(t, func() lock.Store {
 		return prefixed{redislock.New(rdb), "test:lock:" + rand.Text() + ":"}
 	})
@@ -23,7 +21,7 @@ func TestRedisStore(t *testing.T) {
 
 func TestRedisStoreKeyExpires(t *testing.T) {
 	ctx := context.Background()
-	rdb := openRedis(t)
+	rdb := redistest.Open(t)
 	store := redislock.New(rdb)
 	name := "test:lock:" + rand.Text()
 	if ok, err := store.Acquire(ctx, name, "o", time.Minute); !ok || err != nil {
@@ -32,30 +30,15 @@ func TestRedisStoreKeyExpires(t *testing.T) {
 	if ok, err := store.Refresh(ctx, name, "o", 30*time.Second); !ok || err != nil {
 		t.Fatalf("refresh ok=%v err=%v", ok, err)
 	}
-	if ttl := rdb.PTTL(ctx, name).Val(); ttl <= 0 || ttl > 30*time.Second {
-		t.Fatalf("ttl after refresh = %v", ttl)
+	if ms, _ := rdb.Do(ctx, rdb.B().Pttl().Key(name).Build()).AsInt64(); ms <= 0 || ms > 30_000 {
+		t.Fatalf("ttl after refresh = %dms", ms)
 	}
 	if ok, err := store.Release(ctx, name, "o"); !ok || err != nil {
 		t.Fatalf("release ok=%v err=%v", ok, err)
 	}
-	if n := rdb.Exists(ctx, name).Val(); n != 0 {
+	if n, _ := rdb.Do(ctx, rdb.B().Exists().Key(name).Build()).AsInt64(); n != 0 {
 		t.Fatalf("key still exists after release")
 	}
-}
-
-func openRedis(t *testing.T) *redis.Client {
-	t.Helper()
-	url := os.Getenv("REDIS_TEST_URL")
-	if url == "" {
-		t.Fatal("REDIS_TEST_URL is required for this test")
-	}
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rdb := redis.NewClient(opts)
-	t.Cleanup(func() { rdb.Close() })
-	return rdb
 }
 
 // prefixed 给锁名加上随机前缀，让每次契约测试使用独立的键，不需要清空 Redis。

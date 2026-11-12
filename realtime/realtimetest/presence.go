@@ -11,7 +11,7 @@ import (
 var _ realtime.PresenceStore = (*Presence)(nil)
 
 // Presence 把在线记录保存在进程内存中，供测试使用：生产环境中，不停机升级和多实例部署时
-// 同时运行的进程需要共用 realtime.NewDatabasePresence 或 redispresence 存储。
+// 同时运行的进程需要共用 redispresence 存储。
 // 同一个 Presence 交给多个 Realtime，就模拟了共用存储的多个实例。
 type Presence struct {
 	mu       sync.Mutex

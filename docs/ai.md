@@ -634,12 +634,11 @@ runs := chat.NewRuns("blog", agent, sessions,
 )
 ```
 
-`hub` 是[广播](broadcasting.md#creating-the-hub)的 Hub，`locker` 是[原子锁](locks.md)，都在 `open` 中创建，所有实例必须使用相同的后端，例如数据库或 Redis。
+`hub` 是[广播](broadcasting.md#creating-the-hub)的 Hub，`locker` 是[原子锁](locks.md)，都在 `open` 中创建，所有实例必须使用同一个 Redis。
 
 - 对话正在运行时，运行所在的实例持有这个对话的锁。其他实例上的 `Submit`、`Start` 因此返回 `chat.ErrBusy`，不会同时运行两次。
 - 运行的事件每 50 毫秒批量广播一次。其他实例上的 `Runs.Get` 先向运行所在的实例要一份目前为止的快照，再接收之后的事件，返回的 `Run` 用法与本地的相同；`Steer` 和 `Cancel` 转发给运行所在的实例，`Steer` 等待它的回执。
 - 运行所在的实例意外退出时，锁在 30 秒内过期；镜像 15 秒收不到消息就以一个 `error` 事件结束，浏览器重新续传时得到最新的状态。
-- 广播使用数据库后端时，事件多一个轮询间隔（100 毫秒）的延迟。
 
 审批读写的是对话存储，本来就不依赖实例。
 

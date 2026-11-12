@@ -255,7 +255,7 @@ return nil
 
 提醒只让连接立即执行一次上面的校验，是否断开仍由校验决定：凭据仍然有效的连接继续保持，多发的提醒只是多查一次。因此提醒要在修改提交之后发出，否则校验读到的还是旧数据；修改在事务中进行时，用 [AfterCommit](database.md#after-commit) 登记。提醒丢失时（例如 Redis 断线、发出之前进程退出），连接仍会在 30 秒的定期校验中断开。
 
-部署多个实例时，Hub 要使用数据库、Redis 或 NATS 后端，见[选择后端](broadcasting.md#backends)。
+Hub 经由 Redis 在实例之间传递消息，见[后端](broadcasting.md#backends)。
 
 <a id="deployment"></a>
 ## 部署

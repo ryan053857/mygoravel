@@ -3,54 +3,34 @@
 - [简介](#introduction)
 - [安装](#installation)
 - [装配缓存](#assembling-cache)
-- [基本操作](#basic-operations)
 - [为文章详情加缓存](#caching-articles)
     - [action 接收缓存](#using-in-services)
     - [读取：先缓存后数据库](#cache-aside)
     - [热点、集中过期与不存在的数据](#hot-keys)
     - [失效：提交后删除](#invalidation)
 - [缓存键与序列化](#keys-and-serialization)
+- [部署](#deployment)
 - [测试](#testing)
-- [使用 Redis](#redis)
 
 <a id="introduction"></a>
 ## 简介
 
 对于查询代价高、读多写少的数据，可以把查询结果放进缓存，让后续请求不再访问数据库。
 
-mygoravel 没有自己的缓存抽象，推荐直接使用 [eko/gocache](https://github.com/eko/gocache)。和数据库一样，缓存在入口创建，通过构造函数传给 [action](actions.md)。一个 gocache 缓存由三层对象组成：
+缓存放在 [Memcached](https://memcached.org) 中。它只做缓存一件事：内存满时淘汰最久没用的数据，多个实例共享同一份缓存，重启后清空，丢了可以从数据库重建。锁、限流这类不能被淘汰的数据放在 [Redis](redis.md) 中。
 
-```go
-client := memory.New(10*time.Minute, 10*time.Minute) // 存储客户端
-memoryStore := gocachestore.NewGoCache(client)        // 后端适配
-c := cache.New[string](memoryStore)                   // 带类型的 Get / Set / Delete
-```
+mygoravel 不封装 Memcached 客户端，约定使用 [gomemcache](https://github.com/bradfitz/gomemcache)。和数据库一样，客户端在入口创建，通过构造函数传给 [action](actions.md)。在它之上，框架的 `cachex` 提供「先读缓存、没有就查库再写回」的读取方式，并处理热点键过期、集中过期和不存在的数据，业务代码通过它读写。
 
-换成 Redis 等其他后端时只需替换前两层，见[使用 Redis](#redis)。在它之上，框架的 `cachex` 提供「先读缓存、没有就查库再写回」的读取方式，并处理热点键过期、集中过期和不存在的数据，业务代码通过它读写，见[为文章详情加缓存](#caching-articles)。
-
-本章以进程内的内存缓存为例，为博客应用的文章详情加上缓存：在入口装配缓存，让“获取文章”先读缓存、再查数据库，并在文章发布后删除旧缓存。
+本章为博客应用的文章详情加上缓存：在入口装配缓存，让“获取文章”先读缓存、再查数据库，并在文章发布后删除旧缓存。
 
 <a id="installation"></a>
 ## 安装
 
-缓存依赖由应用按需安装：
-
 ```bash
-go get github.com/eko/gocache/lib/v4@v4.2.0
-go get github.com/eko/gocache/store/go_cache/v4@v4.2.2
-go get github.com/patrickmn/go-cache@v2.1.0+incompatible
+go get github.com/bradfitz/gomemcache@latest
 ```
 
-gocache 的核心库和各个 store 分别发布版本，本章示例以这组版本为准。代码中用以下别名导入：
-
-```go
-import (
-    "github.com/eko/gocache/lib/v4/cache"
-    "github.com/eko/gocache/lib/v4/store"
-    gocachestore "github.com/eko/gocache/store/go_cache/v4"
-    memory "github.com/patrickmn/go-cache"
-)
-```
+导入路径是 `github.com/bradfitz/gomemcache/memcache`。
 
 <a id="assembling-cache"></a>
 ## 装配缓存
@@ -59,6 +39,7 @@ import (
 
 ```go
 type CacheConfig struct {
+    Servers    []string      `yaml:"servers"`
     DefaultTTL time.Duration `yaml:"default_ttl"`
 }
 
@@ -70,58 +51,19 @@ type Config struct {
 
 ```yaml
 cache:
+  servers: ["10.0.0.5:11211"]
   default_ttl: 10m
 ```
 
-然后在[入口](dependencies.md#assembling-the-application)的 `open` 中，打开数据库之后创建缓存，保存在 `App` 中，和数据库一起传给 `article.Register`：
+然后在[入口](dependencies.md#assembling-the-application)的 `open` 中创建客户端，保存在 `App` 中：
 
 ```go
-memoryClient := memory.New(cfg.Cache.DefaultTTL, 10*time.Minute)
-articleCache := cache.New[string](gocachestore.NewGoCache(memoryClient))
+mc := memcache.New(cfg.Cache.Servers...)
+mc.Timeout = 200 * time.Millisecond
+stack.MustAdd("memcached", func(context.Context) error { return mc.Close() })
 ```
 
-`memory.New` 的第一个参数是默认 TTL，第二个参数是清理过期数据的间隔。过期的键在读取时立即视为未命中，后台任务按间隔回收它们占用的内存。下文的 [`cachex`](#using-in-services) 写入时总是指定过期时间，默认 TTL 只对直接调用 `Set` 生效。
-
-> [!NOTE]
-> 默认 TTL 要设置在 `memory.New` 上。go_cache store v4.2.2 会忽略 `NewGoCache(client, store.WithExpiration(...))` 中传入的选项。
-
-内存缓存没有需要关闭的连接，也就不需要登记到 `cleanup.Stack`。
-
-内存缓存只在当前进程内有效，重启后清空。如果应用部署了多个副本，每个副本各有一份缓存，一个副本删除缓存不会影响其他副本；这种情况请改用 [Redis](#redis)。
-
-<a id="basic-operations"></a>
-## 基本操作
-
-`Get` 在键不存在或已过期时返回 `store.NotFound`，用 `errors.Is` 与其他错误区分：
-
-```go
-value, err := c.Get(ctx, "blog:greeting:v1")
-switch {
-case errors.Is(err, store.NotFound{}):
-    // 未命中
-case err != nil:
-    return err
-}
-```
-
-不要用 `value == ""` 判断未命中，空字符串也可能是有效的缓存内容。
-
-`Set` 写入或覆盖一个键。不传选项时使用 `memory.New` 设置的默认 TTL：
-
-```go
-err := c.Set(ctx, "blog:greeting:v1", "hello")
-err = c.Set(ctx, "blog:greeting:v1", "hello", store.WithExpiration(30*time.Second))
-err = c.Set(ctx, "blog:greeting:v1", "hello", store.WithExpiration(memory.NoExpiration))
-```
-
-`Delete` 删除一个键，键不存在时也返回 `nil`，因此修改数据后可以直接删除，不必先读取。`Clear` 清空整个缓存：
-
-```go
-err := c.Delete(ctx, "blog:greeting:v1")
-err = c.Clear(ctx)
-```
-
-读取时缓存没有就查询数据库、再写回，请用下文的 [`cachex`](#cache-aside)，它还处理了并发加载和集中过期。`Chain`（多级缓存）、按标签失效等组合能力，请参阅 [gocache 文档](https://github.com/eko/gocache)。
+客户端可以并发使用，整个应用共享这一个 `mc`。gomemcache 的方法不接收 `ctx`，每次操作的超时由 `Timeout` 控制，默认 500 毫秒；缓存是请求路径上的一环，超时宜短，Memcached 慢的时候直接查数据库。
 
 <a id="caching-articles"></a>
 ## 为文章详情加缓存
@@ -129,10 +71,10 @@ err = c.Clear(ctx)
 <a id="using-in-services"></a>
 ### action 接收缓存
 
-`cachex.New` 在 gocache 缓存之上创建一种值的缓存。文章详情的缓存在 `open` 中创建，保存在 `App` 中，和数据库一起传给 `article.Register`，再由它传给 `Get` 和 `Publish`：
+`cachex.New` 创建一种值的缓存。文章详情的缓存在 `open` 中创建，保存在 `App` 中，和数据库一起传给 `article.Register`，再由它传给 `Get` 和 `Publish`：
 
 ```go
-articles := cachex.New[*article.Article](articleCache, "blog:article:v1:", cfg.Cache.DefaultTTL,
+articles := cachex.New[*article.Article](mc, "blog:article:v1:", cfg.Cache.DefaultTTL,
     cachex.Missing(article.ErrNotFound.New))
 ```
 
@@ -149,7 +91,7 @@ func NewGet(db *bun.DB, articles *cachex.Cache[*Article]) *Get {
 }
 ```
 
-`cachex.New` 遇到 `nil` 缓存会 panic，所以在 `open` 中创建，而不是在 `Register` 中：[生成 OpenAPI 文档](routing.md#exporting-openapi)时 `Register` 收到的依赖都是 `nil`。一种值只创建一个 `Cache`，读取和失效共用它。
+`cachex.New` 遇到 `nil` 客户端会 panic，所以在 `open` 中创建，而不是在 `Register` 中：[生成 OpenAPI 文档](routing.md#exporting-openapi)时 `Register` 收到的依赖都是 `nil`。一种值只创建一个 `Cache`，读取和失效共用它。
 
 <a id="cache-aside"></a>
 ### 读取：先缓存后数据库
@@ -185,13 +127,13 @@ func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID
 | --- | --- |
 | 命中 | 解码后返回，每次得到独立的一份 |
 | 未命中 | 调用加载函数，结果写回缓存 |
-| 读取失败、内容无法解码 | 记录 `warn` 日志，调用加载函数 |
+| 读取失败（例如 Memcached 不可用）、内容无法解码 | 记录 `warn` 日志，调用加载函数 |
 | 加载函数返回错误 | 原样返回；除了 `Missing` 声明的错误，都不写缓存 |
-| 写回失败 | 记录 `warn` 日志，照常返回加载的结果 |
+| 写回失败（例如值超过 1 MB） | 记录 `warn` 日志，照常返回加载的结果 |
 
 缓存后端不可用时每个请求都会出错，所以这些日志每个 `Cache` 每分钟最多一条，附上期间省略的条数。出错的次数用[指标](telemetry.md)观察。
 
-这套降级策略只适用于可丢弃的查询缓存。如果用缓存保存会话或限流计数，需要根据用途单独设计故障时的行为。
+这套降级策略只适用于可丢弃的查询缓存。Memcached 只用来放这类数据：会话在数据库中，限流计数和锁在 [Redis](redis.md) 中。
 
 <a id="hot-keys"></a>
 ### 热点、集中过期与不存在的数据
@@ -228,56 +170,44 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 
 缓存键建议由命名空间、资源类型、格式版本和资源 ID 组成，例如 `blog:article:v1:<id>`。前三部分是传给 `cachex.New` 的前缀，`Remember` 和 `Forget` 只传 ID：
 
-- 命名空间区分不同的应用和部署环境，多个环境共用一个 Redis 时不会互相覆盖；
+- 命名空间区分不同的应用和部署环境，多个环境共用一个 Memcached 时不会互相覆盖；
 - 修改缓存内容的结构时，把 `v1` 升为 `v2`，新代码不再读取旧格式，旧键等过期后自然消失；
 - 多租户应用中键还要带上租户，例如传入 `<tenant>:<id>`，得到 `blog:article:v1:<tenant>:<id>`，见[缓存、广播与其他资源](tenancy.md#other-resources)。
 
-`cachex` 把值编码为 JSON 字符串存进 `cache.New[string]`。内存缓存其实可以直接保存结构体，但这样切换到 Redis 时业务代码就要改：Redis store 读出的总是字符串，如果声明为 `cache.New[Article]`，`Get` 会返回零值和 `nil` 错误，而不是报错。统一存 JSON 字符串，两种后端可以无缝替换。
+Memcached 的键最长 250 字节，不能有空白和控制字符。超出这些限制的键（例如很长的搜索条件）由 `cachex` 换成 SHA-256 摘要保存，调用方不用处理。值编码为 JSON 保存，每次读取得到独立的一份。
+
+<a id="deployment"></a>
+## 部署
+
+- **值的大小。** Memcached 默认单个值最大 1 MB，更大的值写入失败，`cachex` 记录日志后照常返回加载的结果，相当于不缓存。缓存大的列表时只缓存 ID，或者调大 Memcached 的 `-I` 参数。
+- **过期时间。** Memcached 按秒计时，`cachex` 把过期时间向上取整到秒；超过 30 天的过期时间会换算成 Unix 时间写入，因为 Memcached 把超过 30 天的数值当作到期时刻。
+- **多个节点。** `memcache.New` 传入多个地址时，键按哈希分到各个节点，节点之间不复制。增减节点时大部分键会换到别的节点，相当于一次大面积失效，请在流量低的时候调整；节点很多时可以通过 `memcache.NewFromSelector` 换成一致性哈希。
+- **内存。** 内存满时 Memcached 淘汰最久没用的数据，这正是缓存需要的行为，不需要别的配置。
 
 <a id="testing"></a>
 ## 测试
 
-内存缓存不依赖外部服务，测试中直接为每个测试创建一份即可：
+`cachex.New` 的第一个参数是只有 `Get`、`Set`、`Delete` 三个方法的 `cachex.Client` 接口，`*memcache.Client` 实现了它。测试读取逻辑时连接真实的 Memcached，和数据库测试一样通过环境变量取得地址，每个测试使用随机的前缀，互不影响：
 
 ```go
-func newTestCache() *cachex.Cache[*article.Article] {
-    c := cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0)))
-    return cachex.New[*article.Article](c, "blog:article:v1:", time.Minute, cachex.Missing(article.ErrNotFound.New))
+func newTestCache(t *testing.T) *cachex.Cache[*article.Article] {
+    t.Helper()
+    addr := os.Getenv("MEMCACHED_TEST_ADDR")
+    if addr == "" {
+        t.Fatal("MEMCACHED_TEST_ADDR is not set")
+    }
+    mc := memcache.New(addr)
+    t.Cleanup(func() { mc.Close() })
+    return cachex.New[*article.Article](mc, "test:"+rand.Text()+":article:", time.Minute,
+        cachex.Missing(article.ErrNotFound.New))
 }
 
-get := article.NewGet(db, newTestCache())
+get := article.NewGet(db, newTestCache(t))
 ```
 
-清理间隔传 `0` 表示不启动后台清理任务。数据库仍使用 [dbtest](testing.md#database-tests)。合并加载、抖动和降级由框架测试，应用值得覆盖的是自己的规则：
+数据库仍使用 [dbtest](testing.md#database-tests)。合并加载、抖动和降级由框架测试，应用值得覆盖的是自己的规则：
 
 - 第一次读取查询数据库并写入缓存，第二次命中缓存；
 - 发布文章后缓存被删除，再次读取得到新状态；
 - 缓存中有别人的草稿时，读取仍返回 `404`；
 - 不存在的文章返回 `404`。
-
-<a id="redis"></a>
-## 使用 Redis
-
-应用有多个副本、需要共享缓存时，改用 Redis。安装 Redis store：
-
-```bash
-go get github.com/eko/gocache/store/redis/v4@v4.2.2
-```
-
-这个 store 的包名也是 `redis`，与 go-redis 冲突，导入时起个别名：
-
-```go
-redisstore "github.com/eko/gocache/store/redis/v4"
-```
-
-在入口中把前两层换成 Redis store，传入[创建好的 Redis 客户端](redis.md#connecting) `rdb`：
-
-```go
-articleCache := cache.New[string](redisstore.NewRedis(rdb, store.WithExpiration(cfg.Cache.DefaultTTL)))
-```
-
-action 和其余代码无需修改。与内存缓存的区别：
-
-- 默认 TTL 通过 `NewRedis` 的选项设置，`store.WithExpiration(0)` 表示不过期；`cachex` 写入时总是指定过期时间，不受它影响；
-- `Clear` 执行 `FLUSHALL`，会清空整个 Redis 实例的所有数据库，不要在共享的 Redis 上调用；
-- 网络故障等行为内存缓存无法模拟，请用真实的 Redis 做集成测试，写法见 [Redis](redis.md#testing)。

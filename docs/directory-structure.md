@@ -180,13 +180,13 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `lock` | 带过期时间的原子锁，数据库存储；`lock/redislock` 是 Redis 存储，`lock/locktest` 是测试用的内存存储与存储的契约测试 | [原子锁](locks.md)、[Redis 存储](locks.md#redis-store) |
+| `lock` | 带过期时间的原子锁；`lock/redislock` 是 Redis 存储，`lock/locktest` 是测试用的内存存储与存储的契约测试 | [原子锁](locks.md)、[Redis 存储](locks.md#redis-store) |
 | `outbound` | 只能访问公网地址的 HTTP 客户端，防止服务端请求伪造；临时失败时重试可以安全重复的请求 | [出站请求](outbound.md) |
 | `outbound/outboundtest` | 不连接网络的 HTTP 传输层：登记响应、记录请求，用于测试 | [测试](outbound.md#testing) |
 | `database` | 打开 PostgreSQL 连接池，`RunInTx` 与提交后回调，约束错误判断 | [数据库](database.md) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
-| `ratelimit` | 按 key 限制操作频率，数据库与内存限流器，`Observe` 报告指标；`ratelimit/redislimit` 是 Redis 限流器 | [限流](rate-limiting.md)、[Redis 限流器](rate-limiting.md#redis-limiter) |
+| `ratelimit` | 按 key 限制操作频率，内存限流器，`Observe` 报告指标；`ratelimit/redislimit` 是 Redis 限流器 | [限流](rate-limiting.md)、[Redis 限流器](rate-limiting.md#redis-limiter) |
 | `captcha` | 在服务端校验 Turnstile、hCaptcha 的人机验证结果，挡住批量注册和提交表单的机器人 | [人机验证](login.md#captcha) |
 | `document/split` | 把 Markdown 切分为可追溯到原文的分段，供检索和计算向量使用 | [文档转换与切分](documents.md#splitting) |
 | `document/convert` | 把 PDF、Word、PowerPoint、Excel、CSV、HTML 等转换为 Markdown；各格式在子包中，`convert/all` 注册全部 | [文档转换与切分](documents.md#converting) |
@@ -196,11 +196,11 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `mail/smtp`、`mail/resend`、`mail/ses` | 通过 SMTP 服务器、Resend API 或 Amazon SES 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend)、[SES](mail.md#ses) |
 | `mail/logmail`、`mail/mailtest` | 开发时写进日志、测试时记录在内存中的发送器 | [邮件](mail.md#assembling-mailer)、[测试](mail.md#testing) |
 | `queue` | 持久化的异步任务队列，数据库驱动、重试、失败任务与指标 | [队列](queue.md) |
-| `queue/redisqueue`、`queue/natsqueue` | Redis 与 NATS JetStream 队列驱动 | [Redis 驱动](queue.md#redis-driver)、[NATS 驱动](queue.md#nats-driver) |
+| `queue/natsqueue` | NATS JetStream 队列驱动 | [NATS 驱动](queue.md#nats-driver) |
 | `queue/queuetest` | 队列驱动的契约测试 | [实现自己的驱动](queue.md#custom-drivers) |
 | `schedule` | 按 cron 表达式定时执行任务，多个实例之间去重 | [定时任务](scheduling.md) |
-| `cachex` | 在 gocache 之上的 cache-aside 读取：合并并发加载、过期时间抖动、缓存空结果，缓存出错时直接加载 | [为文章详情加缓存](cache.md#caching-articles) |
-| `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端，`broadcast/broadcasttest` 是测试用的内存后端与后端的契约测试 | [广播](broadcasting.md) |
+| `cachex` | 在 Memcached 之上的 cache-aside 读取：合并并发加载、过期时间抖动、缓存空结果，缓存出错时直接加载 | [为文章详情加缓存](cache.md#caching-articles) |
+| `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast` 是 Redis 后端，`broadcast/broadcasttest` 是测试用的内存后端与后端的契约测试 | [广播](broadcasting.md) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |
 | `filesystem/local`、`filesystem/s3` | 本地与 S3 磁盘 | [文件存储与上传](filesystem.md#disks) |
 | `imgproxy` | 生成签名的 imgproxy 地址，按需缩放图片，不保存缩略图 | [图片缩略图](filesystem.md#thumbnails) |

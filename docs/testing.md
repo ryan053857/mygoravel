@@ -458,7 +458,7 @@ db := dbtest.Open(t, migrations.FS)
 <a id="running-database-tests-locally"></a>
 ### 在本地运行数据库测试
 
-在项目根目录放一个只给测试用的 `compose.test.yml`。博客应用还用 Redis 记录浏览量，见 [Redis](redis.md#testing)，所以一起启动：
+在项目根目录放一个只给测试用的 `compose.test.yml`，启动应用用到的 PostgreSQL、[Redis](redis.md#testing) 和 [Memcached](cache.md#testing)：
 
 ```yaml
 # compose.test.yml
@@ -488,6 +488,15 @@ services:
       test: redis-cli ping
       interval: 1s
       retries: 30
+
+  memcached:
+    image: memcached:1.6-alpine
+    ports:
+      - 127.0.0.1:51211:11211
+    healthcheck:
+      test: nc -z 127.0.0.1 11211
+      interval: 1s
+      retries: 30
 ```
 
 `--wait` 等到所有服务的健康检查通过才返回，之后就可以直接运行测试：
@@ -496,6 +505,7 @@ services:
 docker compose -f compose.test.yml up -d --wait
 export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
 export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
+export MEMCACHED_TEST_ADDR='127.0.0.1:51211'
 go test -race -count=1 ./...
 ```
 

@@ -67,7 +67,7 @@ sched.Add("reports:daily", "0 3 * * *", reports.Generate, schedule.In(shanghai))
 <a id="running-the-scheduler"></a>
 ## 运行调度器
 
-调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[数据库锁](locks.md#database-store)。注册任务单独写在 `tasks` 中，调度器运行它，[查看任务](#listing-tasks)的命令和后台页面也用它，任务只定义一次。指标和链路的选项也在这里设置，查看任务时不执行任务，它们不起作用：
+调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[原子锁](locks.md#redis-store)。注册任务单独写在 `tasks` 中，调度器运行它，[查看任务](#listing-tasks)的命令和后台页面也用它，任务只定义一次。指标和链路的选项也在这里设置，查看任务时不执行任务，它们不起作用：
 
 ```go
 package bootstrap
@@ -79,7 +79,6 @@ import (
     "example.com/blog/internal/article"
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/lock"
     "github.com/ryan053857/mygoravel/schedule"
     "github.com/ryan053857/mygoravel/session"
 )
@@ -92,8 +91,6 @@ func (a *App) tasks() *schedule.Scheduler {
         schedule.Describe("发布到了预定时间的文章"))
     sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000),
         schedule.Describe("删除过期的会话"))
-    sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDatabase(a.db).Cleanup, 1000),
-        schedule.Describe("删除过期的锁"))
     sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(a.failed.Cleanup(30*24*time.Hour), 1000),
         schedule.Describe("删除 30 天前的失败任务"))
     return sched
@@ -123,9 +120,7 @@ root.AddCommand(command.Run("schedule", "执行定时任务", bootstrap.Schedule
 
 部署多个实例时，每个实例上的调度器都会在同一时刻触发同一个任务。调度器在执行之前取得一把锁，锁名包含任务名和触发时刻，例如 `schedule:sessions:cleanup:1794366000`，只有取得锁的实例执行这一次触发。锁不会主动释放，一分钟后过期，所以各实例的时钟偏差小于一分钟时就不会重复执行。
 
-所有进程共用 `lock.NewDatabase(db)` 或 [Redis 存储](locks.md#redis-store)，去重就覆盖全部实例。单机部署也一样：[不停机升级](deployment.md#upgrade-overlap)时新旧两个调度器会同时运行。
-
-使用数据库存储时，每次触发都会在 `locks` 表中留下一行，由上面的 `locks:cleanup` 定期删除。秒级任务每秒都会写一次 `locks` 表，这类任务较多时建议改用 Redis 存储，过期的键由 Redis 自动删除。
+所有进程共用同一个 [Redis 锁存储](locks.md#redis-store)，去重就覆盖全部实例。单机部署也一样：[不停机升级](deployment.md#upgrade-overlap)时新旧两个调度器会同时运行。过期的锁由 Redis 自动删除。
 
 只想在每个实例上各执行一次的任务，例如清理本机的临时目录，使用 `schedule.EveryInstance()`：
 
@@ -285,10 +280,6 @@ article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) erro
 | 数据 | 清理方法 | 建议频率 |
 | --- | --- | --- |
 | [会话](session.md#cleanup) | `session.NewStore(db).Cleanup` | 每 10 分钟 |
-| [锁](locks.md#cleanup) | `lock.NewDatabase(db).Cleanup` | 每小时 |
-| [广播](broadcasting.md#database-backend) | `broadcast.NewDatabase(db, nil).Cleanup` | 每 10 分钟 |
-| [实时频道](realtime.md#presence-stores) | `realtime.NewDatabasePresence(db).Cleanup` | 每 10 分钟 |
-| [限流](rate-limiting.md#cleanup) | 任意一个 `ratelimit.NewDatabase(...)` 的 `Cleanup` | 每小时 |
 | [登录验证码](login.md#cleanup) | 每套账号的 `login.Realm` 的 `Cleanup` | 每小时 |
 | [未绑定的 passkey](login.md#passkeys) | `passkey.Store` 的 `Cleanup` | 每天 |
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
@@ -298,7 +289,7 @@ article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) erro
 | [Webhook 投递记录](webhooks.md#retention) | `webhook.Cleanup(db, 保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(保留期)` | 每天 |
 
-使用 Redis 存储时过期的数据由 Redis 自动删除，不需要注册清理任务。
+锁、限流和在线成员保存在 Redis 中，过期的键由 Redis 自动删除，不需要注册清理任务。
 
 <a id="testing"></a>
 ## 测试

@@ -2,6 +2,7 @@ package realtime_test
 
 import (
 	"context"
+	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,10 +16,11 @@ import (
 
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/ryan053857/mygoravel/broadcast/redisbroadcast"
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/internal/redistest"
 	"github.com/ryan053857/mygoravel/realtime"
 )
 
@@ -681,10 +683,10 @@ func TestChannelPatterns(t *testing.T) {
 	}
 }
 
-func TestAcrossInstancesOnDatabase(t *testing.T) {
-	db := dbtest.Open(t, broadcast.Migrations())
-	a := start(t, broadcast.NewDatabase(db, nil), realtime.Options{}, nil)
-	b := start(t, broadcast.NewDatabase(db, nil), realtime.Options{}, nil)
+func TestAcrossInstancesOnRedis(t *testing.T) {
+	rdb, channel := redistest.Open(t), "test:realtime:"+rand.Text()
+	a := start(t, redisbroadcast.New(rdb, channel), realtime.Options{}, nil)
+	b := start(t, redisbroadcast.New(rdb, channel), realtime.Options{}, nil)
 	broadcasttest.Ready(t, a.hub, b.hub)
 	for _, n := range []*node{a, b} {
 		n.rt.Channel("room:{id}", realtime.Public().ClientPublish())

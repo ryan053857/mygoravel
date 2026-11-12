@@ -15,20 +15,16 @@ import (
 	"github.com/ryan053857/mygoravel/ai/chat"
 	"github.com/ryan053857/mygoravel/apitoken"
 	"github.com/ryan053857/mygoravel/authz"
-	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/command/migratecmd"
 	"github.com/ryan053857/mygoravel/database/migrate"
 	"github.com/ryan053857/mygoravel/feature"
 	"github.com/ryan053857/mygoravel/filesystem"
-	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/login"
 	"github.com/ryan053857/mygoravel/login/passkey"
 	"github.com/ryan053857/mygoravel/notification"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/ratelimit"
-	"github.com/ryan053857/mygoravel/realtime"
 	"github.com/ryan053857/mygoravel/search"
 	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/sheet/exports"
@@ -43,19 +39,15 @@ var sources = map[string]migrate.Source{
 	"ai/chat":       {Name: "ai", FS: chat.Migrations()},
 	"apitoken":      {Name: "apitoken", FS: apitoken.Migrations()},
 	"authz":         {Name: "authz", FS: authz.Migrations()},
-	"broadcast":     {Name: "broadcast", FS: broadcast.Migrations()},
 	"sheet/exports": {Name: "exports", FS: exports.Migrations()},
 	"feature":       {Name: "feature", FS: feature.Migrations()},
 	"filesystem":    {Name: "filesystem", FS: filesystem.Migrations()},
 	"sheet/imports": {Name: "imports", FS: imports.Migrations()},
-	"lock":          {Name: "lock", FS: lock.Migrations()},
 	"login":         {Name: "login", FS: login.Migrations()},
 	"login/passkey": {Name: "passkey", FS: passkey.Migrations()},
 	"notification":  {Name: "notification", FS: notification.Migrations()},
 	"operation":     {Name: "operation", FS: operation.Migrations()},
 	"queue":         {Name: "queue", FS: queue.Migrations()},
-	"ratelimit":     {Name: "ratelimit", FS: ratelimit.Migrations()},
-	"realtime":      {Name: "realtime", FS: realtime.Migrations()},
 	"search":        {Name: "search", FS: search.Migrations()},
 	"session":       {Name: "session", FS: session.Migrations()},
 	"webhook":       {Name: "webhook", FS: webhook.Migrations()},

@@ -57,7 +57,7 @@ type Options struct {
 	// TrustedOrigins 是允许跨站建立连接的来源，例如 https://app.example.com。
 	// 浏览器发起的连接默认只接受同源请求，没有 Origin 请求头的客户端（移动端、服务器）不受限制。
 	TrustedOrigins []string
-	// Presence 保存 presence 频道的在线成员，所有实例共用同一个存储：NewDatabasePresence 或 redispresence.New。
+	// Presence 保存 presence 频道的在线成员，所有实例共用同一个存储，即 redispresence.New。
 	// 注册 presence 频道时必须设置；不停机升级时新旧进程同时运行，单实例部署同样需要共用的存储。
 	Presence PresenceStore
 	// PresenceGrace 是连接离开 presence 频道后保留在线记录的时间：期间主体重新加入时，

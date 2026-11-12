@@ -69,9 +69,11 @@ import (
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/database"
     "github.com/ryan053857/mygoravel/lock"
+    "github.com/ryan053857/mygoravel/lock/redislock"
     "github.com/ryan053857/mygoravel/logging"
     "github.com/ryan053857/mygoravel/queue"
     "github.com/ryan053857/mygoravel/telemetry"
+    "github.com/redis/rueidis"
     "github.com/uptrace/bun"
     "go.opentelemetry.io/otel/metric"
     "go.opentelemetry.io/otel/trace"
@@ -81,6 +83,7 @@ import (
 type App struct {
     cfg      settings.Config
     db       *bun.DB
+    rdb      rueidis.Client
     locker   *lock.Locker
     queue    queue.Driver
     failed   *queue.FailedJobs
@@ -88,7 +91,7 @@ type App struct {
     tracers  trace.TracerProvider
 }
 
-// open 开启推送，安装全局日志器，打开数据库，把关闭操作登记到 stack。
+// open 开启推送，安装全局日志器，连接数据库和 Redis，把关闭操作登记到 stack。
 func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App, error) {
     tel, err := telemetry.Open(ctx, cfg.Telemetry)
     if err != nil {
@@ -105,10 +108,24 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
         return db.Close()
     })
 
+    opt, err := rueidis.ParseURL(cfg.Redis.URL)
+    if err != nil {
+        return nil, err
+    }
+    rdb, err := rueidis.NewClient(opt)
+    if err != nil {
+        return nil, err
+    }
+    stack.MustAdd("redis", func(context.Context) error {
+        rdb.Close()
+        return nil
+    })
+
     return &App{
         cfg:      cfg,
         db:       db,
-        locker:   lock.New(lock.NewDatabase(db)),
+        rdb:      rdb,
+        locker:   lock.New(redislock.New(rdb)),
         queue:    queue.Database(db),
         failed:   queue.NewFailedJobs(db),
         meters:   tel.Meters,
@@ -153,7 +170,7 @@ func Start(ctx context.Context, cfg settings.Config) error {
 }
 ```
 
-`telemetry.Open` 把日志、指标和链路推送到配置的接收端，没有配置时什么也不做，见[可观测性](telemetry.md#setup)。它最先登记，最后关闭，其他资源关闭时记录的日志也能推送出去。`locker` 是[原子锁](locks.md)，[调度器](scheduling.md#multiple-instances)用它在多个实例之间去重。`queue` 是任务所在的[队列](queue.md)，`failed` 是[失败任务](queue.md#failed-jobs)表，worker、定时任务和[查看队列的命令](queue.md#stats-command)都用它们；换成 Redis 或 NATS 队列时只改这一处。`Worker` 和 `Scheduler` 两个运行部分分别在[队列](queue.md#running-workers)和[定时任务](scheduling.md#running-the-scheduler)两章中介绍。
+`telemetry.Open` 把日志、指标和链路推送到配置的接收端，没有配置时什么也不做，见[可观测性](telemetry.md#setup)。它最先登记，最后关闭，其他资源关闭时记录的日志也能推送出去。`rdb` 是 [Redis](redis.md) 客户端，`locker` 是用它保存的[原子锁](locks.md)，[调度器](scheduling.md#multiple-instances)用它在多个实例之间去重。`queue` 是任务所在的[队列](queue.md)，`failed` 是[失败任务](queue.md#failed-jobs)表，worker、定时任务和[查看队列的命令](queue.md#stats-command)都用它们；换成 Redis 或 NATS 队列时只改这一处。`Worker` 和 `Scheduler` 两个运行部分分别在[队列](queue.md#running-workers)和[定时任务](scheduling.md#running-the-scheduler)两章中介绍。
 
 HTTP 服务在 `internal/bootstrap/http.go` 中：
 

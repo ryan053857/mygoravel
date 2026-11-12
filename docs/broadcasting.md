@@ -5,9 +5,7 @@
 - [发布事件](#publishing-events)
 - [推送给浏览器](#pushing-to-browsers)
     - [断线补发](#replaying-missed-events)
-- [选择后端](#backends)
-    - [数据库](#database-backend)
-    - [Redis 与 NATS](#redis-and-nats)
+- [后端](#backends)
 - [投递保证](#delivery-guarantees)
 - [测试](#testing)
 
@@ -26,11 +24,11 @@
 每个进程创建一个 `broadcast.Hub`，所有长连接共用。在[入口](dependencies.md#assembling-the-application)的 `open` 中创建它，并登记关闭：
 
 ```go
-hub := broadcast.New(broadcast.NewDatabase(db, nil), nil)
+hub := broadcast.New(redisbroadcast.New(rdb, "blog:broadcast"), nil)
 stack.MustAdd("broadcast", func(context.Context) error { return hub.Close() })
 ```
 
-`broadcast.New` 的第一个参数是在实例之间传递消息的后端，见[选择后端](#backends)；第二个参数是日志器，传 `nil` 时使用 `slog.Default()`。Hub 创建后就在后台开始接收消息，`Close` 停止接收并结束全部订阅。
+`broadcast.New` 的第一个参数是在实例之间传递消息的[后端](#backends)；第二个参数是日志器，传 `nil` 时使用 `slog.Default()`。Hub 创建后就在后台开始接收消息，`Close` 停止接收并结束全部订阅。
 
 <a id="publishing-events"></a>
 ## 发布事件
@@ -123,48 +121,17 @@ return web.SSE(w, r, func(s *web.Stream) error {
 补发的数据来自应用自己的表，框架不另外保存事件历史。
 
 <a id="backends"></a>
-## 选择后端
+## 后端
 
-| 后端 | 消息经由 | 适合 |
-| --- | --- | --- |
-| `broadcast.NewDatabase(db, logger)` | `broadcasts` 表 | 多实例部署，不想引入其他组件 |
-| `redisbroadcast.New(rdb, channel)` | Redis Pub/Sub | 已经使用 [Redis](redis.md) |
-| `natsbroadcast.New(nc, prefix)` | NATS 核心发布订阅 | 已经使用 NATS，或者消息量很大 |
-
-单机部署也要经由后端传递：[不停机升级](deployment.md#upgrade-overlap)或滚动发布时新旧进程短暂并存，旧进程中还没结束的请求和任务发布的事件，要送到已经重连到新进程的浏览器。
-
-<a id="database-backend"></a>
-### 数据库
-
-`NewDatabase` 把每条消息插入 `broadcasts` 表，并立即投递给本进程中的订阅；其他实例每 100 毫秒读取新的行，所以跨进程的消息最多延迟一个轮询间隔。同一个进程发布的消息按发布顺序到达；不同进程同时发布的消息没有确定的先后。使用前先发布迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
-
-```go
-migrationCmd.AddCommand(migratecmd.Publish(
-    migrate.Source{Name: "broadcast", FS: broadcast.Migrations()},
-))
-```
-
-表中的行只需要保留很短的时间，`Cleanup` 删除 10 分钟以前的行，交给[定时任务](scheduling.md#framework-cleanups)定期执行：
-
-```go
-sched.Add("broadcasts:cleanup", "*/10 * * * *", schedule.Cleanup(broadcast.NewDatabase(a.db, nil).Cleanup, 1000))
-```
-
-自增 ID 的分配顺序和提交顺序不一定一致：两条并发的消息，后分配到 ID 的可能先提交。读到不连续的 ID 时，`Database` 会等待缺失的行最多 2 秒：期间提交了，就按顺序投递；超时还没出现，就视为回滚留下的空号跳过。所以 `Publish` 应当在业务事务之外调用，见[发布事件](#publishing-events)。数据库暂时不可用时，`Database` 从上次读到的位置继续，不会丢消息。
-
-<a id="redis-and-nats"></a>
-### Redis 与 NATS
-
-两者都在子包中，只有导入的应用才会链接对应的客户端：
+实例之间的消息经由 Redis Pub/Sub 传递，`rdb` 是[入口中创建的 Redis 客户端](redis.md#connecting)：
 
 ```go
 hub := broadcast.New(redisbroadcast.New(rdb, "blog:broadcast"), nil)
-hub := broadcast.New(natsbroadcast.New(nc, "blog.broadcast"), nil)
 ```
 
-`rdb` 是[入口中创建的 Redis 客户端](redis.md#connecting)，`nc` 是应用用 `nats.Connect` 创建的连接，由应用负责关闭。频道名和主题前缀区分不同的应用，同一个应用的实例必须相同。
+频道名区分不同的应用，同一个应用的实例必须相同。单机部署也要经由 Redis 传递：[不停机升级](deployment.md#upgrade-overlap)或滚动发布时新旧进程短暂并存，旧进程中还没结束的请求和任务发布的事件，要送到已经重连到新进程的浏览器。
 
-Redis Pub/Sub 和 NATS 核心发布订阅都不保存消息：订阅连接中断时，期间发布的消息就丢了。后端发现连接中断过，会结束本实例的全部订阅，让浏览器重连补发，见下一节。
+Redis Pub/Sub 不保存消息：订阅连接中断时，期间发布的消息就丢了。后端发现连接中断过，会结束本实例的全部订阅，让浏览器重连补发，见下一节。
 
 <a id="delivery-guarantees"></a>
 ## 投递保证
@@ -174,12 +141,12 @@ Redis Pub/Sub 和 NATS 核心发布订阅都不保存消息：订阅连接中断
 | 原因 | `sub.Err()` | 发生时 |
 | --- | --- | --- |
 | 订阅跟不上 | `broadcast.ErrSlow` | 订阅的缓冲区（64 条）已满，例如浏览器网络很慢 |
-| 后端可能丢了消息 | `broadcast.ErrLost` | 与 Redis、NATS 的连接中断过 |
+| 后端可能丢了消息 | `broadcast.ErrLost` | 与 Redis 的连接中断过 |
 | 订阅被关闭 | `broadcast.ErrClosed` | 调用了 `sub.Close()` 或 `hub.Close()` |
 
 订阅结束后，处理器返回、连接结束，浏览器重连并按 `Last-Event-ID` [补发](#replaying-missed-events)，消息因此既不会丢，也不会乱序。一个订阅跟不上，不会影响其他订阅。
 
-每个实例从后端收到全部主题的消息，再在本地按主题分发。消息量很大、主题很多时，用 NATS 并按业务拆分前缀。
+每个实例从后端收到全部主题的消息，再在本地按主题分发。
 
 <a id="testing"></a>
 ## 测试

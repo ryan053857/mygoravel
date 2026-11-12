@@ -78,14 +78,6 @@ func TestInvalidTasks(t *testing.T) {
 			newScheduler().Add("task", expr, noop)
 		}()
 	}
-	func() {
-		defer func() {
-			if recover() == nil {
-				t.Error("overlong name did not panic")
-			}
-		}()
-		newScheduler().Add(strings.Repeat("x", schedule.MaxNameLength+1), "@hourly", noop)
-	}()
 	s := newScheduler()
 	s.Add("task", "@hourly", noop)
 	defer func() {

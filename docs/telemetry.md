@@ -18,7 +18,7 @@
 
 框架的 HTTP 服务、队列、调度器、限流器和实时频道都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，前三者还报告链路。`telemetry` 包把这些指标、链路和应用的日志一起推送到一个 OTLP 接收端，例如 [OpenObserve](https://openobserve.ai/)，不需要另外部署收集器。
 
-这里只有框架自己的组件。数据库、Redis、NATS 这些依赖由各自的生态报告，例如 Bun 的 [bunotel](https://pkg.go.dev/github.com/uptrace/bun/extra/bunotel)、go-redis 的 [redisotel](https://pkg.go.dev/github.com/redis/go-redis/extra/redisotel/v9)，或者服务器一侧的 exporter，把同一个 Provider 交给它们即可。
+这里只有框架自己的组件。数据库、Redis 这些依赖由各自的生态报告，例如 Bun 的 [bunotel](https://pkg.go.dev/github.com/uptrace/bun/extra/bunotel)、rueidis 的 [rueidisotel](https://pkg.go.dev/github.com/redis/rueidis/rueidisotel)，或者服务器一侧的 exporter，把同一个 Provider 交给它们即可。
 
 和其他功能一样，指标和链路都需要显式开启：把 `MeterProvider`、`TracerProvider` 交给需要报告的组件，没有传入的组件不报告。
 
@@ -123,7 +123,7 @@ sched := schedule.New(a.locker, a.cfg.Schedule, nil, schedule.WithTelemetry(a.me
 ### 限流
 
 ```go
-attempts := ratelimit.Observe(a.meters, "login", ratelimit.NewDatabase(a.db, "login", cfg))
+attempts := ratelimit.Observe(a.meters, "login", redislimit.New(a.rdb, "blog:login", cfg))
 ```
 
 | 指标 | 类型 | 属性 | 含义 |

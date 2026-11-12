@@ -5,9 +5,7 @@
 - [只让一个实例执行](#running-once)
 - [等待锁](#waiting-for-locks)
 - [锁的有效期](#lock-ttl)
-- [使用数据库存储](#database-store)
-    - [过期清理](#cleanup)
-- [使用 Redis 存储](#redis-store)
+- [Redis 存储](#redis-store)
 - [其他存储](#other-stores)
 - [测试](#testing)
 
@@ -28,13 +26,16 @@
 在[入口](dependencies.md#assembling-the-application)的 `open` 中创建 `Locker`，传给需要它的 action：
 
 ```go
-import "github.com/ryan053857/mygoravel/lock"
+import (
+    "github.com/ryan053857/mygoravel/lock"
+    "github.com/ryan053857/mygoravel/lock/redislock"
+)
 
-locker := lock.New(lock.NewDatabase(db))
+locker := lock.New(redislock.New(rdb))
 publishScheduled := article.NewPublishScheduled(db, locker)
 ```
 
-`lock.New` 接收锁存储：[数据库存储](#database-store)或 [Redis 存储](#redis-store)。所有进程共用同一个存储才能互斥，单机部署也是如此：[不停机升级](deployment.md#upgrade-overlap)时新旧进程会同时运行。
+`lock.New` 接收锁存储，生产环境使用 [Redis 存储](#redis-store)，`rdb` 是[入口中创建的客户端](redis.md#connecting)。所有进程共用同一个存储才能互斥，单机部署也是如此：[不停机升级](deployment.md#upgrade-overlap)时新旧进程会同时运行。
 
 <a id="running-once"></a>
 ## 只让一个实例执行
@@ -105,54 +106,12 @@ if err := lk.Refresh(ctx, time.Minute); err != nil {
 
 `locker.Held(ctx, name)` 报告锁此刻是否被持有，不取得也不影响它，适合在后台页面展示状态，例如[定时任务是否正在执行](scheduling.md#listing-tasks)。它的结果只反映查询的那一刻，不能代替 `Acquire` 判断能否执行。
 
-<a id="database-store"></a>
-## 使用数据库存储
-
-`lock.NewDatabase` 把锁保存在应用的数据库中，接收应用的 `*bun.DB`：
-
-```go
-locker := lock.New(lock.NewDatabase(db))
-```
-
-使用前先发布 `locks` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
-
-```go
-migrationCmd.AddCommand(migratecmd.Publish(
-    migrate.Source{Name: "lock", FS: lock.Migrations()},
-))
-```
-
-表中每行是一把锁：`name` 是主键，最长 255 字节（`lock.MaxNameLength`），`owner` 是持有者随机生成的标识，`expires_at` 是过期时间。取得锁时先插入，锁已存在时只接管已过期的锁，两步都是单条原子语句。过期时间按应用服务器的时钟计算，各实例的时钟需要同步。
-
-<a id="cleanup"></a>
-### 过期清理
-
-正常释放的锁会删除对应的行。持有者崩溃留下的过期行不影响加锁，会被下一次 `Acquire` 直接接管；不再使用的锁名可以用 `Cleanup` 删除，每次最多删除 `limit` 条：
-
-```go
-n, err := store.Cleanup(ctx, 1000)
-```
-
-用[定时任务](scheduling.md#framework-cleanups)定期执行，例如每小时一次。[调度器](scheduling.md#multiple-instances)本身也用锁去重，每次触发会留下一行，同样由它清理：
-
-```go
-sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(store.Cleanup, 1000))
-```
-
 <a id="redis-store"></a>
-## 使用 Redis 存储
+## Redis 存储
 
-应用已经使用 [Redis](redis.md) 时，也可以把锁放进 Redis。`redislock.New` 接收[入口中创建的客户端](redis.md#connecting) `rdb`：
+每把锁是一个 Redis 键：键名就是锁名，值是持有者标识，键的过期时间就是锁的有效期。过期由 Redis 计算，不依赖各实例的时钟；过期的键由 Redis 自动删除，不需要迁移，也不需要定期清理。多个应用共用一个 Redis 时，在锁名前加上应用的命名空间，例如 `blog:articles:publish-scheduled`。Redis 必须配置 `noeviction`，否则内存紧张时锁会被淘汰，见 [Redis](redis.md#introduction)。
 
-```go
-import "github.com/ryan053857/mygoravel/lock/redislock"
-
-locker := lock.New(redislock.New(rdb))
-```
-
-每把锁是一个 Redis 键：键名就是锁名，值是持有者标识，键的过期时间就是锁的有效期。过期由 Redis 计算，不依赖各实例的时钟；过期的键由 Redis 自动删除，不需要迁移，也不需要定期清理。多个应用共用一个 Redis 时，在锁名前加上应用的命名空间，例如 `blog:articles:publish-scheduled`。
-
-锁只写在一个 Redis 主节点上。使用哨兵或集群时，主节点故障切换可能丢失刚写入的锁，短时间内出现两个持有者；对互斥要求严格的任务请使用数据库存储。
+锁只写在一个 Redis 主节点上。使用哨兵或集群时，主节点故障切换可能丢失刚写入的锁，短时间内出现两个持有者；对互斥要求严格的操作，请在数据库事务中用 `SELECT ... FOR UPDATE` 锁住相关的行。
 
 <a id="other-stores"></a>
 ## 其他存储
@@ -173,7 +132,7 @@ type Store interface {
 <a id="testing"></a>
 ## 测试
 
-`locktest.NewStore()` 是测试用的内存存储，只在同一个进程内互斥，不需要数据库：
+`locktest.NewStore()` 是测试用的内存存储，只在同一个进程内互斥，不需要 Redis：
 
 ```go
 import "github.com/ryan053857/mygoravel/lock/locktest"
@@ -181,4 +140,4 @@ import "github.com/ryan053857/mygoravel/lock/locktest"
 locker := lock.New(locktest.NewStore())
 ```
 
-它只用于测试。生产环境中同时运行的进程，包括不停机升级时的新旧进程，必须共用数据库或 Redis 存储。
+它只用于测试。生产环境中同时运行的进程，包括不停机升级时的新旧进程，必须共用 Redis 存储。

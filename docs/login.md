@@ -31,18 +31,18 @@
 <a id="assembling"></a>
 ## 装配
 
-先发布 `login` 的迁移；默认的限流器存在数据库中，同时发布 `ratelimit` 的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
+先发布 `login` 的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
 migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "login", FS: login.Migrations()},
-    migrate.Source{Name: "ratelimit", FS: ratelimit.Migrations()},
 ))
 ```
 
 在[入口](dependencies.md#assembling-the-application)中为博客用户创建 `Realm`，[`Hasher`](hashing.md) 哈希密码，[`Crypt`](encryption.md) 派生验证码的密钥：
 
 ```go
+every15 := ratelimit.Config{Rate: 5, Interval: 15 * time.Minute, Burst: 5}
 users := login.New(a.db, login.Options{
     Type:     user.Type,
     Register: true,
@@ -50,6 +50,8 @@ users := login.New(a.db, login.Options{
     Crypt:    a.crypt,
     Send:     sendCode(mailer, emails),
     Resolve:  user.Resolve,
+    Attempts: redislimit.New(a.rdb, "blog:login:user:attempts", every15),
+    Sends:    redislimit.New(a.rdb, "blog:login:user:sends", every15),
 })
 ```
 
@@ -60,6 +62,7 @@ users := login.New(a.db, login.Options{
 | `Send` | 发送验证码，邮件和短信的内容、通道由应用决定 |
 | `Resolve` | 登录成功、签发凭据之前调用一次，通常就是入口的 [Resolver](authentication.md#resolving-subjects)：账号已停用时返回错误，登录失败 |
 | `PerTenant` | 登录标识在租户内唯一，见[登录标识](#identifiers) |
+| `Attempts`、`Sends` | 密码登录失败和发送验证码的[限流器](#limits)，必填 |
 
 验证码默认 6 位数字、15 分钟有效、最多试 3 次，都可以在 `Options` 中修改。`Send` 收到的 `login.Code` 带有用途、接收的标识和验证码，下面用[邮件模板](mail.md#writing-templates)发送：
 
@@ -426,13 +429,13 @@ if len(known) > 0 && !slices.ContainsFunc(known, func(t apitoken.Token) bool { r
 <a id="limits"></a>
 ## 限流与防探测
 
-| 限制 | 默认 | 超出时 |
+| 限制 | 上面的配置 | 超出时 |
 | --- | --- | --- |
 | 同一个标识的密码登录，`Options.Attempts` | 15 分钟内连续失败 5 次，登录成功或找回密码后清零 | `ratelimit.ErrExceeded`，`429` |
 | 向同一个标识发送验证码，`Options.Sends` | 15 分钟 5 次 | `ratelimit.ErrExceeded`，`429` |
-| 同一个验证码的尝试次数，`Options.CodeAttempts` | 3 次 | 验证码作废，`login.ErrInvalidCode` |
+| 同一个验证码的尝试次数，`Options.CodeAttempts` | 默认 3 次 | 验证码作废，`login.ErrInvalidCode` |
 
-默认限流器存在数据库中，多个实例共享计数。已经在用 Redis 时可以换成 [`redislimit`](rate-limiting.md#redis-limiter)。按 IP 的限流不在 `login` 中，需要时在登录接口上安装 [`httpx.RateLimit`](rate-limiting.md#http-middleware)。
+`Attempts` 和 `Sends` 用 [`redislimit`](rate-limiting.md#redis-limiter)，多个实例共享计数；每套账号用各自的名字。按 IP 的限流不在 `login` 中，需要时在登录接口上安装 [`httpx.RateLimit`](rate-limiting.md#http-middleware)。
 
 为了不暴露哪些邮箱注册过：密码登录对“邮箱不存在”和“密码错误”返回同一个错误，耗时相同；找回密码和不开放注册时的验证码不发给未注册的邮箱，但同样返回请求 ID。验证码在库中只保存由应用密钥派生的 HMAC，数据库泄露也不能在有效期内穷举出验证码；完成凭证只保存 SHA-256。
 
@@ -530,7 +533,8 @@ n, err := users.Cleanup(ctx, 1000)
 
 ```go
 outbox := logintest.NewOutbox()
-users := login.New(db, login.Options{Type: user.Type, Hasher: hasher, Crypt: c, Send: outbox.Send})
+loose := ratelimit.NewMemory(ratelimit.Config{Rate: 100, Interval: time.Minute, Burst: 100})
+users := login.New(db, login.Options{Type: user.Type, Hasher: hasher, Crypt: c, Send: outbox.Send, Attempts: loose, Sends: loose})
 
 requestID, err := users.SendCode(ctx, login.SignIn, login.Email("alice@example.com"))
 code, _ := outbox.Last(login.Email("alice@example.com"))

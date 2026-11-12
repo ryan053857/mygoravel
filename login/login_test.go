@@ -3,7 +3,6 @@ package login_test
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"strings"
 	"sync"
 	"testing"
@@ -81,6 +80,11 @@ type env struct {
 }
 
 // newRealm 创建测试用的 Realm：限流器在内存中，宽松到不影响其他测试，限流本身在 TestAttemptsLimit 中检查。
+// realmLimiter 返回一个宽松的内存限流器，供测试中另外创建的 Realm 使用。
+func (e *env) realmLimiter() ratelimit.Limiter {
+	return ratelimit.NewMemory(ratelimit.Config{Rate: 1000, Interval: time.Minute, Burst: 1000})
+}
+
 func newRealm(t *testing.T, opts login.Options) *env {
 	t.Helper()
 	e := &env{db: dbtest.Open(t, login.Migrations()), mail: &mailbox{}, clock: &clock{t: time.Now().UTC().Truncate(time.Second)}}
@@ -265,7 +269,8 @@ func TestRehash(t *testing.T) {
 	}
 	before := stored()
 	stronger := login.New(e.db, login.Options{Type: customer, Hasher: hasher(5), Crypt: crypt.New(crypt.Config{Key: appKey}),
-		Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 9, Interval: time.Minute, Burst: 9})})
+		Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 9, Interval: time.Minute, Burst: 9}),
+		Sends:    ratelimit.NewMemory(ratelimit.Config{Rate: 9, Interval: time.Minute, Burst: 9})})
 	if _, err := stronger.Password(ctx, login.Email("alice@example.com"), "correct horse"); err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +548,7 @@ func TestSendFailure(t *testing.T) {
 	if n, _ := e.db.NewSelect().Table("auth_challenges").Count(ctx); n != 0 {
 		t.Fatalf("%d challenges left after a failed send", n)
 	}
-	noSend := login.New(e.db, login.Options{Type: customer, Hasher: hasher(4), Crypt: crypt.New(crypt.Config{Key: appKey})})
+	noSend := login.New(e.db, login.Options{Type: customer, Hasher: hasher(4), Crypt: crypt.New(crypt.Config{Key: appKey}), Attempts: e.realmLimiter(), Sends: e.realmLimiter()})
 	if _, err := noSend.SendCode(ctx, login.SignIn, login.Email("a@example.com")); err == nil {
 		t.Fatal("SendCode without Options.Send succeeded")
 	}
@@ -785,45 +790,31 @@ func TestCodeSurvivesKeyRotation(t *testing.T) {
 	e := newRealm(t, login.Options{Register: true})
 	requestID, c := e.code(t, ctx, login.SignIn, login.Email("a@example.com"))
 	rotated := login.New(e.db, login.Options{Type: customer, Hasher: hasher(4),
-		Crypt: crypt.New(crypt.Config{Key: crypt.GenerateKey(), PreviousKeys: []string{appKey}})})
+		Crypt:    crypt.New(crypt.Config{Key: crypt.GenerateKey(), PreviousKeys: []string{appKey}}),
+		Attempts: e.realmLimiter(), Sends: e.realmLimiter()})
 	if out, err := rotated.VerifyCode(ctx, requestID, c.Code); err != nil || out.Proof == "" {
 		t.Fatalf("verify after rotation: %+v %v", out, err)
 	}
 }
 
-// 默认限流器存在数据库中，需要 ratelimit 的迁移。
-func TestDefaultLimiters(t *testing.T) {
-	ctx := context.Background()
-	db := dbtest.Open(t, login.Migrations())
-	up, err := fs.ReadFile(ratelimit.Migrations(), "0001_create_rate_limits.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stmt, _, _ := strings.Cut(strings.TrimPrefix(string(up), "-- +goose Up"), "-- +goose Down")
-	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		t.Fatal(err)
-	}
-	realm := login.New(db, login.Options{Type: customer, Hasher: hasher(4), Crypt: crypt.New(crypt.Config{Key: appKey})})
-	for range 5 {
-		_, err := realm.Password(ctx, login.Email("a@example.com"), "x")
-		is(t, err, login.ErrInvalidCredentials)
-	}
-	_, err = realm.Password(ctx, login.Email("a@example.com"), "x")
-	is(t, err, ratelimit.ErrExceeded)
-}
-
 func TestNewPanics(t *testing.T) {
 	db := dbtest.Open(t, login.Migrations())
 	c := crypt.New(crypt.Config{Key: appKey})
+	l := ratelimit.NewMemory(ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
 	for name, opts := range map[string]login.Options{
 		"no type":        {Hasher: hasher(4), Crypt: c},
 		"bad type":       {Type: "Customer", Hasher: hasher(4), Crypt: c},
 		"no hasher":      {Type: customer, Crypt: c},
 		"no crypt":       {Type: customer, Hasher: hasher(4)},
+		"no attempts":    {Type: customer, Hasher: hasher(4), Crypt: c, Sends: l},
+		"no sends":       {Type: customer, Hasher: hasher(4), Crypt: c, Attempts: l},
 		"short code":     {Type: customer, Hasher: hasher(4), Crypt: c, CodeLength: 3},
 		"negative ttl":   {Type: customer, Hasher: hasher(4), Crypt: c, CodeTTL: -time.Second},
 		"negative tries": {Type: customer, Hasher: hasher(4), Crypt: c, CodeAttempts: -1},
 	} {
+		if name != "no attempts" && name != "no sends" {
+			opts.Attempts, opts.Sends = l, l
+		}
 		func() {
 			defer func() {
 				if recover() == nil {

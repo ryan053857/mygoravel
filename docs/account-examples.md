@@ -223,7 +223,9 @@ package accounts
 import (
     "context"
     "net/url"
+    "time"
 
+    "github.com/redis/rueidis"
     "github.com/uptrace/bun"
 
     "example.com/blog/internal/editor"
@@ -234,6 +236,8 @@ import (
     "github.com/ryan053857/mygoravel/login"
     "github.com/ryan053857/mygoravel/login/oauth"
     "github.com/ryan053857/mygoravel/mail"
+    "github.com/ryan053857/mygoravel/ratelimit"
+    "github.com/ryan053857/mygoravel/ratelimit/redislimit"
 )
 
 type Config struct {
@@ -263,7 +267,8 @@ type Accounts struct {
     Apple        *oauth.Provider
 }
 
-func New(ctx context.Context, db *bun.DB, cfg Config, hasher *hashing.Hasher, c *crypt.Crypt, mailer mail.Mailer, sms SMS) (*Accounts, error) {
+func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher *hashing.Hasher, c *crypt.Crypt, mailer mail.Mailer, sms SMS) (*Accounts, error) {
+    every15 := ratelimit.Config{Rate: 5, Interval: 15 * time.Minute, Burst: 5}
     editors := login.New(db, login.Options{
         Type:          editor.Type,
         Hasher:        hasher,
@@ -271,6 +276,8 @@ func New(ctx context.Context, db *bun.DB, cfg Config, hasher *hashing.Hasher, c 
         Issuer:        "Blog 编辑后台",
         PasswordKinds: []string{login.KindEmail},
         Resolve:       editor.Resolve(db),
+        Attempts:      redislimit.New(rdb, "blog:login:editor:attempts", every15),
+        Sends:         redislimit.New(rdb, "blog:login:editor:sends", every15),
         Send: func(ctx context.Context, code login.Code) error {
             link := cfg.PasswordURL + "?" + url.Values{"request": {code.RequestID}, "code": {code.Code}}.Encode()
             return mailer.Send(ctx, mail.Message{
@@ -286,6 +293,8 @@ func New(ctx context.Context, db *bun.DB, cfg Config, hasher *hashing.Hasher, c 
         Hasher:   hasher,
         Crypt:    c,
         Resolve:  reader.Resolve(db),
+        Attempts: redislimit.New(rdb, "blog:login:reader:attempts", every15),
+        Sends:    redislimit.New(rdb, "blog:login:reader:sends", every15),
         Send: func(ctx context.Context, code login.Code) error {
             return sms.Send(ctx, code.To.Value, "Blog 验证码 "+code.Code+"，15 分钟内有效。")
         },
@@ -833,7 +842,7 @@ func (h *handlers) confirm(ctx context.Context, ref identity.Ref, in *ConfirmInp
 在[入口](dependencies.md#assembling-the-application)中创建 `accounts.Accounts`，交给两组入口。页面只接受编辑，API 只接受读者：
 
 ```go
-acc, err := accounts.New(ctx, a.db, a.cfg.Accounts, hashing.New(a.cfg.Hashing), a.crypt, mailer, sms)
+acc, err := accounts.New(ctx, a.db, a.rdb, a.cfg.Accounts, hashing.New(a.cfg.Hashing), a.crypt, mailer, sms)
 if err != nil {
     return err
 }

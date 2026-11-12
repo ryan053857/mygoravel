@@ -36,8 +36,7 @@ var (
 const MaxTopicLength = 200
 
 // ValidateTopic 检查主题：非空，最长 MaxTopicLength 字节，只含字母、数字和 _ - : .，
-// 且 . 不能在开头、结尾或连续出现。这些规则让主题在所有 Backend 中都可以直接使用，
-// 例如作为 NATS 的主题段。
+// 且 . 不能在开头、结尾或连续出现。主题同时是实时频道的名称，这些规则让它可以直接出现在 URL 和日志中。
 func ValidateTopic(topic string) error {
 	if topic == "" || len(topic) > MaxTopicLength {
 		return errors.Newf("broadcast: topic must be 1 to %d bytes", MaxTopicLength)

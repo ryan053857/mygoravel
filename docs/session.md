@@ -8,7 +8,6 @@
     - [设备列表](#listing-sessions)
     - [撤销会话](#revoking-sessions)
     - [过期清理](#cleanup)
-- [使用 Redis 存储](#redis-store)
 - [跨站请求伪造](#csrf)
 
 <a id="introduction"></a>
@@ -165,23 +164,6 @@ n, err := store.Cleanup(ctx, 1000)
 ```go
 sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(store.Cleanup, 1000))
 ```
-
-<a id="redis-store"></a>
-## 使用 Redis 存储
-
-应用已经使用 [Redis](redis.md) 时，也可以把会话放进 Redis。安装 scs 的 [goredisstore](https://github.com/alexedwards/scs/tree/master/goredisstore)：
-
-```bash
-go get github.com/alexedwards/scs/goredisstore@latest
-```
-
-然后传入[入口中创建的客户端](redis.md#connecting) `a.rdb`：
-
-```go
-sessions := session.New(a.cfg.Session, goredisstore.New(a.rdb))
-```
-
-其他代码不变。会话借助 Redis 的键过期自动清除，不需要迁移，也不需要定期清理。设备列表和撤销只由数据库存储提供。
 
 <a id="csrf"></a>
 ## 跨站请求伪造

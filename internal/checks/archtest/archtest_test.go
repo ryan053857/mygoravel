@@ -99,7 +99,7 @@ var rules = map[string]rule{
 var components = []string{
 	"net/http", "database/sql", "github.com/danielgtaylor/huma",
 	"github.com/go-chi/chi", "github.com/uptrace/bun", "github.com/jackc/pgx",
-	"github.com/pressly/goose", "github.com/spf13/cobra", "github.com/redis/go-redis",
+	"github.com/pressly/goose", "github.com/spf13/cobra", "github.com/redis/rueidis",
 }
 
 // 基础层中的例外：form 按 Huma 的标签和校验规则转换字段值。
@@ -318,7 +318,7 @@ func TestLocalFilesDoesNotLinkS3(t *testing.T) {
 // TestOnlyRealtimeLinksCentrifuge 确保不使用 WebSocket 实时频道的应用不会链接 Centrifuge：
 // 广播、SSE 和 AI 的集群协作都只依赖 broadcast。
 func TestOnlyRealtimeLinksCentrifuge(t *testing.T) {
-	for _, pkg := range []string{"/broadcast", "/broadcast/redisbroadcast", "/broadcast/natsbroadcast", "/httpx/rest", "/web", "/ai", "/ai/chat"} {
+	for _, pkg := range []string{"/broadcast", "/broadcast/redisbroadcast", "/httpx/rest", "/web", "/ai", "/ai/chat"} {
 		out, err := exec.Command("go", "list", "-deps", module+pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)
@@ -437,8 +437,8 @@ func TestAPIDoesNotLinkTempl(t *testing.T) {
 	}
 }
 
-// TestCoreDoesNotLinkRedis 确保不用 Redis 的应用不会链接 go-redis，
-// Redis 实现分别在 lock/redislock、ratelimit/redislimit、broadcast/redisbroadcast 和 queue/redisqueue 中。
+// TestCoreDoesNotLinkRedis 确保核心包不链接 Redis 客户端，测试可以用内存替身代替 Redis；
+// Redis 实现分别在 lock/redislock、ratelimit/redislimit、broadcast/redisbroadcast 和 realtime/redispresence 中。
 func TestCoreDoesNotLinkRedis(t *testing.T) {
 	for _, pkg := range []string{module + "/lock", module + "/ratelimit", module + "/httpx", module + "/broadcast", module + "/queue"} {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
@@ -446,16 +446,16 @@ func TestCoreDoesNotLinkRedis(t *testing.T) {
 			t.Fatalf("go list: %v\n%s", err, out)
 		}
 		for _, dep := range strings.Fields(string(out)) {
-			if under(dep, "github.com/redis/go-redis") {
+			if under(dep, "github.com/redis/rueidis") {
 				t.Errorf("%s depends on %s", pkg, dep)
 			}
 		}
 	}
 }
 
-// TestCoreDoesNotLinkNATS 确保不用 NATS 的应用不会链接 nats.go，NATS 实现在 broadcast/natsbroadcast 和 queue/natsqueue 中。
+// TestCoreDoesNotLinkNATS 确保不用 NATS 的应用不会链接 nats.go，NATS 实现在 queue/natsqueue 中。
 func TestCoreDoesNotLinkNATS(t *testing.T) {
-	for _, pkg := range []string{module + "/broadcast", module + "/broadcast/redisbroadcast", module + "/queue", module + "/queue/redisqueue"} {
+	for _, pkg := range []string{module + "/broadcast", module + "/broadcast/redisbroadcast", module + "/queue"} {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)

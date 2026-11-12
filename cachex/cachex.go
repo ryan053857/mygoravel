@@ -1,13 +1,13 @@
-// Package cachex 在 gocache 缓存之上提供 cache-aside 读取。Remember 先读缓存，没有时加载并写回，并处理三个常见问题：
+// Package cachex 在 Memcached 之上提供 cache-aside 读取。Remember 先读缓存，没有时加载并写回，并处理三个常见问题：
 //
 //   - 击穿：热点键过期的瞬间，同一个进程中同一个键的并发加载合并为一次；
 //   - 雪崩：写入时过期时间加上随机抖动，同一批写入的键不会在同一时刻一起过期；
 //   - 穿透：用 Missing 声明表示「不存在」的错误后，不存在的数据也会缓存约一分钟。
 //
-// 值编码为 JSON 存进 cache.CacheInterface[string]，内存和 Redis 等后端可以互相替换。
+// 值编码为 JSON 存进 Memcached，客户端是应用共用的 *memcache.Client（github.com/bradfitz/gomemcache）。
 // 缓存读写失败或缓存中的内容无法解码时直接加载，结果照常返回：查询缓存随时可以从数据库重建，不应让请求失败。
 //
-//	articles := cachex.New[*article.Article](c, "blog:article:v1:", 10*time.Minute, cachex.Missing(article.ErrNotFound.New))
+//	articles := cachex.New[*article.Article](mc, "blog:article:v1:", 10*time.Minute, cachex.Missing(article.ErrNotFound.New))
 //	item, err := articles.Remember(ctx, id.String(), func(ctx context.Context) (*article.Article, error) {
 //		return find(ctx, db, id)
 //	})
@@ -15,6 +15,8 @@ package cachex
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"math/rand/v2"
@@ -22,9 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/cockroachdb/errors"
-	"github.com/eko/gocache/lib/v4/cache"
-	"github.com/eko/gocache/lib/v4/store"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/ryan053857/mygoravel/logging"
@@ -39,11 +40,20 @@ const (
 	missingMarker = "!missing"
 	// logInterval 是每个 Cache 记录缓存故障日志的最小间隔。
 	logInterval = time.Minute
+	// maxRelative 是 Memcached 按相对秒数理解的最长过期时间，更长的要写成 Unix 时间。
+	maxRelative = 30 * 24 * time.Hour
 )
+
+// Client 是 Cache 用到的 Memcached 操作，*memcache.Client 实现了它。
+type Client interface {
+	Get(key string) (*memcache.Item, error)
+	Set(item *memcache.Item) error
+	Delete(key string) error
+}
 
 // Cache 缓存一种值，例如文章详情。它是并发安全的，每种值创建一个，在应用中共用。
 type Cache[T any] struct {
-	cache   cache.CacheInterface[string]
+	mc      Client
 	prefix  string
 	ttl     time.Duration
 	missing func() error
@@ -69,13 +79,14 @@ func Missing(newErr func() error) Option {
 	return func(o *options) { o.missing = newErr }
 }
 
-// New 创建 Cache。c 是保存值的缓存；prefix 加在每个 key 前面，由命名空间、值的种类和格式版本组成，
-// 例如 "blog:article:v1:"，修改值的结构时升级版本；ttl 是值的过期时间，实际写入时随机增加至多 10%。
-// c 为 nil 或 ttl 不为正时 panic。
-func New[T any](c cache.CacheInterface[string], prefix string, ttl time.Duration, opts ...Option) *Cache[T] {
+// New 创建 Cache。mc 通常是应用共用的 *memcache.Client；prefix 加在每个 key 前面，由命名空间、值的种类和格式版本组成，
+// 例如 "blog:article:v1:"，修改值的结构时升级版本；ttl 是值的过期时间，实际写入时随机增加至多 10%，按秒向上取整。
+// 加上前缀后超过 Memcached 的 250 字节或含有空白、控制字符的 key 以 SHA-256 摘要保存。
+// mc 为 nil 或 ttl 不为正时 panic。
+func New[T any](mc Client, prefix string, ttl time.Duration, opts ...Option) *Cache[T] {
 	switch {
-	case c == nil:
-		panic("cachex: nil cache")
+	case mc == nil:
+		panic("cachex: nil client")
 	case ttl <= 0:
 		panic("cachex: ttl must be positive")
 	}
@@ -83,7 +94,7 @@ func New[T any](c cache.CacheInterface[string], prefix string, ttl time.Duration
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return &Cache[T]{cache: c, prefix: prefix, ttl: ttl, missing: o.missing}
+	return &Cache[T]{mc: mc, prefix: prefix, ttl: ttl, missing: o.missing}
 }
 
 // Remember 返回 key 的值：缓存中有时直接返回，没有时调用 load 加载并写入缓存。
@@ -93,7 +104,7 @@ func New[T any](c cache.CacheInterface[string], prefix string, ttl time.Duration
 // 加载继续，其他调用者照常得到结果。load 的错误原样返回给所有等待的调用者，
 // 除了 Missing 声明的错误都不缓存；load 中的 panic 转为错误。
 func (c *Cache[T]) Remember(ctx context.Context, key string, load func(ctx context.Context) (T, error)) (T, error) {
-	key = c.prefix + key
+	key = c.storedKey(key)
 	var zero T
 	if raw, ok := c.cached(ctx, key); ok {
 		if raw == missingMarker && c.missing != nil {
@@ -120,22 +131,48 @@ func (c *Cache[T]) Remember(ctx context.Context, key string, load func(ctx conte
 // Forget 删除 key 的值，例如数据修改之后。正在进行的加载不会被之后的 Remember 共用。
 // 缓存的删除失败时返回错误。
 func (c *Cache[T]) Forget(ctx context.Context, key string) error {
-	key = c.prefix + key
+	key = c.storedKey(key)
 	c.group.Forget(key)
-	return errors.Wrapf(c.cache.Delete(ctx, key), "cachex: forget %q", key)
+	if err := c.mc.Delete(key); err != nil && !errors.Is(err, memcache.ErrCacheMiss) {
+		return errors.Wrapf(err, "cachex: forget %q", key)
+	}
+	return nil
+}
+
+// storedKey 返回 key 在 Memcached 中的键：加上前缀，不合法时换成摘要。
+func (c *Cache[T]) storedKey(key string) string {
+	key = c.prefix + key
+	if legalKey(key) {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// legalKey 报告 key 是否能直接作为 Memcached 的键：最长 250 字节，不含空白和控制字符。
+func legalKey(key string) bool {
+	if len(key) > 250 {
+		return false
+	}
+	for i := range len(key) {
+		if key[i] <= ' ' || key[i] == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // cached 读取 key 在缓存中的内容。没有缓存或读取失败时 ok 为 false，失败时记录日志。
 func (c *Cache[T]) cached(ctx context.Context, key string) (raw string, ok bool) {
-	raw, err := c.cache.Get(ctx, key)
+	item, err := c.mc.Get(key)
 	switch {
-	case errors.Is(err, store.NotFound{}):
+	case errors.Is(err, memcache.ErrCacheMiss):
 		return "", false
 	case err != nil:
 		c.logs.warn(ctx, "read cache failed", "key", key, "error", err)
 		return "", false
 	}
-	return raw, true
+	return string(item.Value), true
 }
 
 // fill 加载 key 的值，编码后写入缓存，返回编码后的内容。Missing 声明的错误写入「不存在」的标记后原样返回。
@@ -163,7 +200,7 @@ func (c *Cache[T]) fill(ctx context.Context, key string, load func(ctx context.C
 
 // write 以加上抖动的 ttl 写入缓存，失败只记录日志。
 func (c *Cache[T]) write(ctx context.Context, key, raw string, ttl time.Duration) {
-	if err := c.cache.Set(ctx, key, raw, store.WithExpiration(withJitter(ttl))); err != nil {
+	if err := c.mc.Set(&memcache.Item{Key: key, Value: []byte(raw), Expiration: expiration(withJitter(ttl))}); err != nil {
 		c.logs.warn(ctx, "write cache failed", "key", key, "error", err)
 	}
 }
@@ -216,4 +253,13 @@ func (t *throttle) warn(ctx context.Context, msg string, args ...any) {
 		args = append(args, "suppressed", suppressed)
 	}
 	slog.WarnContext(ctx, msg, args...)
+}
+
+// expiration 把 ttl 转换为 Memcached 的过期时间：按秒向上取整；超过 30 天时 Memcached 把数值当作 Unix 时间，
+// 所以写成到期的 Unix 秒。
+func expiration(ttl time.Duration) int32 {
+	if ttl > maxRelative {
+		return int32(time.Now().Add(ttl).Unix())
+	}
+	return int32((ttl + time.Second - 1) / time.Second)
 }

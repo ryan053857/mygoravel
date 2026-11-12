@@ -5,9 +5,7 @@
 - [限制请求频率](#http-middleware)
     - [限流的 key](#rate-limit-key)
 - [在处理器中限流](#in-handlers)
-- [使用数据库存储](#database-limiter)
-    - [清理](#cleanup)
-- [使用 Redis 存储](#redis-limiter)
+- [Redis 限流器](#redis-limiter)
 - [指标](#metrics)
 
 <a id="introduction"></a>
@@ -47,10 +45,9 @@ ratelimit.Config{
 | 实现 | 计数保存在 | 适合 |
 | --- | --- | --- |
 | `ratelimit.NewMemory(cfg)` | 进程内存，每个实例分别计数 | 每个请求都要经过的全局限流 |
-| `ratelimit.NewDatabase(db, name, cfg)` | 数据库，多个实例共享 | 登录、验证码、发邮件等低频操作 |
-| `redislimit.New(rdb, name, cfg)` | Redis，多个实例共享 | 多实例共享的全局限流，以及低频操作 |
+| `redislimit.New(rdb, name, cfg)` | Redis，多个实例共享 | 登录、验证码等需要多实例共享计数的操作，以及全局限流 |
 
-三者的算法相同，换实现不会改变限流结果。
+两者的算法相同，换实现不会改变限流结果。
 
 <a id="http-middleware"></a>
 ## 限制请求频率
@@ -116,49 +113,15 @@ func (h *Handlers) Unlock(w http.ResponseWriter, r *http.Request) error {
 入口中创建限流器并传给登录处理器：
 
 ```go
-attempts := ratelimit.NewDatabase(db, "article-passcode", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
+attempts := redislimit.New(rdb, "blog:passcode", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
 ```
 
-校验口令需要多个实例共享计数，否则攻击者把请求分散到各个实例，就能得到成倍的尝试次数，所以这里使用数据库限流器。
-
-<a id="database-limiter"></a>
-## 使用数据库存储
-
-`ratelimit.NewDatabase` 接收应用的 `*bun.DB`，第二个参数 `name` 区分共用一张表的不同限流器：同名的限流器共享配额，所以每个 `name` 应该只对应一种配额。
-
-使用前先发布 `rate_limits` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
-
-```go
-migrationCmd.AddCommand(migratecmd.Publish(
-    migrate.Source{Name: "ratelimit", FS: ratelimit.Migrations()},
-))
-```
-
-每个 key 只占一行，保存以微秒计的理论到达时间；超过 255 字节的 key（例如很长的邮箱）以 SHA-256 摘要保存。每次 `Allow` 是一个短事务：先锁住这一行，再读取当前时间计算是否放行，与内存限流器使用同一套算法，多个实例并发调用时计数也是精确的。时间取自应用服务器的时钟，各实例的时钟需要同步。在 PostgreSQL 上这张表是 `UNLOGGED` 表，不写 WAL，数据库崩溃后表会被清空，相当于所有 key 的配额回满。
-
-每次 `Allow` 都是一次数据库写入，因此不要用它做每个请求都经过的全局限流，那种场景请使用内存或 [Redis](#redis-limiter) 限流器，或者在网关中配置。
-
-<a id="cleanup"></a>
-### 清理
-
-配额已经回满的行与不存在的行等价，删除它们不会改变任何限流结果。`Cleanup` 每次最多删除 `limit` 条这样的行：
-
-```go
-n, err := attempts.Cleanup(ctx, 1000)
-```
-
-清理作用于整张表，不限于调用者的 `name`，用任意一个数据库限流器调用即可。`Cleanup` 可以反复执行，多个实例同时执行也是安全的。
-
-用[定时任务](scheduling.md#framework-cleanups)定期执行，例如每小时一次：
-
-```go
-sched.Add("rate-limits:cleanup", "@hourly", schedule.Cleanup(attempts.Cleanup, 1000))
-```
+校验口令需要多个实例共享计数，否则攻击者把请求分散到各个实例，就能得到成倍的尝试次数，所以这里使用 [Redis 限流器](#redis-limiter)。
 
 <a id="redis-limiter"></a>
-## 使用 Redis 存储
+## Redis 限流器
 
-应用已经使用 [Redis](redis.md) 时，也可以把计数放进 Redis。`redislimit.New` 接收[入口中创建的客户端](redis.md#connecting) `rdb`，其余参数与 `NewDatabase` 相同：
+多个实例共享配额时使用 Redis 限流器。`redislimit.New` 接收[入口中创建的客户端](redis.md#connecting) `rdb`，第二个参数 `name` 区分不同的限流器：同名的限流器共享配额，所以每个 `name` 应该只对应一种配额。
 
 ```go
 import "github.com/ryan053857/mygoravel/ratelimit/redislimit"
@@ -182,11 +145,11 @@ router.Use(httpx.RateLimit(redislimit.New(a.rdb, "blog:http", a.cfg.HTTP.RateLim
 被拒绝的请求返回 `429`，已经出现在 [HTTP 请求的指标](telemetry.md#http)中，按路由就能看出哪个接口被限流。还看不出来的是：被哪个限流器拒绝、拒绝占全部调用的比例、存储是否出错，以及 HTTP 之外的调用。用 `ratelimit.Observe` 包装限流器，`a.meters` 是入口中[创建](telemetry.md#setup)的 `MeterProvider`：
 
 ```go
-logins := ratelimit.NewDatabase(a.db, "login", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
+logins := redislimit.New(a.rdb, "blog:login", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
 attempts := ratelimit.Observe(a.meters, "login", logins)
 ```
 
-把 `attempts` 交给 [`login.Options.Attempts`](login.md#limits)，[清理](#cleanup)仍然调用 `logins.Cleanup`。第二个参数是指标中的名称，与存储的 `name` 分开：Redis 限流器的 `name` 往往带着应用的前缀，指标中不需要。任何 `Limiter` 都可以包装，包括中间件使用的内存限流器。
+把 `attempts` 交给 [`login.Options.Attempts`](login.md#limits)。第二个参数是指标中的名称，与存储的 `name` 分开：Redis 限流器的 `name` 往往带着应用的前缀，指标中不需要。任何 `Limiter` 都可以包装，包括中间件使用的内存限流器。
 
 每次 `Allow` 计入计数器 `ratelimit.requests`，属性 `ratelimit.name` 是名称，`ratelimit.result` 是结果：
 
@@ -194,7 +157,7 @@ attempts := ratelimit.Observe(a.meters, "login", logins)
 | --- | --- |
 | `allowed` | 放行 |
 | `exceeded` | 配额用完，返回 `ErrExceeded` |
-| `error` | 存储出错，例如数据库或 Redis 不可用；中间件此时返回 `503` |
+| `error` | 存储出错，例如 Redis 不可用；中间件此时返回 `503` |
 
 `ctx` 被取消或超时导致的错误不计入，它们来自调用方。导出到 Prometheus 后是 `ratelimit_requests_total`，例如登录被拒绝的比例：
 

@@ -11,7 +11,7 @@ import (
 //
 // Hub 开始监听时先收到 Backend 创建以来发布的全部消息，所以刚创建的 Hub 不会错过紧接着发布的消息。
 // 之后 Publish 在返回之前把消息交给所有 Hub。Backend 保留全部消息，只用于测试；
-// 生产环境中，不停机升级和多实例部署时同时运行的进程需要共用 broadcast.NewDatabase 等后端。
+// 生产环境中，不停机升级和多实例部署时同时运行的进程需要共用 Redis 后端（broadcast/redisbroadcast）。
 type Backend struct {
 	mu        sync.Mutex
 	published []broadcast.Message

@@ -20,7 +20,7 @@
 ## 开发环境
 
 - Go，版本以仓库 [go.mod](../go.mod) 中的声明为准；
-- Docker，用于在本地启动集成测试所需的 PostgreSQL 18 和 Redis 8。
+- Docker，用于在本地启动集成测试所需的服务。
 
 <a id="running-tests"></a>
 ## 运行测试
@@ -44,12 +44,13 @@ go test -race ./...
 <a id="integration-tests"></a>
 ### 集成测试
 
-依赖外部服务的测试需要真实的 PostgreSQL、Redis、开启 JetStream 的 NATS 和 Gotenberg。仓库根目录的 `compose.test.yml` 启动这些服务，版本与 CI 相同，`--wait` 等到它们全部就绪才返回：
+依赖外部服务的测试需要真实的 PostgreSQL、Redis、Memcached、开启 JetStream 的 NATS 和 Gotenberg。仓库根目录的 `compose.test.yml` 启动这些服务，版本与 CI 相同，`--wait` 等到它们全部就绪才返回：
 
 ```bash
 docker compose -f compose.test.yml up -d --wait
 export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
 export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
+export MEMCACHED_TEST_ADDR='127.0.0.1:51211'
 export NATS_TEST_URL='nats://127.0.0.1:54222'
 export GOTENBERG_TEST_URL='http://127.0.0.1:53000'
 go test -race -count=1 ./...
@@ -57,7 +58,7 @@ go test -race -count=1 ./...
 
 没有设置这些环境变量时，集成测试会失败而不是跳过。每个数据库测试使用自己的临时库，Redis 测试给每个键加随机前缀，NATS 队列测试为每个场景建一个随机命名的流，所以服务可以一直开着反复运行测试。数据放在 tmpfs 中，测试完成后执行 `docker compose -f compose.test.yml down -v` 清理，不会留下任何数据。
 
-队列驱动共用 `queue/queuetest` 中的契约测试：数据库、Redis、NATS 驱动运行同一组场景。新增驱动时让它运行 `queuetest.TestDriver`。
+队列驱动共用 `queue/queuetest` 中的契约测试：数据库和 NATS 驱动运行同一组场景。新增驱动时让它运行 `queuetest.TestDriver`。
 
 依赖数据库的测试用 `database/dbtest` 的 `Open` 为每个测试建一个临时库。
 
@@ -79,7 +80,7 @@ go test -race -count=1 ./...
 <a id="doc-tests"></a>
 ### 文档用法测试
 
-有些功能框架不做封装，由文档直接教用户使用社区组件，例如用 gocache 做缓存。`internal/checks/doctest` 在真实环境中验证文档描述的这些行为，例如缓存未命中时返回 `store.NotFound`、Redis store 的 TTL 选项是否生效。依赖升级改变了这些行为时测试会失败，提醒同步修改文档。它还会把文档中博客示例的完整文件（正文写明「完整的 `internal/...`」的代码块）提取出来，和 `internal/checks/doctest/testdata/blog` 中的占位包一起编译；修改这些文件或框架 API 时，测试会指出文档中不再能编译的代码。新增一个完整文件时，把它加入 `blog_test.go` 的 `blogFiles`。
+`internal/checks/doctest` 把文档中博客示例的完整文件（正文写明「完整的 `internal/...`」的代码块）提取出来，和 `internal/checks/doctest/testdata/blog` 中的占位包一起编译；修改这些文件或框架 API 时，测试会指出文档中不再能编译的代码。新增一个完整文件时，把它加入 `blog_test.go` 的 `blogFiles`。
 
 <a id="continuous-integration"></a>
 ## 持续集成
@@ -90,7 +91,7 @@ CI 配置位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，每次
 2. `go vet ./...`；
 3. `golangci-lint run`，配置在 [.golangci.yml](../.golangci.yml)；
 4. 在 `web/ui` 中重新运行 `go tool templ generate`，确认提交的 `_templ.go` 是最新的；
-5. `go test ./...`（使用 PostgreSQL 18、Redis 8、NATS 和 Gotenberg 服务容器）。
+5. `go test ./...`（使用 PostgreSQL 18、Redis 8、Memcached、NATS 和 Gotenberg 服务容器）。
 
 CI 不运行 `-race`，它让整个流程慢了好几倍。提交之前，请在本地至少运行前三项和 `go test ./...`；改动涉及并发时，另外用 `go test -race` 运行相关的包，时序敏感的测试还要不带 `-race` 多跑几轮。
 

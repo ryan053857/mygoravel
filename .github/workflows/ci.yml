@@ -29,6 +29,10 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      memcached:
+        image: memcached:1.6-alpine
+        ports:
+          - 11211:11211
       gotenberg:
         image: gotenberg/gotenberg:9-chromium
         ports:
@@ -41,6 +45,7 @@ jobs:
     env:
       POSTGRES_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
       REDIS_TEST_URL: redis://127.0.0.1:6379/0
+      MEMCACHED_TEST_ADDR: 127.0.0.1:11211
       NATS_TEST_URL: nats://127.0.0.1:4222
       GOTENBERG_TEST_URL: http://127.0.0.1:3000
     steps:

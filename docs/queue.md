@@ -19,7 +19,6 @@
     - [队列状态](#queue-stats)
     - [查看队列的命令](#stats-command)
 - [测试](#testing)
-- [使用 Redis](#redis-driver)
 - [使用 NATS](#nats-driver)
 - [实现自己的驱动](#custom-drivers)
 
@@ -129,7 +128,7 @@ err := Reindex.Publish(ctx, queue.Database(tx), item.ID, queue.Unique(item.ID.St
 
 也可以用事件 ID 作为键，合并第三方回调的重发：排队期间收到的重发被合并；任务执行之后才收到的重发会再执行一次，处理函数仍然要按事件 ID 判断是否已经处理过。
 
-键只在 topic 内唯一，最长 255 字节。数据库和 Redis 驱动支持 `Unique`，[NATS](#nats-driver) 驱动不支持。
+键只在 topic 内唯一，最长 255 字节。数据库驱动支持 `Unique`，[NATS](#nats-driver) 驱动不支持。
 
 <a id="multi-step-jobs"></a>
 ### 多步任务
@@ -486,7 +485,7 @@ ID                                    TOPIC      ATTEMPTS  FAILED AT            
 0193e7b1-2c4f-7d8e-9a1b-5f6c7d8e9f01  mail.send  5         2026-11-12 09:41:07  send mail: dial tcp 10.0.0.12:587: connection refused
 ```
 
-应用同时使用多个队列时，例如任务在 Redis 中而 [webhook 投递](webhooks.md#delivering)总在数据库队列中，把它们都装配为 `App` 的字段，一起传给 `queuecmd.New`，现在的任务数多一列驱动名。
+应用同时使用多个队列时，例如任务在 NATS 中而 [webhook 投递](webhooks.md#delivering)总在数据库队列中，把它们都装配为 `App` 的字段，一起传给 `queuecmd.New`，现在的任务数多一列驱动名。
 
 <a id="testing"></a>
 ## 测试
@@ -505,36 +504,37 @@ if err != nil || n != 1 {
 }
 ```
 
-<a id="redis-driver"></a>
-## 使用 Redis
+<a id="nats-driver"></a>
+## 使用 NATS
 
-任务量大、不想让队列的轮询和写入占用数据库时，可以把任务放进 [Redis](redis.md)。`redisqueue.New` 接收[入口中创建的客户端](redis.md#connecting)和一个键名前缀：
+已经在使用 [NATS](https://nats.io) 时，也可以把任务放进 JetStream。`natsqueue.New` 接收应用创建的连接和一个流名：
 
 ```go
-import "github.com/ryan053857/mygoravel/queue/redisqueue"
+import "github.com/ryan053857/mygoravel/queue/natsqueue"
 
-jobs := redisqueue.New(a.rdb, "blog:queue")
+jobs := natsqueue.New(nc, "BLOG_QUEUE")
 
-// 发布
 err := mailjob.Send.Publish(ctx, jobs, msg)
 
-// 处理：失败任务仍然写入数据库
 failed := queue.NewFailedJobs(a.db, jobs)
 w := queue.NewWorker(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 ```
 
-其余的用法和数据库驱动完全相同：退避重试、失败任务、租约与平滑停止的行为一致，`failed.Retry` 把任务放回 Redis。与数据库驱动的区别：
+服务器需要 NATS 2.12 或更高版本并开启 JetStream（`nats-server -js`），延迟任务使用服务器的定时消息；版本过低时发布和领取任务都会返回错误。驱动在第一次使用时创建名为 `BLOG_QUEUE` 的流，任务确认后即从流中删除；集群部署时用 `natsqueue.Replicas(3)` 设置副本数。每个 topic 对应一个持久消费者，没有任务时拉取请求在服务器上等待，任务到达后立即被领取，不受 `poll_interval` 影响。
 
-- **不能在事务中发布。** Redis 不参与数据库事务，发布任务和业务写入不是原子的，在事务提交之后再发布，见[下文](#publish-after-commit)。需要「业务数据提交，任务就一定在」的场景，仍然使用 `queue.Database(tx)`。
-- **失败任务需要数据库。** 用 `WithFailedJobs` 指定，表结构见[准备数据表](#preparing-tables)。
-- **持久性取决于 Redis 的配置。** 只开启 RDB 快照时，Redis 重启会丢失最近一次快照之后发布的任务；需要可靠的队列时开启 AOF（`appendonly yes`）。主从切换同样可能丢失刚写入的任务。
+NATS 不能在数据库事务中发布，需要[在事务提交后再发布](#publish-after-commit)，失败任务需要用 `WithFailedJobs` 写入数据库。此外还有几处不同：
 
-每个 topic 在 Redis 中有六个键，键名以 `blog:queue:{mail.send}:` 开头，花括号让同一个 topic 的键落在同一个集群槽位，因此也可以使用 Redis 集群。任务完成后对应的记录都会删除，不需要清理。租约和延迟按 Redis 服务端的时钟计算，不受各实例时钟偏差影响。
+- **延迟的精度是秒。** 延迟任务向上取整到秒，最多晚 1 秒执行，不会提前。
+- **租约在启动时确定。** 租约就是消费者的确认等待时间，取自进程启动后第一次领取时的 `lease`，修改配置后重启生效。
+- **租约过期后不能阻止旧的确认。** 一个 worker 与 NATS 失联超过租约、任务被重新投递后，原来的 worker 仍然可以确认它。处理函数本来就需要能重复执行，这通常没有影响。
+- **停止超时释放的任务计入一次执行。** NATS 的投递次数不能回退。
+- **不检查重复的任务 ID。**
+- **不支持[合并重复任务](#unique-jobs)。** JetStream 无法原子地判断一个任务是否还没被领取，带 `queue.Unique` 发布时返回 `natsqueue.ErrUniqueUnsupported`，任务不会入队。
 
 <a id="publish-after-commit"></a>
 ### 事务提交后再发布
 
-在事务中用 Redis 驱动发布时，任务会立刻进入 Redis：worker 可能在事务提交之前就领到任务、读不到新数据；事务回滚了，任务也照样执行。所以要用 [AfterCommit](database.md#after-commit) 登记发布，等事务提交之后再执行。改写[发布文章](#publishing-jobs)的例子，`a.jobs` 是上面创建的 Redis 驱动：
+在事务中用 NATS 驱动发布时，任务会立刻进入 NATS：worker 可能在事务提交之前就领到任务、读不到新数据；事务回滚了，任务也照样执行。所以要用 [AfterCommit](database.md#after-commit) 登记发布，等事务提交之后再执行。改写[发布文章](#publishing-jobs)的例子，`a.jobs` 是上面创建的 NATS 驱动：
 
 ```go
 func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
@@ -562,41 +562,14 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
 }
 ```
 
-这样事务回滚时不会发布，worker 领到任务时文章一定已经提交。代价是提交和发布不是原子的：提交成功后、发布之前进程崩溃或 Redis 不可用，这封通知就丢了，只留下一条错误日志。能接受偶尔丢失的任务（通知、刷新缓存）这样做即可；不能丢的任务使用 `queue.Database(tx)`。
-
-<a id="nats-driver"></a>
-## 使用 NATS
-
-已经在使用 [NATS](https://nats.io) 时，也可以把任务放进 JetStream。`natsqueue.New` 接收应用创建的连接和一个流名：
-
-```go
-import "github.com/ryan053857/mygoravel/queue/natsqueue"
-
-jobs := natsqueue.New(nc, "BLOG_QUEUE")
-
-err := mailjob.Send.Publish(ctx, jobs, msg)
-
-failed := queue.NewFailedJobs(a.db, jobs)
-w := queue.NewWorker(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
-```
-
-服务器需要 NATS 2.12 或更高版本并开启 JetStream（`nats-server -js`），延迟任务使用服务器的定时消息；版本过低时发布和领取任务都会返回错误。驱动在第一次使用时创建名为 `BLOG_QUEUE` 的流，任务确认后即从流中删除；集群部署时用 `natsqueue.Replicas(3)` 设置副本数。每个 topic 对应一个持久消费者，没有任务时拉取请求在服务器上等待，任务到达后立即被领取，不受 `poll_interval` 影响。
-
-和 [Redis](#redis-driver) 一样，NATS 不能在数据库事务中发布，需要[在事务提交后再发布](#publish-after-commit)，失败任务需要用 `WithFailedJobs` 写入数据库。此外还有几处不同：
-
-- **延迟的精度是秒。** 延迟任务向上取整到秒，最多晚 1 秒执行，不会提前。
-- **租约在启动时确定。** 租约就是消费者的确认等待时间，取自进程启动后第一次领取时的 `lease`，修改配置后重启生效。
-- **租约过期后不能阻止旧的确认。** 一个 worker 与 NATS 失联超过租约、任务被重新投递后，原来的 worker 仍然可以确认它。处理函数本来就需要能重复执行，这通常没有影响。
-- **停止超时释放的任务计入一次执行。** NATS 的投递次数不能回退。
-- **不检查重复的任务 ID。**
-- **不支持[合并重复任务](#unique-jobs)。** JetStream 无法原子地判断一个任务是否还没被领取，带 `queue.Unique` 发布时返回 `natsqueue.ErrUniqueUnsupported`，任务不会入队。
+这样事务回滚时不会发布，worker 领到任务时文章一定已经提交。代价是提交和发布不是原子的：提交成功后、发布之前进程崩溃或 NATS 不可用，这封通知就丢了，只留下一条错误日志。能接受偶尔丢失的任务（通知、刷新缓存）这样做即可；不能丢的任务使用 `queue.Database(tx)`。
 
 <a id="custom-drivers"></a>
 ## 实现自己的驱动
 
-驱动实现 `queue.Driver`：保存任务、按租约领取、报告各状态的任务数。重试、失败任务、并发和平滑停止都由 `Worker` 负责，驱动不需要处理。实现时可以参考 [`queue/redisqueue`](../queue/redisqueue/redisqueue.go)。
+驱动实现 `queue.Driver`：保存任务、按租约领取、报告各状态的任务数。重试、失败任务、并发和平滑停止都由 `Worker` 负责，驱动不需要处理。实现时可以参考 [`queue/natsqueue`](../queue/natsqueue/natsqueue.go)。
 
-`queuetest.TestDriver` 检查实现是否符合约定，框架自己的三个驱动也用它测试。`New` 为每个场景返回一个空的驱动，以及保存失败任务的数据库：
+`queuetest.TestDriver` 检查实现是否符合约定，框架自己的两个驱动也用它测试。`New` 为每个场景返回一个空的驱动，以及保存失败任务的数据库：
 
 ```go
 import "github.com/ryan053857/mygoravel/queue/queuetest"

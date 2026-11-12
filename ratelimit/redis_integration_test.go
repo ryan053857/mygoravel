@@ -3,12 +3,10 @@ package ratelimit_test
 import (
 	"context"
 	"crypto/rand"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-
+	"github.com/ryan053857/mygoravel/internal/redistest"
 	"github.com/ryan053857/mygoravel/ratelimit"
 	"github.com/ryan053857/mygoravel/ratelimit/redislimit"
 )
@@ -17,7 +15,7 @@ import (
 func testName() string { return "test:ratelimit:" + rand.Text() }
 
 func TestRedis(t *testing.T) {
-	rdb := openRedis(t)
+	rdb := redistest.Open(t)
 	testLimiter(t, func(cfg ratelimit.Config) ratelimit.Limiter {
 		return redislimit.New(rdb, testName(), cfg)
 	})
@@ -25,7 +23,7 @@ func TestRedis(t *testing.T) {
 
 func TestRedisNamesAreIsolated(t *testing.T) {
 	ctx := context.Background()
-	rdb := openRedis(t)
+	rdb := redistest.Open(t)
 	cfg := ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1}
 	name := testName()
 	login, reset := redislimit.New(rdb, name, cfg), redislimit.New(rdb, testName(), cfg)
@@ -42,7 +40,7 @@ func TestRedisNamesAreIsolated(t *testing.T) {
 
 func TestRedisConcurrentCallsAreExact(t *testing.T) {
 	ctx := context.Background()
-	l := redislimit.New(openRedis(t), testName(), ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 5})
+	l := redislimit.New(redistest.Open(t), testName(), ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 5})
 	results := make(chan error, 20)
 	for range cap(results) {
 		go func() { results <- l.Allow(ctx, "k") }()
@@ -60,7 +58,7 @@ func TestRedisConcurrentCallsAreExact(t *testing.T) {
 
 func TestRedisKeyExpiresWhenRefilled(t *testing.T) {
 	ctx := context.Background()
-	rdb := openRedis(t)
+	rdb := redistest.Open(t)
 	name := testName()
 	l := redislimit.New(rdb, name, ratelimit.Config{Rate: 1, Interval: time.Minute, Burst: 3})
 	for range 2 {
@@ -69,22 +67,7 @@ func TestRedisKeyExpiresWhenRefilled(t *testing.T) {
 		}
 	}
 	// 用掉 2 个配额，2 分钟后回满。
-	if ttl := rdb.PTTL(ctx, name+":k").Val(); ttl < 119*time.Second || ttl > 2*time.Minute {
-		t.Fatalf("ttl=%v", ttl)
+	if ms, _ := rdb.Do(ctx, rdb.B().Pttl().Key(name+":k").Build()).AsInt64(); ms < 119_000 || ms > 120_000 {
+		t.Fatalf("ttl=%dms", ms)
 	}
-}
-
-func openRedis(t *testing.T) *redis.Client {
-	t.Helper()
-	url := os.Getenv("REDIS_TEST_URL")
-	if url == "" {
-		t.Fatal("REDIS_TEST_URL is required for this test")
-	}
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rdb := redis.NewClient(opts)
-	t.Cleanup(func() { rdb.Close() })
-	return rdb
 }

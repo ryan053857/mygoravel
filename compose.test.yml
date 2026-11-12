@@ -27,6 +27,15 @@ services:
       interval: 1s
       retries: 30
 
+  memcached:
+    image: memcached:1.6-alpine
+    ports:
+      - 127.0.0.1:51211:11211
+    healthcheck:
+      test: nc -z 127.0.0.1 11211
+      interval: 1s
+      retries: 30
+
   nats:
     image: nats:2-alpine
     # 队列驱动需要 JetStream；-m 开启监控端口供健康检查使用。

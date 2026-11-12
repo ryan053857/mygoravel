@@ -218,13 +218,7 @@ members, err := rt.Members(ctx, "editing:"+id.String())
 <a id="presence-stores"></a>
 ### 保存在线成员
 
-在线成员保存在所有实例共用的存储中，登记 presence 频道之前必须设置 `Options.Presence`，否则 `rt.Channel` 会 panic。只有一个实例时也一样：[不停机升级](deployment.md#zero-downtime-upgrades)时新旧进程同时运行，双方要看到同一份在线成员。最简单的是数据库：
-
-```go
-rt, err := realtime.New(hub, realtime.Options{Presence: realtime.NewDatabasePresence(db)})
-```
-
-`NewDatabasePresence` 使用 `realtime_presence` 表，使用前先[发布](migrations.md#publishing-framework-migrations) `realtime.Migrations()`，并把 `Cleanup` 交给[定时任务](scheduling.md#framework-cleanups)。每个连接在每个 presence 频道中每 25 秒写入一次，presence 订阅很多时改用 [Redis](redis.md)：
+在线成员保存在所有实例共用的存储中，登记 presence 频道之前必须设置 `Options.Presence`，否则 `rt.Channel` 会 panic。只有一个实例时也一样：[不停机升级](deployment.md#zero-downtime-upgrades)时新旧进程同时运行，双方要看到同一份在线成员。在线成员保存在 [Redis](redis.md) 中：
 
 ```go
 rt, err := realtime.New(hub, realtime.Options{Presence: redispresence.New(rdb, "blog:presence:")})

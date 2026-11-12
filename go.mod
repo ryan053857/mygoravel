@@ -15,6 +15,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sesv2 v1.79.9
 	github.com/aws/smithy-go v1.28.9
 	github.com/axadrn/shadcn-templ/v2 v2.0.0
+	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c
 	github.com/centrifugal/centrifuge v0.40.1
 	github.com/cloudflare/tableflip v1.2.4-0.20240920015315-64983fb2d863
 	github.com/cockroachdb/errors v1.14.0
@@ -22,9 +23,6 @@ require (
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/danielgtaylor/huma/v2 v2.40.0
-	github.com/eko/gocache/lib/v4 v4.2.0
-	github.com/eko/gocache/store/go_cache/v4 v4.2.2
-	github.com/eko/gocache/store/redis/v4 v4.2.2
 	github.com/evanw/esbuild v0.28.2
 	github.com/fxamacker/cbor/v2 v2.9.6
 	github.com/go-chi/chi/v5 v5.5.0
@@ -42,10 +40,9 @@ require (
 	github.com/nats-io/nats.go v1.55.0
 	github.com/nicksnyder/go-i18n/v2 v2.7.0
 	github.com/openai/openai-go v1.12.0
-	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/prometheus/client_golang v1.25.0
-	github.com/redis/go-redis/v9 v9.23.0
+	github.com/redis/rueidis v1.0.79
 	github.com/resend/resend-go/v3 v3.17.0
 	github.com/rs/cors v1.11.1
 	github.com/samber/slog-chi v1.19.1
@@ -120,7 +117,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/x v0.3.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
-	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -147,7 +143,6 @@ require (
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/quagmt/udecimal v1.10.1 // indirect
-	github.com/redis/rueidis v1.0.79 // indirect
 	github.com/richardlehane/mscfb v1.0.9 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
@@ -174,12 +169,9 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.47.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.29.0 // indirect
 	go.shabbyrobe.org/gocovmerge v0.0.0-20230507111327-fa4f82cfbf4d // indirect
-	go.uber.org/atomic v1.12.0 // indirect
-	go.uber.org/mock v0.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/exp v0.0.0-20261011100332-faecfb24eb49 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
