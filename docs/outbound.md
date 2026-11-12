@@ -5,6 +5,7 @@
 - [允许的地址与端口](#allowed-destinations)
     - [本地开发](#local-development)
 - [处理被拒绝的请求](#handling-refusals)
+- [重试](#retrying)
 - [代理](#proxies)
 - [在其他组件中使用](#using-with-other-components)
 - [测试](#testing)
@@ -91,6 +92,31 @@ if errors.Is(err, outbound.ErrForbidden) {
 ```
 
 拒绝发生在建立连接之前，不会向目标发出任何数据。
+
+<a id="retrying"></a>
+## 重试
+
+对方偶尔返回 503 或者连接被重置时，预览就失败了。用 `outbound.Retry` 包装客户端的传输层，临时失败时自动重试：
+
+```go
+previews := outbound.New(outbound.Options{Timeout: 5 * time.Second})
+previews.Transport = outbound.Retry(previews.Transport, outbound.RetryOptions{})
+```
+
+为了不把一次失败变成两次扣款，它只重试可以安全重复的请求：
+
+- 方法是 HTTP 规范中幂等的 GET、HEAD、OPTIONS、TRACE、PUT、DELETE，或者请求带有 `Idempotency-Key`（`X-Idempotency-Key`）请求头，并且请求体可以重新读取：用 `bytes`、`strings` 创建的请求体可以，直接传入的流不行；
+- 连接失败，或者响应状态码是 429、502、503、504。`ErrForbidden`、域名不存在和证书错误不会因为重试而成功，直接返回。
+
+| 选项 | 作用 |
+| --- | --- |
+| `Attempts` | 包括第一次在内的最多尝试次数，默认 3 |
+| `Backoff` | 第一次重试前的等待时间，之后每次翻倍并加上随机抖动，默认 200ms |
+| `MaxWait` | 两次尝试之间最长的等待时间，默认 5s；响应的 `Retry-After` 超过它时不重试，直接返回这个响应 |
+
+客户端的 `Timeout` 和请求的 context 限制包括重试在内的总时长，剩余时间不够等到下一次时，直接返回最后一次的结果。
+
+重试让用户多等，只适合当前请求就需要结果的场景。要保证送达的请求，例如通知第三方订单已支付，放进[队列](queue.md)的任务中：任务失败后由队列重试，进程重启也不会丢失。[Webhook](webhooks.md) 的投递就是这样做的。
 
 <a id="proxies"></a>
 ## 代理
