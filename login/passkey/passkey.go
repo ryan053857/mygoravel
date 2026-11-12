@@ -325,7 +325,7 @@ func (s *Store) Rename(ctx context.Context, ref identity.Ref, id, name string) e
 }
 
 // Remove 移除 ref 的 passkey id，在 db 的事务中同时移除对应的登录标识。不属于 ref 时返回 ErrNotFound；
-// 它是 ref 最后一种登录方式时返回 login.ErrLastIdentifier。设备上保存的 passkey 由用户自己删除。
+// 移除后 ref 将没有可用的登录方式时返回 login.ErrLastMethod。设备上保存的 passkey 由用户自己删除。
 func (s *Store) Remove(ctx context.Context, db bun.IDB, ref identity.Ref, id string) error {
 	if err := s.owns(ctx, ref, id); err != nil {
 		return err

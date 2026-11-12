@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/mail"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -203,8 +204,8 @@ func (r *Realm) Identifiers(ctx context.Context, ref identity.Ref) ([]Attached, 
 	return out, nil
 }
 
-// Detach 移除 ref 的登录标识 id。标识不属于 ref 时返回 ErrNotFound；它是 ref 最后一个标识时返回 ErrLastIdentifier。
-// 更换标识时与 Link 在同一个事务中调用，db 传入这个事务。
+// Detach 移除 ref 的登录标识 id。标识不属于 ref 时返回 ErrNotFound；移除后 ref 将没有可用的登录方式时返回 ErrLastMethod，
+// 例如只剩用户名而没有密码，见 RemovePassword。更换标识时与 Link 在同一个事务中调用，db 传入这个事务。
 func (r *Realm) Detach(ctx context.Context, db bun.IDB, ref identity.Ref, id Identifier) error {
 	if err := r.check(ref); err != nil {
 		return err
@@ -213,27 +214,59 @@ func (r *Realm) Detach(ctx context.Context, db bun.IDB, ref identity.Ref, id Ide
 	if err != nil {
 		return err
 	}
-	var kinds []string
-	err = db.NewSelect().Model((*identifierRow)(nil)).Column("kind").
-		Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).
-		Where("kind = ? AND value = ?", id.Kind, id.Value).Scan(ctx, &kinds)
+	ids, err := r.lockIdentifiers(ctx, db, ref.ID)
 	if err != nil {
-		return errors.Wrap(err, "login: find identifier")
+		return err
 	}
-	if len(kinds) == 0 {
+	rest := slices.DeleteFunc(slices.Clone(ids), func(other Identifier) bool { return other == id })
+	if len(rest) == len(ids) {
 		return ErrNotFound.New()
 	}
-	total, err := db.NewSelect().Model((*identifierRow)(nil)).
-		Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Count(ctx)
+	hash, err := r.passwordHash(ctx, db, ref.ID)
 	if err != nil {
-		return errors.Wrap(err, "login: count identifiers")
+		return err
 	}
-	if int(total) <= len(kinds) {
-		return ErrLastIdentifier.New()
+	if !r.canSignIn(rest, hash != "") {
+		return ErrLastMethod.New()
 	}
 	_, err = db.NewDelete().Model((*identifierRow)(nil)).
 		Where("subject_type = ? AND subject_id = ? AND kind = ? AND value = ?", ref.Type, ref.ID, id.Kind, id.Value).Exec(ctx)
 	return errors.Wrap(err, "login: detach identifier")
+}
+
+// lockIdentifiers 返回主体的全部登录标识，并在事务中锁住这些行，
+// 使并发的 Detach、RemovePassword 不会各自通过检查、合起来移除全部登录方式。
+func (r *Realm) lockIdentifiers(ctx context.Context, db bun.IDB, subjectID string) ([]Identifier, error) {
+	var rows []identifierRow
+	err := db.NewSelect().Model(&rows).Column("kind", "value").
+		Where("subject_type = ? AND subject_id = ?", r.opts.Type, subjectID).For("UPDATE").Scan(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "login: find identifiers")
+	}
+	ids := make([]Identifier, len(rows))
+	for i, row := range rows {
+		ids[i] = Identifier{Kind: row.Kind, Value: row.Value}
+	}
+	return ids, nil
+}
+
+// canSignIn 报告拥有登录标识 ids 的主体是否还能登录：第三方账号和 passkey 可以；
+// 设置了 Options.Send 时，邮箱和手机号可以用验证码登录；有密码时，PasswordKinds 中的标识可以用密码登录。
+// 只有用户名而没有密码的主体无法登录。
+func (r *Realm) canSignIn(ids []Identifier, hasPassword bool) bool {
+	for _, id := range ids {
+		switch {
+		case hasPassword && containsKind(r.opts.PasswordKinds, id.Kind):
+			return true
+		case id.Kind == KindEmail || id.Kind == KindPhone:
+			if r.opts.Send != nil {
+				return true
+			}
+		case id.Kind != KindUsername:
+			return true
+		}
+	}
+	return false
 }
 
 // Forget 删除 ref 的全部登录凭据：标识、密码、二次验证和未完成的验证码，用于注销账号。

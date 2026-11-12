@@ -291,7 +291,7 @@ func TestPasskey(t *testing.T) {
 	}
 	_, err = e.signIn(t, ctx, laptop)
 	is(t, err, passkey.ErrInvalid)
-	is(t, e.passkeys.Remove(ctx, e.db, ref("c1"), list[0].ID), login.ErrLastIdentifier)
+	is(t, e.passkeys.Remove(ctx, e.db, ref("c1"), list[0].ID), login.ErrLastMethod)
 	if list, _ := e.passkeys.List(ctx, ref("c1")); len(list) != 1 {
 		t.Fatalf("after remove: %+v", list)
 	}

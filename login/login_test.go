@@ -728,7 +728,7 @@ func TestDetachAndForget(t *testing.T) {
 	if err := e.realm.Detach(ctx, e.db, ref("c1"), login.Email("ALICE@example.com")); err != nil {
 		t.Fatal(err)
 	}
-	is(t, e.realm.Detach(ctx, e.db, ref("c1"), phone), login.ErrLastIdentifier)
+	is(t, e.realm.Detach(ctx, e.db, ref("c1"), phone), login.ErrLastMethod)
 
 	e.code(t, ctx, login.SignIn, phone)
 	if err := e.realm.Forget(ctx, e.db, ref("c1")); err != nil {
@@ -777,6 +777,53 @@ func TestPasswordManagement(t *testing.T) {
 	if err := e.realm.SetPassword(ctx, e.db, identity.Ref{Type: "staff", ID: "s1"}, "correct horse"); err == nil {
 		t.Fatal("staff subject accepted by the customer realm")
 	}
+}
+
+// 移除标识或密码之后，账号必须还有能用的登录方式。
+func TestLastMethod(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newRealm(t, login.Options{})
+	name := login.Username("alice")
+
+	// 只有用户名和密码：密码是唯一的登录方式。
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), name, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.realm.SetPassword(ctx, e.db, ref("c1"), "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	is(t, e.realm.RemovePassword(ctx, e.db, ref("c1")), login.ErrLastMethod)
+
+	// 有了邮箱，可以用验证码登录，密码可以删除；之后用户名和邮箱都不能移除最后能登录的那个。
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Email("alice@example.com"), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.realm.RemovePassword(ctx, e.db, ref("c1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.realm.RemovePassword(ctx, e.db, ref("c1")); err != nil {
+		t.Fatalf("remove password twice: %v", err)
+	}
+	is(t, e.realm.Detach(ctx, e.db, ref("c1"), login.Email("alice@example.com")), login.ErrLastMethod)
+
+	// 第三方账号单独就能登录。
+	ext := login.Identifier{Kind: "github", Value: "42"}
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), ext, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.realm.Detach(ctx, e.db, ref("c1"), login.Email("alice@example.com")); err != nil {
+		t.Fatal(err)
+	}
+	is(t, e.realm.Detach(ctx, e.db, ref("c1"), ext), login.ErrLastMethod)
+	if err := e.realm.Detach(ctx, e.db, ref("c1"), name); err != nil {
+		t.Fatal(err)
+	}
+
+	// 没有设置 Options.Send 时邮箱不能接收验证码，只能和密码一起使用。
+	e.account(t, ctx, "c2", "bob@example.com", "correct horse")
+	noSend := login.New(e.db, login.Options{Type: customer, Hasher: hasher(4), Crypt: crypt.New(crypt.Config{Key: appKey}), Attempts: e.realmLimiter(), Sends: e.realmLimiter()})
+	is(t, noSend.RemovePassword(ctx, e.db, ref("c2")), login.ErrLastMethod)
 }
 
 func TestCleanup(t *testing.T) {

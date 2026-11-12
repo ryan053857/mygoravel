@@ -30,8 +30,8 @@ var (
 	ErrWeakPassword = errorx.Define(errorx.InvalidArgument, "login.weak_password")
 	// ErrTaken 表示登录标识已属于另一个主体。
 	ErrTaken = errorx.Define(errorx.Conflict, "login.identifier_taken")
-	// ErrLastIdentifier 表示要移除的是主体最后一个登录标识，移除后将无法登录。
-	ErrLastIdentifier = errorx.Define(errorx.Conflict, "login.last_identifier")
+	// ErrLastMethod 表示移除这个登录标识或密码后，主体将没有可用的登录方式，见 Realm.Detach、Realm.RemovePassword。
+	ErrLastMethod = errorx.Define(errorx.Conflict, "login.last_method")
 	// ErrNotFound 表示登录标识不存在。
 	ErrNotFound = errorx.Define(errorx.NotFound, "login.not_found")
 	// ErrTwoFactorEnabled 表示已经启用了二次验证。

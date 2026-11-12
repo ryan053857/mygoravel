@@ -108,12 +108,24 @@ func (r *Realm) SetPassword(ctx context.Context, db bun.IDB, ref identity.Ref, p
 	return r.storePassword(ctx, db, ref.ID, password, true)
 }
 
-// RemovePassword 删除 ref 的密码，之后只能用验证码等其他方式登录。没有密码时什么也不做。
+// RemovePassword 删除 ref 的密码，之后只能用验证码、第三方账号或 passkey 登录。没有密码时什么也不做。
+// 删除后 ref 将没有可用的登录方式时返回 ErrLastMethod，例如只有用户名，或者只有邮箱而没有设置 Options.Send。
 func (r *Realm) RemovePassword(ctx context.Context, db bun.IDB, ref identity.Ref) error {
 	if err := r.check(ref); err != nil {
 		return err
 	}
-	_, err := db.NewDelete().Model((*passwordRow)(nil)).Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Exec(ctx)
+	ids, err := r.lockIdentifiers(ctx, db, ref.ID)
+	if err != nil {
+		return err
+	}
+	if !r.canSignIn(ids, false) {
+		hash, err := r.passwordHash(ctx, db, ref.ID)
+		if err == nil && hash != "" {
+			err = ErrLastMethod.New()
+		}
+		return err
+	}
+	_, err = db.NewDelete().Model((*passwordRow)(nil)).Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Exec(ctx)
 	return errors.Wrap(err, "login: remove password")
 }
 

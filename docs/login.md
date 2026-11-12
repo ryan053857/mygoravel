@@ -202,12 +202,12 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 })
 ```
 
-`Detach` 不允许移除最后一个标识，否则账号将无法登录，返回 `login.ErrLastIdentifier`。
+`Detach` 和 `RemovePassword` 不会让账号失去全部登录方式，那样会返回 `login.ErrLastMethod`。能登录的方式有三种：第三方账号和 passkey；设置了 `Options.Send` 时的邮箱和手机号（用验证码登录）；有密码时的 `PasswordKinds` 标识。例如只剩用户名的账号不能删除密码。
 
 | 方法 | 用途 |
 | --- | --- |
 | `SetPassword(ctx, db, ref, password)` | 设置或修改密码，按密码策略检查 |
-| `RemovePassword(ctx, db, ref)` | 删除密码，之后只能用验证码等方式登录 |
+| `RemovePassword(ctx, db, ref)` | 删除密码，之后只能用验证码、第三方账号或 passkey 登录 |
 | `Lookup(ctx, id)` | 管理后台按邮箱或手机号查找账号 |
 
 修改密码后，用 `RevokeOthers` 让其他设备下线，见[撤销令牌](api-tokens.md#revoking-tokens)。
