@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"testing/synctest"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -113,11 +114,14 @@ func TestReindexWaits(t *testing.T) {
 }
 
 func TestReindexStopsWatchingOnCancel(t *testing.T) {
-	pollInterval = 10 * time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	out, err := execute(ctx, open(t), "reindex", "articles") // 没有 worker，一直等待
-	if err != nil || !strings.Contains(out, "等待 worker 领取任务") || !strings.Contains(out, "重建在 worker 中继续") {
-		t.Fatalf("output %q, err %v", out, err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		db := open(t)
+		// 查看两次进度之后取消
+		ctx, cancel := context.WithTimeout(context.Background(), 2*pollInterval+pollInterval/2)
+		defer cancel()
+		out, err := execute(ctx, db, "reindex", "articles") // 没有 worker，一直等待
+		if err != nil || !strings.Contains(out, "等待 worker 领取任务") || !strings.Contains(out, "重建在 worker 中继续") {
+			t.Fatalf("output %q, err %v", out, err)
+		}
+	})
 }
