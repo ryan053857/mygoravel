@@ -101,7 +101,7 @@ func Routes(api *rest.API, validate rest.TokenValidator, db *bun.DB) {
 }
 ```
 
-新增事件时记得加到这里；事件名称重复时 `Document` 会 panic。
+新增事件时记得加到这里；事件名称重复时 `Document` 会 panic。事件内容一旦发布就是租户依赖的接口，修改时的检查见[检查接口变更](clients.md#checking-changes)。
 
 每个事件描述为一个 `POST` 请求：请求体是 `{type, timestamp, data}`，`data` 的 schema 由事件内容的类型生成，名称规则与[接口的类型](routing.md#shared-responses)相同（`article.PublishedHook` 为 `ArticlePublishedHook`）；请求头是上面的三个签名请求头。`openapi --spec 3.0` 导出的文档不含 `webhooks`，3.0 没有这一项。
 

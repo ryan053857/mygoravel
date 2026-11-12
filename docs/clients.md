@@ -9,6 +9,7 @@
     - [事件流](#event-streams)
     - [上传文件](#uploading-files)
 - [其他语言](#other-languages)
+- [检查接口变更](#checking-changes)
 
 <a id="introduction"></a>
 ## 简介
@@ -19,7 +20,7 @@
 ./bin/api openapi > openapi.json
 ```
 
-把 `openapi.json` 提交到仓库，接口的每次变化都会出现在代码评审中。
+把 `openapi.json` 提交到仓库，接口的每次变化都会出现在代码评审中，CI 还可以[检查不兼容的变更](#checking-changes)。
 
 <a id="generated-names"></a>
 ## 生成的名称
@@ -177,3 +178,31 @@ const { data } = await api.POST("/files", {
 | Python 脚本 | [openapi-python-client](https://github.com/openapi-generators/openapi-python-client) |
 
 生成的客户端同样需要处理认证：请求带 `Authorization: Bearer`，JWT 模式按[客户端的规则](api-tokens.md#jwt)刷新，错误按 `code` 区分。
+
+<a id="checking-changes"></a>
+## 检查接口变更
+
+已经上线的接口，删掉响应中的字段、新增必填参数，都会让旧版本的 App 出错。在 PR 的 CI 中用 [oasdiff](https://github.com/oasdiff/oasdiff) 把导出的文档与主分支上的比较，发现不兼容的变更时失败：
+
+```bash
+go install github.com/oasdiff/oasdiff@v1.37.0
+
+./bin/api openapi > openapi.json
+git diff --exit-code openapi.json   # 改了接口，却没有重新导出、提交
+
+git show origin/main:openapi.json > base.json
+# 接口：旧文档在前，新文档在后
+oasdiff breaking <(jq 'del(.webhooks)' base.json) <(jq 'del(.webhooks)' openapi.json) --fail-on ERR
+# webhook：新旧交换位置，--unmatch-path 排除全部接口
+oasdiff breaking openapi.json base.json --unmatch-path '.*' --fail-on ERR
+```
+
+[webhook](webhooks.md#documenting) 要单独比较。oasdiff 把 webhook 当作别人发给你的请求，而实际上你是发送方，判断方向正好相反：给事件内容加一个字段，它报不兼容；删掉一个字段，它只给出警告。交换新旧文档的位置，结论就对了。
+
+确实要做不兼容的变更时，例如接口还没有调用方，把 oasdiff 输出中的那一行写进一个文件，用 `--err-ignore` 传入：
+
+```text
+PUT /articles/{id} added the new required request property `slug`
+```
+
+oasdiff 只比较请求和响应的结构。schema 改名不改变结构，它不会报告，但生成的类型名会变，前端重新生成类型后由编译器发现。
