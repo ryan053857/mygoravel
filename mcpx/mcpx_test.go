@@ -55,6 +55,11 @@ type SearchArgs struct {
 func newServer(t *testing.T, logger *slog.Logger) *mcpx.Server {
 	t.Helper()
 	srv := mcpx.New(mcpx.Options{Name: "blog", Instructions: "博客", Logger: logger})
+	registerTools(srv)
+	return srv
+}
+
+func registerTools(srv *mcpx.Server) {
 	mcpx.Register(srv, mcpx.Tool{
 		Name: "article_publish", Title: "发布文章", Description: "发布一篇草稿",
 		Permissions: []string{"articles:publish"},
@@ -81,7 +86,6 @@ func newServer(t *testing.T, logger *slog.Logger) *mcpx.Server {
 		func(context.Context, struct{}) (map[string]string, error) {
 			return map[string]string{"pong": "ok"}, nil
 		})
-	return srv
 }
 
 func TestToolsFilteredBySubject(t *testing.T) {

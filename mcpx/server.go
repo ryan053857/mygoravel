@@ -49,8 +49,11 @@ type registered struct {
 	sdk  *mcp.Tool
 }
 
+// ServerOption 调整 New 创建的 Server。
+type ServerOption func(*Server)
+
 // New 创建没有工具的 Server。Name 为空时 panic。
-func New(opts Options) *Server {
+func New(opts Options, options ...ServerOption) *Server {
 	if opts.Name == "" {
 		panic("mcpx: server name is required")
 	}
@@ -64,6 +67,9 @@ func New(opts Options) *Server {
 	s.sdk = mcp.NewServer(&mcp.Implementation{Name: opts.Name, Version: opts.Version},
 		&mcp.ServerOptions{Instructions: opts.Instructions, Logger: s.sdkLogger()})
 	s.sdk.AddReceivingMiddleware(s.authorize)
+	for _, o := range options {
+		o(s)
+	}
 	return s
 }
 

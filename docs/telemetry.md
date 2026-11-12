@@ -9,6 +9,7 @@
     - [队列](#queue)
     - [定时任务](#schedule)
     - [限流](#ratelimit)
+    - [MCP 服务](#mcp)
     - [实时频道](#realtime)
     - [Go 运行时](#runtime)
 - [链路与日志](#trace-logs)
@@ -17,7 +18,7 @@
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、数据库连接池、队列、调度器、限流器和实时频道都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，前四者还报告链路。`telemetry` 包把这些指标、链路和应用的日志一起推送到一个 OTLP 接收端，例如 [OpenObserve](https://openobserve.ai/)，不需要另外部署收集器。
+框架的 HTTP 服务、数据库连接池、队列、调度器、限流器、MCP 服务和实时频道都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，其中 HTTP 服务、数据库连接池、队列、调度器和 MCP 服务还报告链路。`telemetry` 包把这些指标、链路和应用的日志一起推送到一个 OTLP 接收端，例如 [OpenObserve](https://openobserve.ai/)，不需要另外部署收集器。
 
 这里只有框架自己的组件，数据库连接池由 `database.Open` 打开，也在其中。Redis、Memcached 这些依赖由各自的生态报告，例如 rueidis 的 [rueidisotel](https://pkg.go.dev/github.com/redis/rueidis/rueidisotel)，或者服务器一侧的 exporter，把同一个 Provider 交给它们即可。
 
@@ -149,6 +150,21 @@ attempts := ratelimit.Observe(a.meters, "login", redislimit.New(a.rdb, "blog:log
 | `ratelimit.requests` | 计数器 | `ratelimit.name`、`ratelimit.result` | 每次 `Allow` 的结果：`allowed`、`exceeded`（配额用完）或 `error`（存储出错） |
 
 被拒绝的请求同时以 `429` 出现在 HTTP 请求的指标中。用法和查询示例见[限流的指标](rate-limiting.md#metrics)。
+
+<a id="mcp"></a>
+### MCP 服务
+
+```go
+srv := mcpx.New(mcpx.Options{Name: "blog"}, mcpx.WithTelemetry(a.meters, a.tracers))
+```
+
+| 指标 | 类型 | 属性 |
+| --- | --- | --- |
+| `mcp.server.operation.duration` | 直方图，秒 | `mcp.method.name`（`tools/call`、`tools/list`、`initialize` 等）、`gen_ai.tool.name`、`gen_ai.operation.name`（工具调用为 `execute_tool`）、`mcp.protocol.version`、`network.transport`（HTTP 为 `tcp`，stdio 为 `pipe`）；出错时还有 `error.type` |
+
+属性遵循 OpenTelemetry 的 [MCP 语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/mcp.md)，规范目前还在 Development 阶段。工具报告错误时 `error.type` 是 `tool_error`，用它可以统计哪个工具常常失败；调用不存在或没有权限的工具属于调用方的问题，不算出错。`gen_ai.tool.name` 只记录登记过的工具，模型编造的名称不会产生新的指标序列。
+
+每个请求是一个 server span，名称是方法和工具名，例如 `tools/call article_publish`，接在 HTTP 请求的 span 之下。客户端在请求的 `params._meta` 中带了 `traceparent` 时，span 接在客户端的链路之后，并链接到 HTTP 请求的 span。
 
 <a id="realtime"></a>
 ### 实时频道

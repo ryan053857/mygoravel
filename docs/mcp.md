@@ -9,6 +9,8 @@
 - [挂到 HTTP](#serving)
     - [认证与权限](#authentication)
 - [连接客户端](#connecting-clients)
+- [本地 stdio](#stdio)
+- [观测](#observability)
 - [测试](#testing)
 - [其他功能](#other-features)
 
@@ -211,6 +213,42 @@ Cursor、VS Code 等在 MCP 配置文件中写明地址和请求头：
 ```
 
 claude.ai 网页版和 ChatGPT 的远程连接器要求 MCP 的 OAuth 流程，用户在浏览器中登录授权，不能填写请求头。框架目前没有 OAuth 授权服务器，这些客户端还不能连接。
+
+<a id="stdio"></a>
+## 本地 stdio
+
+`mcpx/mcpcmd` 提供 `mcp` 命令。`mcp serve` 以 stdio 运行同一个服务：本机的 AI 客户端把它作为子进程启动，经标准输入输出通信，适合运维人员在服务器或跳板机上使用。`mcp tools` 列出登记的工具、需要的权限和注解，用来检查暴露了什么：
+
+```text
+NAME             PERMISSIONS     HINTS      TITLE
+article_publish  articles:write  -          发布文章
+article_search   articles:read   read-only  搜索文章
+```
+
+它和[其他需要数据库的命令](actions.md#as-commands)一样在 `command.Bind` 中声明。命令行没有 token，调用工具的主体在声明时指定，通常是一个运维账号：
+
+```go
+mcpcmd.New(a.mcp, identity.Subject{Type: identity.System, ID: "mcp-cli", Permissions: []string{"articles:read"}}),
+```
+
+能运行这个命令的人就以这个主体的身份调用工具，权限仍按每个工具的 `Permissions` 检查。只给它运维需要的权限。客户端的配置，例如 Claude Code：
+
+```bash
+claude mcp add blog -- /srv/blog/bin/blog mcp serve --config /srv/blog/config/app.yaml
+```
+
+stdio 的标准输出就是协议通道，日志照常写到标准错误，不会干扰通信。
+
+<a id="observability"></a>
+## 观测
+
+`mcpx.WithTelemetry` 报告每个请求的耗时指标和链路，属性遵循 OpenTelemetry 的 [MCP 语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/mcp.md)：
+
+```go
+srv := mcpx.New(mcpx.Options{Name: "blog"}, mcpx.WithTelemetry(a.meters, a.tracers))
+```
+
+每个请求是一个 span，名称是方法和工具名，例如 `tools/call article_publish`，挂在 HTTP 请求的 span 之下，工具中执行的[数据库语句](telemetry.md#database)也在这条链路中。指标和各属性见[可观测性](telemetry.md#mcp)。
 
 <a id="testing"></a>
 ## 测试

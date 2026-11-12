@@ -70,6 +70,7 @@ var rules = map[string]rule{
 	"realtime":             {layerEntry, []string{"broadcast", "httpx", "identity", "logging"}},
 	"mcpx":                 {layerEntry, []string{"errorx", "httpx", "identity", "logging"}},
 	"mcpx/mcpxtest":        {layerEntry, []string{"identity", "mcpx"}},
+	"mcpx/mcpcmd":          {layerEntry, []string{"command", "identity", "mcpx"}},
 	"command":              {layerEntry, []string{"cleanup", "config", "errorx", "logging"}},
 	"command/httpcmd":      {layerEntry, []string{"command", "httpx"}},
 	"command/migratecmd":   {layerEntry, []string{"command", "database"}},
