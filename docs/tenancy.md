@@ -288,7 +288,7 @@ if err != nil {
 plain, err := customerTokens.Login(ctx, out.Subject, device) // out.Subject.Tenant 是请求所在的租户
 ```
 
-带着这样的令牌访问其他租户时，请求返回 `403`。客户表的主键是 `(tenant_id, id)` 时，把租户编进主体的 ID，见[多套账号体系](authentication.md#account-systems)；第三方登录的[账号关联](social-login.md#linking-accounts)也要加上租户。
+带着这样的令牌访问其他租户时，请求返回 `403`。客户表的主键是 `(tenant_id, id)` 时，把租户编进主体的 ID，见[多套账号体系](authentication.md#account-systems)；[第三方账号](social-login.md#linking-accounts)同样按租户隔离。
 
 <a id="tokens"></a>
 ## 令牌与租户

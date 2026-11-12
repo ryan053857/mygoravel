@@ -61,6 +61,7 @@ type challengeRow struct {
 	CodeHash    string    `bun:"code_hash,notnull"`
 	Attempts    int       `bun:"attempts,notnull"`
 	ProofHash   string    `bun:"proof_hash,nullzero"`
+	Data        string    `bun:"data,nullzero"`
 	CompletedAt time.Time `bun:"completed_at,nullzero"`
 	ExpiresAt   time.Time `bun:"expires_at,notnull"`
 	CreatedAt   time.Time `bun:"created_at,notnull"`
@@ -242,10 +243,11 @@ func WithPassword(password string) RegisterOption {
 	return func(reg *registration) { reg.password = password }
 }
 
-// Register 用 SignIn 或 Verify 的完成凭证，把已验证的标识写给应用刚创建的主体 ref，返回可以签发凭据的主体。
+// Register 用 SignIn、Verify 或 External 的完成凭证，把已验证的标识写给应用刚创建的主体 ref，返回可以签发凭据的主体。
+// External 的凭证写入第三方账号，以及对方确认过的邮箱。
 //
 // 应用的注册 action 在自己的事务中先创建账号行，再调用 Register 并传入同一个事务 db；
-// 任何一步失败都一起回滚，凭证仍可再次使用。标识此时已属于其他主体时返回 ErrTaken，凭证不被消耗。
+// 任何一步失败都一起回滚，凭证仍可再次使用。标识（包括第三方确认过的邮箱）已属于其他主体时返回 ErrTaken，凭证不被消耗。
 func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref identity.Ref, opts ...RegisterOption) (identity.Subject, error) {
 	if err := r.check(ref); err != nil {
 		return identity.Subject{}, err
@@ -259,20 +261,28 @@ func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref iden
 			return identity.Subject{}, err
 		}
 	}
-	c, err := r.proof(ctx, db, proof, SignIn, Verify)
+	c, err := r.proof(ctx, db, proof, SignIn, Verify, purposeExternal)
 	if err != nil {
 		return identity.Subject{}, err
 	}
-	if owner, err := r.owner(ctx, db, c.Tenant, c.identifier()); err != nil {
+	ids, err := c.proven()
+	if err != nil {
 		return identity.Subject{}, err
-	} else if owner != "" && owner != ref.ID {
-		return identity.Subject{}, ErrTaken.New()
+	}
+	for _, id := range ids {
+		if owner, err := r.owner(ctx, db, c.Tenant, id); err != nil {
+			return identity.Subject{}, err
+		} else if owner != "" && owner != ref.ID {
+			return identity.Subject{}, ErrTaken.New()
+		}
 	}
 	if err := r.complete(ctx, db, c); err != nil {
 		return identity.Subject{}, err
 	}
-	if err := r.attach(ctx, db, c.Tenant, c.identifier(), ref.ID, true); err != nil {
-		return identity.Subject{}, err
+	for _, id := range ids {
+		if err := r.attach(ctx, db, c.Tenant, id, ref.ID, true); err != nil {
+			return identity.Subject{}, err
+		}
 	}
 	if reg.password != "" {
 		if err := r.storePassword(ctx, db, ref.ID, reg.password, false); err != nil {
@@ -320,14 +330,15 @@ func (r *Realm) ResetPassword(ctx context.Context, proof, password string) (iden
 	return identity.Ref{Type: r.opts.Type, ID: c.SubjectID}, nil
 }
 
-// Link 用 Verify 或 SignIn 的完成凭证，把已验证的标识绑定到已登录的主体 ref，例如添加邮箱、更换手机号；
+// Link 用 Verify、SignIn 或 External 的完成凭证，把已验证的标识绑定到已登录的主体 ref，例如添加邮箱、更换手机号、
+// 绑定第三方账号（只绑定第三方账号本身，不绑定它的邮箱）；
 // 标识已属于 ref 时只把它标为已验证。标识属于其他主体时返回 ErrTaken，凭证不被消耗。
 // 更换标识时，应用在同一个事务中再用 Detach 移除旧的。
 func (r *Realm) Link(ctx context.Context, db bun.IDB, ref identity.Ref, proof string) error {
 	if err := r.check(ref); err != nil {
 		return err
 	}
-	c, err := r.proof(ctx, db, proof, Verify, SignIn)
+	c, err := r.proof(ctx, db, proof, Verify, SignIn, purposeExternal)
 	if err != nil {
 		return err
 	}

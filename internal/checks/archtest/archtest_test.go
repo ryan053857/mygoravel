@@ -87,6 +87,7 @@ var rules = map[string]rule{
 	"ai":               {layerFeature, nil},
 	"ai/chat":          {layerFeature, []string{"ai", "broadcast", "database", "errorx", "httpx", "lock", "logging"}},
 	"login":            {layerFeature, []string{"crypt", "errorx", "hashing", "identity", "ratelimit"}},
+	"login/oauth":      {layerFeature, []string{"errorx", "login"}},
 
 	"internal": {},
 }
