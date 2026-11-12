@@ -56,6 +56,7 @@ var rules = map[string]rule{
 	"pdf":        {layerInfrastructure, []string{"errorx"}},
 	"mail":       {layerInfrastructure, []string{"i18n"}},
 	"queue":      {layerInfrastructure, []string{"logging"}},
+	"monitor":    {layerInfrastructure, []string{"logging"}},
 	"schedule":   {layerInfrastructure, []string{"lock", "logging"}},
 	"broadcast":  {layerInfrastructure, []string{"identity", "logging"}},
 	"filesystem": {layerInfrastructure, []string{"errorx", "identity"}},

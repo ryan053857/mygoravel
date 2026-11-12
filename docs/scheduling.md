@@ -321,6 +321,7 @@ article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) erro
 | [后台操作](operations.md#cleanup)（包括导入和导出） | `operation.New(db)` 的 `Cleanup(保留期)` | 每天 |
 | [Webhook 投递记录](webhooks.md#retention) | `webhook.Cleanup(db, 保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(保留期)` | 每天 |
+| [运行统计](monitor.md#cleanup) | `monitor.NewStore(db).Cleanup(保留期)` | 每小时 |
 
 使用 Redis 存储时过期的数据由 Redis 自动删除，不需要注册清理任务。
 

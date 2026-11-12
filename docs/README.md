@@ -47,6 +47,7 @@
 - [限流](rate-limiting.md)
 - [队列](queue.md)
 - [定时任务](scheduling.md)
+- [运行统计](monitor.md)
 - [服务端推送](sse.md)
 - [广播](broadcasting.md)
 - [实时频道](realtime.md)

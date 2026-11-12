@@ -30,6 +30,7 @@ go get github.com/ryan053857/mygoravel@main
 | 查看全部路由 | [routes 命令](docs/commands.md#routes-command) |
 | 处理错误与日志 | [错误处理](docs/errors.md) · [日志](docs/logging.md) · [可观测性](docs/telemetry.md) |
 | 在后台执行任务 | [队列](docs/queue.md) · [定时任务](docs/scheduling.md) |
+| 在命令和后台页面查看处理量、耗时 | [运行统计](docs/monitor.md) |
 | 防止任务重复执行 | [原子锁](docs/locks.md) |
 | 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |
 | 发送邮件 | [邮件](docs/mail.md) |
