@@ -17,14 +17,8 @@ import (
 // maxKey 是字符串列的最大长度，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
 const maxKey = 191
 
-// Deliver 是投递任务的 topic，payload 是投递记录的 ID。由 Send 和 Resend 发布，Deliverer 处理。
+// Deliver 是投递任务的 topic，payload 是投递记录的 ID。由 Event.Send 和 Resend 发布，Deliverer 处理。
 var Deliver = queue.Topic[uuid.UUID]("webhook.deliver")
-
-// Event 是要推送的事件。
-type Event struct {
-	Type string // 事件类型，例如 article.published；端点按它订阅
-	Data any    // 事件内容，编码为 JSON 后放在请求体的 data 中
-}
 
 // body 是请求体，字段顺序与 Standard Webhooks 的示例一致。
 type body struct {
@@ -60,13 +54,9 @@ type Delivery struct {
 	UpdatedAt      time.Time `bun:"updated_at,notnull"`
 }
 
-// Send 把事件推送给 subject 所在租户中订阅了 e.Type 的端点：为每个端点写入一条投递记录，
-// 并通过 queue.Database(db) 发布投递任务。db 通常是业务修改所在的事务，事务提交后才会投递，回滚时一起取消。
-// 没有端点订阅时什么也不写。
-//
-// 投递任务总是发布到数据库队列，即使应用的其他任务使用 Redis 或 NATS，worker 也要用数据库驱动处理 Deliver。
-func Send(ctx context.Context, db bun.IDB, subject identity.Subject, e Event) error {
-	if err := checkType(e.Type); err != nil {
+// send 把 typ 事件推送给 subject 所在租户中订阅了它的端点，见 Event.Send。
+func send(ctx context.Context, db bun.IDB, subject identity.Subject, typ string, data any) error {
+	if err := checkType(typ); err != nil {
 		return err
 	}
 	var endpoints []Endpoint
@@ -78,9 +68,9 @@ func Send(ctx context.Context, db bun.IDB, subject identity.Subject, e Event) er
 	now := time.Now().UTC()
 	var deliveries []Delivery
 	for _, ep := range endpoints {
-		if ep.subscribes(e.Type) {
+		if ep.subscribes(typ) {
 			deliveries = append(deliveries, Delivery{
-				Tenant: subject.Tenant, EndpointID: ep.ID, Event: e.Type,
+				Tenant: subject.Tenant, EndpointID: ep.ID, Event: typ,
 				Status: StatusPending, CreatedAt: now, UpdatedAt: now,
 			})
 		}
@@ -88,9 +78,9 @@ func Send(ctx context.Context, db bun.IDB, subject identity.Subject, e Event) er
 	if len(deliveries) == 0 {
 		return nil
 	}
-	payload, err := json.Marshal(body{Type: e.Type, Timestamp: now, Data: e.Data})
+	payload, err := json.Marshal(body{Type: typ, Timestamp: now, Data: data})
 	if err != nil {
-		return errors.Wrapf(err, "webhook: encode %q", e.Type)
+		return errors.Wrapf(err, "webhook: encode %q", typ)
 	}
 	eventID, err := uuid.NewV7()
 	if err != nil {

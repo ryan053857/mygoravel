@@ -124,3 +124,11 @@ func (a *API) Handler() http.Handler { return a.router }
 func (a *API) OpenAPIJSON() ([]byte, error) {
 	return a.OpenAPI().MarshalJSON()
 }
+
+// OpenAPI30JSON 返回转换为 OpenAPI 3.0.3 的文档，供只支持 3.0 的客户端生成器使用。
+// 3.0 没有 webhooks，转换时去掉。
+func (a *API) OpenAPI30JSON() ([]byte, error) {
+	doc := *a.OpenAPI()
+	doc.Webhooks = nil
+	return doc.Downgrade()
+}

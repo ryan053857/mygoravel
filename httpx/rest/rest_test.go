@@ -197,3 +197,18 @@ func TestResponsesHaveNoSchemaLink(t *testing.T) {
 		t.Fatal("schemas still declare $schema property")
 	}
 }
+
+func TestOpenAPI30DropsWebhooks(t *testing.T) {
+	api := rest.New(rest.Options{Mode: rest.ModeOpenAPI})
+	api.OpenAPI().Webhooks = map[string]*huma.PathItem{"article.published": {Post: &huma.Operation{Summary: "x"}}}
+	doc, err := api.OpenAPI30JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), `"openapi":"3.0.3"`) || strings.Contains(string(doc), "webhooks") {
+		t.Fatalf("3.0 doc: %s", doc)
+	}
+	if api.OpenAPI().Webhooks == nil {
+		t.Fatal("webhooks removed from the 3.1 document")
+	}
+}

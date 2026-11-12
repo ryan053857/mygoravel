@@ -4,6 +4,7 @@
 - [安装](#installation)
 - [发送事件](#sending)
     - [请求的格式](#request-format)
+    - [写入接口文档](#documenting)
 - [管理端点](#endpoints)
     - [轮换密钥](#rotating-secrets)
     - [投递记录与重发](#deliveries)
@@ -38,9 +39,11 @@ migratecmd.Publish(postgres.Driver,
 <a id="sending"></a>
 ## 发送事件
 
-在[发布文章](actions.md#writing-actions)的事务中调用 `webhook.Send`：
+事件先声明再发送。声明写明事件的名称和内容的类型，放在 `internal/article/webhooks.go` 中：
 
 ```go
+package article
+
 // PublishedHook 是 article.published 事件的内容。它是给租户系统的公开接口，字段一旦发布就不要随意修改。
 type PublishedHook struct {
     ID          uuid.UUID `json:"id"`
@@ -49,11 +52,16 @@ type PublishedHook struct {
     PublishedAt time.Time `json:"published_at"`
 }
 
+var Published = webhook.Event[PublishedHook]{Name: "article.published", Summary: "文章发布后推送"}
+```
+
+在[发布文章](actions.md#writing-actions)的事务中调用 `Send`：
+
+```go
 err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
     // ……读取、检查并更新文章，与原来相同
-    return webhook.Send(ctx, tx, subject, webhook.Event{
-        Type: "article.published",
-        Data: PublishedHook{ID: item.ID, Title: item.Title, URL: a.baseURL + "/articles/" + item.Slug, PublishedAt: *item.PublishedAt},
+    return Published.Send(ctx, tx, subject, PublishedHook{
+        ID: item.ID, Title: item.Title, URL: a.baseURL + "/articles/" + item.Slug, PublishedAt: *item.PublishedAt,
     })
 })
 ```
@@ -80,6 +88,45 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=
 - `webhook-id` 是事件 ID：同一个事件发给不同的端点、重试多少次都相同，接收方用它去重。
 - `webhook-signature` 是用端点密钥对 `id.timestamp.body` 计算的 HMAC-SHA256，接收方据此确认请求来自你、内容没有被改过。
 - 投递**至少一次**，不保证顺序。接收方应当按 `webhook-id` 去重，按 `timestamp` 判断先后。
+
+<a id="documenting"></a>
+### 写入接口文档
+
+在注册全部路由的 `bootstrap.Routes`（见[依赖装配](dependencies.md#assembling-the-application)）中用 `webhook.Document` 列出全部事件，[openapi 命令](commands.md#openapi-command)导出的文档就会在 `webhooks` 中描述它们：
+
+```go
+func Routes(api *rest.API, validate rest.TokenValidator, db *bun.DB) {
+    article.Register(api, rest.RequireBearer(api, validate, "articles"), db)
+    webhook.Document(api.OpenAPI(), article.Published)
+}
+```
+
+新增事件时记得加到这里；事件名称重复时 `Document` 会 panic。
+
+每个事件描述为一个 `POST` 请求：请求体是 `{type, timestamp, data}`，`data` 的 schema 由事件内容的类型生成，名称规则与[接口的类型](routing.md#shared-responses)相同（`article.PublishedHook` 为 `ArticlePublishedHook`）；请求头是上面的三个签名请求头。`openapi --spec 3.0` 导出的文档不含 `webhooks`，3.0 没有这一项。
+
+租户可以用这份文档生成事件内容的类型。例如用 TypeScript 接收时，[openapi-typescript](clients.md#generating-types) 生成的 `webhooks` 类型按事件名列出请求体，配合 Standard Webhooks 的官方库 [standardwebhooks](https://www.npmjs.com/package/standardwebhooks) 校验签名：
+
+```ts
+import { Webhook } from "standardwebhooks"
+import type { webhooks } from "./blog-api"
+
+type BlogEvent = {
+  [K in keyof webhooks]: webhooks[K]["post"]["requestBody"]["content"]["application/json"]
+}[keyof webhooks]
+
+const wh = new Webhook(secret) // 端点的 whsec_ 密钥
+
+export async function POST(req: Request): Promise<Response> {
+  const event = wh.verify(await req.text(), Object.fromEntries(req.headers)) as BlogEvent
+  switch (event.type) {
+    case "article.published":
+      await syncArticle(event.data.url) // data 是 ArticlePublishedHook
+      break
+  }
+  return new Response(null, { status: 204 })
+}
+```
 
 <a id="endpoints"></a>
 ## 管理端点

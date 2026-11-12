@@ -164,7 +164,7 @@ func TestSend(t *testing.T) {
 		ctx := context.Background()
 		send := func(sub identity.Subject, typ string) {
 			t.Helper()
-			if err := webhook.Send(ctx, db, sub, webhook.Event{Type: typ, Data: map[string]any{"id": 1}}); err != nil {
+			if err := (webhook.Event[any]{Name: typ}).Send(ctx, db, sub, map[string]any{"id": 1}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -218,7 +218,7 @@ func TestSend(t *testing.T) {
 			t.Fatalf("after prefix event: %d", n)
 		}
 		err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-			if err := webhook.Send(ctx, tx, acme, webhook.Event{Type: "article.published"}); err != nil {
+			if err := (webhook.Event[any]{Name: "article.published"}).Send(ctx, tx, acme, nil); err != nil {
 				return err
 			}
 			return errors.New("rollback")
@@ -228,7 +228,7 @@ func TestSend(t *testing.T) {
 		}
 
 		for _, typ := range []string{"", "article.*", strings.Repeat("x", 192)} {
-			if err := webhook.Send(ctx, db, acme, webhook.Event{Type: typ}); err == nil {
+			if err := (webhook.Event[any]{Name: typ}).Send(ctx, db, acme, nil); err == nil {
 				t.Errorf("type %q accepted", typ)
 			}
 		}
@@ -360,7 +360,7 @@ func TestDeliver(t *testing.T) {
 		brokenEP := create(t, db, "acme", broken.srv.URL, "*")
 		startWorker(t, db, 2)
 
-		if err := webhook.Send(ctx, db, acme, webhook.Event{Type: "article.published", Data: map[string]string{"title": "hi"}}); err != nil {
+		if err := (webhook.Event[map[string]string]{Name: "article.published"}).Send(ctx, db, acme, map[string]string{"title": "hi"}); err != nil {
 			t.Fatal(err)
 		}
 		byEndpoint := map[uuid.UUID]webhook.Delivery{}
@@ -419,7 +419,7 @@ func TestDeliverRefusesPrivateAddresses(t *testing.T) {
 	rcv := newReceiver(t)
 	create(t, db, "acme", rcv.srv.URL, "*")
 	runWorker(t, db, webhook.Options{MaxAttempts: 5})
-	if err := webhook.Send(ctx, db, acme, webhook.Event{Type: "article.published", Data: map[string]string{"title": "hi"}}); err != nil {
+	if err := (webhook.Event[map[string]string]{Name: "article.published"}).Send(ctx, db, acme, map[string]string{"title": "hi"}); err != nil {
 		t.Fatal(err)
 	}
 	list := deliveries(t, db, webhook.DeliveryQuery{Tenant: "acme"})
@@ -440,7 +440,7 @@ func TestDeliverRotatedAndDisabled(t *testing.T) {
 			t.Fatal(err)
 		}
 		off := create(t, db, "acme", rcv.srv.URL+"/off", "*")
-		if err := webhook.Send(ctx, db, acme, webhook.Event{Type: "x"}); err != nil {
+		if err := (webhook.Event[any]{Name: "x"}).Send(ctx, db, acme, nil); err != nil {
 			t.Fatal(err)
 		}
 		// 发布之后才停用：投递时标记为失败，不发送。
@@ -478,7 +478,7 @@ func TestCleanup(t *testing.T) {
 		ctx := context.Background()
 		create(t, db, "acme", "https://a.example", "*")
 		for range 3 {
-			if err := webhook.Send(ctx, db, acme, webhook.Event{Type: "x"}); err != nil {
+			if err := (webhook.Event[any]{Name: "x"}).Send(ctx, db, acme, nil); err != nil {
 				t.Fatal(err)
 			}
 		}

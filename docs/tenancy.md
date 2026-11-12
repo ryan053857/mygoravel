@@ -243,7 +243,7 @@ func (a *ScheduleDigests) Handle(ctx context.Context) error {
 | [广播](broadcasting.md) | 主题带上租户：`t:<tenant>:articles`。SSE 处理器用 `sub.Tenant` 订阅，不要从查询参数中取租户；[实时频道](realtime.md#private-channels)的授权函数把频道名中的租户与 `sub.Tenant` 比较 |
 | [限流](rate-limiting.md) | 按用户或 IP 的限流不用改；按租户限额时，key 用 `tenant:<id>` |
 | [锁](locks.md) | 锁名中的 ID 全局唯一（如 UUID）时不用改；按 slug 等租户内唯一的值加锁时，带上租户 |
-| [Webhook](webhooks.md) | 不用改。端点属于租户，`webhook.Send` 只发给 `subject.Tenant` 的端点 |
+| [Webhook](webhooks.md) | 不用改。端点属于租户，`Event.Send` 只发给 `subject.Tenant` 的端点 |
 | [文件](filesystem.md) | 不用改。文件记录的是上传者，引用文件的业务行（如文章的封面）有 `tenant_id`，读写都经过业务行的租户检查 |
 
 

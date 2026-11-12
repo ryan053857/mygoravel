@@ -18,7 +18,7 @@ import (
 // OpenAPI 构造 openapi 命令：以文档模式创建 API、调用 register 注册路由，
 // 把 OpenAPI 文档输出到标准输出。不读取配置，不调用处理器。
 //
-// 默认输出 OpenAPI 3.1；--spec 3.0 输出转换后的 3.0.3，供只支持 3.0 的客户端生成器使用，例如 oapi-codegen。
+// 默认输出 OpenAPI 3.1；--spec 3.0 输出转换后的 3.0.3（不含 webhooks），供只支持 3.0 的客户端生成器使用，例如 oapi-codegen。
 func OpenAPI(opts rest.Options, register func(api *rest.API)) *cobra.Command {
 	var spec string
 	cmd := leaf("openapi", "输出 OpenAPI 文档", func(cmd *cobra.Command) error {
@@ -28,7 +28,7 @@ func OpenAPI(opts rest.Options, register func(api *rest.API)) *cobra.Command {
 		api := docAPI(opts, register)
 		data, err := api.OpenAPIJSON()
 		if spec == "3.0" {
-			data, err = api.OpenAPI().Downgrade()
+			data, err = api.OpenAPI30JSON()
 		}
 		if err != nil {
 			return err
