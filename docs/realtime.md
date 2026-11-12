@@ -152,7 +152,7 @@ router.Handle("/t/{tenant}/realtime", rt.Handler())
 
 同源页面不需要设置它：连接经过页面路由，租户已经由 `web.Options.Tenant` 写入。
 
-token 无效、属于其他账号体系，或 Resolver 拒绝主体时，连接以 3500 关闭，SDK 不再重连。连接期间两者每 30 秒重新运行一次，token 被撤销、用户被停用或移出租户后连接结束。既没有会话也没有 token 的连接是匿名的，只能订阅公开频道。
+token 无效、属于其他账号体系，或 Resolver 拒绝主体时，连接以 3500 关闭，SDK 不再重连。连接期间两者每 30 秒重新运行一次，token 被撤销、用户被停用或移出租户后连接结束。使用 [JWT 模式](api-tokens.md#jwt)时，SDK 传入 access token；复查时检查的是登录是否已被撤销，access token 过期后连接照常保持。既没有会话也没有 token 的连接是匿名的，只能订阅公开频道。
 
 <a id="revocation"></a>
 ### 撤销后断开

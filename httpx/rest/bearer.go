@@ -26,7 +26,7 @@ func RequireBearer(api *API, validate TokenValidator, permissions ...string) fun
 	if validate == nil {
 		panic("rest: nil token validator")
 	}
-	scheme := &huma.SecurityScheme{Type: "http", Scheme: "bearer", BearerFormat: "opaque"}
+	scheme := &huma.SecurityScheme{Type: "http", Scheme: "bearer"}
 	return RequireAuth(api, "bearer", scheme, func(ctx huma.Context) (identity.Subject, error) {
 		token := bearerToken(ctx.Header("Authorization"))
 		if token == "" {

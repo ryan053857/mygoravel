@@ -15,6 +15,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/google/uuid"
 
 	"github.com/ryan053857/mygoravel/crypt"
 	"github.com/ryan053857/mygoravel/identity"
@@ -103,7 +104,8 @@ type JWTConfig struct {
 // access token 过期后用 refresh token 换一对新的，refresh token 每次刷新都轮换。
 //
 // 每次登录仍是 api_tokens 中的一行（Kind 为 KindRefresh），Store 的 List、Revoke、RevokeOthers、RevokeSubject、Cleanup 照常使用。
-// 撤销这一行后 refresh token 立即失效，已签发的 access token 在 TTL 内仍然有效；需要撤销立即生效的入口用 Store.Validate 的不透明 token。
+// 撤销这一行后 refresh token 立即失效，已签发的 access token 在 TTL 内仍然可以发起请求；需要撤销立即生效的入口用 Store.Validate 的不透明 token。
+// SSE、实时连接等长连接复查凭据时会查询这一行，撤销后连接照常结束，见 Validate。
 // 可以并发使用。
 type JWT struct {
 	store *Store
@@ -278,6 +280,11 @@ func (j *JWT) sign(r *row, now time.Time) (Pair, error) {
 const leeway = 5 * time.Second
 
 // Validate 实现 rest.TokenValidator：access token 只校验签名和有效期（允许 5 秒时钟偏差），不访问数据库。
+//
+// 长连接复查时（identity.Rechecking 报告为 true）改为确认登录仍然存在：按 sid 查一次 api_tokens，
+// 登录被撤销或过期时返回 ErrInvalid，所以撤销后 SSE、实时连接在下一次复查时结束；
+// access token 本身过期不影响复查，连接不会每个 TTL 断开一次。
+//
 // 返回的主体 Method 为 bearer，Credential 为登录的 ID（与 Store.List 的 Token.ID 相同，可以交给 Store.Revoke），
 // Tenant、Impersonator 与签发时相同，Scopes、Permissions 为空。无效或过期时返回 ErrInvalid。
 //
@@ -302,7 +309,13 @@ func (j *JWT) Validate(ctx context.Context, token string) (identity.Subject, err
 	if j.cfg.Audience != "" {
 		want.AnyAudience = jwt.Audience{j.cfg.Audience}
 	}
-	if err := c.ValidateWithLeeway(want, leeway); err != nil {
+	recheck := identity.Rechecking(ctx)
+	checked := c.Claims
+	if recheck {
+		// 复查时由数据库中的登录决定是否有效，不看 access token 的有效期。
+		checked.Expiry = nil
+	}
+	if err := checked.ValidateWithLeeway(want, leeway); err != nil {
 		return identity.Subject{}, ErrInvalid.New()
 	}
 	ref, err := identity.ParseRef(c.Subject)
@@ -321,7 +334,30 @@ func (j *JWT) Validate(ctx context.Context, token string) (identity.Subject, err
 			return identity.Subject{}, ErrInvalid.New()
 		}
 	}
+	if recheck {
+		if err := j.alive(ctx, sub); err != nil {
+			return identity.Subject{}, err
+		}
+	}
 	return sub, nil
+}
+
+// alive 确认 access token 所属的登录没有被撤销或过期。
+func (j *JWT) alive(ctx context.Context, sub identity.Subject) error {
+	id, err := uuid.Parse(sub.Credential)
+	if err != nil {
+		return ErrInvalid.New()
+	}
+	ok, err := j.store.live(j.store.db.NewSelect().Model((*row)(nil)), time.Now().UTC()).
+		Where("id = ?", id).Where("kind = ?", KindRefresh).
+		Where("subject_type = ? AND subject_id = ?", sub.Type, sub.ID).Exists(ctx)
+	if err != nil {
+		return errors.Wrap(err, "apitoken: recheck")
+	}
+	if !ok {
+		return ErrInvalid.New()
+	}
+	return nil
 }
 
 // JWKS 返回公开公钥（JSON Web Key Set）的 handler，通常挂在 /.well-known/jwks.json，

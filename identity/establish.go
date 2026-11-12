@@ -69,12 +69,22 @@ func Establish(ctx context.Context, authenticate Authenticator, resolve Resolver
 
 // Reestablish 在长连接期间重新执行 Establish，确认 was 仍然有效：凭据被撤销、凭据换了主体或代为登录者、
 // 主体不再是租户成员或失去权限时返回 4xx 类错误，连接应当结束；Failed 报告为 true 的错误表示暂时无法判断，连接保持。
+// authenticate 和 resolve 收到的 ctx 中 Rechecking 报告为 true。
 func Reestablish(ctx context.Context, was Subject, authenticate Authenticator, resolve Resolver, permissions ...string) error {
-	sub, err := Establish(ctx, authenticate, resolve, permissions...)
+	sub, err := Establish(context.WithValue(ctx, recheckingKey{}, true), authenticate, resolve, permissions...)
 	if err == nil && (sub.Ref() != was.Ref() || sub.Impersonator != was.Impersonator) {
 		return ErrUnauthenticated.New()
 	}
 	return err
+}
+
+type recheckingKey struct{}
+
+// Rechecking 报告 ctx 是否来自 Reestablish，即长连接期间对已建立连接的复查，而不是新的请求。
+// 不访问存储的凭据（例如 apitoken.JWT 的 access token）据此在复查时确认凭据没有被撤销。
+func Rechecking(ctx context.Context) bool {
+	v, _ := ctx.Value(recheckingKey{}).(bool)
+	return v
 }
 
 // Failed 报告 err 是否表示认证后端或 Resolver 的故障（errorx.Unavailable、errorx.Internal 类错误或普通错误），

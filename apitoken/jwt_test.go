@@ -21,6 +21,7 @@ import (
 	"github.com/ryan053857/mygoravel/crypt"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
@@ -59,6 +60,12 @@ func access(t *testing.T, j *apitoken.JWT, token string) (identity.Subject, bool
 		t.Fatal(err)
 	}
 	return sub, true
+}
+
+// recheck 像长连接复查那样在 was 的租户中校验 access token，返回 identity.Reestablish 的结果。
+func recheck(j *apitoken.JWT, was identity.Subject, token string) error {
+	auth := func(ctx context.Context) (identity.Subject, error) { return j.Validate(ctx, token) }
+	return identity.Reestablish(identity.WithTenant(context.Background(), was.Tenant), was, auth, nil)
 }
 
 func TestJWTLoginAndValidate(t *testing.T) {
@@ -108,6 +115,10 @@ func TestJWTLoginAndValidate(t *testing.T) {
 			time.Sleep(10*time.Minute + 6*time.Second)
 			if _, ok := access(t, j, p.Access); ok {
 				t.Fatal("expired access token accepted")
+			}
+			// 长连接复查由登录本身决定：登录还在，过期的 access token 不会让连接断开。
+			if err := recheck(j, got, p.Access); err != nil {
+				t.Fatalf("recheck of a live login: %v", err)
 			}
 		})
 	})
@@ -244,7 +255,11 @@ func TestJWTRevoke(t *testing.T) {
 		if _, ok := valid(t, s, opaque); ok {
 			t.Fatal("opaque token survived")
 		}
-		// 登出当前设备：refresh token 立即失效，已签发的 access token 在有效期内仍可用。
+		// 登出当前设备：refresh token 立即失效，已签发的 access token 在有效期内仍可用，
+		// 但长连接复查时查询登录，连接随之结束。
+		if err := recheck(j, sub, a.Access); err != nil {
+			t.Fatalf("recheck before revoke: %v", err)
+		}
 		if err := s.Revoke(ctx, sub, sub.Credential); err != nil {
 			t.Fatal(err)
 		}
@@ -253,6 +268,9 @@ func TestJWTRevoke(t *testing.T) {
 		}
 		if _, ok := access(t, j, a.Access); !ok {
 			t.Fatal("access token is expected to stay valid until it expires")
+		}
+		if err := recheck(j, sub, a.Access); !errors.Is(err, identity.ErrUnauthenticated) {
+			t.Fatalf("recheck after revoke: %v", err)
 		}
 	})
 }
@@ -361,5 +379,30 @@ func TestJWTRequireBearer(t *testing.T) {
 		if rr.Code != status {
 			t.Errorf("%.20s: %d %s", token, rr.Code, rr.Body)
 		}
+	}
+}
+
+// 通过 RequireBearer 建立的长连接：撤销登录后复查失败，连接应当结束。
+func TestJWTRequireBearerRecheck(t *testing.T) {
+	j, s := newJWT(t, sqlite.Driver, apitoken.JWTConfig{})
+	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}})
+	op := huma.Operation{OperationID: "events", Method: http.MethodGet, Path: "/events"}
+	rest.RequireBearer(api, j.Validate)(&op)
+	var before, after error
+	rest.Register(api, op, func(ctx context.Context, _ *struct{}) (*struct{}, error) {
+		before = httpx.CheckCredential(ctx)
+		sub, _ := identity.FromContext(ctx)
+		if err := s.Revoke(ctx, sub, sub.Credential); err != nil {
+			t.Fatal(err)
+		}
+		after = httpx.CheckCredential(ctx)
+		return nil, nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtLogin(t, j, alice, apitoken.Device{}).Access)
+	rr := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent || before != nil || !errors.Is(after, identity.ErrUnauthenticated) {
+		t.Fatalf("status=%d before=%v after=%v", rr.Code, before, after)
 	}
 }

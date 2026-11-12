@@ -219,7 +219,7 @@ editor.Post("/admin/articles/publish", h.Publish)
 
 连接结束后，浏览器重连时按普通请求重新认证：页面跳转到登录页，JSON API 返回 `401`。所以凭据失效后，最多 30 秒连接就会断开，处理器不需要自己检查。
 
-页面会重新读取会话存储并经过 [`Options.Accounts`](views.md#login) 中的 Resolver；JSON API 会重新运行 token 校验器，校验器有副作用时（例如 `apitoken` 延长登录 token 的有效期），长连接期间也会每 30 秒发生一次。自己实现认证中间件时，用 `httpx.WithCredentialCheck` 登记同样的校验函数，SSE 会照样运行它。
+页面会重新读取会话存储并经过 [`Options.Accounts`](views.md#login) 中的 Resolver；JSON API 会重新运行 token 校验器，校验器有副作用时（例如 `apitoken` 延长登录 token 的有效期），长连接期间也会每 30 秒发生一次。校验器可以用 `identity.Rechecking(ctx)` 区分复查和新的请求：[JWT 模式](api-tokens.md#jwt)平时只验签名，复查时查询登录是否已被撤销。自己实现认证中间件时，用 `httpx.WithCredentialCheck` 登记同样的校验函数，SSE 会照样运行它。
 
 <a id="immediate-revocation"></a>
 ### 立即断开

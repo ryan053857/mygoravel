@@ -108,12 +108,23 @@ func TestReestablish(t *testing.T) {
 	now := was
 	var authErr, resolveErr error
 	perms := []string{"events"}
-	auth := func(context.Context) (identity.Subject, error) { return now, authErr }
-	resolve := func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+	auth := func(ctx context.Context) (identity.Subject, error) {
+		if !identity.Rechecking(ctx) {
+			t.Error("authenticator: not rechecking")
+		}
+		return now, authErr
+	}
+	resolve := func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+		if !identity.Rechecking(ctx) {
+			t.Error("resolver: not rechecking")
+		}
 		sub.Permissions = perms
 		return sub, resolveErr
 	}
 	check := func() error { return identity.Reestablish(context.Background(), was, auth, resolve, "events") }
+	if identity.Rechecking(context.Background()) {
+		t.Fatal("plain context is rechecking")
+	}
 
 	if err := check(); err != nil {
 		t.Fatalf("unchanged: %v", err)
