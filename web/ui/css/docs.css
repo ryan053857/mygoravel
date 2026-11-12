@@ -1,0 +1,225 @@
+/* web/docs 的正文排版：Markdown 渲染出的元素没有类名，样式都在 .docs-prose 之下，颜色取主题变量，
+   随风格和暗色模式变化。代码高亮的颜色在 docs-chroma.css（生成）。 */
+
+@import "./docs-chroma.css";
+
+@layer components {
+  .docs-prose {
+    line-height: 1.75;
+    overflow-wrap: break-word;
+  }
+  .docs-prose > :first-child {
+    margin-top: 0;
+  }
+  .docs-prose :where(p, ul, ol, blockquote, table, .docs-code, .docs-alert, img, hr) {
+    margin-block: 1.25em;
+  }
+  .docs-prose :where(h2, h3, h4) {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    line-height: 1.4;
+    scroll-margin-top: 5rem;
+  }
+  .docs-prose h2 {
+    margin-top: 2.5em;
+    margin-bottom: 0.75em;
+    padding-bottom: 0.4em;
+    border-bottom: 1px solid var(--border);
+    font-size: 1.5rem;
+  }
+  .docs-prose h3 {
+    margin-top: 2em;
+    margin-bottom: 0.5em;
+    font-size: 1.25rem;
+  }
+  .docs-prose h4 {
+    margin-top: 1.75em;
+    margin-bottom: 0.5em;
+    font-size: 1.05rem;
+  }
+  .docs-prose .docs-anchor {
+    margin-left: 0.4em;
+    color: var(--muted-foreground);
+    font-weight: 400;
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .docs-prose :where(h2, h3, h4):hover .docs-anchor,
+  .docs-prose .docs-anchor:focus-visible {
+    opacity: 1;
+  }
+  .docs-prose a:not(.docs-anchor) {
+    color: var(--primary);
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--primary) 40%, transparent);
+    text-underline-offset: 3px;
+  }
+  .docs-prose a:not(.docs-anchor):hover {
+    text-decoration-color: currentColor;
+  }
+  .docs-prose strong {
+    font-weight: 600;
+  }
+  .docs-prose :where(ul, ol) {
+    padding-left: 1.5em;
+  }
+  .docs-prose ul {
+    list-style: disc;
+  }
+  .docs-prose ol {
+    list-style: decimal;
+  }
+  .docs-prose li {
+    margin-block: 0.4em;
+  }
+  .docs-prose li::marker {
+    color: var(--muted-foreground);
+  }
+  .docs-prose li > :where(ul, ol, p) {
+    margin-block: 0.4em;
+  }
+  .docs-prose li:has(> input[type="checkbox"]) {
+    list-style: none;
+  }
+  .docs-prose li > input[type="checkbox"] {
+    margin: 0 0.5em 0 -1.4em;
+    vertical-align: middle;
+  }
+  .docs-prose blockquote {
+    padding-left: 1em;
+    border-left: 3px solid var(--border);
+    color: var(--muted-foreground);
+  }
+  .docs-prose hr {
+    border-color: var(--border);
+    margin-block: 2.5em;
+  }
+  .docs-prose img {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius);
+  }
+  .docs-prose table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .docs-prose :where(th, td) {
+    padding: 0.5em 0.9em;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+  .docs-prose th {
+    background: var(--muted);
+    font-weight: 600;
+  }
+  .docs-prose :not(pre) > code {
+    padding: 0.15em 0.4em;
+    border-radius: calc(var(--radius) * 0.6);
+    background: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+  }
+
+  .docs-code {
+    position: relative;
+  }
+  .docs-code pre {
+    overflow-x: auto;
+    padding: 1em 1.1em;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+  .docs-copy {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) * 0.8);
+    background: var(--background);
+    color: var(--muted-foreground);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .docs-code:hover .docs-copy,
+  .docs-copy:focus-visible,
+  .docs-copy[data-copied] {
+    opacity: 1;
+  }
+  .docs-copy:hover {
+    color: var(--foreground);
+  }
+  .docs-copy .docs-copy-done,
+  .docs-copy[data-copied] .docs-copy-idle {
+    display: none;
+  }
+  .docs-copy[data-copied] .docs-copy-done {
+    display: block;
+  }
+  @media (hover: none) {
+    .docs-copy {
+      opacity: 1;
+    }
+  }
+
+  .docs-alert {
+    --docs-alert: var(--primary);
+    padding: 0.75em 1em;
+    border-left: 3px solid var(--docs-alert);
+    border-radius: calc(var(--radius) * 0.6);
+    background: color-mix(in oklab, var(--docs-alert) 7%, transparent);
+  }
+  .docs-alert > :last-child {
+    margin-bottom: 0;
+  }
+  .docs-alert > * {
+    margin-block: 0.5em;
+  }
+  .docs-alert-title {
+    margin-top: 0;
+    color: var(--docs-alert);
+    font-weight: 600;
+  }
+  .docs-alert[data-kind="note"] {
+    --docs-alert: oklch(0.55 0.17 255);
+  }
+  .docs-alert[data-kind="tip"] {
+    --docs-alert: oklch(0.58 0.15 150);
+  }
+  .docs-alert[data-kind="important"] {
+    --docs-alert: oklch(0.55 0.2 295);
+  }
+  .docs-alert[data-kind="warning"] {
+    --docs-alert: oklch(0.65 0.15 70);
+  }
+  .docs-alert[data-kind="caution"] {
+    --docs-alert: var(--destructive);
+  }
+  .dark .docs-alert[data-kind="note"] {
+    --docs-alert: oklch(0.7 0.14 255);
+  }
+  .dark .docs-alert[data-kind="tip"] {
+    --docs-alert: oklch(0.72 0.15 150);
+  }
+  .dark .docs-alert[data-kind="important"] {
+    --docs-alert: oklch(0.7 0.17 295);
+  }
+  .dark .docs-alert[data-kind="warning"] {
+    --docs-alert: oklch(0.78 0.14 75);
+  }
+}

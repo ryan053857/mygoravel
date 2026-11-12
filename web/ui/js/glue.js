@@ -220,6 +220,61 @@
     true,
   );
 
+  // 文档（web/docs）：复制代码块。
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("[data-docs-copy]");
+    if (!btn || !navigator.clipboard) return;
+    var pre = btn.parentElement.querySelector("pre");
+    navigator.clipboard.writeText(pre.textContent.replace(/\n$/, "")).then(function () {
+      btn.setAttribute("data-copied", "");
+      clearTimeout(btn._docsCopied);
+      btn._docsCopied = setTimeout(function () {
+        btn.removeAttribute("data-copied");
+      }, 2000);
+    });
+  });
+  // 本页目录高亮页面顶部所在的小节。
+  var docsSpyFrame = 0;
+  function docsSpy() {
+    docsSpyFrame = 0;
+    var links = document.querySelectorAll("[data-docs-toc] a[href^='#']");
+    var current = links[0];
+    links.forEach(function (a) {
+      var h = document.getElementById(a.getAttribute("href").slice(1));
+      if (h && h.getBoundingClientRect().top <= 96) current = a;
+    });
+    links.forEach(function (a) {
+      a.toggleAttribute("data-active", a === current);
+    });
+  }
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (!docsSpyFrame) docsSpyFrame = requestAnimationFrame(docsSpy);
+    },
+    { passive: true },
+  );
+  // htmx 只替换正文区域：之后更新侧边栏的高亮，关闭手机上的侧边栏，回到页面顶部或链接中的小节。
+  var docsPath = null;
+  function docsNavigated() {
+    var page = document.querySelector("[data-docs-path]");
+    if (!page || page.getAttribute("data-docs-path") === docsPath) return;
+    var first = docsPath === null;
+    docsPath = page.getAttribute("data-docs-path");
+    document.querySelectorAll("[data-docs-nav]").forEach(function (a) {
+      a.toggleAttribute("data-active", a.getAttribute("href") === docsPath);
+    });
+    if (!first) {
+      if (window.templ && window.templ.sidebar) window.templ.sidebar.setOpenMobile(false, "web-docs-sidebar");
+      var hash = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      if (hash) hash.scrollIntoView();
+      else window.scrollTo(0, 0);
+    }
+    docsSpy();
+  }
+  document.addEventListener("htmx:after:swap", docsNavigated);
+  docsNavigated();
+
   // 扩展组件：页面出现选择器匹配的元素时加载对应脚本，每个只加载一次。
   var extras = JSON.parse((script && script.getAttribute("data-extras")) || "{}");
   function load() {

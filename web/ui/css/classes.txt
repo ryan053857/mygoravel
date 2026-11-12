@@ -457,6 +457,7 @@
 !x
 !y
 !y)
+#
 #${id}
 #666
 #ccc
@@ -3033,6 +3034,7 @@ ${width}px
 *p.Spacing
 *p.TooltipHidden
 *p.Value
+*page,
 *r.next
 *r.next++
 *rootState
@@ -11073,6 +11075,8 @@ ${width}px
 <!--
 <!DOCTYPE
 </a>
+</article>
+</aside>
 </body>
 </button>
 </caption>
@@ -11122,6 +11126,8 @@ ${width}px
 <Input/>.
 <Textarea/>.
 <a
+<article
+<aside
 <body
 <body>
 <body>,
@@ -11465,13 +11471,16 @@ ${width}px
 @menuButtonEl(tp)
 @nativeselect.NativeSelect(nativeselect.Props{ID:
 @nativeselect.Option(nativeselect.OptionProps{Value:
+@navGroupView(v,
 @navItem(it)
+@navSubItem(v,
 @navigationButton(navigation{slot:
 @p.Actions
 @p.Footer
 @p.Head
 @p.Icon()
 @p.Logo(icon.Props{Class:
+@pageView(v)
 @pagination.Content()
 @pagination.Ellipsis()
 @pagination.Item()
@@ -11501,13 +11510,16 @@ ${width}px
 @sheet.Sheet(sheet.Props{
 @sheet.Title()
 @sidebar.Content()
+@sidebar.Content(sidebar.ContentProps{Attributes:
 @sidebar.Footer()
 @sidebar.Group()
 @sidebar.GroupLabel()
 @sidebar.Header()
 @sidebar.Inset()
+@sidebar.Inset(sidebar.InsetProps{Class:
 @sidebar.Menu()
 @sidebar.MenuBadge()
+@sidebar.MenuButton(sidebar.MenuButtonProps{Attributes:
 @sidebar.MenuButton(sidebar.MenuButtonProps{Href:
 @sidebar.MenuButton(sidebar.MenuButtonProps{Size:
 @sidebar.MenuButton(sidebar.MenuButtonProps{Tooltip:
@@ -11517,6 +11529,7 @@ ${width}px
 @sidebar.MenuSubItem()
 @sidebar.Provider(sidebar.ProviderProps{ID:
 @sidebar.Rail()
+@sidebar.Sidebar()
 @sidebar.Sidebar(sidebar.Props{Collapsible:
 @sidebar.Trigger(sidebar.TriggerProps{Class:
 @skeleton.Skeleton(skeleton.Props{
@@ -11528,6 +11541,7 @@ ${width}px
 @templ.Raw(childrenHTML)
 @templ.Raw(content)
 @templ.Raw(it.Icon)
+@templ.Raw(localize(ctx,
 @textarea.Textarea(textarea.Props{
 @textarea.Textarea(textarea.Props{ID:
 @toast.Toast(toast.Props{Title:
@@ -11548,9 +11562,12 @@ ${width}px
 @ui.Pagination(list,
 @ui.SortHead(q.Sort,
 @ui.TextField(f,
+@ui.ThemeToggle()
 @ui.Toaster()
 @userAvatar(u)
 @userMenu(*p.User)
+@v.site.opts.Actions
+@v.site.opts.Logo(icon.Props{Class:
 A
 A${fmtF(cornerRadius)},${fmtF(cornerRadius)},0,0,${sign
 A${fmtF(innerR)},${fmtF(innerR)},0,${innerArcAngle
@@ -11624,6 +11641,7 @@ ActionProps
 Actions
 Actions(props
 ActionsProps
+Actions，正文右侧是本页目录。
 ActivateOnFocus
 Activation
 ActiveBar
@@ -13021,8 +13039,8 @@ FileFieldProps)
 FileHeadphone
 FileHeart
 FileImage
-FileInfo)
-FileInfo{})
+FileInfo,
+FileInfo{},
 FileInput
 FileKey
 FileLock
@@ -15026,6 +15044,7 @@ Page(p
 Page(props
 PageDown
 PageDown:
+PageID
 PageProps
 PageProps)
 PageUp
@@ -15732,6 +15751,7 @@ Sidebar.
 Sidebar</span>
 SidebarID
 SidebarID,
+SidebarID})
 SidebarMenuButton
 SidebarProvider
 SidebarProvider.openMobile
@@ -18726,6 +18746,8 @@ boolOr(v
 boolean
 booleans
 boom-box
+boost...
+boost})
 border
 border-(--color-border)
 border-0
@@ -18737,6 +18759,7 @@ border-collapse
 border-color:
 border-dashed
 border-radius:
+border-t
 border-transparent
 border:
 borderBottom
@@ -18960,6 +18983,7 @@ c.collection
 c.current
 c.current);
 c.currentIndex
+c.description
 c.first);
 c.getAttribute(
 c.getDate(endOfMonth(target));
@@ -19004,6 +19028,7 @@ c.step
 c.step)
 c.step;
 c.tagName
+c.title
 c.total
 c.total);
 c;
@@ -21183,6 +21208,7 @@ crossScrollable
 crossScrollable,
 crosshair
 crown
+crumbs
 cs
 cs.fontSize,
 cs.letterSpacing
@@ -21590,7 +21616,9 @@ data-activation-direction
 data-activation-direction=
 data-active
 data-active:bg-background
+data-active:font-medium
 data-active:text-foreground
+data-active:text-sidebar-foreground
 data-active=
 data-active?={
 data-align
@@ -21650,6 +21678,9 @@ data-disabled:opacity-50
 data-disabled:pointer-events-none
 data-disabled={
 data-disabled?={
+data-docs-nav>{
+data-docs-path={
+data-docs-toc>
 data-drawer-content
 data-empty
 data-empty?={
@@ -22686,6 +22717,12 @@ docEl
 docEl.clientHeight
 docEl.clientWidth;
 dock
+docs
+docs-prose
+docs.next
+docs.overview
+docs.previous
+docs.toc
 document
 document,
 document.
@@ -23673,7 +23710,7 @@ fence
 ferris-wheel
 fetches
 fi
-fi)
+fi,
 fi.Filename
 fi.ID
 fi.URL
@@ -24173,6 +24210,7 @@ following
 following-bottom
 follows
 follows.
+font-bold
 font-medium
 font-medium${t.labelClass
 font-mono
@@ -24339,6 +24377,7 @@ func(i,
 func(index
 func(props
 func(sort
+func(string)
 func(v
 func(value
 function
@@ -24363,6 +24402,7 @@ fuzzy
 fw
 f（*web.Form[T]）的字段
 g
+g)
 g*100,
 g*thumbSize)
 g.Class,
@@ -24404,6 +24444,9 @@ g.plotX)
 g.plotX;
 g.plotY
 g.reversed
+g.section
+g.section.content
+g.section.title
 g.startAngle,
 g.tickCoords);
 g.vertical
@@ -24422,6 +24465,7 @@ gap
 gap,
 gap-1
 gap-1.5
+gap-10
 gap-2
 gap-3
 gap-4
@@ -24955,6 +24999,7 @@ github.com/axadrn/shadcn-templ/v2/components/toggle
 github.com/axadrn/shadcn-templ/v2/components/tooltip
 github.com/axadrn/shadcn-templ/v2/utils
 github.com/ryan053857/mygoravel/web
+github.com/ryan053857/mygoravel/web/ui
 gitlab
 given
 given,
@@ -25263,6 +25308,9 @@ h-full
 h-max
 h-px
 h-svh
+h.ID)
+h.Level
+h.Text
 h0
 h0)
 h1
@@ -25712,6 +25760,7 @@ hover:bg-muted
 hover:group-data-[collapsible=offcanvas]:bg-sidebar
 hover:text-accent-foreground
 hover:text-foreground
+hover:text-sidebar-foreground
 hover:underline
 hoverEnabled
 hoverEnabled()
@@ -25801,6 +25850,8 @@ https://images.unsplash.com/photo-1604076850742-4c7221f3101b?q=80&w=1887&auto=fo
 https://samthor.au/2021/observing-dom/
 humanSize(fi.Size)
 humanSize(p.MaxSize)
+hx-boost
+hx-boost=
 hx-confirm
 hx-confirm=
 hx-delete=
@@ -26915,10 +26966,14 @@ it.Label
 it.Label,
 it.Label})
 it.Name)
+it.content
 it.disabled,
 it.name
 it.name)
 it.open,
+it.section
+it.section.children
+it.title
 it:
 italic
 item
@@ -27436,6 +27491,7 @@ layers
 layers-2
 layers-plus
 layout
+layout(v
 layout,
 layout,omitempty
 layout-dashboard
@@ -27514,6 +27570,7 @@ len(attrs)
 len(attrs))
 len(bs.cells)
 len(bs.cells))
+len(crumbs)
 len(data))
 len(data)),
 len(enabled)
@@ -27522,6 +27579,7 @@ len(fs)
 len(it.Items)
 len(keys)
 len(layout)
+len(list)
 len(m.Series))
 len(p.Data))
 len(p.Modifiers)
@@ -27543,6 +27601,7 @@ len(st.x.Domain)
 len(st.y.Domain)
 len(ticks))
 len(u.Menu)
+len(v.page.toc)
 len(values)
 len(values))
 len)
@@ -28463,10 +28522,12 @@ max-0.99*step;
 max-age=
 max-h-(--available-height)
 max-h-(--drawer-content-max-height,none)
+max-h-[calc(100svh-7rem)]
 max-height),
 max-height:100%;max-width:100%;flex-grow:1;overflow:auto;
 max-w-(--available-width)
 max-w-(--skeleton-width)
+max-w-3xl
 max-w-5xl
 max-w-full
 max-w-lg
@@ -28560,6 +28621,8 @@ may
 maybe
 maybeBadgeEl
 maybeHasDeleted
+mb-2
+mb-3
 md
 md.
 md:after:hidden
@@ -28572,6 +28635,7 @@ md:hidden
 md:opacity-0
 md:p-10
 md:p-6
+md:px-8
 meaningful
 means
 meanwhile
@@ -29177,7 +29241,10 @@ msg),
 msg)})
 mss
 mss)
+mt-1
+mt-12
 mt-2
+mt-8
 mt-auto
 much
 multiple
@@ -29365,12 +29432,17 @@ navEnd
 navEnd)
 navEnd,
 navEnd]
+navGroup)
+navGroupView
+navGroupView(v
 navGroups(ctx,
 navItem(it
+navLink()})
 navStart
 navStart)
 navStart,
 navStart;
+navSubItem(v
 navVisible(s
 navVisible(s,
 navbar
@@ -29605,6 +29677,7 @@ nfc
 nice
 niceTickValues(min,
 nil
+nil)
 nil,
 nil:
 nil}
@@ -30687,6 +30760,7 @@ p.Placeholder
 p.Placeholder,
 p.PreserveScrollOnPrepend
 p.Pressed
+p.Preview)
 p.Ratio
 p.ReadOnly
 p.ReadOnly,
@@ -30762,6 +30836,7 @@ p.position()
 p.radius
 p.radius;
 p.sizeClasses(),
+p.title
 p.value()
 p.variant()
 p.variantClasses(),
@@ -30804,6 +30879,8 @@ page,
 page.
 page:
 pageLink(p,
+pageView
+pageView(v
 pages
 pages</span>
 pagination
@@ -31261,6 +31338,7 @@ pixels
 pixels,
 pixels;
 pizza
+pl-3
 pl-4
 place
 place(sidebar)
@@ -31925,6 +32003,9 @@ preventedKeys
 preventedPressSuppressionTimer
 preventing
 prevents
+preview
+preview)
+previewURL(fi,
 previous
 previous,
 previous.getBoundingClientRect();
@@ -32089,6 +32170,7 @@ pt-0
 pt-2
 pt-3
 pt-4
+pt-6
 pts
 pts)
 pts.map((p,
@@ -32119,6 +32201,7 @@ px/rem
 px;
 py
 py-2
+py-8
 pyramid
 p})
 p（page.Offset）的分页导航，只有一页时不显示。
@@ -34704,6 +34787,7 @@ size-
 size-(--cell-size)
 size-10
 size-3
+size-3.5
 size-4
 size-6
 size-8
@@ -34805,6 +34889,7 @@ sm:block
 sm:flex
 sm:flex-row
 sm:gap-12
+sm:grid-cols-2
 sm:justify-end
 sm:left-auto
 sm:min-h-0
@@ -36041,6 +36126,7 @@ sub.getAttribute(
 sub.id
 sub.open
 sub.removeEventListener(
+sub.title)
 sub;
 subContentOf(sub)
 subContentOf(sub);
@@ -36552,10 +36638,16 @@ templ.GetChildren(ctx).Render(ctx,
 templ.GetChildren(ctx);
 templ.JSONString(p.Value)
 templ.JSONString(s.values)
+templ.KV(
 templ.NopComponent
+templ.SafeURL(
 templ.SafeURL(fi.URL)
 templ.SafeURL(orDefault(p.Home,
 templ.SafeURL(p.Href)
+templ.SafeURL(v.home())
+templ.SafeURL(v.url(c))
+templ.SafeURL(v.url(g.section))
+templ.SafeURL(v.url(p))
 templ.ToGoHTML(ctx,
 template
 template,
@@ -36579,6 +36671,7 @@ text
 text(ctx,
 text,
 text-2xl
+text-3xl
 text-[0.8rem]
 text-[CanvasText]
 text-align-center
@@ -36599,11 +36692,13 @@ text-foreground
 text-foreground/60
 text-initial
 text-left
+text-lg
 text-muted-foreground
 text-popover-foreground
 text-pretty
 text-primary-foreground
 text-quote
+text-right
 text-search
 text-select
 text-sidebar-foreground
@@ -37130,6 +37225,7 @@ top,
 top-0
 top-1/2
 top-1/3
+top-22
 top-[60%]
 top-full
 top-right
@@ -37225,6 +37321,7 @@ trackPWMBadge(input),
 trackPWMBadgeWhileFocused(input)
 trackPWMBadgeWhileFocused(input);
 tracking
+tracking-tight
 tracks
 tractor
 traffic-cone
@@ -37949,8 +38046,32 @@ v);
 v,
 v.(string);
 v.(type)
+v.active(g.section)
+v.active(it),
+v.active(p),
+v.crumbs();
+v.documentTitle()})
 v.every(isDate);
+v.groups()
+v.home(),
+v.listing();
 v.map(parseMatcher);
+v.open(it),
+v.page.body))
+v.page.content
+v.page.description
+v.page.next
+v.page.next;
+v.page.prev
+v.page.prev;
+v.page.toc
+v.site.opts.Actions
+v.site.opts.Logo
+v.site.opts.Title
+v.title()
+v.url(it),
+v.url(p),
+v.url(v.page)
 v1.1.1
 v4,
 v;
@@ -38156,6 +38277,8 @@ video
 video-off
 videotape
 view
+view)
+view,
 view.
 view.innerHeight;
 view.innerWidth;
@@ -38836,6 +38959,7 @@ xi)
 xi,
 xi;
 xj,
+xl:block
 xlink:href=
 xmlns
 xmlns=
@@ -39113,6 +39237,7 @@ zooming
 传给
 侧边栏的
 写下第一篇文章吧。
+切换页面时替换的部分。
 删除
 删除后无法恢复。
 删除这篇文章？
@@ -39142,6 +39267,7 @@ zooming
 是一组单选项，对应表单结构体中的字符串字段。每个选项的
 是一组复选框，对应表单结构体中的字符串切片字段：选中的每一项提交一个同名的值。
 是上传文件的字段：用户选择文件后立即上传到
+是侧边栏中的一组。目录的首页有正文时，组的标题是它的链接。
 是切换暗色模式的按钮，选择记在浏览器中。放在
 是列表没有数据时的提示：图标、标题、说明，children
 是原生的下拉选择。Placeholder
@@ -39155,6 +39281,8 @@ zooming
 是当前的排序参数（key
 是操作，例如「新建文章」按钮。
 是放置服务端渲染的对话框的位置，放在布局的
+是文档页：左侧是目录导航，顶栏是展开侧边栏的按钮和
+是正文区域：htmx
 是登录、注册、找回密码等页面的居中卡片：上方是名称，卡片中是标题、说明和
 是确认按钮的文字，
 是说明，data-confirm-action

@@ -59,6 +59,16 @@ ui.theme.toggle: Toggle dark mode
 ui.file.remove: Remove
 ui.file.failed: Upload failed
 ui.file.too_large: The file must not be larger than
+docs.toc: On this page
+docs.previous: Previous
+docs.next: Next
+docs.overview: Overview
+docs.copy: Copy
+docs.alert.note: Note
+docs.alert.tip: Tip
+docs.alert.important: Important
+docs.alert.warning: Warning
+docs.alert.caution: Caution
 validation.required: This field is required
 validation.filled: This field must not be empty
 validation.min_length: Must be at least {{.Min}} characters

@@ -11,6 +11,7 @@
 
 @import "./vendor/tw-animate.css";
 @import "./vendor/shadcn-tailwind.css";
+@import "./docs.css";
 
 /* shadcn-templ 组件和 web/ui 组件中的类名（生成）。风格中的 @apply 直接生成样式，不需要扫描。
    本目录不引用目录之外的文件，可以整体复制到应用中。 */

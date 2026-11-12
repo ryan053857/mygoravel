@@ -1,0 +1,170 @@
+package docs
+
+import (
+	"github.com/axadrn/shadcn-templ/v2/components/collapsible"
+	"github.com/axadrn/shadcn-templ/v2/components/icon"
+	"github.com/axadrn/shadcn-templ/v2/components/sidebar"
+	"github.com/ryan053857/mygoravel/web/ui"
+)
+
+// layout 是文档页：左侧是目录导航，顶栏是展开侧边栏的按钮和 Actions，正文右侧是本页目录。
+templ layout(v view) {
+	@ui.Page(ui.PageProps{Title: v.documentTitle()}) {
+		@sidebar.Provider(sidebar.ProviderProps{ID: SidebarID}) {
+			@sidebar.Sidebar() {
+				@sidebar.Header() {
+					@sidebar.Menu() {
+						@sidebar.MenuItem() {
+							@sidebar.MenuButton(sidebar.MenuButtonProps{Size: sidebar.MenuButtonSizeLg, Href: v.home(), Attributes: templ.Attributes{"hx-boost": "true"}}) {
+								if v.site.opts.Logo != nil {
+									<div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+										@v.site.opts.Logo(icon.Props{Class: "size-4"})
+									</div>
+								}
+								<span class="truncate font-semibold">{ v.site.opts.Title }</span>
+							}
+						}
+					}
+				}
+				@sidebar.Content(sidebar.ContentProps{Attributes: boost}) {
+					for _, g := range v.groups() {
+						@navGroupView(v, g)
+					}
+				}
+			}
+			@sidebar.Inset(sidebar.InsetProps{Class: "min-w-0"}) {
+				<header class="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
+					@sidebar.Trigger(sidebar.TriggerProps{Class: "-ml-1", Attributes: templ.Attributes{"aria-label": text(ctx, "ui.sidebar.toggle")}})
+					<a href={ templ.SafeURL(v.home()) } class="truncate text-sm font-semibold md:hidden">{ v.site.opts.Title }</a>
+					<div class="ml-auto flex items-center gap-2">
+						if v.site.opts.Actions != nil {
+							@v.site.opts.Actions
+						}
+						@ui.ThemeToggle()
+					</div>
+				</header>
+				@pageView(v)
+			}
+		}
+	}
+}
+
+// navGroupView 是侧边栏中的一组。目录的首页有正文时，组的标题是它的链接。
+templ navGroupView(v view, g navGroup) {
+	@sidebar.Group() {
+		if g.section != nil {
+			@sidebar.GroupLabel() {
+				if g.section.content {
+					<a href={ templ.SafeURL(v.url(g.section)) } hx-boost="true" class="hover:text-sidebar-foreground data-active:text-sidebar-foreground" data-active?={ v.active(g.section) } data-docs-nav>{ g.section.title }</a>
+				} else {
+					{ g.section.title }
+				}
+			}
+		}
+		@sidebar.Menu() {
+			for _, it := range g.items {
+				if it.section == nil {
+					@sidebar.MenuItem() {
+						@sidebar.MenuButton(sidebar.MenuButtonProps{Href: v.url(it), IsActive: v.active(it), Attributes: navLink()}) {
+							<span>{ it.title }</span>
+						}
+					}
+				} else {
+					@collapsible.Collapsible(collapsible.Props{DefaultOpen: v.open(it), Class: "group/collapsible"}) {
+						@sidebar.MenuItem() {
+							@sidebar.MenuButton(sidebar.MenuButtonProps{Attributes: collapsible.Trigger(ctx)}) {
+								<span>{ it.title }</span>
+								@icon.ChevronRight(icon.Props{Class: "ml-auto transition-transform duration-200 group-data-open/collapsible:rotate-90"})
+							}
+							@collapsible.Content() {
+								@sidebar.MenuSub() {
+									if it.content {
+										@navSubItem(v, it, text(ctx, "docs.overview"))
+									}
+									for _, sub := range it.section.children {
+										@navSubItem(v, sub, sub.title)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+templ navSubItem(v view, p *page, label string) {
+	@sidebar.MenuSubItem() {
+		@sidebar.MenuSubButton(sidebar.MenuSubButtonProps{Href: v.url(p), IsActive: v.active(p), Attributes: navLink()}) {
+			<span>{ label }</span>
+		}
+	}
+}
+
+// pageView 是正文区域：htmx 切换页面时替换的部分。
+templ pageView(v view) {
+	<div id={ PageID } class="flex flex-1 justify-center gap-10 px-4 py-8 md:px-8" data-docs-path={ v.url(v.page) } { boost... }>
+		<article class="w-full min-w-0 max-w-3xl">
+			if crumbs := v.crumbs(); len(crumbs) > 0 {
+				<nav class="mb-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground" aria-label="breadcrumb">
+					for i, c := range crumbs {
+						if i > 0 {
+							@icon.ChevronRight(icon.Props{Class: "size-3.5"})
+						}
+						<a href={ templ.SafeURL(v.url(c)) } hx-boost="true" class="hover:text-foreground">{ c.title }</a>
+					}
+				</nav>
+			}
+			<h1 class="text-3xl font-bold tracking-tight">{ v.title() }</h1>
+			if v.page.description != "" {
+				<p class="mt-2 text-lg text-muted-foreground">{ v.page.description }</p>
+			}
+			if v.page.content {
+				<div class="docs-prose mt-8">
+					@templ.Raw(localize(ctx, v.page.body))
+				</div>
+			}
+			if list := v.listing(); len(list) > 0 {
+				<div class="mt-8 grid gap-4 sm:grid-cols-2">
+					for _, c := range list {
+						<a href={ templ.SafeURL(v.url(c)) } hx-boost="true" class="rounded-lg border p-4 transition-colors hover:bg-muted">
+							<p class="font-medium">{ c.title }</p>
+							if c.description != "" {
+								<p class="mt-1 text-sm text-muted-foreground">{ c.description }</p>
+							}
+						</a>
+					}
+				</div>
+			}
+			if v.page.prev != nil || v.page.next != nil {
+				<nav class="mt-12 grid gap-4 border-t pt-6 sm:grid-cols-2">
+					if p := v.page.prev; p != nil {
+						<a href={ templ.SafeURL(v.url(p)) } hx-boost="true" rel="prev" class="flex flex-col gap-1 rounded-lg border p-4 transition-colors hover:bg-muted">
+							<span class="text-sm text-muted-foreground">{ text(ctx, "docs.previous") }</span>
+							<span class="font-medium">{ p.title }</span>
+						</a>
+					} else {
+						<span class="hidden sm:block"></span>
+					}
+					if p := v.page.next; p != nil {
+						<a href={ templ.SafeURL(v.url(p)) } hx-boost="true" rel="next" class="flex flex-col gap-1 rounded-lg border p-4 text-right transition-colors hover:bg-muted">
+							<span class="text-sm text-muted-foreground">{ text(ctx, "docs.next") }</span>
+							<span class="font-medium">{ p.title }</span>
+						</a>
+					}
+				</nav>
+			}
+		</article>
+		if len(v.page.toc) > 0 {
+			<aside class="hidden w-56 shrink-0 xl:block">
+				<nav class="sticky top-22 flex max-h-[calc(100svh-7rem)] flex-col gap-1 overflow-y-auto text-sm" data-docs-toc>
+					<p class="mb-2 font-medium">{ text(ctx, "docs.toc") }</p>
+					for _, h := range v.page.toc {
+						<a href={ templ.SafeURL("#" + h.ID) } class={ "text-muted-foreground transition-colors hover:text-foreground data-active:font-medium data-active:text-foreground", templ.KV("pl-3", h.Level == 3) }>{ h.Text }</a>
+					}
+				</nav>
+			</aside>
+		}
+	</div>
+}

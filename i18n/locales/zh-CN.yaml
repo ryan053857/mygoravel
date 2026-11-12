@@ -59,6 +59,16 @@ ui.theme.toggle: 切换暗色模式
 ui.file.remove: 移除
 ui.file.failed: 上传失败
 ui.file.too_large: 文件不能超过
+docs.toc: 本页目录
+docs.previous: 上一页
+docs.next: 下一页
+docs.overview: 概览
+docs.copy: 复制
+docs.alert.note: 说明
+docs.alert.tip: 提示
+docs.alert.important: 重要
+docs.alert.warning: 警告
+docs.alert.caution: 注意
 validation.required: 必填
 validation.filled: 不能为空
 validation.min_length: 至少 {{.Min}} 个字符
