@@ -73,7 +73,7 @@ func sendCode(mailer mail.Mailer, emails *mail.Templates) func(context.Context, 
 }
 ```
 
-`c.Purpose` 是 `sign_in`、`reset` 或 `verify`，对应三个模板。`c.Registered` 表示邮箱已经注册，模板可以据此写“登录”还是“注册”。用短信时按 `c.To.Kind` 区分 `email` 和 `phone`。
+`c.Purpose` 是 `sign_in`、`reset`、`verify` 或 `confirm`（[确认身份](#confirming)），对应四个模板。`c.Registered` 表示邮箱已经注册，模板可以据此写“登录”还是“注册”。用短信时按 `c.To.Kind` 区分 `email` 和 `phone`。
 
 <a id="identifiers"></a>
 ## 登录标识
@@ -307,9 +307,26 @@ err = users.Link(ctx, a.db, sub.Ref(), proof)
 <a id="confirming"></a>
 ## 确认身份
 
-修改邮箱、关闭二次验证、删除账号之前，再次确认操作的就是账号本人。`Confirm(ctx, ref, password)` 校验密码，`CheckTwoFactor(ctx, ref, code)` 校验验证器上的数字或恢复码，失败次数都有限制。
+修改邮箱、关闭二次验证、删除账号之前，再次确认操作的就是账号本人。按账号有的登录方式选一种：
 
-JSON API 让客户端在这类请求中带上密码，处理器先调用 `Confirm`。页面则把这类路由声明为 `Confirmed`，在一段时间内确认过身份的会话直接放行：
+| 方式 | 调用 |
+| --- | --- |
+| 密码 | `Confirm(ctx, ref, password)` |
+| 验证码 | `SendConfirmCode(ctx, ref, id)` 发给账号自己的邮箱或手机号，`ConfirmCode(ctx, ref, requestID, code)` 校验 |
+| 二次验证 | `CheckTwoFactor(ctx, ref, code)` 校验验证器上的数字或恢复码 |
+| passkey、第三方账号 | 再登录一次，`out.Subject.Ref()` 等于 `ref` 即可 |
+
+失败次数都有限制。`HasPassword` 决定显示密码框还是“发送验证码”。确认用的验证码只发给 `ref` 自己的标识，其他标识返回 `ErrNotFound`；它不能用来登录，`VerifyCode` 不接受它，所以不会绕过二次验证。
+
+没有密码的账号用验证码确认：
+
+```go
+requestID, err := users.SendConfirmCode(ctx, sub.Ref(), login.Phone(phone))
+// 用户收到验证码后
+err = users.ConfirmCode(ctx, sub.Ref(), in.Body.RequestID, in.Body.Code)
+```
+
+JSON API 让客户端在这类请求中带上密码或验证码，处理器先确认，完整的写法见[读者注销账号](account-examples.md#reader-api)。页面则把这类路由声明为 `Confirmed`，在一段时间内确认过身份的会话直接放行：
 
 ```go
 pages := web.New(web.Options{
@@ -320,7 +337,7 @@ pages := web.New(web.Options{
 pages.Routes(r, web.Require().Confirmed(15*time.Minute)).Post("/account/delete", h.Delete)
 ```
 
-登录本身算一次确认。超过 15 分钟时，请求被带到 `Options.Confirm`，`next` 参数带上原地址。确认页校验密码后调用 `pages.Confirm`，再跳回原地址：
+登录本身算一次确认。超过 15 分钟时，请求被带到 `Options.Confirm`，`next` 参数带上原地址。确认页校验密码（或验证码）后调用 `pages.Confirm`，再跳回原地址：
 
 ```go
 func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) error {

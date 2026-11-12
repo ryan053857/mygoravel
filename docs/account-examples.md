@@ -18,7 +18,7 @@
 | 入口 | 服务端渲染的页面，会话登录 | JSON API，JWT access token + refresh token |
 | 账号怎么来 | 管理员邀请，编辑通过邮件中的链接设置密码 | 手机验证码自助注册，或 Sign in with Apple |
 | 怎么登录 | 邮箱 + 密码，**必须**启用 TOTP 二次验证 | 手机验证码，或 Apple |
-| 敏感操作 | 邀请编辑前 15 分钟内确认过密码 | 注销账号 |
+| 敏感操作 | 邀请编辑前 15 分钟内确认过密码 | 注销账号前用验证码或重新登录 Apple 确认身份 |
 
 两套账号的登录凭据都保存在框架的 `auth_*` 表中，`editors`、`readers` 表只有业务字段。下面的五个文件都是完整的代码。
 
@@ -580,7 +580,8 @@ func (h *handlers) logout(w http.ResponseWriter, r *http.Request) error {
 2. `POST /auth/codes/verify` 提交验证码：已注册时得到一对 token，未注册时得到注册凭证；
 3. 未注册时进入注册页，`POST /auth/sign-up` 带着注册凭证和昵称注册，得到一对 token；
 4. 也可以用 Sign in with Apple：App 把系统返回的 ID token 交给 `POST /auth/apple`，结果与第 2 步相同；
-5. access token 过期后 `POST /auth/refresh`；退出登录、注销账号用 access token 调用 `DELETE /auth/session`、`DELETE /account`。
+5. access token 过期后 `POST /auth/refresh`；退出登录用 access token 调用 `DELETE /auth/session`；
+6. 注销账号前先确认身份：有手机号的读者 `POST /account/confirm-code` 收到验证码，带着它调用 `DELETE /account`；只用 Apple 登录的读者重新登录一次 Apple，带上新的 ID token。
 
 下面是完整的 `internal/reader/readerapi/routes.go`：
 
@@ -639,6 +640,16 @@ type AppleInput struct {
     }
 }
 
+// ConfirmInput 确认操作的是读者本人：验证码，或重新登录 Apple 得到的 ID token。
+type ConfirmInput struct {
+    Body struct {
+        RequestID    string `json:"request_id,omitempty" doc:"POST /account/confirm-code 返回的请求 ID"`
+        Code         string `json:"code,omitempty"`
+        AppleIDToken string `json:"apple_id_token,omitempty" doc:"没有手机号的读者重新登录 Apple 得到的 ID token"`
+        Nonce        string `json:"nonce,omitempty"`
+    }
+}
+
 type RefreshInput struct {
     Body struct {
         RefreshToken string `json:"refresh_token" minLength:"1"`
@@ -690,6 +701,7 @@ func Register(api *rest.API, db *bun.DB, acc *accounts.Accounts) {
         return op
     }
     rest.Register(api, signedIn("reader-logout", http.MethodDelete, "/auth/session"), h.logout)
+    rest.Register(api, signedIn("reader-confirm-code", http.MethodPost, "/account/confirm-code"), h.sendConfirmCode)
     rest.Register(api, signedIn("reader-delete", http.MethodDelete, "/account"), h.deleteAccount)
 }
 
@@ -758,9 +770,52 @@ func (h *handlers) logout(ctx context.Context, _ *struct{}) (*struct{}, error) {
     return nil, h.acc.ReaderTokens.Revoke(ctx, sub, sub.Credential)
 }
 
-func (h *handlers) deleteAccount(ctx context.Context, _ *struct{}) (*struct{}, error) {
+// sendConfirmCode 向读者自己的手机号发送确认身份的验证码。
+func (h *handlers) sendConfirmCode(ctx context.Context, _ *struct{}) (*SendCodeOutput, error) {
     sub, _ := identity.FromContext(ctx)
+    ids, err := h.acc.Readers.Identifiers(ctx, sub.Ref())
+    if err != nil {
+        return nil, err
+    }
+    for _, id := range ids {
+        if id.Kind == login.KindPhone {
+            requestID, err := h.acc.Readers.SendConfirmCode(ctx, sub.Ref(), id.Identifier)
+            if err != nil {
+                return nil, err
+            }
+            out := &SendCodeOutput{}
+            out.Body.RequestID = requestID
+            return out, nil
+        }
+    }
+    return nil, login.ErrNotFound.New()
+}
+
+func (h *handlers) deleteAccount(ctx context.Context, in *ConfirmInput) (*struct{}, error) {
+    sub, _ := identity.FromContext(ctx)
+    if err := h.confirm(ctx, sub.Ref(), in); err != nil {
+        return nil, err
+    }
     return nil, h.delete.Handle(ctx, sub.Ref())
+}
+
+// confirm 确认操作的是读者本人：校验发到手机的验证码，或者重新登录 Apple，登录的必须是同一个读者。
+func (h *handlers) confirm(ctx context.Context, ref identity.Ref, in *ConfirmInput) error {
+    if in.Body.AppleIDToken == "" {
+        return h.acc.Readers.ConfirmCode(ctx, ref, in.Body.RequestID, in.Body.Code)
+    }
+    ext, err := h.acc.Apple.IDToken(ctx, in.Body.AppleIDToken, in.Body.Nonce)
+    if err != nil {
+        return err
+    }
+    out, err := h.acc.Readers.External(ctx, ext)
+    if err != nil {
+        return err
+    }
+    if out.Subject.Ref() != ref {
+        return login.ErrInvalidCredentials.New()
+    }
+    return nil
 }
 ```
 
@@ -770,6 +825,7 @@ func (h *handlers) deleteAccount(ctx context.Context, _ *struct{}) (*struct{}, e
 - 发送验证码对未注册的手机号同样发送（`Register: true`），所以第 2 步才知道要注册；同一个手机号 15 分钟内最多发 5 次，见[限流与防探测](login.md#limits)。
 - Apple 的 `Nonce` 应当由服务器下发，见 [App 原生登录](social-login.md#native-sign-in)。Apple 账号对方确认过的邮箱会一并写入，所以邮箱已被其他读者使用时注册返回 `login.ErrTaken`。
 - 退出登录撤销的是这次登录的 refresh token，已签发的 access token 在 10 分钟内过期；注销账号还会让这个读者的全部登录立即无法刷新。
+- 读者没有密码，注销前用验证码或重新登录 Apple [确认身份](login.md#confirming)。确认用的验证码只发给读者自己的手机号，不能用来登录。
 
 <a id="wiring"></a>
 ## 接入入口

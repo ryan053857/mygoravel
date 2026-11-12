@@ -335,6 +335,86 @@ func TestSignInWithCode(t *testing.T) {
 	})
 }
 
+// 没有密码的账号用发给自己的验证码确认身份。
+func TestConfirmCode(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		e := newRealm(t, driver, login.Options{})
+		phone := login.Phone("+8613800138000")
+		if err := e.realm.Attach(ctx, e.db, ref("c1"), phone, false); err != nil {
+			t.Fatal(err)
+		}
+		e.account(t, ctx, "c2", "c2@example.com", "")
+
+		// 只能发给自己的标识。
+		_, err := e.realm.SendConfirmCode(ctx, ref("c2"), phone)
+		is(t, err, login.ErrNotFound)
+		_, err = e.realm.SendConfirmCode(ctx, ref("c1"), login.Email("nobody@example.com"))
+		is(t, err, login.ErrNotFound)
+		if _, err := e.realm.SendCode(ctx, login.Confirm, phone); err == nil {
+			t.Fatal("SendCode sent a confirm code")
+		}
+
+		send := func() (string, login.Code) {
+			t.Helper()
+			requestID, err := e.realm.SendConfirmCode(ctx, ref("c1"), phone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := e.mail.last(t, phone)
+			if c.RequestID != requestID || c.Purpose != login.Confirm || !c.Registered {
+				t.Fatalf("sent %+v for request %s", c, requestID)
+			}
+			return requestID, c
+		}
+		requestID, c := send()
+		// 确认用的验证码不能用来登录，也不能替别人确认；这些尝试不消耗次数。
+		for range 3 {
+			_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
+			is(t, err, login.ErrInvalidCode)
+			is(t, e.realm.ConfirmCode(ctx, ref("c2"), requestID, c.Code), login.ErrInvalidCode)
+		}
+		if err := e.realm.ConfirmCode(ctx, ref("c1"), requestID, c.Code); err != nil {
+			t.Fatal(err)
+		}
+		list, _ := e.realm.Identifiers(ctx, ref("c1"))
+		if len(list) != 1 || !list[0].Verified {
+			t.Fatalf("identifiers=%+v", list)
+		}
+		is(t, e.realm.ConfirmCode(ctx, ref("c1"), requestID, c.Code), login.ErrInvalidCode)
+
+		// 登录用的验证码不能用来确认身份。
+		requestID, c = e.code(t, ctx, login.SignIn, phone)
+		is(t, e.realm.ConfirmCode(ctx, ref("c1"), requestID, c.Code), login.ErrInvalidCode)
+
+		// 每个验证码最多试 3 次。
+		requestID, c = send()
+		for range 3 {
+			is(t, e.realm.ConfirmCode(ctx, ref("c1"), requestID, "000000x"), login.ErrInvalidCode)
+		}
+		is(t, e.realm.ConfirmCode(ctx, ref("c1"), requestID, c.Code), login.ErrInvalidCode)
+
+		// 发送之后标识被移除：不能确认。
+		requestID, c = send()
+		if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Email("c1@example.com"), true); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.realm.Detach(ctx, e.db, ref("c1"), phone); err != nil {
+			t.Fatal(err)
+		}
+		is(t, e.realm.ConfirmCode(ctx, ref("c1"), requestID, c.Code), login.ErrInvalidCode)
+
+		// 过期后无效。
+		requestID, err = e.realm.SendConfirmCode(ctx, ref("c1"), login.Email("c1@example.com"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c = e.mail.last(t, login.Email("c1@example.com"))
+		e.clock.add(15 * time.Minute)
+		is(t, e.realm.ConfirmCode(ctx, ref("c1"), requestID, c.Code), login.ErrInvalidCode)
+	})
+}
+
 // 并发提交同一个验证码，只有一次成功。
 func TestConcurrentVerify(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {

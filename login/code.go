@@ -32,6 +32,8 @@ const (
 	Reset Purpose = "reset"
 	// Verify 证明持有一个标识，验证后得到完成凭证，交给 Link 绑定到已登录的主体，或交给 Register。
 	Verify Purpose = "verify"
+	// Confirm 确认身份：由 SendConfirmCode 发给已登录主体自己的标识，交给 ConfirmCode。
+	Confirm Purpose = "confirm"
 )
 
 // Code 是要发送给用户的验证码，由 Options.Send 发送。
@@ -79,29 +81,75 @@ func (r *Realm) SendCode(ctx context.Context, purpose Purpose, id Identifier) (s
 		return "", errors.New("login: Options.Send is required to send codes")
 	}
 	if !slices.Contains([]Purpose{SignIn, Reset, Verify}, purpose) {
-		return "", errors.Newf("login: unknown purpose %q", purpose)
+		return "", errors.Newf("login: SendCode does not send purpose %q", purpose)
 	}
-	id, err := id.Normalize()
+	id, tenant, owner, err := r.sending(ctx, id)
 	if err != nil {
 		return "", err
+	}
+	switch {
+	case purpose == Reset && owner == "", purpose == SignIn && owner == "" && !r.opts.Register:
+		requestID, err := uuid.NewV7()
+		return requestID.String(), errors.Wrap(err, "login: new id")
+	}
+	return r.send(ctx, purpose, id, tenant, owner)
+}
+
+// SendConfirmCode 向 ref 自己的标识 id 发送 Confirm 用途的验证码，返回请求 ID，交给 ConfirmCode。
+// 没有密码的账号（只用验证码、第三方账号或 passkey 登录）用它在敏感操作之前确认身份，见 Confirm。
+// id 不属于 ref 时返回 ErrNotFound；发送次数与 SendCode 一样由 Options.Sends 限制。
+func (r *Realm) SendConfirmCode(ctx context.Context, ref identity.Ref, id Identifier) (string, error) {
+	if err := r.check(ref); err != nil {
+		return "", err
+	}
+	if r.opts.Send == nil {
+		return "", errors.New("login: Options.Send is required to send codes")
+	}
+	id, tenant, owner, err := r.sending(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if owner != ref.ID {
+		return "", ErrNotFound.New()
+	}
+	return r.send(ctx, Confirm, id, tenant, owner)
+}
+
+// ConfirmCode 校验 SendConfirmCode 发给 ref 的验证码，确认身份，用法与 Confirm 相同，接收验证码的标识同时标为已验证。
+// 验证码不正确、已过期、已用过、尝试次数已用完、不是发给 ref 的，或者标识已经不属于 ref 时返回 ErrInvalidCode。
+func (r *Realm) ConfirmCode(ctx context.Context, ref identity.Ref, requestID, code string) error {
+	if err := r.check(ref); err != nil {
+		return err
+	}
+	c, err := r.attempt(ctx, requestID, code, func(c *challengeRow) bool {
+		return c.Purpose == Confirm && c.SubjectID == ref.ID
+	})
+	if err != nil {
+		return err
+	}
+	return r.use(ctx, c)
+}
+
+// sending 规范化标识、检查发送次数，返回标识、当前租户和标识的主人（未注册时为空）。
+func (r *Realm) sending(ctx context.Context, id Identifier) (Identifier, string, string, error) {
+	id, err := id.Normalize()
+	if err != nil {
+		return id, "", "", err
 	}
 	tenant := r.tenant(ctx)
 	if err := r.opts.Sends.Allow(ctx, r.limitKey(tenant, id)); err != nil {
-		return "", err
+		return id, "", "", err
 	}
 	owner, err := r.owner(ctx, r.db, tenant, id)
-	if err != nil {
-		return "", err
-	}
+	return id, tenant, owner, err
+}
+
+// send 保存并发送一个验证码，返回请求 ID。
+func (r *Realm) send(ctx context.Context, purpose Purpose, id Identifier, tenant, owner string) (string, error) {
 	requestID, err := uuid.NewV7()
 	if err != nil {
 		return "", errors.Wrap(err, "login: new id")
 	}
-	switch {
-	case purpose == Reset && owner == "", purpose == SignIn && owner == "" && !r.opts.Register:
-		return requestID.String(), nil
-	}
-
 	now := r.now().UTC()
 	code := digits(r.opts.CodeLength)
 	row := &challengeRow{
@@ -129,56 +177,67 @@ func (r *Realm) SendCode(ctx context.Context, purpose Purpose, id Identifier) (s
 // SignIn 且标识已注册时直接登录，返回 Outcome.Subject（启用了二次验证时为 Outcome.Pending），并把标识标为已验证；
 // 其余情况返回 Outcome.Proof，交给 Register、ResetPassword 或 Link 完成。
 func (r *Realm) VerifyCode(ctx context.Context, requestID, code string) (Outcome, error) {
-	rid, err := uuid.Parse(requestID)
+	c, err := r.attempt(ctx, requestID, code, func(c *challengeRow) bool { return c.Purpose != Confirm })
 	if err != nil {
-		return Outcome{}, ErrInvalidCode.New()
+		return Outcome{}, err
 	}
-	now := r.now().UTC()
-	var c challengeRow
-	err = r.db.NewSelect().Model(&c).Where("id = ?", rid).Where("subject_type = ?", r.opts.Type).
-		Where("proof_hash IS NULL AND completed_at IS NULL").Where("expires_at > ?", now).Scan(ctx)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && c.Tenant != r.tenant(ctx) {
-		return Outcome{}, ErrInvalidCode.New()
-	}
-	if err != nil {
-		return Outcome{}, errors.Wrap(err, "login: find code")
-	}
-	// 先记一次尝试再比较，并发的猜测也不会超过次数限制。
-	n, err := affected(r.db.NewUpdate().Model((*challengeRow)(nil)).Set("attempts = attempts + 1").
-		Where("id = ?", rid).Where("attempts < ?", r.opts.CodeAttempts).
-		Where("proof_hash IS NULL AND completed_at IS NULL").Exec(ctx))
-	if err != nil {
-		return Outcome{}, errors.Wrap(err, "login: count attempt")
-	}
-	if n == 0 || !r.codeMatches(rid, code, c.CodeHash) {
-		return Outcome{}, ErrInvalidCode.New()
-	}
-
 	if c.Purpose == SignIn && c.SubjectID != "" {
-		return r.signInWithCode(ctx, &c, now)
+		if err := r.use(ctx, c); err != nil {
+			return Outcome{}, err
+		}
+		return r.authenticated(ctx, c.SubjectID, c.Tenant)
 	}
 	secret := token()
-	n, err = affected(r.db.NewUpdate().Model((*challengeRow)(nil)).
-		Set("proof_hash = ?", sha(secret)).Set("expires_at = ?", now.Add(r.opts.ProofTTL)).
-		Where("id = ?", rid).Where("proof_hash IS NULL AND completed_at IS NULL").Exec(ctx))
+	n, err := affected(r.db.NewUpdate().Model((*challengeRow)(nil)).
+		Set("proof_hash = ?", sha(secret)).Set("expires_at = ?", r.now().UTC().Add(r.opts.ProofTTL)).
+		Where("id = ?", c.ID).Where("proof_hash IS NULL AND completed_at IS NULL").Exec(ctx))
 	if err != nil {
 		return Outcome{}, errors.Wrap(err, "login: issue proof")
 	}
 	if n == 0 {
 		return Outcome{}, ErrInvalidCode.New()
 	}
-	return Outcome{Proof: rid.String() + "." + secret}, nil
+	return Outcome{Proof: c.ID.String() + "." + secret}, nil
 }
 
-// signInWithCode 完成已注册标识的验证码登录。
-func (r *Realm) signInWithCode(ctx context.Context, c *challengeRow, now time.Time) (Outcome, error) {
-	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		n, err := affected(tx.NewUpdate().Model((*challengeRow)(nil)).Set("completed_at = ?", now).
+// attempt 校验一次验证码：记录不存在、已过期、已用过、不是在当前租户中验证、accept 不接受、
+// 尝试次数已用完或验证码不正确时返回 ErrInvalidCode。
+func (r *Realm) attempt(ctx context.Context, requestID, code string, accept func(*challengeRow) bool) (*challengeRow, error) {
+	rid, err := uuid.Parse(requestID)
+	if err != nil {
+		return nil, ErrInvalidCode.New()
+	}
+	var c challengeRow
+	err = r.db.NewSelect().Model(&c).Where("id = ?", rid).Where("subject_type = ?", r.opts.Type).
+		Where("proof_hash IS NULL AND completed_at IS NULL").Where("expires_at > ?", r.now().UTC()).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (c.Tenant != r.tenant(ctx) || !accept(&c)) {
+		return nil, ErrInvalidCode.New()
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "login: find code")
+	}
+	// 先记一次尝试再比较，并发的猜测也不会超过次数限制。
+	n, err := affected(r.db.NewUpdate().Model((*challengeRow)(nil)).Set("attempts = attempts + 1").
+		Where("id = ?", rid).Where("attempts < ?", r.opts.CodeAttempts).
+		Where("proof_hash IS NULL AND completed_at IS NULL").Exec(ctx))
+	if err != nil {
+		return nil, errors.Wrap(err, "login: count attempt")
+	}
+	if n == 0 || !r.codeMatches(rid, code, c.CodeHash) {
+		return nil, ErrInvalidCode.New()
+	}
+	return &c, nil
+}
+
+// use 用掉发给已注册标识的验证码（登录或确认身份），并把标识标为已验证。
+// 并发使用、或者发送之后标识已被移除或转给了别人时返回 ErrInvalidCode。
+func (r *Realm) use(ctx context.Context, c *challengeRow) error {
+	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		n, err := affected(tx.NewUpdate().Model((*challengeRow)(nil)).Set("completed_at = ?", r.now().UTC()).
 			Where("id = ?", c.ID).Where("proof_hash IS NULL AND completed_at IS NULL").Exec(ctx))
 		if err != nil {
 			return errors.Wrap(err, "login: complete code")
 		}
-		// 发送之后标识可能已被移除或转给了别人。
 		owner, err := r.owner(ctx, tx, c.Tenant, c.identifier())
 		switch {
 		case err != nil:
@@ -188,10 +247,6 @@ func (r *Realm) signInWithCode(ctx context.Context, c *challengeRow, now time.Ti
 		}
 		return r.markVerified(ctx, tx, c.Tenant, c.identifier())
 	})
-	if err != nil {
-		return Outcome{}, err
-	}
-	return r.authenticated(ctx, c.SubjectID, c.Tenant)
 }
 
 // proof 返回完成凭证对应的验证记录。凭证无效、已过期、已用过、用途不在 purposes 中，
