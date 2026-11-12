@@ -1,4 +1,4 @@
-// Package searchcmd 提供 search reindex 命令：发起搜索索引的重建，显示进度直到完成。
+// Package searchcmd 提供 search reindex 命令：发起全文搜索索引或向量索引的重建，显示进度直到完成。
 package searchcmd
 
 import (
@@ -18,7 +18,7 @@ import (
 	"github.com/ryan053857/mygoravel/operation"
 )
 
-// Index 是可以重建的索引，*search.Index[D] 实现了它。
+// Index 是可以重建的索引，*search.Index[D] 和 *vector.Index[D] 都实现了它。
 type Index interface {
 	Name() string
 	Reindex(ctx context.Context, tx bun.IDB, ops *operation.Service, owner identity.Subject) (*operation.Operation, error)
@@ -30,17 +30,25 @@ var owner = identity.Subject{Type: identity.System, ID: "cli"}
 // pollInterval 是查看进度的间隔。
 var pollInterval = time.Second
 
-// New 返回 search 命令，db 是索引所在的数据库，indexes 是可以重建的索引：
+// New 返回 search 命令，db 是应用的数据库，indexes 是可以重建的索引，可以同时有全文搜索索引和向量索引，
+// 名称不能重复：
 //
 //	search reindex <index>            发起重建，由 worker 执行，每秒显示一次进度，直到完成
 //	search reindex <index> --detach   发起之后立即返回
 //
 // 显示进度时按 Ctrl-C 只停止查看，重建在 worker 中继续。重建失败时命令以非 0 状态退出。
-// 和其他需要数据库的命令一样，在 command.Bind 中声明，db 在执行时装配。
+// 和其他需要数据库的命令一样，在 command.Bind 中声明，db 在执行时装配。索引的名称重复时 panic。
 func New(db *bun.DB, indexes ...Index) *cobra.Command {
+	seen := map[string]bool{}
+	for _, ix := range indexes {
+		if seen[ix.Name()] {
+			panic(errors.Newf("searchcmd: duplicate index name %q", ix.Name()))
+		}
+		seen[ix.Name()] = true
+	}
 	reindex := &cobra.Command{
 		Use:   "reindex <index>",
-		Short: "重建搜索索引",
+		Short: "重建全文搜索索引或向量索引",
 		Args:  command.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			i := slices.IndexFunc(indexes, func(ix Index) bool { return ix.Name() == args[0] })
@@ -58,7 +66,7 @@ func New(db *bun.DB, indexes ...Index) *cobra.Command {
 		},
 	}
 	reindex.Flags().Bool("detach", false, "发起重建后立即返回，不等待完成")
-	root := &cobra.Command{Use: "search", Short: "搜索索引"}
+	root := &cobra.Command{Use: "search", Short: "全文搜索索引和向量索引"}
 	root.AddCommand(reindex)
 	return root
 }

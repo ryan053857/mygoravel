@@ -14,12 +14,14 @@
 //	    return Chunks.Sync(ctx, tx, fileID.String())
 //	})
 //
-//	Chunks.Handle(w, store, loadChunks)
+//	Chunks.Handle(w, store, loadChunks, scanChunkKeys)
 //
 // Search 计算查询文本的向量，返回语义最接近的文档：
 //
 //	hits, err := Chunks.Search(ctx, store, vector.Query{Text: question, Tenant: sub.Tenant, Limit: 20})
 //
-// Store 连接 Qdrant，用一个模型计算所有索引的向量。每个索引是一个 collection，记录了建立它的模型；
-// Store 的模型与之不同时，同步和检索都返回错误。
+// 换了模型或者计算向量的文本之后，用 Reindex 重建：重建用 Store 的模型写入索引的新版本（一个新的 collection），
+// 期间同步同时写入新旧两个版本，完成后切换，查询不会看到建了一半的索引。每个版本记录了建立它的模型，
+// 写入和查询总是用这个模型；换模型期间用 WithPrevious 传入旧模型。search/searchcmd 的 search reindex 命令
+// 也能重建向量索引。
 package vector

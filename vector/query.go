@@ -13,7 +13,7 @@ const DefaultLimit = 10
 
 // Query 是一次检索的条件。
 type Query struct {
-	// Text 是查询文本，用 Store 的模型计算向量后检索语义最接近的文档。不能为空。
+	// Text 是查询文本，用建立索引当前版本的模型计算向量后检索语义最接近的文档。不能为空。
 	Text string
 	// Tenant 是查询的租户，"" 为平台本身。文档类型有 tenant 字段时总是只查询这个租户的文档；
 	// 没有 tenant 字段时必须为空。
@@ -32,7 +32,8 @@ type Hit[D any] struct {
 	Score float64 `json:"score"` // 与查询文本的余弦相似度，越大越接近
 }
 
-// Search 检索与 q.Text 语义最接近的文档，按相似度从高到低返回。索引还没有同步过任何文档时返回空。
+// Search 检索与 q.Text 语义最接近的文档，按相似度从高到低返回。查询使用索引当前的版本，
+// 用建立这个版本的模型计算 q.Text 的向量。索引还没有同步过任何文档时返回空。
 func (ix *Index[D]) Search(ctx context.Context, s *Store, q Query) ([]Hit[D], error) {
 	if q.Text == "" {
 		return nil, errors.New("vector: empty query text")
@@ -41,34 +42,17 @@ func (ix *Index[D]) Search(ctx context.Context, s *Store, q Query) ([]Hit[D], er
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.open(ctx, ix.name, ix.schema, false)
-	if err != nil || !ok {
-		return nil, err
-	}
-	vecs, err := s.model.Embedder.Embed(ctx, []string{q.Text})
-	if err != nil {
-		return nil, errors.Wrap(err, "vector: embed query")
-	}
-	if len(vecs) != 1 || len(vecs[0]) != s.model.Dims {
-		return nil, errors.Newf("vector: embedder returned an unexpected vector for model %q", s.model.Name)
-	}
 	limit := q.Limit
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
-	req := &qdrant.QueryPoints{
-		CollectionName: s.collection(ix.name),
-		Query:          qdrant.NewQueryDense(vecs[0]),
-		Filter:         filter,
-		Limit:          qdrant.PtrOf(uint64(limit)),
-		WithPayload:    qdrant.NewWithPayloadInclude(payloadKey, payloadDoc),
+	// 读到版本之后、查询之前，重建可能刚好切换并删除了这个版本：重新读取版本再查一次
+	found, gone, err := ix.query(ctx, s, q.Text, filter, limit, q.MinScore)
+	if gone {
+		found, _, err = ix.query(ctx, s, q.Text, filter, limit, q.MinScore)
 	}
-	if q.MinScore != 0 {
-		req.ScoreThreshold = qdrant.PtrOf(float32(q.MinScore))
-	}
-	found, err := s.client.Query(ctx, req)
 	if err != nil {
-		return nil, errors.Wrapf(err, "vector: query %s", ix.name)
+		return nil, err
 	}
 	hits := make([]Hit[D], len(found))
 	for i, p := range found {
@@ -101,4 +85,46 @@ func (ix *Index[D]) filter(q Query) (*qdrant.Filter, error) {
 		return nil, nil
 	}
 	return &qdrant.Filter{Must: must}, nil
+}
+
+// query 在查询使用的版本中检索与 text 最接近的 limit 个文档，用建立这个版本的模型计算 text 的向量。
+// 查询出错、而这个版本的 collection 已经不存在时 gone 为 true。
+func (ix *Index[D]) query(ctx context.Context, s *Store, text string, filter *qdrant.Filter, limit int, minScore float64) (found []*qdrant.ScoredPoint, gone bool, err error) {
+	st, err := readState(ctx, s.db, ix.name, false)
+	if err != nil {
+		return nil, false, err
+	}
+	collection := s.collection(ix.name, st.Version)
+	m, ok, err := s.open(ctx, collection, ix.schema, false)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	vecs, err := m.Embedder.Embed(ctx, []string{text})
+	if err != nil {
+		return nil, false, errors.Wrap(err, "vector: embed query")
+	}
+	if len(vecs) != 1 || len(vecs[0]) != m.Dims {
+		return nil, false, errors.Newf("vector: embedder returned an unexpected vector for model %q", m.Name)
+	}
+	req := &qdrant.QueryPoints{
+		CollectionName: collection,
+		Query:          qdrant.NewQueryDense(vecs[0]),
+		Filter:         filter,
+		Limit:          qdrant.PtrOf(uint64(limit)),
+		WithPayload:    qdrant.NewWithPayloadInclude(payloadKey, payloadDoc),
+	}
+	if minScore != 0 {
+		req.ScoreThreshold = qdrant.PtrOf(float32(minScore))
+	}
+	found, err = s.client.Query(ctx, req)
+	if err != nil {
+		err = errors.Wrapf(err, "vector: query %s", ix.name)
+		if exists, checkErr := s.client.CollectionExists(ctx, collection); checkErr == nil && !exists {
+			s.mu.Lock()
+			delete(s.ready, collection)
+			s.mu.Unlock()
+			return nil, true, err
+		}
+	}
+	return found, false, err
 }

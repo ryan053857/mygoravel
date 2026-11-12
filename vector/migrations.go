@@ -8,7 +8,7 @@ import (
 //go:embed migrations
 var migrationFiles embed.FS
 
-// Migrations 返回向量索引的表 vector_keys 的迁移，供应用发布。
+// Migrations 返回向量索引的表 vector_keys、vector_indexes 的迁移，供应用发布。
 func Migrations() fs.FS {
 	f, err := fs.Sub(migrationFiles, "migrations")
 	if err != nil {

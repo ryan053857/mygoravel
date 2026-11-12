@@ -35,6 +35,7 @@ notification.not_found: 通知不存在
 operation.not_found: 操作不存在
 operation.failed: 操作中断，请重新操作
 search.reindex_superseded: 重建已被之后发起的重建取代
+vector.reindex_superseded: 重建已被之后发起的重建取代
 imports.errors_column: 错误
 sheet.unsupported_format: 只支持 CSV 和 XLSX 文件
 sheet.bad_file: 无法读取表格文件

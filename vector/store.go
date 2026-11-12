@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -17,8 +18,8 @@ var validPrefix = regexp.MustCompile(`^[a-z0-9_.-]{0,32}$`)
 
 // Model 是计算向量的模型。
 type Model struct {
-	// Name 是模型的名称，例如 text-embedding-3-small。它记录在 collection 中：
-	// 不同模型的向量不能比较，换了模型之后，用旧模型建立的 collection 不能再写入和查询。
+	// Name 是模型的名称，例如 text-embedding-3-small。它记录在索引的每个版本中：
+	// 不同模型的向量不能比较，一个版本的写入和查询总是使用建立它的模型。
 	Name string
 	// Dims 是向量的维度，与模型输出的一致。
 	Dims int
@@ -26,15 +27,17 @@ type Model struct {
 	Embedder ai.Embedder
 }
 
-// Store 把索引保存在 Qdrant 中。它持有应用的数据库，用来在同步时锁住 key、读取文档。用 New 创建，可以并发使用。
+// Store 把索引保存在 Qdrant 中。它持有应用的数据库，用来在同步时锁住 key、读取文档、记录索引的版本。
+// 用 New 创建，可以并发使用。
 type Store struct {
 	db     *bun.DB
 	client *qdrant.Client
-	model  Model
+	model  Model            // 建立新版本使用的模型
+	models map[string]Model // 按名称索引的所有模型：model 和 WithPrevious 传入的旧模型
 	prefix string
 
 	mu    sync.Mutex
-	ready map[string]bool // 已经确认模型一致、建好 payload 索引的 collection
+	ready map[string]Model // 已经确认模型、建好 payload 索引的 collection 和它的模型
 }
 
 // Option 是 New 的选项。
@@ -46,16 +49,24 @@ func WithPrefix(prefix string) Option {
 	return func(s *Store) { s.prefix = prefix }
 }
 
+// WithPrevious 传入换模型之前使用的模型。换了模型之后，索引在重建完成之前仍是用旧模型建立的，
+// 查询和同步它都要用旧模型；重建完成后去掉这个选项。
+func WithPrevious(models ...Model) Option {
+	return func(s *Store) {
+		for _, m := range models {
+			s.addModel(m)
+		}
+	}
+}
+
 // New 创建 Store。db 是应用的数据库，需要 vector 的迁移；client 是 Qdrant 的客户端，在入口创建一次；
-// model 计算所有索引的向量。参数不正确时 panic。
+// model 计算向量，索引的新版本都用它建立。参数不正确时 panic。
 func New(db *bun.DB, client *qdrant.Client, model Model, opts ...Option) *Store {
-	if db == nil || client == nil || model.Embedder == nil {
-		panic("vector: nil database, client or embedder")
+	if db == nil || client == nil {
+		panic("vector: nil database or client")
 	}
-	if model.Name == "" || model.Dims <= 0 {
-		panic("vector: model needs a name and positive dimensions")
-	}
-	s := &Store{db: db, client: client, model: model, ready: map[string]bool{}}
+	s := &Store{db: db, client: client, model: model, models: map[string]Model{}, ready: map[string]Model{}}
+	s.addModel(model)
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -65,8 +76,20 @@ func New(db *bun.DB, client *qdrant.Client, model Model, opts ...Option) *Store 
 	return s
 }
 
-// collection 返回索引的 collection 的名称。
-func (s *Store) collection(index string) string { return s.prefix + index + "_v1" }
+func (s *Store) addModel(m Model) {
+	if m.Name == "" || m.Dims <= 0 || m.Embedder == nil {
+		panic("vector: a model needs a name, positive dimensions and an embedder")
+	}
+	if _, ok := s.models[m.Name]; ok {
+		panic(errors.Newf("vector: duplicate model %q", m.Name))
+	}
+	s.models[m.Name] = m
+}
+
+// collection 返回索引的一个版本的 collection 名称。
+func (s *Store) collection(index string, version int) string {
+	return s.prefix + index + "_v" + strconv.Itoa(version)
+}
 
 // metadata 中记录模型的键。
 const (
@@ -74,59 +97,64 @@ const (
 	metaDims  = "mygoravel.dims"
 )
 
-// open 确认索引的 collection 存在且是用 s.model 建立的。不存在时，create 为 true 则创建，否则返回 false。
-func (s *Store) open(ctx context.Context, index string, sc *schema, create bool) (bool, error) {
-	name := s.collection(index)
+// open 确认 collection 存在，返回建立它的模型。不存在时，create 为 true 则用 s.model 创建，否则 ok 为 false。
+func (s *Store) open(ctx context.Context, collection string, sc *schema, create bool) (m Model, ok bool, err error) {
 	s.mu.Lock()
-	ready := s.ready[name]
+	m, ok = s.ready[collection]
 	s.mu.Unlock()
-	if ready {
-		return true, nil
+	if ok {
+		return m, true, nil
 	}
 
-	exists, err := s.client.CollectionExists(ctx, name)
+	exists, err := s.client.CollectionExists(ctx, collection)
 	if err != nil {
-		return false, errors.Wrapf(err, "vector: check collection %s", name)
+		return Model{}, false, errors.Wrapf(err, "vector: check collection %s", collection)
 	}
 	if !exists {
 		if !create {
-			return false, nil
+			return Model{}, false, nil
 		}
-		if err := s.create(ctx, name, sc); err != nil {
-			return false, err
+		if err := s.create(ctx, collection, sc); err != nil {
+			return Model{}, false, err
 		}
 	}
-	info, err := s.client.GetCollectionInfo(ctx, name)
+	info, err := s.client.GetCollectionInfo(ctx, collection)
 	if err != nil {
-		return false, errors.Wrapf(err, "vector: get collection %s", name)
+		return Model{}, false, errors.Wrapf(err, "vector: get collection %s", collection)
 	}
-	if err := s.checkModel(name, info); err != nil {
-		return false, err
+	if m, err = s.modelOf(collection, info); err != nil {
+		return Model{}, false, err
 	}
 	// 文档类型新增的过滤字段也在这里建立索引；已经存在的索引不受影响
-	if err := s.createFieldIndexes(ctx, name, sc); err != nil {
-		return false, err
+	if err := s.createFieldIndexes(ctx, collection, sc); err != nil {
+		return Model{}, false, err
 	}
 	s.mu.Lock()
-	s.ready[name] = true
+	s.ready[collection] = m
 	s.mu.Unlock()
-	return true, nil
+	return m, true, nil
 }
 
-func (s *Store) checkModel(name string, info *qdrant.CollectionInfo) error {
+// modelOf 返回建立 collection 的模型，它必须是 Store 的模型之一。
+func (s *Store) modelOf(collection string, info *qdrant.CollectionInfo) (Model, error) {
 	meta := info.GetConfig().GetMetadata()
-	model, dims := meta[metaModel].GetStringValue(), meta[metaDims].GetIntegerValue()
-	if model != s.model.Name || dims != int64(s.model.Dims) {
-		return errors.Newf("vector: collection %s was built with model %q (%d dimensions), configured %q (%d dimensions)",
-			name, model, dims, s.model.Name, s.model.Dims)
+	name, dims := meta[metaModel].GetStringValue(), meta[metaDims].GetIntegerValue()
+	m, ok := s.models[name]
+	if !ok {
+		return Model{}, errors.Newf("vector: collection %s was built with model %q, which is not configured; "+
+			"pass it with vector.WithPrevious until a reindex with %q finishes", collection, name, s.model.Name)
 	}
-	return nil
+	if dims != int64(m.Dims) {
+		return Model{}, errors.Newf("vector: collection %s has %d dimensions, model %q is configured with %d",
+			collection, dims, name, m.Dims)
+	}
+	return m, nil
 }
 
 // create 用 s.model 创建 collection。多个进程同时创建时只有一个成功，其余的沿用它。
-func (s *Store) create(ctx context.Context, name string, sc *schema) error {
+func (s *Store) create(ctx context.Context, collection string, sc *schema) error {
 	req := &qdrant.CreateCollection{
-		CollectionName: name,
+		CollectionName: collection,
 		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
 			Size: uint64(s.model.Dims), Distance: qdrant.Distance_Cosine,
 		}),
@@ -141,8 +169,8 @@ func (s *Store) create(ctx context.Context, name string, sc *schema) error {
 	}
 	if err := s.client.CreateCollection(ctx, req); err != nil {
 		// 另一个进程同时创建成功时沿用它
-		if exists, _ := s.client.CollectionExists(ctx, name); !exists {
-			return errors.Wrapf(err, "vector: create collection %s", name)
+		if exists, _ := s.client.CollectionExists(ctx, collection); !exists {
+			return errors.Wrapf(err, "vector: create collection %s", collection)
 		}
 	}
 	return nil
@@ -175,9 +203,9 @@ func (s *Store) createFieldIndexes(ctx context.Context, name string, sc *schema)
 	return nil
 }
 
-// embed 给 entries 填入向量，返回它们的 point：文本与这个 key 已有的某个文档相同时沿用它的向量，
-// 其余的去掉重复后一次交给模型计算。
-func (s *Store) embed(ctx context.Context, collection, key string, entries []entry) ([]*qdrant.PointStruct, error) {
+// embed 给 entries 填入 m 计算的向量，返回它们的 point：文本与这个 key 在 collection 中已有的某个文档相同时
+// 沿用它的向量，其余的去掉重复后一次交给模型计算。
+func (s *Store) embed(ctx context.Context, collection string, m Model, key string, entries []entry) ([]*qdrant.PointStruct, error) {
 	points := make([]*qdrant.PointStruct, len(entries))
 	if len(entries) == 0 {
 		return points, nil
@@ -186,7 +214,7 @@ func (s *Store) embed(ctx context.Context, collection, key string, entries []ent
 	for i, e := range entries {
 		hashes[i] = e.hash
 	}
-	known, err := s.vectors(ctx, collection, key, hashes)
+	known, err := s.vectors(ctx, collection, m, key, hashes)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +227,7 @@ func (s *Store) embed(ctx context.Context, collection, key string, entries []ent
 		}
 	}
 	if len(texts) > 0 {
-		vecs, err := s.model.Embedder.Embed(ctx, texts)
+		vecs, err := m.Embedder.Embed(ctx, texts)
 		if err != nil {
 			return nil, errors.Wrap(err, "vector: embed")
 		}
@@ -207,8 +235,8 @@ func (s *Store) embed(ctx context.Context, collection, key string, entries []ent
 			return nil, errors.Newf("vector: embedder returned %d vectors for %d texts", len(vecs), len(texts))
 		}
 		for i, v := range vecs {
-			if len(v) != s.model.Dims {
-				return nil, errors.Newf("vector: embedder returned %d dimensions, model %q has %d", len(v), s.model.Name, s.model.Dims)
+			if len(v) != m.Dims {
+				return nil, errors.Newf("vector: embedder returned %d dimensions, model %q has %d", len(v), m.Name, m.Dims)
 			}
 			known[missing[i]] = v
 		}
@@ -221,7 +249,7 @@ func (s *Store) embed(ctx context.Context, collection, key string, entries []ent
 }
 
 // vectors 返回 key 已有的文档中，文本的哈希在 hashes 中的文档的向量，按哈希索引。
-func (s *Store) vectors(ctx context.Context, collection, key string, hashes []string) (map[string][]float32, error) {
+func (s *Store) vectors(ctx context.Context, collection string, m Model, key string, hashes []string) (map[string][]float32, error) {
 	known := map[string][]float32{}
 	req := &qdrant.ScrollPoints{
 		CollectionName: collection,
@@ -238,7 +266,7 @@ func (s *Store) vectors(ctx context.Context, collection, key string, hashes []st
 			return nil, errors.Wrap(err, "vector: read existing points")
 		}
 		for _, p := range found {
-			if v := p.GetVectors().GetVector().GetDenseVector().GetData(); len(v) == s.model.Dims {
+			if v := p.GetVectors().GetVector().GetDenseVector().GetData(); len(v) == m.Dims {
 				known[p.GetPayload()[payloadHash].GetStringValue()] = v
 			}
 		}

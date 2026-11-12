@@ -7,11 +7,12 @@
 - [同步](#syncing)
     - [沿用向量](#reusing-vectors)
     - [立即同步](#refreshing)
+- [重建索引](#reindexing)
 - [检索](#searching)
     - [过滤](#filtering)
     - [多租户](#tenancy)
     - [重排](#reranking)
-- [模型](#models)
+- [换模型](#changing-models)
 - [测试](#testing)
 
 <a id="introduction"></a>
@@ -28,16 +29,17 @@
 go get github.com/qdrant/go-client@v1.19.0
 ```
 
-把 `vector` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`。同步任务通过[队列](queue.md)执行，所以还需要队列的迁移：
+把 `vector` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`。同步任务通过[队列](queue.md)执行，重建索引的进度记在[后台操作](operations.md)中，所以还需要它们的迁移：
 
 ```go
 migratecmd.Publish(
     migrate.Source{Name: "queue", FS: queue.Migrations()},
+    migrate.Source{Name: "operation", FS: operation.Migrations()},
     migrate.Source{Name: "vector", FS: vector.Migrations()},
 )
 ```
 
-迁移只建一张 `vector_keys` 表，用来让同一个 key 的同步依次执行。向量和文档都在 Qdrant 中。
+数据库中只有两张小表：`vector_keys` 让同一个 key 的同步依次执行，`vector_indexes` 记录索引的版本。向量和文档都在 Qdrant 中。
 
 <a id="connecting"></a>
 ## 连接 Qdrant
@@ -77,14 +79,14 @@ vectors := vector.New(db, qc, vector.Model{
 })
 ```
 
-`Store` 持有数据库，同步时用它锁住 key、读取文档。`Model` 用来计算所有索引的向量：`Dims` 必须与模型输出的维度一致；`Embedder` 是 [ai.Embedder](ai.md#media)，分段多时用 `openai.WithBatchSize` 分批请求。
+`Store` 持有数据库，同步时用它锁住 key、读取文档。`Model` 用来计算向量：`Dims` 必须与模型输出的维度一致；`Embedder` 是 [ai.Embedder](ai.md#media)，分段多时用 `openai.WithBatchSize` 分批请求。
 
 多个应用共用一个 Qdrant 时，用 `vector.WithPrefix("blog_")` 给 collection 名称加前缀。
 
 <a id="defining-indexes"></a>
 ## 声明索引
 
-[文档转换与切分](documents.md#processing-uploads)把文章的附件切分为分段，存进 `attachment_chunks` 表（模型 `AttachmentChunk`）。下面是完整的 `internal/attachment/vector.go`，它声明分段的向量索引和读取文档的函数：
+[文档转换与切分](documents.md#processing-uploads)把文章的附件切分为分段，存进 `attachment_chunks` 表（模型 `AttachmentChunk`）。下面是完整的 `internal/attachment/vector.go`，它声明分段的向量索引、读取文档和列出 key 的函数：
 
 ```go
 package attachment
@@ -129,6 +131,28 @@ func LoadChunks(ctx context.Context, tx bun.IDB, key string) ([]ChunkDoc, error)
     }
     return docs, nil
 }
+
+// ScanChunkKeys 按 ID 的顺序列出 after 之后有分段的附件，重建索引时使用。
+func ScanChunkKeys(ctx context.Context, db bun.IDB, after string, limit int) ([]string, error) {
+    q := db.NewSelect().Model((*AttachmentChunk)(nil)).ColumnExpr("DISTINCT file_id").
+        OrderExpr("file_id").Limit(int64(limit))
+    if after != "" {
+        id, err := uuid.Parse(after)
+        if err != nil {
+            return nil, queue.Permanent(err)
+        }
+        q = q.Where("file_id > ?", id)
+    }
+    var ids []uuid.UUID
+    if err := q.Scan(ctx, &ids); err != nil {
+        return nil, errors.Wrap(err, "scan chunk keys")
+    }
+    keys := make([]string, len(ids))
+    for i, id := range ids {
+        keys[i] = id.String()
+    }
+    return keys, nil
+}
 ```
 
 标签有三种：
@@ -153,10 +177,10 @@ return database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 })
 ```
 
-worker 注册同步任务的处理函数，加在 [worker 的装配](queue.md#running-workers)中：
+worker 注册同步任务和[重建任务](#reindexing)的处理函数，加在 [worker 的装配](queue.md#running-workers)中：
 
 ```go
-attachment.Chunks.Handle(w, a.vectors, attachment.LoadChunks)
+attachment.Chunks.Handle(w, a.vectors, attachment.LoadChunks, attachment.ScanChunkKeys)
 ```
 
 处理任务时，`LoadChunks` 在同步事务中读取附件当前的分段，计算向量后替换 Qdrant 中这个 key 原有的文档；返回空时从索引中删除。任务只带 key，每次都重新读取，重复或乱序执行的结果都一样。
@@ -164,7 +188,7 @@ attachment.Chunks.Handle(w, a.vectors, attachment.LoadChunks)
 - 同一个 key 的同步依次执行，后执行的一定读到更新的数据。为此锁要一直持有到写完 Qdrant，计算向量期间同步事务也保持打开，所以 `LoadFunc` 只应读取数据，转换、切分文件这类耗时的处理放在之前的任务中完成。
 - 删除附件同样调用 `Sync`，`LoadChunks` 读不到分段，索引中的文档随之删除。
 - 计算向量的文本为空时，任务不再重试，直接转入[失败任务表](queue.md#failed-jobs)。模型服务出错时，任务按队列的规则重试。
-- 索引第一次同步时自动创建 Qdrant 的 collection 和过滤字段的索引；之后新增过滤字段时，进程启动后第一次同步会补建索引。
+- 索引的每个版本是 Qdrant 中的一个 collection，第一次写入时自动创建，同时给过滤字段建立索引；之后新增过滤字段时，进程启动后第一次同步会补建索引。
 
 <a id="reusing-vectors"></a>
 ### 沿用向量
@@ -179,6 +203,33 @@ attachment.Chunks.Handle(w, a.vectors, attachment.LoadChunks)
 ```go
 err := attachment.Chunks.Refresh(ctx, vectors, attachment.LoadChunks, fileID.String())
 ```
+
+<a id="reindexing"></a>
+## 重建索引
+
+换了模型、改了计算向量的文本（例如 `Context` 的拼法），或者有数据绕过 `Sync` 被修改过，就要重建索引。重建命令与[全文搜索](search.md#reindexing)共用 `search/searchcmd`，把向量索引一起传进去，在 [bootstrap.Commands](actions.md#as-commands) 中声明：
+
+```go
+searchcmd.New(a.db, article.SearchIndex, attachment.Chunks)
+```
+
+部署新版本之后执行：
+
+```bash
+$ ./bin/api search reindex attachment-chunks
+已发起 attachment-chunks 的重建，操作 0193e7b1-…，由 worker 执行
+已处理 500 / 约 3200 个 key
+……
+重建完成：3200 个 key，其中 0 个无法建索引
+```
+
+重建写入索引的一个新版本，也就是一个新的 collection，完成之前查询仍然使用原来的版本：
+
+- 发起之后，同步同时写入原来的版本和新版本，重建期间修改的附件不会漏掉。
+- 重建任务用 `ScanChunkKeys` 每次列出 500 个 key，逐个用 `LoadChunks` 读取，计算向量后写入新版本。进度保存在操作中，任务重试时从上次保存的地方继续。
+- 全部写入后，新版本成为查询使用的版本，原来版本的 collection 随后删除。
+
+新版本中的每个文档都要重新计算一次向量，重建前估算一下费用。同一个索引再次发起重建时，正在进行的重建被取代，它的操作变为失败，错误码是 `vector.reindex_superseded`。重建是一个[后台操作](operations.md)，类型是 `vector.reindex.attachment-chunks`，在管理后台发起时直接调用 `attachment.Chunks.Reindex(ctx, tx, ops, sub)`。
 
 <a id="searching"></a>
 ## 检索
@@ -248,14 +299,27 @@ hits, err = ai.RerankBy(ctx, a.reranker, question, hits, func(h vector.Hit[Chunk
 }, 5)
 ```
 
-<a id="models"></a>
-## 模型
+<a id="changing-models"></a>
+## 换模型
 
-不同模型算出的向量不能比较。索引的 collection 记录了建立它的模型名称和维度，`Store` 配置的模型与之不同时，同步和检索都返回错误，而不会把两种向量混在一起。
+不同模型算出的向量不能比较。索引的每个版本都记录了建立它的模型名称和维度，写入和查询这个版本时总是用这个模型计算向量。`Store` 中没有这个模型时，同步和检索都返回错误，而不会把两种向量混在一起。
 
-换模型意味着所有文档都要重新计算向量。目前需要在 Qdrant 中删除这个索引的 collection（`attachment-chunks_v1`），再对所有 key 调用 `Sync`，期间检索不到结果。
+换模型分三步：
 
-Qdrant 中的数据都可以从数据库重新算出来，所以不必和数据库一起备份；丢失后按上面的方法重新同步即可，只是要再付一次计算向量的费用。
+1. 把配置改为新模型，旧模型用 `vector.WithPrevious` 传入，部署：
+
+    ```go
+    vectors := vector.New(db, qc,
+        vector.Model{Name: cfg.Embedding.Model, Dims: 1536, Embedder: openai.New(cfg.Embedding)},
+        vector.WithPrevious(vector.Model{Name: cfg.OldEmbedding.Model, Dims: 1024, Embedder: openai.New(cfg.OldEmbedding)}),
+    )
+    ```
+
+    这时查询和同步仍然使用旧模型建立的版本。
+2. 执行 `search reindex attachment-chunks`。新版本用新模型建立，重建期间的修改同时用两个模型计算。
+3. 重建完成后，去掉 `WithPrevious` 和旧模型的配置，再部署一次。
+
+Qdrant 中的数据都可以从数据库重新算出来，所以不必和数据库一起备份。丢失后重建索引即可，只是要再付一次计算向量的费用。
 
 <a id="testing"></a>
 ## 测试

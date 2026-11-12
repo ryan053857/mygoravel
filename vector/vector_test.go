@@ -22,6 +22,7 @@ import (
 	"github.com/ryan053857/mygoravel/ai/aitest"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/queue/queuetest"
 	"github.com/ryan053857/mygoravel/vector"
@@ -54,17 +55,31 @@ func (s *source) set(key string, docs ...chunkDoc) {
 	s.docs[key] = docs
 }
 
+// scan 按 key 的顺序返回 after 之后的 key，每次最多 2 个，让重建分成多批。
+func (s *source) scan(_ context.Context, _ bun.IDB, after string, limit int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for key := range s.docs {
+		if key > after {
+			out = append(out, key)
+		}
+	}
+	slices.Sort(out)
+	return out[:min(len(out), limit, 2)], nil
+}
+
 func (s *source) load(_ context.Context, _ bun.IDB, key string) ([]chunkDoc, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.docs[key], nil
 }
 
-// migrations 合并队列和向量索引的迁移，按这个顺序排列版本号。
+// migrations 合并队列、操作和向量索引的迁移，按这个顺序排列版本号。
 func migrations(t *testing.T) fs.FS {
 	t.Helper()
 	merged := fstest.MapFS{}
-	for prefix, src := range map[string]fs.FS{"1": queue.Migrations(), "2": vector.Migrations()} {
+	for prefix, src := range map[string]fs.FS{"1": queue.Migrations(), "2": operation.Migrations(), "3": vector.Migrations()} {
 		err := fs.WalkDir(src, ".", func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
@@ -269,25 +284,17 @@ func TestTenant(t *testing.T) {
 func TestModelMismatch(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t)
-	client, err := qdrant.NewClient(&qdrant.Config{Host: "127.0.0.1", Port: qdrantPort(t)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prefix := "t" + strings.ToLower(rand.Text()[:10]) + "_"
-	t.Cleanup(func() {
-		_ = client.DeleteCollection(context.Background(), prefix+"chunks_v1")
-		_ = client.Close()
-	})
-	old := vector.New(f.db, client, vector.Model{Name: "old", Dims: dims, Embedder: f.emb}, vector.WithPrefix(prefix))
+	shared := newShared(t, f.db)
+	old := shared.store(vector.Model{Name: "old", Dims: dims, Embedder: f.emb})
 	f.src.set("a", chunkDoc{Text: "一"})
 	if err := chunks.Refresh(ctx, old, f.src.load, "a"); err != nil {
 		t.Fatal(err)
 	}
 
-	// 同一个 collection、换了模型的 Store：不能写入，也不能查询
+	// 同一个 collection、没有配置建立它的模型的 Store：不能写入，也不能查询
 	for _, m := range []vector.Model{{Name: "new", Dims: dims, Embedder: f.emb}, {Name: "old", Dims: dims * 2, Embedder: f.emb}} {
-		changed := vector.New(f.db, client, m, vector.WithPrefix(prefix))
-		if err := chunks.Refresh(ctx, changed, f.src.load, "a"); err == nil || !strings.Contains(err.Error(), "was built with model") {
+		changed := shared.store(m)
+		if err := chunks.Refresh(ctx, changed, f.src.load, "a"); err == nil || !strings.Contains(err.Error(), "chunks_v1") {
 			t.Fatalf("refresh with model %+v: %v", m, err)
 		}
 		if _, err := chunks.Search(ctx, changed, vector.Query{Text: "一"}); err == nil {
@@ -296,8 +303,29 @@ func TestModelMismatch(t *testing.T) {
 	}
 }
 
-// qdrantPort 返回 vectortest.EnvAddr 中的端口，测试 Qdrant 在本机。
-func qdrantPort(t *testing.T) int {
+// shared 创建使用同一个随机 collection 前缀的 Store，用于测试换模型。
+type shared struct {
+	db     *bun.DB
+	client *qdrant.Client
+	prefix string
+}
+
+func (sh *shared) store(m vector.Model, opts ...vector.Option) *vector.Store {
+	return vector.New(sh.db, sh.client, m, append(opts, vector.WithPrefix(sh.prefix))...)
+}
+
+// exists 返回 collection（不含前缀）是否存在。
+func (sh *shared) exists(t *testing.T, name string) bool {
+	t.Helper()
+	ok, err := sh.client.CollectionExists(context.Background(), sh.prefix+name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
+// newShared 连接测试 Qdrant，测试结束时删除前缀下的 collection。
+func newShared(t *testing.T, db *bun.DB) *shared {
 	t.Helper()
 	_, port, err := net.SplitHostPort(os.Getenv(vectortest.EnvAddr))
 	if err != nil {
@@ -307,7 +335,24 @@ func qdrantPort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return n
+	client, err := qdrant.NewClient(&qdrant.Config{Host: "127.0.0.1", Port: n})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := "t" + strings.ToLower(rand.Text()[:10]) + "_"
+	t.Cleanup(func() {
+		defer func() { _ = client.Close() }()
+		names, err := client.ListCollections(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+		for _, name := range names {
+			if strings.HasPrefix(name, prefix) {
+				_ = client.DeleteCollection(context.Background(), name)
+			}
+		}
+	})
+	return &shared{db: db, client: client, prefix: prefix}
 }
 
 func TestInvalidDocuments(t *testing.T) {
@@ -349,7 +394,7 @@ func TestSyncThroughQueue(t *testing.T) {
 	}
 
 	w := queue.NewWorker(f.db, queuetest.Config(t), nil)
-	chunks.Handle(w, f.store, f.src.load)
+	chunks.Handle(w, f.store, f.src.load, f.src.scan)
 	queuetest.Run(t, w)
 	deadline := time.Now().Add(10 * time.Second)
 	for len(f.search(t, vector.Query{Text: "队列同步"})) == 0 {

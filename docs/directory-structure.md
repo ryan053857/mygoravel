@@ -250,8 +250,8 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `webhook` | 向租户的端点推送事件，按 Standard Webhooks 签名与校验 | [Webhook](webhooks.md) |
 | `search` | 全文搜索：在应用的数据库中建索引，事务中发起同步，过滤、排序、分面和高亮，不停服重建 | [全文搜索](search.md) |
 | `search/gse` | 按词语切分中文的分词器，基于 gse 的词典 | [分词](search.md#tokenizers) |
-| `search/searchcmd` | `search reindex` 命令：发起重建并显示进度 | [重建索引](search.md#reindexing) |
-| `vector` | 向量检索：向量存放在 Qdrant 中，事务中发起同步，文本不变时沿用向量，按租户和字段过滤 | [向量检索](vector.md) |
+| `search/searchcmd` | `search reindex` 命令：发起全文搜索索引或向量索引的重建，显示进度 | [重建索引](search.md#reindexing)、[重建向量索引](vector.md#reindexing) |
+| `vector` | 向量检索：向量存放在 Qdrant 中，事务中发起同步，文本不变时沿用向量，按租户和字段过滤，不停服重建和换模型 | [向量检索](vector.md) |
 | `vector/vectortest` | 连接测试 Qdrant 的 Store，collection 测试结束时删除 | [测试](vector.md#testing) |
 | `sheet/imports` | 在后台导入表格：进度、断点续跑、失败行下载 | [后台导入](import-export.md#background-imports) |
 | `sheet/exports` | 在后台导出表格：进度，完成后上传到文件存储 | [后台导出](import-export.md#background-exports) |

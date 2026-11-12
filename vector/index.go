@@ -15,6 +15,7 @@ import (
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/uptrace/bun"
 
+	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
 )
 
@@ -41,9 +42,10 @@ var pointSpace = uuid.MustParse("1b2f1a6e-3f3c-4f57-9b1e-6c4f0d3e8a21")
 
 // Index 是一个向量索引，D 是它的文档类型。用 Define 声明为包级变量，同步和查询都通过它。
 type Index[D any] struct {
-	name   string
-	schema *schema
-	sync   queue.Topic[string]
+	name    string
+	schema  *schema
+	sync    queue.Topic[string]
+	reindex queue.Topic[uuid.UUID]
 }
 
 // Define 声明名为 name 的索引。文档类型 D 的字段用 vector 标签说明用途：
@@ -79,7 +81,11 @@ func Define[D any](name string) *Index[D] {
 	if err != nil {
 		panic(err)
 	}
-	return &Index[D]{name: name, schema: s, sync: queue.Topic[string]("vector.sync." + name)}
+	return &Index[D]{
+		name: name, schema: s,
+		sync:    queue.Topic[string]("vector.sync." + name),
+		reindex: queue.Topic[uuid.UUID]("vector.reindex." + name),
+	}
 }
 
 // Name 返回索引的名称。
@@ -104,11 +110,12 @@ func (ix *Index[D]) Sync(ctx context.Context, db bun.IDB, keys ...string) error 
 	return errors.Wrapf(ix.sync.PublishAll(ctx, db, keys), "vector: publish %s sync", ix.name)
 }
 
-// Handle 把同步任务的处理函数注册到 w，load 读取一个 key 的文档，opts 调整同步任务的处理。
+// Handle 把同步任务和重建任务（见 Reindex）的处理函数注册到 w，
+// load 读取一个 key 的文档，scan 在重建时列出所有的 key。opts 调整同步任务的处理。
 // 文档无法建索引（例如计算向量的文本为空）时同步任务不再重试，直接转入失败任务表。
-func (ix *Index[D]) Handle(w *queue.Worker, s *Store, load LoadFunc[D], opts ...queue.HandleOption) {
-	if s == nil || load == nil {
-		panic("vector: nil store or load function")
+func (ix *Index[D]) Handle(w *queue.Worker, s *Store, load LoadFunc[D], scan ScanFunc, opts ...queue.HandleOption) {
+	if s == nil || load == nil || scan == nil {
+		panic("vector: nil store, load or scan function")
 	}
 	ix.sync.Handle(w, func(ctx context.Context, key string) error {
 		err := ix.Refresh(ctx, s, load, key)
@@ -117,9 +124,14 @@ func (ix *Index[D]) Handle(w *queue.Worker, s *Store, load LoadFunc[D], opts ...
 		}
 		return err
 	}, opts...)
+	ops := operation.New(s.db)
+	ix.reindex.Handle(w, func(ctx context.Context, id uuid.UUID) error {
+		return ix.rebuild(ctx, s, ops, load, scan, id)
+	})
 }
 
 // Refresh 立即同步 keys，与同步任务的处理相同。用于测试，或者需要马上能查到的场合。
+// 重建期间同时写入查询使用的版本和正在重建的版本。
 //
 // 每个 key 在一个事务中同步：锁住 key，读取文档，计算文本有变化的文档的向量，写入 Qdrant，删除多出的文档。
 // 计算向量期间事务保持打开，同一个 key 的同步依次执行，先读到旧数据的不会覆盖后读到新数据的。
@@ -129,12 +141,9 @@ func (ix *Index[D]) Refresh(ctx context.Context, s *Store, load LoadFunc[D], key
 			return err
 		}
 	}
-	if _, err := s.open(ctx, ix.name, ix.schema, true); err != nil {
-		return err
-	}
 	for _, key := range keys {
-		if err := ix.refresh(ctx, s, load, key); err != nil {
-			return errors.Wrapf(err, "vector: sync %s %q", ix.name, key)
+		if err := ix.refresh(ctx, s, load, key, 0); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -147,14 +156,21 @@ func checkKey(key string) error {
 	return nil
 }
 
-func (ix *Index[D]) refresh(ctx context.Context, s *Store, load LoadFunc[D], key string) error {
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+// refresh 在一个事务中同步 key：build 为 0 时写入 indexVersions 返回的版本，否则只写入重建的版本 build。
+func (ix *Index[D]) refresh(ctx context.Context, s *Store, load LoadFunc[D], key string, build int) error {
+	err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		// 先锁住这个 key：同一个 key 的同步依次执行，后执行的读到的数据更新，不会被先读到旧数据的覆盖
 		_, err := tx.NewRaw(`INSERT INTO vector_keys (index_name, doc_key, synced_at) VALUES (?, ?, ?) `+
 			`ON CONFLICT (index_name, doc_key) DO UPDATE SET synced_at = excluded.synced_at`,
 			ix.name, key, time.Now().UTC()).Exec(ctx)
 		if err != nil {
 			return errors.Wrap(err, "vector: lock key")
+		}
+		versions := []int{build}
+		if build == 0 {
+			if versions, err = indexVersions(ctx, tx, ix.name); err != nil {
+				return err
+			}
 		}
 		docs, err := load(ctx, tx, key)
 		if err != nil {
@@ -164,36 +180,50 @@ func (ix *Index[D]) refresh(ctx context.Context, s *Store, load LoadFunc[D], key
 		if err != nil {
 			return err
 		}
-		collection := s.collection(ix.name)
-		points, err := s.embed(ctx, collection, key, entries)
-		if err != nil {
-			return err
-		}
-		for start := 0; start < len(points); start += batchSize {
-			_, err := s.client.Upsert(ctx, &qdrant.UpsertPoints{
-				CollectionName: collection, Points: points[start:min(start+batchSize, len(points))], Wait: qdrant.PtrOf(true),
-			})
-			if err != nil {
-				return errors.Wrap(err, "vector: upsert points")
+		for _, v := range versions {
+			if err := ix.write(ctx, s, v, key, entries); err != nil {
+				return err
 			}
 		}
-		// 删除这个 key 原来比现在多出的文档
-		_, err = s.client.Delete(ctx, &qdrant.DeletePoints{
-			CollectionName: collection, Wait: qdrant.PtrOf(true),
-			Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{Must: []*qdrant.Condition{
-				qdrant.NewMatchKeyword(payloadKey, key),
-				qdrant.NewRange(payloadPos, &qdrant.Range{Gte: qdrant.PtrOf(float64(len(points)))}),
-			}}),
-		})
-		if err != nil {
-			return errors.Wrap(err, "vector: delete points")
-		}
-		if len(points) == 0 {
+		if len(entries) == 0 {
 			_, err := tx.NewRaw(`DELETE FROM vector_keys WHERE index_name = ? AND doc_key = ?`, ix.name, key).Exec(ctx)
 			return errors.Wrap(err, "vector: delete key")
 		}
 		return nil
 	})
+	return errors.Wrapf(err, "vector: sync %s %q", ix.name, key)
+}
+
+// write 把 key 在版本 version 中原有的文档替换为 entries，用建立这个版本的模型计算向量。
+func (ix *Index[D]) write(ctx context.Context, s *Store, version int, key string, entries []entry) error {
+	collection := s.collection(ix.name, version)
+	// 重建可能在读取版本之后切换并删除了 version：这时会重新创建它，写入的文档不会被查询，
+	// 下一次重建开始时随其他废弃的版本一起删除
+	m, _, err := s.open(ctx, collection, ix.schema, true)
+	if err != nil {
+		return err
+	}
+	points, err := s.embed(ctx, collection, m, key, entries)
+	if err != nil {
+		return err
+	}
+	for start := 0; start < len(points); start += batchSize {
+		_, err := s.client.Upsert(ctx, &qdrant.UpsertPoints{
+			CollectionName: collection, Points: points[start:min(start+batchSize, len(points))], Wait: qdrant.PtrOf(true),
+		})
+		if err != nil {
+			return errors.Wrap(err, "vector: upsert points")
+		}
+	}
+	// 删除这个 key 原来比现在多出的文档
+	_, err = s.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collection, Wait: qdrant.PtrOf(true),
+		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{Must: []*qdrant.Condition{
+			qdrant.NewMatchKeyword(payloadKey, key),
+			qdrant.NewRange(payloadPos, &qdrant.Range{Gte: qdrant.PtrOf(float64(len(points)))}),
+		}}),
+	})
+	return errors.Wrap(err, "vector: delete points")
 }
 
 // entry 是一个文档要写入 Qdrant 的内容。

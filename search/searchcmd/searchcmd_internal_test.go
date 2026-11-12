@@ -124,3 +124,12 @@ func TestReindexStopsWatchingOnCancel(t *testing.T) {
 		}
 	})
 }
+
+func TestDuplicateIndexNames(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("duplicate index names accepted")
+		}
+	}()
+	New(nil, articles, search.Define[doc]("articles"))
+}
