@@ -41,6 +41,7 @@ var blogFiles = []docFile{
 	{"internal/article/queue_import.go", "import-export.md"},
 	{"internal/article/queue_export.go", "import-export.md"},
 	{"internal/article/bulk_publish.go", "operations.md"},
+	{"internal/article/search.go", "search.md"},
 	{"internal/article/article_test.go", "testing.md"},
 	{"internal/article/commands_test.go", "testing.md"},
 	{"internal/article/commands.go", "actions.md"},

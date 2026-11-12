@@ -32,6 +32,7 @@ import (
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/ratelimit"
 	"github.com/ryan053857/mygoravel/realtime"
+	"github.com/ryan053857/mygoravel/search"
 	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/sheet/exports"
 	"github.com/ryan053857/mygoravel/sheet/imports"
@@ -56,6 +57,7 @@ var sources = map[string]migrate.Source{
 	"queue":         {Name: "queue", FS: queue.Migrations()},
 	"ratelimit":     {Name: "ratelimit", FS: ratelimit.Migrations()},
 	"realtime":      {Name: "realtime", FS: realtime.Migrations()},
+	"search":        {Name: "search", FS: search.Migrations()},
 	"session":       {Name: "session", FS: session.Migrations()},
 	"webhook":       {Name: "webhook", FS: webhook.Migrations()},
 }

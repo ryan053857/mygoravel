@@ -26,6 +26,7 @@ require (
 	github.com/eko/gocache/store/redis/v4 v4.2.2
 	github.com/evanw/esbuild v0.28.2
 	github.com/go-chi/chi/v5 v5.5.0
+	github.com/go-ego/gse v1.0.0
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/gogo/protobuf v1.3.2
@@ -164,6 +165,7 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
+	github.com/vcaesar/cedar v0.20.2 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/xuri/efp v0.0.3-0.20260924042702-217b81952dec // indirect

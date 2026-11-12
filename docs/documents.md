@@ -206,7 +206,7 @@ func (a *Index) Job(ctx context.Context, fileID uuid.UUID) error {
 - `a.embedder` 是 [ai.Embedder](ai.md#media)，分段很多时用 `openai.WithBatchSize` 让它分批请求。
 - 任务可能重复执行，先删后插让结果保持一致。
 - 多租户应用中，分段表带上租户，查询时按 `sub.Tenant` 过滤，见[多租户](tenancy.md#data-isolation)。
-- 向量如何存储和检索取决于数据库，例如 PostgreSQL 的 pgvector；在此之前，可以先用关键词检索出候选，再用 [ai.RerankBy](ai.md#media) 按语义重排。
+- 向量如何存储和检索取决于数据库，例如 PostgreSQL 的 pgvector；在此之前，可以先用[全文搜索](search.md#multiple-documents)按关键词检索出候选分段，再用 [ai.RerankBy](ai.md#media) 按语义重排。
 
 <a id="formats"></a>
 ## 各种格式

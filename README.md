@@ -41,6 +41,7 @@ go get github.com/ryan053857/mygoravel@main
 | 导入导出 Excel 和 CSV | [导入与导出](docs/import-export.md) |
 | 批量处理并显示进度 | [后台操作](docs/operations.md) |
 | 向租户推送事件 | [Webhook](docs/webhooks.md) |
+| 按关键词搜索文章、商品 | [全文搜索](docs/search.md) |
 | 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |
 | 让 AI 引用 PDF、Word 等文档 | [文档转换与切分](docs/documents.md) |
 | 保护接口 | [认证](docs/authentication.md) · [授权](docs/authorization.md) · [哈希](docs/hashing.md) · [加密与签名链接](docs/encryption.md) · [限流](docs/rate-limiting.md) |

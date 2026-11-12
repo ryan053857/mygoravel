@@ -66,6 +66,7 @@
 - [后台操作](operations.md)
 - [导入与导出](import-export.md)
 - [Webhook](webhooks.md)
+- [全文搜索](search.md)
 
 ## AI
 

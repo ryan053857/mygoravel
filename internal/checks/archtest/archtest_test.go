@@ -78,6 +78,8 @@ var rules = map[string]rule{
 	"webhook":       {layerFeature, []string{"errorx", "identity", "outbound", "queue"}},
 	"sheet/imports": {layerFeature, []string{"database", "errorx", "filesystem", "i18n", "identity", "operation", "sheet"}},
 	"sheet/exports": {layerFeature, []string{"database", "filesystem", "identity", "operation", "sheet"}},
+	"search":        {layerFeature, []string{"page", "queue"}},
+	"search/gse":    {layerFeature, []string{"search"}},
 	"ai":            {layerFeature, nil},
 	"ai/chat":       {layerFeature, []string{"ai", "broadcast", "database", "errorx", "httpx", "lock", "logging"}},
 
@@ -347,6 +349,19 @@ func TestDocumentCoreIsLight(t *testing.T) {
 					t.Errorf("%s depends on %s", pkg, dep)
 				}
 			}
+		}
+	}
+}
+
+// TestSearchCoreIsLight 确保只用默认分词器的应用不会链接 gse 和它嵌入的词典，它们只由 search/gse 引入。
+func TestSearchCoreIsLight(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", module+"/search").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list: %v\n%s", err, out)
+	}
+	for _, dep := range strings.Fields(string(out)) {
+		if under(dep, "github.com/go-ego/gse") {
+			t.Errorf("search depends on %s", dep)
 		}
 	}
 }
