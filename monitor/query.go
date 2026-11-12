@@ -93,7 +93,7 @@ func (m *Monitor) Totals(ctx context.Context, from, to time.Time, metrics ...str
 	err := m.db.NewRaw(`SELECT metric, label, SUM(count) AS count, SUM(sum) AS sum, MAX(max) AS max
 FROM monitor_aggregates WHERE metric IN (?) AND bucket >= ? AND bucket < ?
 GROUP BY metric, label ORDER BY label, metric`,
-		bun.In(metrics), minute(from), to.Unix()).Scan(ctx, &rows)
+		bun.List(metrics), minute(from), to.Unix()).Scan(ctx, &rows)
 	if err != nil {
 		return nil, errors.Wrapf(err, "monitor: totals of %q", metrics)
 	}
