@@ -69,10 +69,10 @@ tokens := apitoken.NewStore(a.db, a.cfg.APIToken)
 requireArticles := rest.RequireBearer(api, tokens.Validate, "articles")
 ```
 
-产品有多套账号、需要不同的有效期时，例如运营人员空闲 1 天失效、移动端的客户 90 天才过期，每套账号用自己的配置创建一个 `Store` 签发。它们共用 `api_tokens` 表，`Validate` 不读取配置，用其中任何一个校验都可以：
+产品有多套账号、需要不同的有效期时，例如商家员工空闲 1 天失效、移动端的客户 90 天才过期，每套账号用自己的配置创建一个 `Store` 签发。它们共用 `api_tokens` 表，`Validate` 不读取配置，用其中任何一个校验都可以：
 
 ```go
-staffTokens := apitoken.NewStore(a.db, a.cfg.StaffToken)
+merchantTokens := apitoken.NewStore(a.db, a.cfg.MerchantToken)
 customerTokens := apitoken.NewStore(a.db, a.cfg.CustomerToken)
 plain, err := customerTokens.Login(ctx, sub, device)
 ```
@@ -276,7 +276,7 @@ api := rest.New(rest.Options{
 
 不透明的登录 token 每个请求都要查一次表。JWT 模式改为签发一对凭据：请求带短期的 access token（JWT），校验只验签名和有效期，不访问数据库；access token 过期后，用 refresh token 换一对新的。适合请求量大、或者有其他服务也要校验 token 的场景。
 
-每次登录仍然是 `api_tokens` 中的一行，[设备列表](#listing-tokens)、[撤销](#revoking-tokens)、[过期清理](#cleanup)都照常使用。区别在于撤销的效果：refresh token 立即失效，已经签发的 access token 在有效期（默认 10 分钟）内仍然可以发起请求。撤销需要立即生效的账号体系继续用不透明 token。两种方式可以在同一个应用中并存，例如运营人员用不透明 token，客户 App 用 JWT。
+每次登录仍然是 `api_tokens` 中的一行，[设备列表](#listing-tokens)、[撤销](#revoking-tokens)、[过期清理](#cleanup)都照常使用。区别在于撤销的效果：refresh token 立即失效，已经签发的 access token 在有效期（默认 10 分钟）内仍然可以发起请求。撤销需要立即生效的账号体系继续用不透明 token。两种方式可以在同一个应用中并存，例如商家后台的 API 用不透明 token，客户 App 用 JWT。运营后台是服务端渲染的页面，使用[会话](session.md)，不签发 token。
 
 [SSE](sse.md#revoked-credentials) 和[实时连接](realtime.md#revocation)这类长连接不受这个限制：复查凭据时 `JWT.Validate` 按登录 ID 查一次表，撤销后连接和不透明 token 一样，最多 30 秒内结束，调用 `Recheck*` 时立即结束。复查只看登录是否还在，不看 access token 是否过期，所以已经建立的连接不会每 10 分钟断开一次。断线后重连时 access token 可能已经过期，实时连接的客户端要设置 [`getToken`](realtime.md#tokens) 换新的。
 
