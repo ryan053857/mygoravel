@@ -164,7 +164,6 @@ func (m *Monitor) Cleanup(keep time.Duration) func(ctx context.Context, limit in
 		if limit <= 0 {
 			return 0, errors.New("monitor: cleanup limit must be positive")
 		}
-		// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 		old := m.db.NewRaw(`SELECT metric, label, bucket FROM monitor_aggregates WHERE bucket < ? ORDER BY bucket LIMIT ?`,
 			time.Now().Add(-keep).Unix(), limit)
 		res, err := m.db.NewRaw(`DELETE FROM monitor_aggregates WHERE (metric, label, bucket) IN

@@ -11,8 +11,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 )
 
 // statsDriver 是只实现 Stats 的驱动，返回 next 中的结果。
@@ -67,7 +66,7 @@ func TestObserveJobs(t *testing.T) {
 		{Topic: "full", Jobs: map[State]int{StateReady: 2, StateDelayed: 1, StateRetrying: 0, StateRunning: 3}, OldestReadyAt: now.Add(-time.Minute)},
 		{Topic: "partial", Jobs: map[State]int{StateReady: 4, StateRunning: 0}},
 	}}
-	db := dbtesting.Open(t, sqlite.Driver, Migrations())
+	db := dbtest.Open(t, Migrations())
 	failed := NewFailedJobs(db)
 	for _, r := range []failedJob{
 		{Driver: "fake", Topic: "full"}, {Driver: "fake", Topic: "gone"}, {Driver: "fake", Topic: "gone"},

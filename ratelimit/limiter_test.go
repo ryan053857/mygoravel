@@ -55,7 +55,7 @@ func testLimiter(t *testing.T, newLimiter func(ratelimit.Config) ratelimit.Limit
 	})
 
 	t.Run("refills and rejected calls do not consume", func(t *testing.T) {
-		// 结果取决于调用耗时：一组调用接近 interval 时（例如 CI 上 SQLite 写盘慢），
+		// 结果取决于调用耗时：一组调用接近 interval 时，
 		// 无法区分配额回满和实现错误，放大 interval 重新检查。
 		for interval := 300 * time.Millisecond; !refillsWithoutConsuming(t, newLimiter(ratelimit.Config{Rate: 1, Interval: interval, Burst: 1}), interval); interval *= 4 {
 			if interval > 5*time.Second {

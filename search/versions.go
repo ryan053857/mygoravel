@@ -7,7 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 )
 
 // 索引的版本记在 search_indexes 中。查询只读 version；重建时登记一个更大的 building，
@@ -23,12 +22,12 @@ type state struct {
 	LastKey   *string       `bun:"last_key"`
 }
 
-// versions 返回同步要写入的版本：查询使用的版本，以及正在重建的版本（如果有）。
+// indexVersions 返回同步要写入的版本：查询使用的版本，以及正在重建的版本（如果有）。
 //
 // 它在锁住 key 之后读取，不加锁：一个同步如果在重建登记之前读到没有 building，重建任务处理这个 key 时
 // 要等它提交，之后重新读取数据，不会漏掉它的修改；登记之后开始的同步一定读到 building。
-func (s store) versions(ctx context.Context, db bun.IDB, index string) ([]int, error) {
-	st, err := s.state(ctx, db, index, false)
+func indexVersions(ctx context.Context, db bun.IDB, index string) ([]int, error) {
+	st, err := readState(ctx, db, index, false)
 	if err != nil {
 		return nil, err
 	}
@@ -38,11 +37,11 @@ func (s store) versions(ctx context.Context, db bun.IDB, index string) ([]int, e
 	return []int{st.Version}, nil
 }
 
-// state 读取索引的状态，没有记录时返回版本 1。lock 为 true 时锁住这一行直到事务结束。
-func (s store) state(ctx context.Context, db bun.IDB, index string, lock bool) (state, error) {
+// readState 读取索引的状态，没有记录时返回版本 1。lock 为 true 时锁住这一行直到事务结束。
+func readState(ctx context.Context, db bun.IDB, index string, lock bool) (state, error) {
 	q := `SELECT version, building, operation_id, last_key FROM search_indexes WHERE name = ?`
-	if lock && s.dialect != dialect.SQLite {
-		q += ` FOR UPDATE` // SQLite 的写事务已经独占数据库
+	if lock {
+		q += ` FOR UPDATE`
 	}
 	var rows []state
 	if err := db.NewRaw(q, index).Scan(ctx, &rows); err != nil {
@@ -55,16 +54,13 @@ func (s store) state(ctx context.Context, db bun.IDB, index string, lock bool) (
 }
 
 // startBuild 登记操作 op 重建的新版本，取代正在进行的重建，返回新版本号。
-func (s store) startBuild(ctx context.Context, tx bun.IDB, index string, op uuid.UUID) (int, error) {
+func startBuild(ctx context.Context, tx bun.IDB, index string, op uuid.UUID) (int, error) {
 	// 先确保有这一行并锁住它：并发登记的重建依次取得版本号
-	q := `INSERT INTO search_indexes (name, version) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET version = search_indexes.version`
-	if s.dialect == dialect.MySQL {
-		q = `INSERT INTO search_indexes (name, version) VALUES (?, 1) ON DUPLICATE KEY UPDATE version = version`
-	}
-	if _, err := tx.NewRaw(q, index).Exec(ctx); err != nil {
+	if _, err := tx.NewRaw(`INSERT INTO search_indexes (name, version) VALUES (?, 1) `+
+		`ON CONFLICT (name) DO UPDATE SET version = search_indexes.version`, index).Exec(ctx); err != nil {
 		return 0, errors.Wrap(err, "search: start reindex")
 	}
-	st, err := s.state(ctx, tx, index, true)
+	st, err := readState(ctx, tx, index, true)
 	if err != nil {
 		return 0, err
 	}
@@ -74,9 +70,9 @@ func (s store) startBuild(ctx context.Context, tx bun.IDB, index string, op uuid
 	return building, errors.Wrap(err, "search: start reindex")
 }
 
-// build 返回操作 op 重建的版本和处理到的 key。op 已被后发起的重建取代时返回 errSuperseded。
-func (s store) build(ctx context.Context, db bun.IDB, index string, op uuid.UUID, lock bool) (state, error) {
-	st, err := s.state(ctx, db, index, lock)
+// currentBuild 返回操作 op 重建的版本和处理到的 key。op 已被后发起的重建取代时返回 errSuperseded。
+func currentBuild(ctx context.Context, db bun.IDB, index string, op uuid.UUID, lock bool) (state, error) {
+	st, err := readState(ctx, db, index, lock)
 	if err != nil {
 		return state{}, err
 	}
@@ -87,8 +83,8 @@ func (s store) build(ctx context.Context, db bun.IDB, index string, op uuid.UUID
 }
 
 // saveProgress 记下操作 op 的重建处理到的 key，与操作的进度在同一个事务中提交。
-func (s store) saveProgress(ctx context.Context, tx bun.IDB, index string, op uuid.UUID, lastKey string) error {
-	if _, err := s.build(ctx, tx, index, op, true); err != nil {
+func saveProgress(ctx context.Context, tx bun.IDB, index string, op uuid.UUID, lastKey string) error {
+	if _, err := currentBuild(ctx, tx, index, op, true); err != nil {
 		return err
 	}
 	_, err := tx.NewRaw(`UPDATE search_indexes SET last_key = ? WHERE name = ?`, lastKey, index).Exec(ctx)
@@ -96,8 +92,8 @@ func (s store) saveProgress(ctx context.Context, tx bun.IDB, index string, op uu
 }
 
 // finishBuild 把操作 op 重建的版本切换为查询使用的版本。
-func (s store) finishBuild(ctx context.Context, tx bun.IDB, index string, op uuid.UUID) error {
-	if _, err := s.build(ctx, tx, index, op, true); err != nil {
+func finishBuild(ctx context.Context, tx bun.IDB, index string, op uuid.UUID) error {
+	if _, err := currentBuild(ctx, tx, index, op, true); err != nil {
 		return err
 	}
 	_, err := tx.NewRaw(`UPDATE search_indexes SET version = building, building = NULL, operation_id = NULL, last_key = NULL `+
@@ -106,7 +102,7 @@ func (s store) finishBuild(ctx context.Context, tx bun.IDB, index string, op uui
 }
 
 // countKeys 返回索引中有文档的 key 的个数，作为重建的预计单位数。
-func (s store) countKeys(ctx context.Context, db bun.IDB, index string) (int, error) {
+func countKeys(ctx context.Context, db bun.IDB, index string) (int, error) {
 	var n int
 	err := db.NewRaw(`SELECT COUNT(*) FROM search_keys WHERE index_name = ?`, index).Scan(ctx, &n)
 	return n, errors.Wrap(err, "search: count keys")
@@ -116,8 +112,8 @@ func (s store) countKeys(ctx context.Context, db bun.IDB, index string) (int, er
 const dropBatch = 1000
 
 // dropStale 删除已经废弃的版本中的文档，见本文件开头的说明。
-func (s store) dropStale(ctx context.Context, db bun.IDB, index string) error {
-	st, err := s.state(ctx, db, index, false)
+func dropStale(ctx context.Context, db bun.IDB, index string) error {
+	st, err := readState(ctx, db, index, false)
 	if err != nil {
 		return err
 	}
@@ -133,12 +129,7 @@ func (s store) dropStale(ctx context.Context, db bun.IDB, index string) error {
 			return nil
 		}
 		err = db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-			deletes := []string{`DELETE FROM search_values WHERE entry_id IN (?)`}
-			if s.dialect == dialect.SQLite {
-				deletes = append(deletes, `DELETE FROM search_fts WHERE rowid IN (?)`)
-			}
-			deletes = append(deletes, `DELETE FROM search_entries WHERE id IN (?)`)
-			for _, q := range deletes {
+			for _, q := range []string{`DELETE FROM search_values WHERE entry_id IN (?)`, `DELETE FROM search_entries WHERE id IN (?)`} {
 				if _, err := tx.NewRaw(q, bun.List(ids)).Exec(ctx); err != nil {
 					return err
 				}

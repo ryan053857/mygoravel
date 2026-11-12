@@ -13,7 +13,6 @@ import (
 	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/command/migratecmd"
 	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/postgres"
 )
 
 type settings struct {
@@ -59,7 +58,7 @@ func TestExitCodes(t *testing.T) {
 		{[]string{"migrate", "up", "extra"}, command.ExitUsage},
 		{[]string{"migrate", "status", "--unknown"}, command.ExitUsage},
 	} {
-		root := newRoot(migratecmd.New(fstest.MapFS{}, postgres.Driver, dbConfig))
+		root := newRoot(migratecmd.New(fstest.MapFS{}, dbConfig))
 		if _, _, err := execute(root, tc.args...); command.ExitCode(err) != tc.want {
 			t.Errorf("args=%v exit=%d want=%d err=%v", tc.args, command.ExitCode(err), tc.want, err)
 		}
@@ -67,7 +66,7 @@ func TestExitCodes(t *testing.T) {
 }
 
 func TestHelpWithoutSubcommand(t *testing.T) {
-	out, _, err := execute(newRoot(migratecmd.New(fstest.MapFS{}, postgres.Driver, dbConfig)), "migrate")
+	out, _, err := execute(newRoot(migratecmd.New(fstest.MapFS{}, dbConfig)), "migrate")
 	if err != nil || !bytes.Contains([]byte(out), []byte("status")) {
 		t.Fatalf("out=%q err=%v", out, err)
 	}

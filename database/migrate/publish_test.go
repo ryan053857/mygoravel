@@ -8,9 +8,6 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
-
-	"github.com/ryan053857/mygoravel/database/postgres"
-	"github.com/ryan053857/mygoravel/database/sqlite"
 )
 
 const testMigration = "-- +goose Up\nCREATE TABLE example (id integer);\n-- +goose Down\nDROP TABLE example;\n"
@@ -18,9 +15,9 @@ const testMigration = "-- +goose Up\nCREATE TABLE example (id integer);\n-- +goo
 func TestPublishUpgradePreservesApplicationSQL(t *testing.T) {
 	dir := t.TempDir()
 	source := Source{Name: "files", FS: fstest.MapFS{
-		"postgres/0001_create_files.sql": {Data: []byte(testMigration)},
+		"0001_create_files.sql": {Data: []byte(testMigration)},
 	}}
-	first, err := Publish(dir, postgres.Driver, source)
+	first, err := Publish(dir, source)
 	if err != nil || len(first) != 1 {
 		t.Fatalf("first=%v err=%v", first, err)
 	}
@@ -37,8 +34,8 @@ func TestPublishUpgradePreservesApplicationSQL(t *testing.T) {
 	if err := os.WriteFile(renamed, []byte(custom), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	source.FS.(fstest.MapFS)["postgres/0002_add_field.sql"] = &fstest.MapFile{Data: []byte(testMigration)}
-	second, err := Publish(dir, postgres.Driver, source)
+	source.FS.(fstest.MapFS)["0002_add_field.sql"] = &fstest.MapFile{Data: []byte(testMigration)}
+	second, err := Publish(dir, source)
 	if err != nil || len(second) != 1 || !strings.HasPrefix(second[0], "29990101000001_files_0002_") {
 		t.Fatalf("second=%v err=%v", second, err)
 	}
@@ -46,7 +43,7 @@ func TestPublishUpgradePreservesApplicationSQL(t *testing.T) {
 	if string(data) != custom {
 		t.Fatal("application migration was overwritten")
 	}
-	again, err := Publish(dir, postgres.Driver, source)
+	again, err := Publish(dir, source)
 	if err != nil || len(again) != 0 {
 		t.Fatalf("again=%v err=%v", again, err)
 	}
@@ -54,10 +51,10 @@ func TestPublishUpgradePreservesApplicationSQL(t *testing.T) {
 
 func TestPublishOrdersSourceVersionsNumerically(t *testing.T) {
 	files := fstest.MapFS{
-		"postgres/10_later.sql": {Data: []byte(testMigration)},
-		"postgres/2_first.sql":  {Data: []byte(testMigration)},
+		"10_later.sql": {Data: []byte(testMigration)},
+		"2_first.sql":  {Data: []byte(testMigration)},
 	}
-	names, err := Publish(t.TempDir(), postgres.Driver, Source{Name: "files", FS: files})
+	names, err := Publish(t.TempDir(), Source{Name: "files", FS: files})
 	if err != nil || len(names) != 2 || !strings.HasSuffix(names[0], "_2_first.sql") || !strings.HasSuffix(names[1], "_10_later.sql") {
 		t.Fatalf("names=%v err=%v", names, err)
 	}
@@ -78,7 +75,7 @@ func TestPublishTimestampAndNumericVersions(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d_existing.sql", tc.existing)), []byte(testMigration), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			names, err := Publish(dir, postgres.Driver, Source{Name: "files", FS: fstest.MapFS{"postgres/1_new.sql": {Data: []byte(testMigration)}}})
+			names, err := Publish(dir, Source{Name: "files", FS: fstest.MapFS{"1_new.sql": {Data: []byte(testMigration)}}})
 			if err != nil || len(names) != 1 || names[0] != fmt.Sprintf("%d_files_1_new.sql", tc.want) {
 				t.Fatalf("names=%v err=%v want=%d", names, err, tc.want)
 			}
@@ -92,9 +89,9 @@ func TestPublishPlansAllVersionsBeforeWriting(t *testing.T) {
 	if err := os.WriteFile(name, []byte(testMigration), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	written, err := Publish(dir, postgres.Driver, Source{Name: "files", FS: fstest.MapFS{
-		"postgres/1_first.sql": {Data: []byte(testMigration)},
-		"postgres/2_next.sql":  {Data: []byte(testMigration)},
+	written, err := Publish(dir, Source{Name: "files", FS: fstest.MapFS{
+		"1_first.sql": {Data: []byte(testMigration)},
+		"2_next.sql":  {Data: []byte(testMigration)},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "version overflow") || len(written) != 0 {
 		t.Fatalf("written=%v err=%v", written, err)
@@ -106,23 +103,23 @@ func TestPublishPlansAllVersionsBeforeWriting(t *testing.T) {
 }
 
 func TestPublishPrevalidatesAllSources(t *testing.T) {
-	valid := Source{Name: "files", FS: fstest.MapFS{"postgres/1_valid.sql": {Data: []byte(testMigration)}}}
+	valid := Source{Name: "files", FS: fstest.MapFS{"1_valid.sql": {Data: []byte(testMigration)}}}
 	for _, bad := range []Source{
 		{Name: "../escape", FS: valid.FS},
 		{Name: "nil"},
 		{Name: "files", FS: valid.FS},
 		{Name: "duplicate", FS: fstest.MapFS{
-			"postgres/01_first.sql": {Data: []byte(testMigration)},
-			"postgres/1_second.sql": {Data: []byte(testMigration)},
+			"01_first.sql": {Data: []byte(testMigration)},
+			"1_second.sql": {Data: []byte(testMigration)},
 		}},
-		{Name: "invalid", FS: fstest.MapFS{"postgres/wrong.sql": {Data: []byte(testMigration)}}},
-		{Name: "negative", FS: fstest.MapFS{"postgres/-1_wrong.sql": {Data: []byte(testMigration)}}},
-		{Name: "zero", FS: fstest.MapFS{"postgres/0_wrong.sql": {Data: []byte(testMigration)}}},
-		{Name: "missing_up", FS: fstest.MapFS{"postgres/1_wrong.sql": {Data: []byte("select 1;")}}},
+		{Name: "invalid", FS: fstest.MapFS{"wrong.sql": {Data: []byte(testMigration)}}},
+		{Name: "negative", FS: fstest.MapFS{"-1_wrong.sql": {Data: []byte(testMigration)}}},
+		{Name: "zero", FS: fstest.MapFS{"0_wrong.sql": {Data: []byte(testMigration)}}},
+		{Name: "missing_up", FS: fstest.MapFS{"1_wrong.sql": {Data: []byte("select 1;")}}},
 	} {
 		t.Run(bad.Name, func(t *testing.T) {
 			dir := t.TempDir()
-			if written, err := Publish(dir, postgres.Driver, valid, bad); err == nil || len(written) != 0 {
+			if written, err := Publish(dir, valid, bad); err == nil || len(written) != 0 {
 				t.Fatalf("written=%v err=%v", written, err)
 			}
 			entries, _ := os.ReadDir(dir)
@@ -148,7 +145,7 @@ func TestPublishRejectsInvalidApplicationDirectory(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			written, err := Publish(dir, postgres.Driver, Source{Name: "new", FS: fstest.MapFS{"postgres/1_new.sql": {Data: []byte(testMigration)}}})
+			written, err := Publish(dir, Source{Name: "new", FS: fstest.MapFS{"1_new.sql": {Data: []byte(testMigration)}}})
 			if err == nil || len(written) != 0 {
 				t.Fatalf("written=%v err=%v", written, err)
 			}
@@ -170,28 +167,8 @@ func TestPublishFileNeverOverwrites(t *testing.T) {
 	}
 }
 
-func TestPublishSelectsDriverDirectory(t *testing.T) {
-	source := Source{Name: "files", FS: fstest.MapFS{
-		"postgres/0001_create_files.sql": {Data: []byte(testMigration + "-- postgres\n")},
-		"sqlite/0001_create_files.sql":   {Data: []byte(testMigration + "-- sqlite\n")},
-	}}
-	dir := t.TempDir()
-	names, err := Publish(dir, sqlite.Driver, source)
-	if err != nil || len(names) != 1 {
-		t.Fatalf("names=%v err=%v", names, err)
-	}
-	data, _ := os.ReadFile(filepath.Join(dir, names[0]))
-	if !strings.HasPrefix(string(data), "-- mygoravel: files/0001_create_files\n") || !strings.HasSuffix(string(data), "-- sqlite\n") {
-		t.Fatalf("data=%s", data)
-	}
-	// 同一次变更在各数据库中共用来源标记，换数据库后不会重复发布。
-	if again, err := Publish(dir, postgres.Driver, source); err != nil || len(again) != 0 {
-		t.Fatalf("again=%v err=%v", again, err)
-	}
-	if _, err := Publish(t.TempDir(), fakeDriver("mysql"), source); err == nil || !strings.Contains(err.Error(), "has no mysql migrations") {
+func TestPublishRequiresMigrations(t *testing.T) {
+	if _, err := Publish(t.TempDir(), Source{Name: "files", FS: fstest.MapFS{}}); err == nil || !strings.Contains(err.Error(), "has no migrations") {
 		t.Fatalf("err=%v", err)
-	}
-	if _, err := Publish(t.TempDir(), nil, source); err == nil {
-		t.Fatal("empty driver accepted")
 	}
 }

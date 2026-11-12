@@ -2,9 +2,6 @@
 
 - [简介](#introduction)
 - [配置](#configuration)
-    - [使用 SQLite](#sqlite)
-    - [使用 MySQL](#mysql)
-    - [数据库差异](#dialect-differences)
 - [连接数据库](#connecting)
 - [定义模型](#defining-models)
     - [主键](#primary-keys)
@@ -21,15 +18,13 @@
 <a id="introduction"></a>
 ## 简介
 
-几乎每个 API 都需要与数据库交互。mygoravel 支持 PostgreSQL、SQLite 和 MySQL，并使用以下组件：
+几乎每个 API 都需要与数据库交互。mygoravel 只支持 PostgreSQL，并使用以下组件：
 
-- [pgx](https://github.com/jackc/pgx)：PostgreSQL 驱动，由 `database/postgres` 包提供；
-- [modernc.org/sqlite](https://gitlab.com/cznic/sqlite)：纯 Go 的 SQLite 驱动，不需要 cgo，由 `database/sqlite` 包提供；
-- [go-sql-driver/mysql](https://github.com/go-sql-driver/mysql)：MySQL 驱动，由 `database/mysql` 包提供；
+- [pgx](https://github.com/jackc/pgx)：PostgreSQL 驱动；
 - [Bun](https://bun.uptrace.dev)：SQL 优先的 Go ORM，负责查询构建和模型映射；
 - [goose](https://github.com/pressly/goose)：数据库迁移，见[迁移](migrations.md)。
 
-`database` 包负责打开一个配置好的连接池，返回原生的 `*bun.DB`。应用的迁移是按某一种数据库写的，因此数据库类型在代码中通过驱动包选定，而不是在配置中；应用只会编译自己 import 的驱动。之后的查询、事务等操作都直接使用 Bun 的 API，你可以随时参考 [Bun 官方文档](https://bun.uptrace.dev/guide/)。
+`database` 包负责打开一个配置好的连接池，返回原生的 `*bun.DB`。之后的查询、事务等操作都直接使用 Bun 的 API，你可以随时参考 [Bun 官方文档](https://bun.uptrace.dev/guide/)。
 
 <a id="configuration"></a>
 ## 配置
@@ -47,7 +42,7 @@ database:
 
 | 字段 | 说明 | `DefaultConfig` 中的默认值 |
 | --- | --- | --- |
-| `dsn` | PostgreSQL 连接串，例如 `postgres://user:pass@localhost:5432/app?sslmode=disable`；SQLite 是数据库文件路径 | 无，必填 |
+| `dsn` | PostgreSQL 连接串，例如 `postgres://user:pass@localhost:5432/app?sslmode=disable` | 无，必填 |
 | `max_open_conns` | 最大连接数；`0` 表示不限制 | 4 × `GOMAXPROCS` |
 | `max_idle_conns` | 最大空闲连接数；`0` 表示不保留空闲连接 | 4 × `GOMAXPROCS` |
 | `conn_max_lifetime` | 连接的最长存活时间 | `1h` |
@@ -66,90 +61,15 @@ if err != nil {
 }
 ```
 
-`database.Config` 实现了 `Validate` 方法，`config.Load` 会自动检查 DSN 是否为空、连接池参数是否合法；DSN 的格式由驱动在打开连接时检查。
+`database.Config` 实现了 `Validate` 方法，`config.Load` 会自动检查 DSN 是否为空、连接池参数是否合法；DSN 的格式在打开连接时检查。
 
 > [!TIP]
 > 设置 `max_open_conns` 时，请考虑应用的部署副本数：所有副本的连接数之和不应超过数据库的最大连接数。
 
-<a id="sqlite"></a>
-### 使用 SQLite
-
-SQLite 把整个数据库存放在一个文件中，不需要单独的数据库服务，适合只部署一个实例的应用。使用 `database/sqlite` 包的驱动，`dsn` 是文件路径，所在目录必须已经存在：
-
-```yaml
-database:
-  dsn: storage/app.db
-```
-
-```go
-db, err := database.Open(ctx, sqlite.Driver, cfg.Database)
-```
-
-驱动为每个连接设置以下参数，`dsn` 中不能再带连接参数：
-
-- `journal_mode=WAL`：读和写互不阻塞；
-- `busy_timeout=5000`：写入冲突时最多等待 5 秒，而不是立即失败；
-- `foreign_keys=ON`：SQLite 默认不检查外键；
-- `synchronous=NORMAL`：WAL 模式下安全，写入更快；
-- 写事务在 `BEGIN` 时就取得写锁，多个先读后写的事务会依次执行，不会在中途失败。
-
-使用 SQLite 时需要注意：
-
-- SQLite 没有时间类型，Bun 会把时间转换为 UTC 文本写入，按文本比较即可得到正确的时间顺序。因此请让所有时间都经过 Bun 写入，不要在迁移中使用 `DEFAULT CURRENT_TIMESTAMP`，它写入的文本格式不同；
-- 写事务已经独占了数据库，不需要也不支持 `SELECT ... FOR UPDATE`，在 SQLite 上请去掉 `For("UPDATE")`，见[在事务中检查](authorization.md#checking-in-transactions)；
-- 每个事务在 `BEGIN` 时都会取得写锁，只读的事务请传入 `&sql.TxOptions{ReadOnly: true}`，它不取写锁，也不会让写入排队；
-- `ALTER TABLE` 只支持部分操作，修改列需要重建表，见 [SQLite 文档](https://www.sqlite.org/lang_altertable.html#otheralter)。
-
-部署见[使用 SQLite 部署](deployment.md#sqlite)，备份见[备份与恢复](deployment.md#backups)。
-
-<a id="mysql"></a>
-### 使用 MySQL
-
-mygoravel 支持 MySQL 8.4 LTS，不保证兼容 MariaDB。使用 `database/mysql` 包的驱动，`dsn` 是 URL：
-
-```yaml
-database:
-  dsn: mysql://blog:${DATABASE_PASSWORD}@localhost:3306/blog
-```
-
-```go
-db, err := database.Open(ctx, mysql.Driver, cfg.Database)
-```
-
-URL 上的查询参数原样交给 go-sql-driver/mysql，例如 `?tls=true`。以下设置由驱动固定，`dsn` 中的同名参数会被覆盖：
-
-- 时间按 UTC 读写：连接的 `time_zone` 是 `+00:00`，写入的时间先转换为 UTC，读出的 `DATETIME` 是 UTC 的 `time.Time`；
-- `RowsAffected` 返回 `WHERE` 匹配到的行数，与 PostgreSQL 和 SQLite 一致。MySQL 默认返回实际改变的行数，值没有变化的 `UPDATE` 会返回 0。
-
-使用 MySQL 时需要注意：
-
-- 时间列请声明为 `DATETIME(6)`，`DATETIME` 只精确到秒；
-- 默认的排序规则比较字符串时不区分大小写，`'Hello' = 'hello'` 为真，唯一约束也是如此。需要区分大小写的列（例如 token）请声明 `COLLATE utf8mb4_bin`；
-- DDL 会隐式提交事务，迁移失败时已经执行的语句不会回滚，见[迁移失败后的恢复](migrations.md#recovering-non-transactional-migrations)；
-- 不支持 `RETURNING`。
-
-<a id="dialect-differences"></a>
-### 数据库差异
-
-数据库类型由驱动包选定，Bun 的查询在三种数据库上写法相同，框架的会话、API 令牌、锁、限流和文件服务在三种数据库上行为一致（[队列](queue.md)也是如此）。仍然需要留意的是数据库本身的差异：
-
-| | PostgreSQL | SQLite | MySQL |
-| --- | --- | --- | --- |
-| 驱动与 `dsn` | `postgres.Driver`，`postgres://` 连接串 | `sqlite.Driver`，文件路径 | `mysql.Driver`，`mysql://` URL |
-| 约束错误按什么匹配 | 约束名 | `表.列` | 约束名或索引名 |
-| `SELECT ... FOR UPDATE` | 支持 | 不需要，写事务独占数据库 | 支持 |
-| DDL 能否回滚 | 能 | 能 | 不能 |
-| 字符串比较 | 区分大小写 | 区分大小写 | 默认不区分 |
-| `RETURNING` | 支持 | 支持 | 不支持 |
-| 默认隔离级别 | READ COMMITTED | 写事务依次执行 | REPEATABLE READ，带间隙锁 |
-| 死锁 | `postgres.IsDeadlock` 识别 | 不会发生 | `mysql.IsDeadlock` 识别，更常见 |
-| 部署 | 多实例 | 单实例 | 多实例 |
-
-
 <a id="connecting"></a>
 ## 连接数据库
 
-使用 `database.Open` 打开连接池，第二个参数是应用使用的数据库驱动。它会立即 Ping 数据库确认连通，失败时自动释放已打开的资源，并返回 `database.ErrUnavailable`。这个错误属于 `errorx.Unavailable` 分类，命令因此以 `ExitUnavailable` 退出，部署脚本可以据此重试，见[退出码](commands.md#exit-codes)。下面是一个完整的连接检查函数：
+使用 `database.Open` 打开连接池。它会立即 Ping 数据库确认连通，失败时自动释放已打开的资源，并返回 `database.ErrUnavailable`。这个错误属于 `errorx.Unavailable` 分类，命令因此以 `ExitUnavailable` 退出，部署脚本可以据此重试，见[退出码](commands.md#exit-codes)。下面是一个完整的连接检查函数：
 
 ```go
 package storage
@@ -158,13 +78,12 @@ import (
     "context"
 
     "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/database/postgres"
 )
 
 func Check(ctx context.Context, dsn string) error {
     cfg := database.DefaultConfig()
     cfg.DSN = dsn
-    db, err := database.Open(ctx, postgres.Driver, cfg)
+    db, err := database.Open(ctx, cfg)
     if err != nil {
         return err
     }
@@ -217,13 +136,13 @@ type Article struct {
 <a id="primary-keys"></a>
 ### 主键
 
-mygoravel 约定主键使用 UUIDv7，由应用在插入前生成，迁移中声明为 `id uuid PRIMARY KEY`（SQLite 中为 `id TEXT PRIMARY KEY`，MySQL 中为 `id CHAR(36) PRIMARY KEY`）：
+mygoravel 约定主键使用 UUIDv7，由应用在插入前生成，迁移中声明为 `id uuid PRIMARY KEY`：
 
 ```go
 item := &Article{ID: uuid.Must(uuid.NewV7()), AuthorID: subject.ID}
 ```
 
-在插入之前就有 ID，同一事务中的关联记录、对象存储的键或者幂等重试都可以直接使用它。UUIDv7 以毫秒时间戳开头，新记录总是追加在索引末尾，写入性能接近自增 ID；对外暴露时也不会泄露记录数量或被逐个遍历，但它包含创建时间，也不能代替[授权](authorization.md)检查。只在内部使用、不出现在接口中的大表，可以在迁移中改用自增主键：PostgreSQL 为 `bigint GENERATED ALWAYS AS IDENTITY`，MySQL 为 `BIGINT AUTO_INCREMENT`，SQLite 为 `INTEGER PRIMARY KEY`。
+在插入之前就有 ID，同一事务中的关联记录、对象存储的键或者幂等重试都可以直接使用它。UUIDv7 以毫秒时间戳开头，新记录总是追加在索引末尾，写入性能接近自增 ID；对外暴露时也不会泄露记录数量或被逐个遍历，但它包含创建时间，也不能代替[授权](authorization.md)检查。只在内部使用、不出现在接口中的大表，可以在迁移中改用自增主键 `bigint GENERATED ALWAYS AS IDENTITY`。
 
 <a id="timestamps"></a>
 ### 自动维护时间戳
@@ -305,14 +224,10 @@ _, err = db.NewDelete().
 
 软删除由 Bun 根据模型标签处理，直接执行原生 SQL 时需要自行处理 `deleted_at` 条件。上述时间戳钩子只处理插入和更新查询，`NewDelete()` 的软删除不会通过其中的 `*bun.UpdateQuery` 分支刷新 `updated_at`。
 
-软删除的记录仍然参与数据库唯一约束。本例的 `articles_slug_key` 会继续保留已删除文章的 slug；如果业务允许复用，可以在迁移中把它改为只约束未删除记录的唯一索引。PostgreSQL 和 SQLite 使用部分索引；MySQL 不支持部分索引，用函数索引让已删除记录的值为 `NULL`，`NULL` 不参与唯一比较：
+软删除的记录仍然参与数据库唯一约束。本例的 `articles_slug_key` 会继续保留已删除文章的 slug；如果业务允许复用，可以在迁移中把它改为只约束未删除记录的部分唯一索引：
 
 ```sql
--- PostgreSQL、SQLite
 CREATE UNIQUE INDEX articles_slug_key ON articles (slug) WHERE deleted_at IS NULL;
-
--- MySQL
-CREATE UNIQUE INDEX articles_slug_key ON articles ((IF(deleted_at IS NULL, slug, NULL)));
 ```
 
 索引沿用原来的名字，[处理约束错误](#constraint-errors)的代码不需要修改。
@@ -406,16 +321,14 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 <a id="isolation-and-deadlocks"></a>
 ### 隔离级别与死锁
 
-三种数据库的默认隔离级别不同：PostgreSQL 是 READ COMMITTED，MySQL 是 REPEATABLE READ，SQLite 的写事务依次执行。无论哪种数据库，“先读取、检查、再修改”的逻辑都应当放在一个事务中，并用 `FOR UPDATE` 锁住要修改的行（SQLite 不需要），见[在事务中检查](authorization.md#checking-in-transactions)。
+PostgreSQL 的默认隔离级别是 READ COMMITTED。“先读取、检查、再修改”的逻辑应当放在一个事务中，并用 `FOR UPDATE` 锁住要修改的行，见[在事务中检查](authorization.md#checking-in-transactions)。
 
-MySQL 更容易出现死锁：在 REPEATABLE READ 下，范围查询和查询不存在的行会加间隙锁；`INSERT IGNORE` 和唯一键检查遇到已存在的行会加共享锁，之后再 `FOR UPDATE` 要升级为排他锁。多个事务同时这样做，就会互相等待。需要“不存在就插入、存在就锁住”时，用一条 upsert 直接取得排他锁，框架的数据库限流器就是这样做的。
-
-数据库检测到死锁时会中止其中一个事务，`postgres.IsDeadlock` 和 `mysql.IsDeadlock` 可以识别这个错误。被中止的事务已经整体回滚，登记的提交后回调也一并丢弃，可以直接重试：
+数据库检测到死锁时会中止其中一个事务，`database.IsDeadlock` 可以识别这个错误。被中止的事务已经整体回滚，登记的提交后回调也一并丢弃，可以直接重试：
 
 ```go
 for attempt := 1; ; attempt++ {
     err := database.RunInTx(ctx, a.db, nil, publish)
-    if postgres.IsDeadlock(err) && attempt < 3 {
+    if database.IsDeadlock(err) && attempt < 3 {
         continue
     }
     return err
@@ -437,7 +350,7 @@ func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes
         Title: c.Title, Slug: c.Slug, Content: c.Content,
     }
     _, err := a.db.NewInsert().Model(item).Exec(ctx)
-    if postgres.IsUniqueViolation(err, "articles_slug_key") {
+    if database.IsUniqueViolation(err, "articles_slug_key") {
         return nil, ErrSlugTaken.Wrap(err, errorx.Public("slug", c.Slug))
     }
     if err != nil {
@@ -447,24 +360,16 @@ func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes
 }
 ```
 
-判断函数由驱动包提供，`postgres`、`sqlite` 和 `mysql` 包中各有一组同名函数：
+`database` 包提供以下判断函数：
 
-| 函数 | 判断的约束 | PostgreSQL | SQLite | MySQL |
-| --- | --- | --- | --- | --- |
-| `IsUniqueViolation(err, names...)` | 唯一约束与主键 | 23505 | `SQLITE_CONSTRAINT_UNIQUE`、`SQLITE_CONSTRAINT_PRIMARYKEY` | 1062 |
-| `IsForeignKeyViolation(err)` | 外键约束 | 23503 | `SQLITE_CONSTRAINT_FOREIGNKEY` | 1451、1452 |
-| `IsCheckViolation(err)` | 检查约束 | 23514 | `SQLITE_CONSTRAINT_CHECK` | 3819 |
+| 函数 | 判断的约束 | SQLSTATE |
+| --- | --- | --- |
+| `IsUniqueViolation(err, names...)` | 唯一约束与主键 | 23505 |
+| `IsForeignKeyViolation(err)` | 外键约束 | 23503 |
+| `IsCheckViolation(err)` | 检查约束 | 23514 |
+| `IsDeadlock(err)` | 死锁 | 40P01 |
 
 `IsUniqueViolation` 可以传入约束名，只在指定的约束冲突时返回 `true`。推荐总是指定约束名，为不同的约束返回不同的业务错误，例如“slug 已被使用”和“邮箱已注册”；其他错误则保留原因继续返回。
-
-SQLite 的错误中没有约束名，只有冲突的列，因此在 SQLite 上按 `表.列` 匹配，多列之间用 `, ` 分隔；表达式索引则按索引名匹配：
-
-```go
-sqlite.IsUniqueViolation(err, "articles.slug")
-sqlite.IsUniqueViolation(err, "files.disk, files.key")
-```
-
-MySQL 与 PostgreSQL 一样按约束名或索引名匹配，主键的名字是 `PRIMARY`。
 
 <a id="testing"></a>
 ## 测试

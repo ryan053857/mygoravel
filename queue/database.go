@@ -7,13 +7,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 )
 
 // driverDatabase 是数据库驱动的名称。
 const driverDatabase = "database"
 
-// Database 返回把任务保存在 queue_jobs 表中的驱动，支持 PostgreSQL、MySQL 和 SQLite，
+// Database 返回把任务保存在 queue_jobs 表中的驱动，
 // db 必须已执行 Migrations 中的迁移。db 可以是 bun.Tx：在事务中发布的任务随事务一起提交，
 // 事务回滚时任务不会被处理。失败任务写入同一个数据库的 queue_failed_jobs，与删除任务在同一个事务中完成。
 func Database(db bun.IDB) Driver {
@@ -33,8 +32,6 @@ func (d *dbDriver) Name() string { return driverDatabase }
 //
 // 带 Unique 键的任务靠唯一索引 (topic, unique_key) 合并，冲突时什么也不做，不会让外层事务中止；
 // 并发发布同一个键时，后者等前者的事务结束：前者提交则跳过，回滚则插入。
-// MySQL 使用不修改任何列的 upsert，它不区分冲突的是哪个唯一键，因此带键的任务 ID 重复时也会被跳过；
-// Publish 每次生成新的 ID，只有 Publisher 重复使用消息 UUID 时才会遇到。
 func (d *dbDriver) Enqueue(ctx context.Context, jobs ...Job) error {
 	now := time.Now().UTC()
 	var plain, keyed []job
@@ -65,13 +62,7 @@ func (d *dbDriver) Enqueue(ctx context.Context, jobs ...Job) error {
 		}
 	}
 	if len(keyed) > 0 {
-		q := d.db.NewInsert().Model(&keyed)
-		if d.db.Dialect().Name() == dialect.MySQL {
-			q = q.On("DUPLICATE KEY UPDATE id = id")
-		} else {
-			q = q.On("CONFLICT (topic, unique_key) DO NOTHING")
-		}
-		if _, err := q.Exec(ctx); err != nil {
+		if _, err := d.db.NewInsert().Model(&keyed).On("CONFLICT (topic, unique_key) DO NOTHING").Exec(ctx); err != nil {
 			return err
 		}
 	}
@@ -103,20 +94,15 @@ func (d *dbDriver) Claim(ctx context.Context, req ClaimRequest) ([]Claim, error)
 // claim 领取 topic 中最多 n 个到期的任务：attempts 加一，available_at 推到租约到期时间，释放 Unique 键。
 // 返回的行保留领取前的 available_at，即任务本次可以被领取的时间。
 //
-// 先锁住到期的行再更新，两步在一个事务中：PostgreSQL 和 MySQL 用 SKIP LOCKED 跳过其他实例正在领取的行，
-// MySQL 在读已提交隔离级别下只锁返回的行、不加间隙锁，不会挡住同时发布的任务；
-// SQLite 的写事务在 BEGIN 时就取得写锁，同一时刻只有一个领取。
+// 先锁住到期的行再更新，两步在一个事务中：SKIP LOCKED 跳过其他实例正在领取的行。
 func (d *dbDriver) claim(req ClaimRequest) ([]job, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 	now := time.Now().UTC()
 	var jobs []job
-	err := d.db.RunInTx(ctx, txOptions(d.db), func(ctx context.Context, tx bun.Tx) error {
+	err := d.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		q := tx.NewSelect().Model(&jobs).Where("j.topic = ?", req.Topic).Where("j.available_at <= ?", now).
-			OrderExpr("j.available_at, j.id").Limit(int64(req.Max))
-		if d.db.Dialect().Name() != dialect.SQLite {
-			q = q.For("UPDATE SKIP LOCKED")
-		}
+			OrderExpr("j.available_at, j.id").Limit(int64(req.Max)).For("UPDATE SKIP LOCKED")
 		if err := q.Scan(ctx); err != nil || len(jobs) == 0 {
 			return err
 		}
@@ -174,7 +160,7 @@ func (c *dbClaim) Release(ctx context.Context) error {
 
 // fail 在一个事务中把仍由本次领取持有的任务移入 queue_failed_jobs。
 func (c *dbClaim) fail(ctx context.Context, record failedJob) error {
-	return c.db.RunInTx(ctx, txOptions(c.db), func(ctx context.Context, tx bun.Tx) error {
+	return c.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		res, err := tx.NewDelete().Model((*job)(nil)).
 			Where("id = ?", c.row.ID).Where("attempts = ?", c.row.Attempts).Exec(ctx)
 		if err := held(res, err); err != nil {

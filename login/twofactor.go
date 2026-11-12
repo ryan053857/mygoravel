@@ -83,7 +83,7 @@ func (r *Realm) SetupTOTP(ctx context.Context, db bun.IDB, ref identity.Ref, acc
 	row = &twoFactorRow{
 		SubjectType: string(r.opts.Type), SubjectID: ref.ID, Secret: r.opts.Crypt.Encrypt(secret), CreatedAt: r.now().UTC(),
 	}
-	q := upsert(db, db.NewInsert().Model(row), "subject_type, subject_id", "secret", "last_step", "created_at")
+	q := upsert(db.NewInsert().Model(row), "subject_type, subject_id", "secret", "last_step", "created_at")
 	if _, err := q.Exec(ctx); err != nil {
 		return TOTPSetup{}, errors.Wrap(err, "login: save totp")
 	}

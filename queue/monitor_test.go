@@ -7,16 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/monitor"
 	"github.com/ryan053857/mygoravel/queue"
 )
 
 func TestMonitor(t *testing.T) {
 	ctx := context.Background()
-	db := openDB(t, sqlite.Driver)
-	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	db := openDB(t)
+	mon := monitor.New(dbtest.Open(t, monitor.Migrations()), nil)
 	t.Cleanup(func() { _ = mon.Close(ctx) })
 
 	var attempts atomic.Int64

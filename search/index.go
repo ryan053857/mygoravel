@@ -152,24 +152,23 @@ func (ix *Index[D]) Refresh(ctx context.Context, db bun.IDB, load LoadFunc[D], k
 }
 
 func checkKey(key string) error {
-	if key == "" || len(key) > maxValue {
-		return errors.Newf("search: key must be 1 to %d bytes, got %d", maxValue, len(key))
+	if key == "" {
+		return errors.New("search: empty key")
 	}
 	return nil
 }
 
 // refresh 在一个事务中同步 key：build 为 0 时写入 versions 返回的版本，否则只写入重建的版本 build。
 func (ix *Index[D]) refresh(ctx context.Context, db bun.IDB, load LoadFunc[D], key string, build int) error {
-	st := storeOf(db)
-	err := db.RunInTx(ctx, st.txOptions(), func(ctx context.Context, tx bun.Tx) error {
+	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		// 先锁住这个 key：同一个 key 的同步依次执行，后执行的读到的数据更新，不会被先读到旧数据的覆盖
-		if err := st.lockKey(ctx, tx, ix.name, key); err != nil {
+		if err := lockKey(ctx, tx, ix.name, key); err != nil {
 			return err
 		}
 		versions := []int{build}
 		if build == 0 {
 			var err error
-			if versions, err = st.versions(ctx, tx, ix.name); err != nil {
+			if versions, err = indexVersions(ctx, tx, ix.name); err != nil {
 				return err
 			}
 		}
@@ -182,12 +181,12 @@ func (ix *Index[D]) refresh(ctx context.Context, db bun.IDB, load LoadFunc[D], k
 			return err
 		}
 		for _, v := range versions {
-			if err := st.replace(ctx, tx, ix.name, v, key, entries); err != nil {
+			if err := replaceEntries(ctx, tx, ix.name, v, key, entries); err != nil {
 				return err
 			}
 		}
 		if len(entries) == 0 {
-			return st.unlockKey(ctx, tx, ix.name, key)
+			return unlockKey(ctx, tx, ix.name, key)
 		}
 		return nil
 	})
@@ -211,9 +210,6 @@ func (ix *Index[D]) entries(docs []D) ([]entry, error) {
 		if f := ix.schema.tenant; f != nil {
 			if fv, ok := f.get(v); ok {
 				e.tenant = fv.String()
-			}
-			if len(e.tenant) > maxValue {
-				return nil, errors.Mark(errors.Newf("search: tenant longer than %d bytes", maxValue), errInvalid)
 			}
 		}
 		for _, f := range ix.schema.text {

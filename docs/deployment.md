@@ -19,10 +19,8 @@
     - [维护步骤](#maintenance-steps)
     - [不必整站停服时](#without-downtime)
 - [日志](#logging)
-- [使用 SQLite 部署](#sqlite)
 - [备份与恢复](#backups)
     - [数据库](#database-backups)
-    - [SQLite](#sqlite-backups)
     - [文件](#file-backups)
     - [恢复之后](#after-restoring)
     - [恢复演练](#restore-drills)
@@ -42,7 +40,7 @@ Go 应用会被编译成一个独立的二进制文件。对于根目录包含 `
 go build -trimpath -o bin/api .
 ```
 
-如果入口位于 `cmd/api`，则把构建目标改为 `./cmd/api`。`-trimpath` 会去掉二进制中的本地路径信息。三种数据库的驱动都是纯 Go 实现，可以用 `CGO_ENABLED=0` 构建不依赖系统库的静态二进制。
+如果入口位于 `cmd/api`，则把构建目标改为 `./cmd/api`。`-trimpath` 会去掉二进制中的本地路径信息。PostgreSQL 驱动是纯 Go 实现，可以用 `CGO_ENABLED=0` 构建不依赖系统库的静态二进制。
 
 由于迁移文件、翻译文件和[静态文件](assets.md)都已通过 `embed` 嵌入，部署时只需要这一个二进制文件和 `config` 目录。构建前确认 templ 生成的代码和 Tailwind 生成的样式表（如果使用）都是最新的：二者都提交在版本库中，修改 `.templ` 后忘记重新生成，二进制里就是旧的页面。请将 `go.mod` 和 `go.sum` 提交到版本库，并记录每次构建对应的提交，以便出现问题时准确定位版本。
 
@@ -79,7 +77,7 @@ CONFIG=--config=config/app.yaml,config/prod.yaml
 ./bin/api migrate up $CONFIG
 ```
 
-在 PostgreSQL 和 MySQL 上，迁移器使用数据库锁，即使多个部署任务同时执行迁移，也只会串行运行。迁移成功后，再启动依赖新表结构的服务。滚动发布期间，新旧版本会同时运行，请确保数据库变更对两个版本都兼容，见[零停机变更](migrations.md#zero-downtime-changes)。
+迁移器使用数据库锁，即使多个部署任务同时执行迁移，也只会串行运行。迁移成功后，再启动依赖新表结构的服务。滚动发布期间，新旧版本会同时运行，请确保数据库变更对两个版本都兼容，见[零停机变更](migrations.md#zero-downtime-changes)。
 
 <a id="starting-the-server"></a>
 ### 启动服务
@@ -119,7 +117,7 @@ worker 和调度器不监听端口，部署平台按进程是否存活判断它�
 
 在虚拟机或物理机上，用 systemd 管理应用进程：开机和崩溃后启动它，收集它的日志，停止时向它发送 `SIGTERM`。mygoravel 不提供生成或安装 unit 文件的命令，下面的模板 unit 改一下路径就能使用。
 
-假设部署目录是 `/opt/blog`，其中有 `bin/api`、`config`，以及存放 SQLite 数据库和本地磁盘文件的 `storage`。密钥写在 `/etc/blog/env` 中，每行一个 `DATABASE_URL=...`，权限设为 `600`。应用以系统用户 `blog` 运行，只有 `storage` 可写：
+假设部署目录是 `/opt/blog`，其中有 `bin/api`、`config`，以及存放本地磁盘文件的 `storage`。密钥写在 `/etc/blog/env` 中，每行一个 `DATABASE_URL=...`，权限设为 `600`。应用以系统用户 `blog` 运行，只有 `storage` 可写：
 
 ```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin blog
@@ -265,7 +263,7 @@ CMD ["start"]
 - **`ENTRYPOINT` 必须使用 exec 形式**，也就是 JSON 数组。这样应用就是容器中的 1 号进程，能直接收到 `docker stop` 发送的 `SIGTERM`。如果写成 `ENTRYPOINT ./api start` 这样的 shell 形式，信号会发给 shell，应用收不到，宽限期一到就被强制终止。
 - **`--config` 写在 `ENTRYPOINT` 中**，`docker run blog migrate up` 这样的命令也会使用同样的配置。在命令后面再传 `--config`，会追加到这两个文件之后。
 - **distroless 镜像带有 CA 证书和时区数据**，访问 HTTPS 接口、调度器使用 `In(loc)` 都不需要额外安装。
-- **`storage` 用于 SQLite 和本地磁盘，要挂载卷。** 镜像中预先建好这个目录并交给 `nonroot` 用户，否则新建的命名卷属于 root，应用无法写入。使用 PostgreSQL 和 S3 磁盘时，容器不需要任何卷。
+- **`storage` 用于本地磁盘，要挂载卷。** 镜像中预先建好这个目录并交给 `nonroot` 用户，否则新建的命名卷属于 root，应用无法写入。使用 S3 磁盘时，容器不需要任何卷。
 
 用 Docker Compose 分开运行，并在启动前执行迁移：
 
@@ -442,18 +440,6 @@ telemetry:
 
 排查问题时，可以使用响应头 `X-Request-ID` 中的请求 ID，在日志中找到同一请求的访问日志和错误诊断。详见[日志](logging.md)。
 
-<a id="sqlite"></a>
-## 使用 SQLite 部署
-
-使用 [SQLite](database.md#sqlite) 时，数据库就是服务器上的一个文件，部署方式与 PostgreSQL 有几处不同：
-
-- **只运行一个实例。** 多台机器无法共享同一个数据库文件。同一台机器上的多个进程可以同时打开它，因此滚动发布时先启动新进程、再停止旧进程是安全的；在 Kubernetes 中请使用 `replicas: 1` 和 `Recreate` 策略，避免数据卷同时挂载到两个节点。
-- **把数据库目录放在持久化存储上。** SQLite 在数据库文件旁边维护 `app.db-wal` 和 `app.db-shm` 两个文件，它们和 `app.db` 必须在同一目录，请挂载整个目录，而不是单个文件。不要使用 NFS 等网络文件系统，它们上面的文件锁不可靠。
-- **迁移不加锁。** 请在同一个部署任务中先执行 `migrate up`，再启动服务，不要让多个任务同时执行迁移。
-- **队列和定时任务都可以使用 SQLite。** 队列的领取与业务写入共用唯一的写者，长时间不提交的写事务会让 worker 等待，见[队列](queue.md#preparing-tables)。
-
-需要运行多个实例，或者写入量超过单机承受能力时，请改用 PostgreSQL。备份方式见 [SQLite 的备份](#sqlite-backups)。
-
 <a id="backups"></a>
 ## 备份与恢复
 
@@ -464,24 +450,9 @@ mygoravel 不提供备份命令。只有数据库自己的备份机制能持续�
 <a id="database-backups"></a>
 ### 数据库
 
-| 数据库 | 建议 |
-| --- | --- |
-| PostgreSQL | 使用托管数据库（RDS、Cloud SQL 等）时，开启自动备份和时间点恢复（PITR）；自建时用 [pgBackRest](https://pgbackrest.org) 或 [WAL-G](https://github.com/wal-g/wal-g) 持续归档 WAL |
-| MySQL | 托管数据库同上；自建时用 [Percona XtraBackup](https://docs.percona.com/percona-xtrabackup/) 做全量备份，加上 binlog 恢复到任意时间点 |
-| SQLite | 见[下文](#sqlite-backups) |
+使用托管数据库（RDS、Cloud SQL 等）时，开启自动备份和时间点恢复（PITR）；自建时用 [pgBackRest](https://pgbackrest.org) 或 [WAL-G](https://github.com/wal-g/wal-g) 持续归档 WAL。
 
-库很小时，用 `pg_dump` 或 `mysqldump --single-transaction` 定时导出也可以，但只能恢复到导出的那一刻。`pg_dump` 的主版本不能低于数据库服务器的主版本。
-
-<a id="sqlite-backups"></a>
-### SQLite
-
-不要直接复制正在使用的数据库文件：此时部分数据可能还在 `-wal` 文件中，复制出来的文件可能不完整。请用 `VACUUM INTO` 生成一份一致的快照，它不会阻塞读写：
-
-```bash
-sqlite3 storage/app.db "VACUUM INTO '/backups/app-$(date +%F).db'"
-```
-
-应用的二进制中已经包含 SQLite，服务器上没有 `sqlite3` 命令时，可以把同一条语句写成应用的[自定义命令](commands.md#custom-commands)，用 `db.ExecContext(ctx, "VACUUM INTO ?", path)` 执行。需要持续备份时，可以使用 [Litestream](https://litestream.io) 把数据库实时复制到对象存储。
+库很小时，用 `pg_dump` 定时导出也可以，但只能恢复到导出的那一刻。`pg_dump` 的主版本不能低于数据库服务器的主版本。
 
 <a id="file-backups"></a>
 ### 文件
@@ -518,7 +489,7 @@ sqlite3 storage/app.db "VACUUM INTO '/backups/app-$(date +%F).db'"
 ```bash
 go test ./...
 go test -race ./...
-go test -race -tags=integration ./...
+go test -race ./...
 ```
 
 框架所需的 Go 版本以其 [go.mod](../go.mod) 为准，框架自身的数据库集成测试使用 PostgreSQL 18。你的应用额外引入的组件（例如缓存客户端）应当固定版本，并有各自的集成测试。

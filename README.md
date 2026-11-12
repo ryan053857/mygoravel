@@ -14,7 +14,7 @@ mygoravel 是一个用于构建 HTTP API 和服务端渲染页面的 Go 应用�
 go get github.com/ryan053857/mygoravel@main
 ```
 
-需要 Go 1.27.3 或更高版本；数据库功能支持 PostgreSQL、SQLite 和 MySQL。框架的包分为基础、基础设施、入口、功能四层，每个包都可以单独使用，见[框架包一览](docs/directory-structure.md#framework-packages)。从[安装](docs/installation.md)开始，几分钟即可运行第一个接口。
+需要 Go 1.27.3 或更高版本；数据库使用 PostgreSQL。框架的包分为基础、基础设施、入口、功能四层，每个包都可以单独使用，见[框架包一览](docs/directory-structure.md#framework-packages)。从[安装](docs/installation.md)开始，几分钟即可运行第一个接口。
 
 ## 文档
 

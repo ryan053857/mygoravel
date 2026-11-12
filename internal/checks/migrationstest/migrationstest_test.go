@@ -1,5 +1,4 @@
-// Package migrationstest 检查框架各个包内嵌的迁移：每个包都登记在这里，三种数据库的迁移文件一一对应，
-// 并且能通过公开的 publish 命令原样发布。
+// Package migrationstest 检查框架各个包内嵌的迁移：每个包都登记在这里，并且能通过公开的 publish 命令原样发布。
 package migrationstest
 
 import (
@@ -19,11 +18,7 @@ import (
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/command/migratecmd"
-	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
-	"github.com/ryan053857/mygoravel/database/mysql"
-	"github.com/ryan053857/mygoravel/database/postgres"
-	"github.com/ryan053857/mygoravel/database/sqlite"
 	"github.com/ryan053857/mygoravel/feature"
 	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/lock"
@@ -68,8 +63,6 @@ var sources = map[string]migrate.Source{
 	"webhook":       {Name: "webhook", FS: webhook.Migrations()},
 }
 
-var drivers = []database.Driver{postgres.Driver, mysql.Driver, sqlite.Driver}
-
 // TestEveryPackageIsListed 确保仓库中每个 migrations 目录都登记在 sources 中。
 func TestEveryPackageIsListed(t *testing.T) {
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}").Output()
@@ -110,85 +103,55 @@ func TestEveryPackageIsListed(t *testing.T) {
 	}
 }
 
-// TestDialectsHaveTheSameFiles 确保每个包在三种数据库下的迁移文件一一对应：
-// 同名文件描述同一次变更，发布时共用一个来源标记。
-func TestDialectsHaveTheSameFiles(t *testing.T) {
-	for dir, src := range sources {
-		t.Run(dir, func(t *testing.T) {
-			var want []string
-			for _, driver := range drivers {
-				entries, err := fs.ReadDir(src.FS, driver.Name())
-				if err != nil || len(entries) == 0 {
-					t.Fatalf("%s: entries=%v err=%v", driver.Name(), entries, err)
-				}
-				var names []string
-				for _, e := range entries {
-					names = append(names, e.Name())
-				}
-				if want == nil {
-					want = names
-				} else if !slices.Equal(names, want) {
-					t.Errorf("%s has %v, %s has %v", driver.Name(), names, drivers[0].Name(), want)
-				}
-			}
-		})
-	}
-}
-
 // TestPublishThroughPublicCommand 确保内嵌的 SQL 能通过公开的 publish 命令原样发布，重复发布不再写入。
 func TestPublishThroughPublicCommand(t *testing.T) {
 	for dir, src := range sources {
-		for _, driver := range drivers {
-			t.Run(dir+"/"+driver.Name(), func(t *testing.T) {
-				embedded, err := fs.Sub(src.FS, driver.Name())
+		t.Run(dir, func(t *testing.T) {
+			embedded := src.FS
+			entries, err := fs.ReadDir(embedded, ".")
+			if err != nil || len(entries) == 0 {
+				t.Fatalf("embedded migrations=%v err=%v", entries, err)
+			}
+			target := filepath.Join(t.TempDir(), "migrations")
+			run := func() []string {
+				t.Helper()
+				root := command.Root("api", "test")
+				root.AddCommand(migratecmd.Publish(src))
+				root.SetArgs([]string{"publish", "--dir", target, "--config", filepath.Join(target, "absent.yaml")})
+				var output bytes.Buffer
+				root.SetOut(&output)
+				if err := root.Execute(); err != nil {
+					t.Fatal(err)
+				}
+				return strings.Fields(output.String())
+			}
+			names := run()
+			if len(names) != len(entries) {
+				t.Fatalf("published=%v embedded=%v", names, entries)
+			}
+			for _, entry := range entries {
+				original, err := fs.ReadFile(embedded, entry.Name())
 				if err != nil {
 					t.Fatal(err)
 				}
-				entries, err := fs.ReadDir(embedded, ".")
-				if err != nil || len(entries) == 0 {
-					t.Fatalf("embedded migrations=%v err=%v", entries, err)
+				i := slices.IndexFunc(names, func(name string) bool {
+					return strings.HasSuffix(name, "_"+src.Name+"_"+entry.Name())
+				})
+				if i < 0 {
+					t.Fatalf("missing published %s in %v", entry.Name(), names)
 				}
-				target := filepath.Join(t.TempDir(), "migrations")
-				run := func() []string {
-					t.Helper()
-					root := command.Root("api", "test")
-					root.AddCommand(migratecmd.Publish(driver, src))
-					root.SetArgs([]string{"publish", "--dir", target, "--config", filepath.Join(target, "absent.yaml")})
-					var output bytes.Buffer
-					root.SetOut(&output)
-					if err := root.Execute(); err != nil {
-						t.Fatal(err)
-					}
-					return strings.Fields(output.String())
+				published, err := os.ReadFile(filepath.Join(target, names[i]))
+				if err != nil {
+					t.Fatal(err)
 				}
-				names := run()
-				if len(names) != len(entries) {
-					t.Fatalf("published=%v embedded=%v", names, entries)
+				want := append([]byte("-- mygoravel: "+src.Name+"/"+strings.TrimSuffix(entry.Name(), ".sql")+"\n"), original...)
+				if !bytes.Equal(published, want) {
+					t.Fatalf("published content differs from embedded SQL: %s", names[i])
 				}
-				for _, entry := range entries {
-					original, err := fs.ReadFile(embedded, entry.Name())
-					if err != nil {
-						t.Fatal(err)
-					}
-					i := slices.IndexFunc(names, func(name string) bool {
-						return strings.HasSuffix(name, "_"+src.Name+"_"+entry.Name())
-					})
-					if i < 0 {
-						t.Fatalf("missing published %s in %v", entry.Name(), names)
-					}
-					published, err := os.ReadFile(filepath.Join(target, names[i]))
-					if err != nil {
-						t.Fatal(err)
-					}
-					want := append([]byte("-- mygoravel: "+src.Name+"/"+strings.TrimSuffix(entry.Name(), ".sql")+"\n"), original...)
-					if !bytes.Equal(published, want) {
-						t.Fatalf("published content differs from embedded SQL: %s", names[i])
-					}
-				}
-				if again := run(); len(again) != 0 {
-					t.Fatalf("repeat published=%v", again)
-				}
-			})
-		}
+			}
+			if again := run(); len(again) != 0 {
+				t.Fatalf("repeat published=%v", again)
+			}
+		})
 	}
 }

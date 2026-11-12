@@ -1,5 +1,3 @@
-//go:build integration
-
 package doctest_test
 
 import (

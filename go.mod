@@ -30,7 +30,6 @@ require (
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-ego/gse v1.0.0
 	github.com/go-jose/go-jose/v4 v4.1.9
-	github.com/go-sql-driver/mysql v1.10.1
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.6.0
@@ -55,9 +54,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/uptrace/bun v1.3.0
-	github.com/uptrace/bun/dialect/mysqldialect v1.3.0
 	github.com/uptrace/bun/dialect/pgdialect v1.3.0
-	github.com/uptrace/bun/dialect/sqlitedialect v1.3.0
 	github.com/wneessen/go-mail v0.8.2
 	github.com/xuri/excelize/v2 v2.11.1
 	go.opentelemetry.io/contrib/bridges/otelslog v0.21.0
@@ -81,17 +78,12 @@ require (
 	golang.org/x/term v0.48.0
 	golang.org/x/text v0.43.0
 	google.golang.org/protobuf v1.36.12
-	modernc.org/sqlite v1.62.0
 	trpc.group/trpc-go/trpc-agent-go v1.12.0
-	trpc.group/trpc-go/trpc-agent-go/session/mysql v1.12.0
 	trpc.group/trpc-go/trpc-agent-go/session/postgres v1.12.0
-	trpc.group/trpc-go/trpc-agent-go/session/sqlite v1.12.0
-	trpc.group/trpc-go/trpc-agent-go/storage/mysql v1.12.0
 	trpc.group/trpc-go/trpc-agent-go/storage/postgres v0.8.0
 )
 
 require (
-	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/JohannesKaufmann/dom v0.3.1 // indirect
 	github.com/Oudwins/tailwind-merge-go v0.2.2 // indirect
 	github.com/a-h/parse v0.0.0-20250122154542-74294addb73e // indirect
@@ -120,7 +112,6 @@ require (
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
 	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/creack/pty v1.1.24 // indirect
-	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/getsentry/sentry-go v0.46.0 // indirect
@@ -148,7 +139,6 @@ require (
 	github.com/natefinch/atomic v1.0.1 // indirect
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
-	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/panjf2000/ants/v2 v2.10.0 // indirect
 	github.com/philhofer/fwd v1.2.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -158,7 +148,6 @@ require (
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/quagmt/udecimal v1.10.1 // indirect
 	github.com/redis/rueidis v1.0.79 // indirect
-	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/richardlehane/mscfb v1.0.9 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
@@ -198,9 +187,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
 	google.golang.org/grpc v1.84.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	modernc.org/libc v1.80.1 // indirect
-	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.12.1 // indirect
+	modernc.org/sqlite v1.62.0 // indirect
 	trpc.group/trpc-go/trpc-a2a-go v0.2.6-0.20260721084546-18c8244d0acb // indirect
 )
 

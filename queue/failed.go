@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 )
 
 // ErrFailedJobNotFound 表示失败任务表中没有这个 ID。
@@ -38,7 +37,7 @@ func NewFailedJobs(db bun.IDB, drivers ...Driver) *FailedJobs {
 // 任务不存在时返回 ErrFailedJobNotFound；原来的驱动不在 NewFailedJobs 的 drivers 中时返回错误。
 // 放回数据库驱动与删除失败记录在同一个事务中；放回其他驱动在删除提交之前完成，提交失败时任务可能被执行两次。
 func (f *FailedJobs) Retry(ctx context.Context, id uuid.UUID) error {
-	err := f.db.RunInTx(ctx, txOptions(f.db), func(ctx context.Context, tx bun.Tx) error {
+	err := f.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		row := new(failedJob)
 		err := tx.NewSelect().Model(row).Where("id = ?", id).Scan(ctx)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -85,13 +84,11 @@ func (f *FailedJobs) RetryAll(ctx context.Context, topic string, before time.Tim
 		drivers = append(drivers, name)
 	}
 	var n int
-	err := f.db.RunInTx(ctx, txOptions(f.db), func(ctx context.Context, tx bun.Tx) error {
+	err := f.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var rows []failedJob
 		sel := f.matching(tx.NewSelect().Model(&rows), topic, before).
-			Where("f.driver IN (?)", bun.List(drivers)).Limit(int64(limit))
-		if f.db.Dialect().Name() != dialect.SQLite {
-			sel = sel.For("UPDATE SKIP LOCKED") // 两个管理员同时点「全部重试」时互不重复
-		}
+			Where("f.driver IN (?)", bun.List(drivers)).Limit(int64(limit)).
+			For("UPDATE SKIP LOCKED") // 两个管理员同时点「全部重试」时互不重复
 		if err := sel.Scan(ctx); err != nil || len(rows) == 0 {
 			return err
 		}
@@ -156,7 +153,7 @@ func (f *FailedJobs) matching(q *bun.SelectQuery, topic string, before time.Time
 func (f *FailedJobs) delete(ctx context.Context, topic string, before time.Time, limit int) (int, error) {
 	ids := f.matching(f.db.NewSelect().Model((*failedJob)(nil)).Column("f.id"), topic, before).Limit(int64(limit))
 	res, err := f.db.NewDelete().Model((*failedJob)(nil)).
-		Where("id IN (SELECT id FROM (?) AS old)", ids).Exec(ctx)
+		Where("id IN (?)", ids).Exec(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -273,7 +270,7 @@ func (f *FailedJobs) Cleanup(keep time.Duration) func(ctx context.Context, limit
 
 // record 写入一条失败记录。
 func (f *FailedJobs) record(ctx context.Context, row failedJob) error {
-	return f.db.RunInTx(ctx, txOptions(f.db), func(ctx context.Context, tx bun.Tx) error {
+	return f.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		return recordFailed(ctx, tx, row)
 	})
 }

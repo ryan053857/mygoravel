@@ -46,12 +46,12 @@ agent 本身由 [trpc-agent-go](https://github.com/trpc-group/trpc-agent-go) 提
 对话的消息保存在数据库中，模型每次回答时都会读出完整的历史。先[发布](migrations.md#publishing-framework-migrations)这些表的迁移：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "ai", FS: chat.Migrations()},
 ))
 ```
 
-这些表的名称都以 `agent_` 开头，PostgreSQL、MySQL 和 SQLite 都支持，`migratecmd.Publish` 按传入的驱动选择对应的迁移。表结构与 trpc-agent-go 各数据库的会话存储完全一致，框架的测试会在每次升级 trpc-agent-go 时检查这一点。
+这些表的名称都以 `agent_` 开头，表结构与 trpc-agent-go 的 PostgreSQL 会话存储完全一致，框架的测试会在每次升级 trpc-agent-go 时检查这一点。
 
 <a id="assembling"></a>
 ## 装配
@@ -61,7 +61,7 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ```go
 chat.SetLogger(slog.Default())
 
-sessions, err := chatpg.NewSessions(db) // chatpg 是 github.com/ryan053857/mygoravel/ai/chat/postgres
+sessions, err := chat.NewSessions(db)
 if err != nil {
     return nil, err
 }
@@ -83,7 +83,7 @@ stack.MustAdd("ai", func(ctx context.Context) error {
 ```
 
 - `chat.SetLogger` 让 trpc-agent-go 的日志写进应用的日志，带 `component=ai` 字段，可以[单独设置级别](logging.md#component-levels)。
-- 对话存储按数据库选择包：`ai/chat/postgres`、`ai/chat/mysql` 或 `ai/chat/sqlite`，用法相同，参数都是应用的 `*bun.DB`，和数据库驱动 `database/postgres` 等一一对应，应用只链接自己用的那个。PostgreSQL 和 MySQL 直接使用应用的连接池；SQLite 对同一个数据库文件另开一组连接（trpc-agent-go 关闭存储时会关闭它的连接），不支持内存数据库。`sessions.Close` 不会关闭应用的数据库。
+- `chat.NewSessions` 把对话保存在应用的 PostgreSQL 中，直接使用应用的连接池，`sessions.Close` 不会关闭它。
 - `chat.RequireApproval` 列出需要审批的工具，见[审批](#approval)。
 - `runs.Shutdown` 让进程停止时进行中的回答说完，见[部署](#deployment)；`runs.Close` 取消剩下的运行并关闭 runner。它们登记在数据库之后，所以会先于数据库关闭。
 

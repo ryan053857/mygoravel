@@ -23,7 +23,7 @@ var exempt = map[string]bool{
 	"ai/chat/migrations": true,
 }
 
-// dbClock 匹配 PostgreSQL、MySQL 和 SQLite 中读取当前时间的写法。
+// dbClock 匹配 SQL 中读取当前时间的写法。
 var dbClock = regexp.MustCompile(`(?i)\b(now|clock_timestamp|statement_timestamp|transaction_timestamp|sysdate|curdate|curtime|utc_timestamp|utc_date|utc_time|unix_timestamp|unixepoch)\s*\(|\b(current_timestamp|current_date|current_time|localtimestamp|localtime)\b|'now'`)
 
 func TestSQLDoesNotReadDatabaseClock(t *testing.T) {

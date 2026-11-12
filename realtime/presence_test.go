@@ -7,45 +7,40 @@ import (
 
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/realtime"
 	"github.com/ryan053857/mygoravel/realtime/realtimetest"
 )
 
 func TestDatabasePresence(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		realtimetest.TestPresenceStore(t, func(t *testing.T) realtime.PresenceStore {
-			return realtime.NewDatabasePresence(dbtesting.Open(t, driver, realtime.Migrations()))
-		})
+	realtimetest.TestPresenceStore(t, func(t *testing.T) realtime.PresenceStore {
+		return realtime.NewDatabasePresence(dbtest.Open(t, realtime.Migrations()))
 	})
 }
 
 func TestDatabasePresenceCleanup(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		s := realtime.NewDatabasePresence(dbtesting.Open(t, driver, realtime.Migrations()))
-		for _, client := range []string{"a", "b", "c"} {
-			if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: client, Subject: identity.Ref{Type: "user", ID: "u"}}, -time.Second); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: "live", Subject: identity.Ref{Type: "user", ID: "u"}}, time.Minute); err != nil {
+	ctx := context.Background()
+	s := realtime.NewDatabasePresence(dbtest.Open(t, realtime.Migrations()))
+	for _, client := range []string{"a", "b", "c"} {
+		if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: client, Subject: identity.Ref{Type: "user", ID: "u"}}, -time.Second); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.Cleanup(ctx, 0); err == nil {
-			t.Fatal("cleanup accepted a zero limit")
+	}
+	if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: "live", Subject: identity.Ref{Type: "user", ID: "u"}}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Cleanup(ctx, 0); err == nil {
+		t.Fatal("cleanup accepted a zero limit")
+	}
+	for _, want := range []int{2, 1, 0} {
+		if n, err := s.Cleanup(ctx, 2); err != nil || n != want {
+			t.Fatalf("cleanup = %d, %v; want %d", n, err, want)
 		}
-		for _, want := range []int{2, 1, 0} {
-			if n, err := s.Cleanup(ctx, 2); err != nil || n != want {
-				t.Fatalf("cleanup = %d, %v; want %d", n, err, want)
-			}
-		}
-		if got, err := s.List(ctx, "room:1"); err != nil || len(got) != 1 || got[0].Client != "live" {
-			t.Fatalf("entries after cleanup = %+v, %v", got, err)
-		}
-	})
+	}
+	if got, err := s.List(ctx, "room:1"); err != nil || len(got) != 1 || got[0].Client != "live" {
+		t.Fatalf("entries after cleanup = %+v, %v", got, err)
+	}
 }
 
 // editors 是测试用的 presence 规则：carol 不能加入，其他人以自己的名字加入。
@@ -135,62 +130,60 @@ func TestPresenceChannel(t *testing.T) {
 // 在另一个实例上取消订阅时立即发出 leave，而且只发一次。
 // 取消订阅的控制消息在 Hub 的投递中到达，离开事件又要发布到 Hub，这里确认两者不会互相等待。
 func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		hubDB := dbtesting.Open(t, driver, broadcast.Migrations())
-		presence := realtime.NewDatabasePresence(dbtesting.Open(t, driver, realtime.Migrations()))
-		store := &tokens{}
-		opts := realtime.Options{Authenticate: store.validate, Presence: presence, PresenceGrace: 300 * time.Millisecond}
-		a := start(t, broadcast.NewDatabase(hubDB, nil), opts, nil)
-		b := start(t, broadcast.NewDatabase(hubDB, nil), opts, nil)
-		broadcasttest.Ready(t, a.hub, b.hub)
-		for _, n := range []*node{a, b} {
-			n.rt.Channel("editing:{article}", realtime.Presence(editors))
-		}
+	hubDB := dbtest.Open(t, broadcast.Migrations())
+	presence := realtime.NewDatabasePresence(dbtest.Open(t, realtime.Migrations()))
+	store := &tokens{}
+	opts := realtime.Options{Authenticate: store.validate, Presence: presence, PresenceGrace: 300 * time.Millisecond}
+	a := start(t, broadcast.NewDatabase(hubDB, nil), opts, nil)
+	b := start(t, broadcast.NewDatabase(hubDB, nil), opts, nil)
+	broadcasttest.Ready(t, a.hub, b.hub)
+	for _, n := range []*node{a, b} {
+		n.rt.Channel("editing:{article}", realtime.Presence(editors))
+	}
 
-		alice, bob := mustConnect(t, a.url, "alice", nil), mustConnect(t, b.url, "bob", nil)
-		alice.mustSubscribe("editing:7")
-		alice.membership() // 自己的 join
-		// 等 b 读到 alice 的 join 之后 bob 再订阅：数据库后端按轮询投递其他实例的消息，
-		// 否则这条稍早的 join 可能在 bob 订阅之后才到达 b。
-		broadcasttest.Ready(t, a.hub, b.hub)
-		bob.mustSubscribe("editing:7")
-		if kind, m := alice.membership(); kind != "join" || m.User != "user:bob" {
-			t.Fatalf("join from the other instance = %s %+v", kind, m)
-		}
-		if users, err := alice.presence("editing:7"); err != nil || len(users) != 2 {
-			t.Fatalf("presence = %v, %+v", users, err)
-		}
-		if members, err := a.rt.Members(context.Background(), "editing:7"); err != nil || len(members) != 2 {
-			t.Fatalf("members = %+v, %v", members, err)
-		}
+	alice, bob := mustConnect(t, a.url, "alice", nil), mustConnect(t, b.url, "bob", nil)
+	alice.mustSubscribe("editing:7")
+	alice.membership() // 自己的 join
+	// 等 b 读到 alice 的 join 之后 bob 再订阅：数据库后端按轮询投递其他实例的消息，
+	// 否则这条稍早的 join 可能在 bob 订阅之后才到达 b。
+	broadcasttest.Ready(t, a.hub, b.hub)
+	bob.mustSubscribe("editing:7")
+	if kind, m := alice.membership(); kind != "join" || m.User != "user:bob" {
+		t.Fatalf("join from the other instance = %s %+v", kind, m)
+	}
+	if users, err := alice.presence("editing:7"); err != nil || len(users) != 2 {
+		t.Fatalf("presence = %v, %+v", users, err)
+	}
+	if members, err := a.rt.Members(context.Background(), "editing:7"); err != nil || len(members) != 2 {
+		t.Fatalf("members = %+v, %v", members, err)
+	}
 
-		// alice 换到另一个实例：先在 b 上订阅，再关闭 a 上的连接。bob 看不到加入（a 上还有她的记录），
-		// 也看不到离开（a 的宽限期满时 b 上有她的记录），alice 也收不到自己的 join。
-		// 先建新连接再关旧连接，结果不依赖重连有多快；如果先断开再重连，重连慢于宽限期时离开事件是正确的。
-		if kind, m := bob.membership(); kind != "join" || m.User != "user:bob" {
-			t.Fatalf("bob's own join = %s %+v", kind, m)
-		}
-		old := alice
-		alice = mustConnect(t, b.url, "alice", nil)
-		alice.mustSubscribe("editing:7") // 回复订阅之前在线记录已经写入
-		old.close()
-		bob.noMembership(600 * time.Millisecond)
+	// alice 换到另一个实例：先在 b 上订阅，再关闭 a 上的连接。bob 看不到加入（a 上还有她的记录），
+	// 也看不到离开（a 的宽限期满时 b 上有她的记录），alice 也收不到自己的 join。
+	// 先建新连接再关旧连接，结果不依赖重连有多快；如果先断开再重连，重连慢于宽限期时离开事件是正确的。
+	if kind, m := bob.membership(); kind != "join" || m.User != "user:bob" {
+		t.Fatalf("bob's own join = %s %+v", kind, m)
+	}
+	old := alice
+	alice = mustConnect(t, b.url, "alice", nil)
+	alice.mustSubscribe("editing:7") // 回复订阅之前在线记录已经写入
+	old.close()
+	bob.noMembership(600 * time.Millisecond)
 
-		if err := a.rt.Unsubscribe(identity.Ref{Type: "user", ID: "bob"}, "editing:7"); err != nil {
-			t.Fatal(err)
-		}
-		if ch := bob.unsubscribed(); ch != "editing:7" {
-			t.Fatalf("unsubscribed from %q", ch)
-		}
-		if kind, m := alice.membership(); kind != "leave" || m.User != "user:bob" {
-			t.Fatalf("leave from the other instance = %s %+v", kind, m)
-		}
-		// 连接所在的实例宽限期满时不再重复发出 leave。
-		alice.noMembership(700 * time.Millisecond)
-		if members, err := b.rt.Members(context.Background(), "editing:7"); err != nil || len(members) != 1 || members[0].Subject.ID != "alice" {
-			t.Fatalf("members after unsubscribe = %+v, %v", members, err)
-		}
-	})
+	if err := a.rt.Unsubscribe(identity.Ref{Type: "user", ID: "bob"}, "editing:7"); err != nil {
+		t.Fatal(err)
+	}
+	if ch := bob.unsubscribed(); ch != "editing:7" {
+		t.Fatalf("unsubscribed from %q", ch)
+	}
+	if kind, m := alice.membership(); kind != "leave" || m.User != "user:bob" {
+		t.Fatalf("leave from the other instance = %s %+v", kind, m)
+	}
+	// 连接所在的实例宽限期满时不再重复发出 leave。
+	alice.noMembership(700 * time.Millisecond)
+	if members, err := b.rt.Members(context.Background(), "editing:7"); err != nil || len(members) != 1 || members[0].Subject.ID != "alice" {
+		t.Fatalf("members after unsubscribe = %+v, %v", members, err)
+	}
 }
 
 // 连接离开后在线记录保留一个宽限期：期间主体重新加入时没有事件，期满仍然没有连接才发出 leave。

@@ -14,9 +14,6 @@ import (
 	"github.com/ryan053857/mygoravel/queue"
 )
 
-// maxKey 是字符串列的最大长度，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
-const maxKey = 191
-
 // Deliver 是投递任务的 topic，payload 是投递记录的 ID。由 Event.Send 和 Resend 发布，Deliverer 处理。
 var Deliver = queue.Topic[uuid.UUID]("webhook.deliver")
 
@@ -110,7 +107,7 @@ func enqueue(ctx context.Context, db bun.IDB, deliveries []Delivery) error {
 }
 
 func checkType(t string) error {
-	if t == "" || strings.Contains(t, "*") || len(t) > maxKey {
+	if t == "" || strings.Contains(t, "*") {
 		return errors.Newf("webhook: invalid event type %q", t)
 	}
 	return nil

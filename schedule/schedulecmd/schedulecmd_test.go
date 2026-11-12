@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/lock/locktest"
 	"github.com/ryan053857/mygoravel/monitor"
@@ -62,7 +61,7 @@ func TestSchedules(t *testing.T) {
 
 func TestSchedulesLastRun(t *testing.T) {
 	ctx := context.Background()
-	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	mon := monitor.New(dbtest.Open(t, monitor.Migrations()), nil)
 	t.Cleanup(func() { _ = mon.Close(ctx) })
 	started := time.Date(2026, 11, 12, 3, 0, 0, 0, time.Local)
 	mon.Set(schedule.MetricLastRun, "reports:daily", schedule.Run{Tick: started, Started: started, Duration: 1500 * time.Millisecond, Error: "smtp down"})

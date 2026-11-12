@@ -8,7 +8,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Database 是基于 Bun 的锁存储。查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供三种数据库的表结构。
+// Database 是基于 Bun 的锁存储。Migrations 提供表结构。
 // 过期时间按应用服务器时钟计算，各实例的时钟需要同步。
 //
 // Database 不在后台清理过期的锁：过期的锁会被下一次 Acquire 直接取得，残留行由应用定时调用 Cleanup 删除。
@@ -91,11 +91,10 @@ func (s *Database) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("lock: cleanup limit must be positive")
 	}
-	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 	expired := s.db.NewSelect().Model((*row)(nil)).Column("name").
 		Where("expires_at <= ?", time.Now().UTC()).OrderExpr("expires_at").Limit(int64(limit))
 	res, err := s.db.NewDelete().Model((*row)(nil)).
-		Where("name IN (SELECT name FROM (?) AS expired)", expired).Exec(ctx)
+		Where("name IN (?)", expired).Exec(ctx)
 	if err != nil {
 		return 0, errors.Wrap(err, "lock: cleanup")
 	}

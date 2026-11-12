@@ -1,31 +1,26 @@
 package migratecmd_test
 
 import (
-	"path/filepath"
+	"context"
+	"net/url"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/ryan053857/mygoravel/command/migratecmd"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 )
 
-func TestMigrateCommandsOnSQLite(t *testing.T) {
-	path := writeConfig(t, "database:\n  dsn: "+filepath.Join(t.TempDir(), "app.db")+"\n")
-	testMigrateCommands(t, sqlite.Driver, path)
-}
-
-// testMigrateCommands 用 driver 和 configPath 指向的空数据库依次检查 status、up、down 的输出。
-func testMigrateCommands(t *testing.T, driver database.Driver, configPath string) {
-	path := configPath
+// TestMigrateCommands 在一个空数据库上依次检查 status、up、down 的输出。
+func TestMigrateCommands(t *testing.T) {
+	path := serverConfig(t)
 	migrations := fstest.MapFS{
 		"00001_create_notes.sql": {Data: []byte("-- +goose Up\nCREATE TABLE notes (id int);\n-- +goose Down\nDROP TABLE notes;\n")},
 		"00002_add_body.sql":     {Data: []byte("-- +goose Up\nALTER TABLE notes ADD body text;\n-- +goose Down\nALTER TABLE notes DROP body;\n")},
 	}
 	run := func(args ...string) string {
 		t.Helper()
-		root := newRoot(migratecmd.New(migrations, driver, dbConfig))
+		root := newRoot(migratecmd.New(migrations, dbConfig))
 		out, _, err := execute(root, append(args, "--config", path)...)
 		if err != nil {
 			t.Fatalf("%v: %v", args, err)
@@ -57,4 +52,19 @@ func testMigrateCommands(t *testing.T, driver database.Driver, configPath string
 	if got := status(); got != "1 applied 00001_create_notes.sql\n2 pending 00002_add_body.sql" {
 		t.Fatalf("status after down:\n%s", got)
 	}
+}
+
+// serverConfig 创建临时数据库，返回指向它的配置文件路径。
+func serverConfig(t *testing.T) string {
+	db := dbtest.Open(t, nil)
+	var name string
+	if err := db.QueryRowContext(context.Background(), "SELECT current_database()").Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	dsn, err := url.Parse(dbtest.URL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dsn.Path = "/" + name
+	return writeConfig(t, "database:\n  dsn: "+dsn.String()+"\n")
 }

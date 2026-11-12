@@ -8,7 +8,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 )
 
 // Database 把计数存在数据库中，多个实例共享同一份配额，表结构由 Migrations 提供。
@@ -56,16 +55,8 @@ func (d *Database) Allow(ctx context.Context, key string) error {
 	var wait time.Duration
 	err := d.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		// 插入或锁住 key 的行：没有记录时插入 tat=0（与没有记录等价），已有记录时值不变但取得排他行锁。
-		// 直接取得排他锁，不经过共享锁：MySQL 上 INSERT IGNORE 遇到重复行时加共享锁，
-		// 再 SELECT ... FOR UPDATE 升级为排他锁，并发时会死锁。SQLite 的写事务在 BEGIN 时已独占数据库。
 		r := &row{Name: d.name, Key: storedKey(key)}
-		q := tx.NewInsert().Model(r)
-		if tx.Dialect().Name() == dialect.MySQL {
-			q = q.On("DUPLICATE KEY UPDATE").Set("tat = tat")
-		} else {
-			q = q.On("CONFLICT (name, key) DO UPDATE").Set("tat = r.tat")
-		}
-		if _, err := q.Exec(ctx); err != nil {
+		if _, err := tx.NewInsert().Model(r).On("CONFLICT (name, key) DO UPDATE").Set("tat = r.tat").Exec(ctx); err != nil {
 			return err
 		}
 		if err := tx.NewSelect().Model(r).WherePK().Scan(ctx); err != nil {
@@ -115,7 +106,6 @@ func (d *Database) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("ratelimit: cleanup limit must be positive")
 	}
-	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 	expired := d.db.NewSelect().Model((*row)(nil)).Column("name", "key").
 		Where("tat <= ?", time.Now().UnixMicro()).OrderExpr("tat").Limit(int64(limit))
 	res, err := d.db.NewDelete().Model((*row)(nil)).

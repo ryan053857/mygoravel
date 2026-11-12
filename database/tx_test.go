@@ -13,13 +13,13 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/logging/logtest"
 )
 
-func openItems(t *testing.T, driver database.Driver) *bun.DB {
+func openItems(t *testing.T) *bun.DB {
 	t.Helper()
-	db := dbtesting.Open(t, driver, nil)
+	db := dbtest.Open(t, nil)
 	if _, err := db.ExecContext(context.Background(), "CREATE TABLE items (id INTEGER PRIMARY KEY)"); err != nil {
 		t.Fatal(err)
 	}
@@ -51,131 +51,123 @@ func (r *recorder) hook(name string) func(context.Context) error {
 }
 
 func TestRunInTxRunsHooksAfterCommit(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		db := openItems(t, driver)
-		var r recorder
-		err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
-			if err := insert(ctx, tx, 1); err != nil {
-				return err
-			}
-			tx.AfterCommit(func(context.Context) error {
-				// 回调执行时数据已经提交，事务外的连接能读到。
-				r.ran = append(r.ran, "first")
-				if got := ids(t, db); !slices.Equal(got, []int{1}) {
-					t.Errorf("hook saw %v, want committed row", got)
-				}
-				return nil
-			})
-			tx.AfterCommit(r.hook("second"))
-			if len(r.ran) != 0 {
-				t.Error("hook ran before commit")
+	ctx := context.Background()
+	db := openItems(t)
+	var r recorder
+	err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
+		if err := insert(ctx, tx, 1); err != nil {
+			return err
+		}
+		tx.AfterCommit(func(context.Context) error {
+			// 回调执行时数据已经提交，事务外的连接能读到。
+			r.ran = append(r.ran, "first")
+			if got := ids(t, db); !slices.Equal(got, []int{1}) {
+				t.Errorf("hook saw %v, want committed row", got)
 			}
 			return nil
 		})
-		if err != nil {
-			t.Fatal(err)
+		tx.AfterCommit(r.hook("second"))
+		if len(r.ran) != 0 {
+			t.Error("hook ran before commit")
 		}
-		if !slices.Equal(r.ran, []string{"first", "second"}) {
-			t.Fatalf("ran %v", r.ran)
-		}
+		return nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.ran, []string{"first", "second"}) {
+		t.Fatalf("ran %v", r.ran)
+	}
 }
 
 func TestRunInTxDiscardsHooksOnRollback(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		db := openItems(t, driver)
-		var r recorder
-		boom := errors.New("boom")
-		err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
-			if err := insert(ctx, tx, 1); err != nil {
-				return err
-			}
-			tx.AfterCommit(r.hook("discarded"))
-			return boom
-		})
-		if !errors.Is(err, boom) {
-			t.Fatalf("err = %v", err)
+	ctx := context.Background()
+	db := openItems(t)
+	var r recorder
+	boom := errors.New("boom")
+	err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
+		if err := insert(ctx, tx, 1); err != nil {
+			return err
 		}
-		if len(r.ran) != 0 || len(ids(t, db)) != 0 {
-			t.Fatalf("ran %v, rows %v", r.ran, ids(t, db))
-		}
+		tx.AfterCommit(r.hook("discarded"))
+		return boom
 	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(r.ran) != 0 || len(ids(t, db)) != 0 {
+		t.Fatalf("ran %v, rows %v", r.ran, ids(t, db))
+	}
 }
 
 func TestRunInTxSavepoints(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		db := openItems(t, driver)
-		var r recorder
-		boom := errors.New("boom")
-		err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
-			tx.AfterCommit(r.hook("outer"))
-			err := database.RunInTx(ctx, tx, nil, func(ctx context.Context, sp database.Tx) error {
-				if err := insert(ctx, sp, 1); err != nil {
-					return err
-				}
-				sp.AfterCommit(r.hook("failed savepoint"))
-				return boom
-			})
-			if !errors.Is(err, boom) {
-				t.Errorf("savepoint err = %v", err)
-			}
-			err = database.RunInTx(ctx, tx, nil, func(ctx context.Context, sp database.Tx) error {
-				sp.AfterCommit(r.hook("savepoint"))
-				return insert(ctx, sp, 2)
-			})
-			if err != nil {
+	ctx := context.Background()
+	db := openItems(t)
+	var r recorder
+	boom := errors.New("boom")
+	err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
+		tx.AfterCommit(r.hook("outer"))
+		err := database.RunInTx(ctx, tx, nil, func(ctx context.Context, sp database.Tx) error {
+			if err := insert(ctx, sp, 1); err != nil {
 				return err
 			}
-			if len(r.ran) != 0 {
-				t.Errorf("savepoint hooks ran before the outer commit: %v", r.ran)
-			}
-			tx.AfterCommit(r.hook("last"))
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !slices.Equal(r.ran, []string{"outer", "savepoint", "last"}) {
-			t.Fatalf("ran %v", r.ran)
-		}
-		if got := ids(t, db); !slices.Equal(got, []int{2}) {
-			t.Fatalf("rows %v", got)
-		}
-	})
-}
-
-func TestRunInTxOuterRollbackDiscardsSavepointHooks(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		db := openItems(t, driver)
-		var r recorder
-		boom := errors.New("boom")
-		err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
-			err := database.RunInTx(ctx, tx, nil, func(ctx context.Context, sp database.Tx) error {
-				sp.AfterCommit(r.hook("savepoint"))
-				return insert(ctx, sp, 1)
-			})
-			if err != nil {
-				return err
-			}
+			sp.AfterCommit(r.hook("failed savepoint"))
 			return boom
 		})
 		if !errors.Is(err, boom) {
-			t.Fatalf("err = %v", err)
+			t.Errorf("savepoint err = %v", err)
 		}
-		if len(r.ran) != 0 || len(ids(t, db)) != 0 {
-			t.Fatalf("ran %v, rows %v", r.ran, ids(t, db))
+		err = database.RunInTx(ctx, tx, nil, func(ctx context.Context, sp database.Tx) error {
+			sp.AfterCommit(r.hook("savepoint"))
+			return insert(ctx, sp, 2)
+		})
+		if err != nil {
+			return err
 		}
+		if len(r.ran) != 0 {
+			t.Errorf("savepoint hooks ran before the outer commit: %v", r.ran)
+		}
+		tx.AfterCommit(r.hook("last"))
+		return nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.ran, []string{"outer", "savepoint", "last"}) {
+		t.Fatalf("ran %v", r.ran)
+	}
+	if got := ids(t, db); !slices.Equal(got, []int{2}) {
+		t.Fatalf("rows %v", got)
+	}
+}
+
+func TestRunInTxOuterRollbackDiscardsSavepointHooks(t *testing.T) {
+	ctx := context.Background()
+	db := openItems(t)
+	var r recorder
+	boom := errors.New("boom")
+	err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
+		err := database.RunInTx(ctx, tx, nil, func(ctx context.Context, sp database.Tx) error {
+			sp.AfterCommit(r.hook("savepoint"))
+			return insert(ctx, sp, 1)
+		})
+		if err != nil {
+			return err
+		}
+		return boom
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(r.ran) != 0 || len(ids(t, db)) != 0 {
+		t.Fatalf("ran %v, rows %v", r.ran, ids(t, db))
+	}
 }
 
 type ctxKey struct{}
 
 func TestRunInTxContext(t *testing.T) {
-	db := openItems(t, dbtesting.Drivers()[0])
+	db := openItems(t)
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKey{}, "outer"))
 	defer cancel()
 	var hookErr, hookValue any
@@ -211,7 +203,7 @@ func TestRunInTxContext(t *testing.T) {
 
 func TestRunInTxLogsHookFailures(t *testing.T) {
 	logs := logtest.Capture(t)
-	db := openItems(t, dbtesting.Drivers()[0])
+	db := openItems(t)
 	var r recorder
 	err := database.RunInTx(context.Background(), db, nil, func(ctx context.Context, tx database.Tx) error {
 		tx.AfterCommit(func(context.Context) error { return errors.New("broadcast failed") })
@@ -237,7 +229,7 @@ func TestRunInTxLogsHookFailures(t *testing.T) {
 
 func TestRunInTxMisuse(t *testing.T) {
 	ctx := context.Background()
-	db := openItems(t, dbtesting.Drivers()[0])
+	db := openItems(t)
 	noop := func(context.Context, database.Tx) error { return nil }
 
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {

@@ -14,7 +14,7 @@
 
 有些操作要在后台跑好几分钟：导入几万行表格、导出几十万篇文章、批量发布选中的一百篇文章。用户需要看到进度，结束后知道结果，还希望在一个“任务中心”里看到自己发起过的所有操作。
 
-`operation` 包把这些操作记在 `operations` 表中：谁发起的、是什么操作、当前状态、处理了多少、失败了多少、失败的原因。[后台导入和导出](import-export.md#background-imports)也建立在它之上，所以导入、导出和应用自己的批量操作出现在同一个列表里，用同一种方式推送进度。支持 PostgreSQL、SQLite 和 MySQL。
+`operation` 包把这些操作记在 `operations` 表中：谁发起的、是什么操作、当前状态、处理了多少、失败了多少、失败的原因。[后台导入和导出](import-export.md#background-imports)也建立在它之上，所以导入、导出和应用自己的批量操作出现在同一个列表里，用同一种方式推送进度。
 
 操作只负责记录，执行仍然是普通的[队列](queue.md)任务。
 
@@ -26,7 +26,7 @@
 把 `operation` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`。它要排在 `imports`、`exports` 之前，它们的表引用 `operations` 表：
 
 ```go
-migratecmd.Publish(postgres.Driver,
+migratecmd.Publish(
     migrate.Source{Name: "queue", FS: queue.Migrations()},
     migrate.Source{Name: "operation", FS: operation.Migrations()},
 )

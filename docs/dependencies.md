@@ -68,7 +68,6 @@ import (
     "github.com/ryan053857/mygoravel/cleanup"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/lock"
     "github.com/ryan053857/mygoravel/logging"
     "github.com/ryan053857/mygoravel/monitor"
@@ -100,7 +99,7 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
     stack.MustAdd("telemetry", tel.Shutdown)
     slog.SetDefault(logging.New(cfg.Logs, logging.Export(tel.Logs)))
 
-    db, err := database.Open(ctx, postgres.Driver, cfg.Database)
+    db, err := database.Open(ctx, cfg.Database)
     if err != nil {
         return nil, err
     }
@@ -254,7 +253,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-func WithDatabase(ctx context.Context, driver database.Driver, cfg database.Config,
+func WithDatabase(ctx context.Context, cfg database.Config,
     run func(*bun.DB) error,
 ) (err error) {
     var stack cleanup.Stack
@@ -262,7 +261,7 @@ func WithDatabase(ctx context.Context, driver database.Driver, cfg database.Conf
         err = stack.CloseWith(context.Background(), err)
     }()
 
-    db, err := database.Open(ctx, driver, cfg)
+    db, err := database.Open(ctx, cfg)
     if err != nil {
         return err
     }

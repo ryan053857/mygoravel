@@ -17,9 +17,9 @@
 <a id="introduction"></a>
 ## 简介
 
-`search` 包在应用自己的数据库中提供全文搜索：按关键词查找文章，带过滤、排序、分页、分面统计和命中词高亮。支持 PostgreSQL、SQLite 和 MySQL，三种数据库的结果一致，不需要额外部署搜索服务。
+`search` 包在应用自己的数据库中提供全文搜索：按关键词查找文章，带过滤、排序、分页、分面统计和命中词高亮，不需要额外部署搜索服务。
 
-中文是重点。PostgreSQL 自带的全文检索不切分中文，zhparser 之类的扩展在托管数据库上通常装不了；SQLite 的 FTS5 把一串连续的中文当成一个词；MySQL 默认忽略少于 3 个字符的词。`search` 在应用中分词，数据库只保存切分好的词，所以三种数据库都能搜中文，行为也相同。
+中文是重点。PostgreSQL 自带的全文检索不切分中文，zhparser 之类的扩展在托管数据库上通常装不了。`search` 在应用中分词，把切分好的词写入 `tsvector`，不依赖数据库扩展。
 
 这个包借鉴自 Laravel 的 [Scout](https://laravel.com/docs/scout)，但不监听模型的保存自动同步：批量更新和原生 SQL 会绕过模型事件，索引就悄悄过期了。同步由 action 在修改数据的事务中显式发起，通过数据库队列执行，事务回滚时同步也一起取消。
 
@@ -29,7 +29,7 @@
 把 `search` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`。同步任务通过数据库队列执行，重建索引的进度记在[后台操作](operations.md)中，所以还需要它们的迁移：
 
 ```go
-migratecmd.Publish(postgres.Driver,
+migratecmd.Publish(
     migrate.Source{Name: "queue", FS: queue.Migrations()},
     migrate.Source{Name: "operation", FS: operation.Migrations()},
     migrate.Source{Name: "search", FS: search.Migrations()},

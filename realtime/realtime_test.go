@@ -15,11 +15,10 @@ import (
 
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/realtime"
 )
 
@@ -683,34 +682,32 @@ func TestChannelPatterns(t *testing.T) {
 }
 
 func TestAcrossInstancesOnDatabase(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		db := dbtesting.Open(t, driver, broadcast.Migrations())
-		a := start(t, broadcast.NewDatabase(db, nil), realtime.Options{}, nil)
-		b := start(t, broadcast.NewDatabase(db, nil), realtime.Options{}, nil)
-		broadcasttest.Ready(t, a.hub, b.hub)
-		for _, n := range []*node{a, b} {
-			n.rt.Channel("room:{id}", realtime.Public().ClientPublish())
-		}
-		ca, cb := mustConnect(t, a.url, "", nil), mustConnect(t, b.url, "", nil)
-		ca.mustSubscribe("room:1")
-		cb.mustSubscribe("room:1")
+	db := dbtest.Open(t, broadcast.Migrations())
+	a := start(t, broadcast.NewDatabase(db, nil), realtime.Options{}, nil)
+	b := start(t, broadcast.NewDatabase(db, nil), realtime.Options{}, nil)
+	broadcasttest.Ready(t, a.hub, b.hub)
+	for _, n := range []*node{a, b} {
+		n.rt.Channel("room:{id}", realtime.Public().ClientPublish())
+	}
+	ca, cb := mustConnect(t, a.url, "", nil), mustConnect(t, b.url, "", nil)
+	ca.mustSubscribe("room:1")
+	cb.mustSubscribe("room:1")
 
-		// 不同实例发布的消息没有确定的先后，所以等前一条到达之后再发布下一条。
-		publish(t, a.hub, "room:1", map[string]int{"n": 1})
-		for _, c := range []*client{ca, cb} {
-			if p := c.push(); string(p.Pub.Data) != `{"n":1}` || p.Pub.Info != nil {
-				t.Fatalf("first push = %+v", p.Pub)
-			}
+	// 不同实例发布的消息没有确定的先后，所以等前一条到达之后再发布下一条。
+	publish(t, a.hub, "room:1", map[string]int{"n": 1})
+	for _, c := range []*client{ca, cb} {
+		if p := c.push(); string(p.Pub.Data) != `{"n":1}` || p.Pub.Info != nil {
+			t.Fatalf("first push = %+v", p.Pub)
 		}
-		if reply := cb.publish("room:1", map[string]bool{"typing": true}); reply.Error != nil {
-			t.Fatalf("client publish: %+v", reply.Error)
+	}
+	if reply := cb.publish("room:1", map[string]bool{"typing": true}); reply.Error != nil {
+		t.Fatalf("client publish: %+v", reply.Error)
+	}
+	for _, c := range []*client{ca, cb} {
+		if p := c.push(); string(p.Pub.Data) != `{"typing":true}` || p.Pub.Info == nil {
+			t.Fatalf("second push = %+v", p.Pub)
 		}
-		for _, c := range []*client{ca, cb} {
-			if p := c.push(); string(p.Pub.Data) != `{"typing":true}` || p.Pub.Info == nil {
-				t.Fatalf("second push = %+v", p.Pub)
-			}
-		}
-	})
+	}
 }
 
 func TestMetrics(t *testing.T) {

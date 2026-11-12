@@ -19,10 +19,9 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/hashing"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/login"
 	"github.com/ryan053857/mygoravel/login/passkey"
 	"github.com/ryan053857/mygoravel/ratelimit"
@@ -181,9 +180,9 @@ func migrations(t *testing.T) fs.FS {
 	return merged
 }
 
-func newEnv(t *testing.T, driver database.Driver, perTenant bool) *env {
+func newEnv(t *testing.T, perTenant bool) *env {
 	t.Helper()
-	db := dbtesting.Open(t, driver, migrations(t))
+	db := dbtest.Open(t, migrations(t))
 	var hc hashing.Config
 	hc.SetDefaults()
 	hc.Driver, hc.Bcrypt.Cost = "bcrypt", 4
@@ -239,73 +238,67 @@ func is(t *testing.T, err, want error) {
 }
 
 func TestPasskey(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newEnv(t, driver, false)
+	ctx := context.Background()
+	e := newEnv(t, false)
 
-		// 用 passkey 注册新账号，然后用它登录。
-		phone := newDevice(t)
-		e.register(t, ctx, phone, identity.Ref{}, "c1")
-		out, err := e.signIn(t, ctx, phone)
-		if err != nil || out.Subject.Ref() != ref("c1") {
-			t.Fatalf("sign in: %+v %v", out, err)
-		}
+	// 用 passkey 注册新账号，然后用它登录。
+	phone := newDevice(t)
+	e.register(t, ctx, phone, identity.Ref{}, "c1")
+	out, err := e.signIn(t, ctx, phone)
+	if err != nil || out.Subject.Ref() != ref("c1") {
+		t.Fatalf("sign in: %+v %v", out, err)
+	}
 
-		// 已登录的账号再添加一个 passkey：已有的 passkey 在选项中被排除，同一个账号用同一个用户句柄。
-		laptop := newDevice(t)
-		c, err := e.passkeys.BeginRegistration(ctx, ref("c1"), "alice@example.com")
-		if err != nil {
-			t.Fatal(err)
-		}
-		o := parse(t, c)
-		if len(o.PublicKey.ExcludeCredentials) != 1 || o.PublicKey.ExcludeCredentials[0].ID != b64.EncodeToString(phone.id) {
-			t.Fatalf("exclusions=%+v", o.PublicKey.ExcludeCredentials)
-		}
-		again, _ := e.passkeys.BeginRegistration(ctx, ref("c1"), "alice@example.com")
-		if parse(t, again).PublicKey.User.ID != o.PublicKey.User.ID {
-			t.Fatal("user handle differs between registrations of the same account")
-		}
-		proof, err := e.passkeys.FinishRegistration(ctx, c.Token, laptop.create(t, c), "MacBook")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := e.realm.Link(ctx, e.db, ref("c1"), proof); err != nil {
-			t.Fatal(err)
-		}
-		if out, err := e.signIn(t, ctx, laptop); err != nil || out.Subject.ID != "c1" {
-			t.Fatalf("laptop: %+v %v", out, err)
-		}
+	// 已登录的账号再添加一个 passkey：已有的 passkey 在选项中被排除，同一个账号用同一个用户句柄。
+	laptop := newDevice(t)
+	c, err := e.passkeys.BeginRegistration(ctx, ref("c1"), "alice@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := parse(t, c)
+	if len(o.PublicKey.ExcludeCredentials) != 1 || o.PublicKey.ExcludeCredentials[0].ID != b64.EncodeToString(phone.id) {
+		t.Fatalf("exclusions=%+v", o.PublicKey.ExcludeCredentials)
+	}
+	again, _ := e.passkeys.BeginRegistration(ctx, ref("c1"), "alice@example.com")
+	if parse(t, again).PublicKey.User.ID != o.PublicKey.User.ID {
+		t.Fatal("user handle differs between registrations of the same account")
+	}
+	proof, err := e.passkeys.FinishRegistration(ctx, c.Token, laptop.create(t, c), "MacBook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.realm.Link(ctx, e.db, ref("c1"), proof); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := e.signIn(t, ctx, laptop); err != nil || out.Subject.ID != "c1" {
+		t.Fatalf("laptop: %+v %v", out, err)
+	}
 
-		list, err := e.passkeys.List(ctx, ref("c1"))
-		if err != nil || len(list) != 2 || list[0].Name != "iPhone" || list[1].Name != "MacBook" || list[0].LastUsedAt.IsZero() {
-			t.Fatalf("list=%+v %v", list, err)
-		}
-		if err := e.passkeys.Rename(ctx, ref("c1"), list[1].ID, " 公司电脑 "); err != nil {
-			t.Fatal(err)
-		}
-		is(t, e.passkeys.Rename(ctx, ref("c2"), list[1].ID, "x"), passkey.ErrNotFound)
+	list, err := e.passkeys.List(ctx, ref("c1"))
+	if err != nil || len(list) != 2 || list[0].Name != "iPhone" || list[1].Name != "MacBook" || list[0].LastUsedAt.IsZero() {
+		t.Fatalf("list=%+v %v", list, err)
+	}
+	if err := e.passkeys.Rename(ctx, ref("c1"), list[1].ID, " 公司电脑 "); err != nil {
+		t.Fatal(err)
+	}
+	is(t, e.passkeys.Rename(ctx, ref("c2"), list[1].ID, "x"), passkey.ErrNotFound)
 
-		// 移除：设备上的 passkey 不能再登录；最后一种登录方式不能移除。
-		is(t, e.passkeys.Remove(ctx, e.db, ref("c2"), list[1].ID), passkey.ErrNotFound)
-		if err := e.passkeys.Remove(ctx, e.db, ref("c1"), list[1].ID); err != nil {
-			t.Fatal(err)
-		}
-		_, err = e.signIn(t, ctx, laptop)
-		is(t, err, passkey.ErrInvalid)
-		is(t, e.passkeys.Remove(ctx, e.db, ref("c1"), list[0].ID), login.ErrLastIdentifier)
-		if list, _ := e.passkeys.List(ctx, ref("c1")); len(list) != 1 {
-			t.Fatalf("after remove: %+v", list)
-		}
-	})
+	// 移除：设备上的 passkey 不能再登录；最后一种登录方式不能移除。
+	is(t, e.passkeys.Remove(ctx, e.db, ref("c2"), list[1].ID), passkey.ErrNotFound)
+	if err := e.passkeys.Remove(ctx, e.db, ref("c1"), list[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.signIn(t, ctx, laptop)
+	is(t, err, passkey.ErrInvalid)
+	is(t, e.passkeys.Remove(ctx, e.db, ref("c1"), list[0].ID), login.ErrLastIdentifier)
+	if list, _ := e.passkeys.List(ctx, ref("c1")); len(list) != 1 {
+		t.Fatalf("after remove: %+v", list)
+	}
 }
 
 func TestPasskeyRejects(t *testing.T) {
-	dbtesting.ForEach(t, testRejects)
-}
-
-func testRejects(t *testing.T, driver database.Driver) {
 	ctx := context.Background()
-	e := newEnv(t, driver, false)
+	e := newEnv(t, false)
 	d := newDevice(t)
 	e.register(t, ctx, d, identity.Ref{}, "c1")
 
@@ -360,7 +353,7 @@ func testRejects(t *testing.T, driver database.Driver) {
 func TestPasskeyTenants(t *testing.T) {
 	acme := identity.WithTenant(context.Background(), "acme")
 	globex := identity.WithTenant(context.Background(), "globex")
-	e := newEnv(t, dbtesting.Drivers()[0], true)
+	e := newEnv(t, true)
 	d := newDevice(t)
 	e.register(t, acme, d, identity.Ref{}, "acme:1")
 	if out, err := e.signIn(t, acme, d); err != nil || out.Subject.Tenant != "acme" {
@@ -375,7 +368,7 @@ func TestPasskeyTenants(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	db := dbtesting.Open(t, dbtesting.Drivers()[0], migrations(t))
+	db := dbtest.Open(t, migrations(t))
 	c := crypt.New(crypt.Config{Key: appKey})
 	if _, err := passkey.New(db, nil, c, passkey.Config{RPID: rpID, Origins: []string{origin}}); err == nil {
 		t.Fatal("nil realm accepted")

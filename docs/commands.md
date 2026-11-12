@@ -47,7 +47,6 @@ import (
     "github.com/ryan053857/mygoravel/command/migratecmd"
     "github.com/ryan053857/mygoravel/command/httpcmd"
     "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/database/postgres"
 )
 
 // New 返回应用的根命令。
@@ -58,7 +57,7 @@ func New() *cobra.Command {
         command.Run("work", "处理队列任务", bootstrap.Work),
         command.Run("schedule", "执行定时任务", bootstrap.Schedule),
         command.Run("start", "在一个进程中运行 HTTP 服务、队列和定时任务", bootstrap.Start),
-        migratecmd.New(migrations.FS, postgres.Driver, dbConfig),
+        migratecmd.New(migrations.FS, dbConfig),
         httpcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
         httpcmd.Routes(bootstrap.DocRouter),
         command.Config[settings.Config](),
@@ -118,7 +117,7 @@ func main() {
 root := command.Root("worker", "订单事件消费者")
 root.AddCommand(
     command.Run("run", "消费订单事件", consumer.Run),
-    migratecmd.New(migrations.FS, postgres.Driver, dbConfig),
+    migratecmd.New(migrations.FS, dbConfig),
 )
 ```
 
@@ -309,7 +308,7 @@ root.AddCommand(&cobra.Command{
         if err != nil {
             return err
         }
-        db, err := database.Open(cmd.Context(), postgres.Driver, cfg.Database)
+        db, err := database.Open(cmd.Context(), cfg.Database)
         if err != nil {
             return err // 连不上时是 database.ErrUnavailable，以 ExitUnavailable 退出
         }

@@ -15,7 +15,7 @@
 <a id="introduction"></a>
 ## 简介
 
-JSON API 使用 Bearer token [认证](authentication.md)。`apitoken` 包把 token 存在数据库中（支持 PostgreSQL、SQLite 和 MySQL），提供签发、校验、滑动过期和撤销，校验函数可以直接交给 `rest.RequireBearer`。
+JSON API 使用 Bearer token [认证](authentication.md)。`apitoken` 包把 token 存在数据库中，提供签发、校验、滑动过期和撤销，校验函数可以直接交给 `rest.RequireBearer`。
 
 token 分为两类：
 
@@ -57,7 +57,7 @@ api_token:
 `apitoken.NewStore` 接收应用的 `*bun.DB` 和配置。使用前先发布 `api_tokens` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "apitoken", FS: apitoken.Migrations()},
 ))
 ```

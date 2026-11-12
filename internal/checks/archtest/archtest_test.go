@@ -90,7 +90,7 @@ var rules = map[string]rule{
 	"search/gse":       {layerFeature, []string{"search"}},
 	"search/searchcmd": {layerFeature, []string{"command", "database", "identity", "operation"}},
 	"ai":               {layerFeature, nil},
-	"ai/chat":          {layerFeature, []string{"ai", "broadcast", "database", "errorx", "httpx", "lock", "logging"}},
+	"ai/chat":          {layerFeature, []string{"ai", "broadcast", "errorx", "httpx", "lock", "logging"}},
 	"login":            {layerFeature, []string{"crypt", "errorx", "hashing", "identity", "ratelimit"}},
 	"login/oauth":      {layerFeature, []string{"errorx", "login"}},
 	"login/passkey":    {layerFeature, []string{"crypt", "errorx", "identity", "login"}},
@@ -247,7 +247,6 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/httpx/rest", module + "/errorx", true},
 		{module + "/database/dbtest", module + "/database/migrate", true},
 		{module + "/database", module + "/config", false},
-		{module + "/internal/dbtesting", module + "/database/sqlite", true},
 		{module + "/config", "go.yaml.in/yaml/v4", true},
 		{module + "/errorx", module + "/httpx/rest", false},
 		{module + "/httpx", module + "/command", false},
@@ -286,7 +285,6 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/command/devcmd", module + "/command", true},
 		{module + "/ai/openai", module + "/ai", true},
 		{module + "/ai", module + "/httpx", false},
-		{module + "/ai/chat/postgres", module + "/database", true},
 		{module + "/web", module + "/filesystem", false},
 		{module + "/web/upload", module + "/filesystem", true},
 		{module + "/web/ui", module + "/web", true},
@@ -484,47 +482,6 @@ func TestCommandCoreIsLight(t *testing.T) {
 		for _, heavy := range []string{module + "/httpx", module + "/database", "github.com/danielgtaylor/huma", "github.com/jackc/pgx", "github.com/pressly/goose"} {
 			if under(dep, heavy) {
 				t.Errorf("command depends on %s", dep)
-			}
-		}
-	}
-}
-
-// TestDatabaseCoreDoesNotLinkDrivers 确保应用只链接自己 import 的数据库驱动：
-// 核心包、迁移、迁移命令与测试用的 dbtest 不依赖任何驱动，各驱动子包也互不依赖。
-func TestDatabaseCoreDoesNotLinkDrivers(t *testing.T) {
-	drivers := map[string]string{
-		"postgres": "github.com/jackc/pgx",
-		"sqlite":   "modernc.org/sqlite",
-		"mysql":    "github.com/go-sql-driver/mysql",
-	}
-	all := []string{drivers["postgres"], drivers["sqlite"], drivers["mysql"]}
-	checks := map[string][]string{
-		module + "/database":           all,
-		module + "/database/migrate":   all,
-		module + "/database/dbtest":    all,
-		module + "/command/migratecmd": all,
-		module + "/ai/chat":            all,
-	}
-	// 各驱动子包和 AI 对话存储的同名子包只链接自己的驱动。
-	for name, own := range drivers {
-		for _, other := range all {
-			if other != own {
-				for _, pkg := range []string{module + "/database/" + name, module + "/ai/chat/" + name} {
-					checks[pkg] = append(checks[pkg], other)
-				}
-			}
-		}
-	}
-	for pkg, forbidden := range checks {
-		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
-		if err != nil {
-			t.Fatalf("go list: %v\n%s", err, out)
-		}
-		for _, dep := range strings.Fields(string(out)) {
-			for _, driver := range forbidden {
-				if under(dep, driver) {
-					t.Errorf("%s depends on %s", pkg, dep)
-				}
 			}
 		}
 	}

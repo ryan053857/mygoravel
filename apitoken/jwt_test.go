@@ -19,12 +19,10 @@ import (
 
 	"github.com/ryan053857/mygoravel/apitoken"
 	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
 var appKey = crypt.GenerateKey()
@@ -34,9 +32,9 @@ func hmacKeys(key string, previous ...string) apitoken.Keys {
 }
 
 // newJWT 用 testConfig 的 Store 和 appKey 派生的 HMAC 密钥创建 JWT。
-func newJWT(t *testing.T, driver database.Driver, cfg apitoken.JWTConfig) (*apitoken.JWT, *apitoken.Store) {
+func newJWT(t *testing.T, cfg apitoken.JWTConfig) (*apitoken.JWT, *apitoken.Store) {
 	t.Helper()
-	s := newStore(t, driver)
+	s := newStore(t)
 	cfg.Keys = hmacKeys(appKey)
 	return apitoken.NewJWT(s, cfg), s
 }
@@ -69,132 +67,128 @@ func recheck(j *apitoken.JWT, was identity.Subject, token string) error {
 }
 
 func TestJWTLoginAndValidate(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		synctest.Test(t, func(t *testing.T) {
-			ctx := context.Background()
-			j, s := newJWT(t, driver, apitoken.JWTConfig{})
-			staff := identity.Ref{Type: "staff", ID: "s1"}
-			sub := identity.Subject{Type: "customer", ID: "c:42", Tenant: "acme", Impersonator: staff}
-			p := jwtLogin(t, j, sub, apitoken.Device{IP: "203.0.113.7"})
-			if p.Access == "" || p.Refresh == "" || !p.ExpiresAt.Equal(time.Now().Add(10*time.Minute)) {
-				t.Fatalf("pair=%+v", p)
-			}
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		j, s := newJWT(t, apitoken.JWTConfig{})
+		staff := identity.Ref{Type: "staff", ID: "s1"}
+		sub := identity.Subject{Type: "customer", ID: "c:42", Tenant: "acme", Impersonator: staff}
+		p := jwtLogin(t, j, sub, apitoken.Device{IP: "203.0.113.7"})
+		if p.Access == "" || p.Refresh == "" || !p.ExpiresAt.Equal(time.Now().Add(10*time.Minute)) {
+			t.Fatalf("pair=%+v", p)
+		}
 
-			got, ok := access(t, j, p.Access)
-			if !ok || got.Type != "customer" || got.ID != "c:42" || got.Tenant != "acme" || got.Impersonator != staff ||
-				got.Method != "bearer" || got.Credential == "" || got.Scopes != nil || got.Permissions != nil {
-				t.Fatalf("subject=%+v ok=%v", got, ok)
-			}
-			list, err := s.List(ctx, got)
-			if err != nil || len(list) != 1 || list[0].ID != got.Credential || !list[0].Current ||
-				list[0].Kind != apitoken.KindRefresh || list[0].IP != "203.0.113.7" {
-				t.Fatalf("list=%+v err=%v", list, err)
-			}
+		got, ok := access(t, j, p.Access)
+		if !ok || got.Type != "customer" || got.ID != "c:42" || got.Tenant != "acme" || got.Impersonator != staff ||
+			got.Method != "bearer" || got.Credential == "" || got.Scopes != nil || got.Permissions != nil {
+			t.Fatalf("subject=%+v ok=%v", got, ok)
+		}
+		list, err := s.List(ctx, got)
+		if err != nil || len(list) != 1 || list[0].ID != got.Credential || !list[0].Current ||
+			list[0].Kind != apitoken.KindRefresh || list[0].IP != "203.0.113.7" {
+			t.Fatalf("list=%+v err=%v", list, err)
+		}
 
-			// refresh token 不能作为 Bearer 凭据；不是 JWT 的 token 交给 Store.Validate，同一个 API 也接受个人访问令牌。
-			if _, ok := valid(t, s, p.Refresh); ok {
-				t.Fatal("refresh token accepted as an opaque bearer token")
+		// refresh token 不能作为 Bearer 凭据；不是 JWT 的 token 交给 Store.Validate，同一个 API 也接受个人访问令牌。
+		if _, ok := valid(t, s, p.Refresh); ok {
+			t.Fatal("refresh token accepted as an opaque bearer token")
+		}
+		opaque := login(t, s, alice, apitoken.Device{})
+		personal := create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
+		for token, want := range map[string]identity.Subject{opaque: {Type: "user", ID: "alice"}, personal: {Type: "user", ID: "alice", Scopes: read}} {
+			if got, ok := access(t, j, token); !ok || got.Ref() != want.Ref() || len(got.Scopes) != len(want.Scopes) {
+				t.Fatalf("opaque token: %+v ok=%v", got, ok)
 			}
-			opaque := login(t, s, alice, apitoken.Device{})
-			personal := create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
-			for token, want := range map[string]identity.Subject{opaque: {Type: "user", ID: "alice"}, personal: {Type: "user", ID: "alice", Scopes: read}} {
-				if got, ok := access(t, j, token); !ok || got.Ref() != want.Ref() || len(got.Scopes) != len(want.Scopes) {
-					t.Fatalf("opaque token: %+v ok=%v", got, ok)
-				}
+		}
+		for _, bad := range []string{"", "bogus", "a.b.c", p.Refresh, p.Access + "x", p.Access[:len(p.Access)-2]} {
+			if _, ok := access(t, j, bad); ok {
+				t.Fatalf("token %q accepted as access token", bad)
 			}
-			for _, bad := range []string{"", "bogus", "a.b.c", p.Refresh, p.Access + "x", p.Access[:len(p.Access)-2]} {
-				if _, ok := access(t, j, bad); ok {
-					t.Fatalf("token %q accepted as access token", bad)
-				}
-			}
-			if _, err := j.Refresh(ctx, opaque); !errors.Is(err, apitoken.ErrInvalid) {
-				t.Fatalf("opaque token refreshed: %v", err)
-			}
+		}
+		if _, err := j.Refresh(ctx, opaque); !errors.Is(err, apitoken.ErrInvalid) {
+			t.Fatalf("opaque token refreshed: %v", err)
+		}
 
-			// access token 过期后失效（允许 5 秒时钟偏差）。
-			time.Sleep(10*time.Minute + 6*time.Second)
-			if _, err := j.Validate(ctx, p.Access); !errors.Is(err, apitoken.ErrInvalid) || !errors.Is(err, identity.ErrExpired) {
-				t.Fatalf("expired access token: %v", err)
-			}
-			if _, err := j.Validate(ctx, p.Access+"x"); !errors.Is(err, apitoken.ErrInvalid) || errors.Is(err, identity.ErrExpired) {
-				t.Fatalf("tampered access token: %v", err)
-			}
-			// 长连接复查由登录本身决定：登录还在，过期的 access token 不会让连接断开。
-			if err := recheck(j, got, p.Access); err != nil {
-				t.Fatalf("recheck of a live login: %v", err)
-			}
-		})
+		// access token 过期后失效（允许 5 秒时钟偏差）。
+		time.Sleep(10*time.Minute + 6*time.Second)
+		if _, err := j.Validate(ctx, p.Access); !errors.Is(err, apitoken.ErrInvalid) || !errors.Is(err, identity.ErrExpired) {
+			t.Fatalf("expired access token: %v", err)
+		}
+		if _, err := j.Validate(ctx, p.Access+"x"); !errors.Is(err, apitoken.ErrInvalid) || errors.Is(err, identity.ErrExpired) {
+			t.Fatalf("tampered access token: %v", err)
+		}
+		// 长连接复查由登录本身决定：登录还在，过期的 access token 不会让连接断开。
+		if err := recheck(j, got, p.Access); err != nil {
+			t.Fatalf("recheck of a live login: %v", err)
+		}
 	})
 }
 
 func TestJWTRefresh(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		synctest.Test(t, func(t *testing.T) {
-			ctx := context.Background()
-			var reused []apitoken.Token
-			j, s := newJWT(t, driver, apitoken.JWTConfig{
-				OnReuse: func(_ context.Context, tok apitoken.Token) { reused = append(reused, tok) },
-			})
-			first := jwtLogin(t, j, alice, apitoken.Device{})
-			sub, _ := access(t, j, first.Access)
-
-			// 一直在用：每 50 分钟刷新一次，越过最初的空闲截止时间仍然有效，刷新时轮换 refresh token。
-			cur := first
-			for range 3 {
-				time.Sleep(50 * time.Minute)
-				next, err := j.Refresh(ctx, cur.Refresh)
-				if err != nil || next.Refresh == "" || next.Refresh == cur.Refresh {
-					t.Fatalf("refresh: %+v %v", next, err)
-				}
-				got, ok := access(t, j, next.Access)
-				if !ok || got.Credential != sub.Credential {
-					t.Fatalf("refreshed subject=%+v", got)
-				}
-				cur = next
-			}
-			list, _ := s.List(ctx, sub)
-			if len(list) != 1 || !list[0].LastUsedAt.Equal(time.Now()) || !list[0].ExpiresAt.Equal(time.Now().Add(time.Hour)) {
-				t.Fatalf("list=%+v", list)
-			}
-
-			// 宽限期内重复使用上一个 token：只得到新的 access token。
-			time.Sleep(20 * time.Second)
-			prev := cur
-			cur, _ = j.Refresh(ctx, prev.Refresh)
-			again, err := j.Refresh(ctx, prev.Refresh)
-			if err != nil || again.Refresh != "" || again.Access == "" {
-				t.Fatalf("grace refresh: %+v %v", again, err)
-			}
-			// 超过宽限期再用上一个 token：视为被盗，撤销整个登录，当前的 refresh token 也失效。
-			time.Sleep(31 * time.Second)
-			if _, err := j.Refresh(ctx, prev.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
-				t.Fatalf("reused token: %v", err)
-			}
-			if len(reused) != 1 || reused[0].ID != sub.Credential {
-				t.Fatalf("OnReuse=%+v", reused)
-			}
-			if _, err := j.Refresh(ctx, cur.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
-				t.Fatalf("login survived reuse: %v", err)
-			}
-			// 更早的 token 只是无效，不再触发 OnReuse。
-			if _, err := j.Refresh(ctx, first.Refresh); !errors.Is(err, apitoken.ErrInvalid) || len(reused) != 1 {
-				t.Fatalf("old token: %v reused=%d", err, len(reused))
-			}
-
-			// 空闲超时后 refresh token 失效。
-			idle := jwtLogin(t, j, alice, apitoken.Device{})
-			time.Sleep(time.Hour)
-			if _, err := j.Refresh(ctx, idle.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
-				t.Fatalf("idle refresh: %v", err)
-			}
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		var reused []apitoken.Token
+		j, s := newJWT(t, apitoken.JWTConfig{
+			OnReuse: func(_ context.Context, tok apitoken.Token) { reused = append(reused, tok) },
 		})
+		first := jwtLogin(t, j, alice, apitoken.Device{})
+		sub, _ := access(t, j, first.Access)
+
+		// 一直在用：每 50 分钟刷新一次，越过最初的空闲截止时间仍然有效，刷新时轮换 refresh token。
+		cur := first
+		for range 3 {
+			time.Sleep(50 * time.Minute)
+			next, err := j.Refresh(ctx, cur.Refresh)
+			if err != nil || next.Refresh == "" || next.Refresh == cur.Refresh {
+				t.Fatalf("refresh: %+v %v", next, err)
+			}
+			got, ok := access(t, j, next.Access)
+			if !ok || got.Credential != sub.Credential {
+				t.Fatalf("refreshed subject=%+v", got)
+			}
+			cur = next
+		}
+		list, _ := s.List(ctx, sub)
+		if len(list) != 1 || !list[0].LastUsedAt.Equal(time.Now()) || !list[0].ExpiresAt.Equal(time.Now().Add(time.Hour)) {
+			t.Fatalf("list=%+v", list)
+		}
+
+		// 宽限期内重复使用上一个 token：只得到新的 access token。
+		time.Sleep(20 * time.Second)
+		prev := cur
+		cur, _ = j.Refresh(ctx, prev.Refresh)
+		again, err := j.Refresh(ctx, prev.Refresh)
+		if err != nil || again.Refresh != "" || again.Access == "" {
+			t.Fatalf("grace refresh: %+v %v", again, err)
+		}
+		// 超过宽限期再用上一个 token：视为被盗，撤销整个登录，当前的 refresh token 也失效。
+		time.Sleep(31 * time.Second)
+		if _, err := j.Refresh(ctx, prev.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
+			t.Fatalf("reused token: %v", err)
+		}
+		if len(reused) != 1 || reused[0].ID != sub.Credential {
+			t.Fatalf("OnReuse=%+v", reused)
+		}
+		if _, err := j.Refresh(ctx, cur.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
+			t.Fatalf("login survived reuse: %v", err)
+		}
+		// 更早的 token 只是无效，不再触发 OnReuse。
+		if _, err := j.Refresh(ctx, first.Refresh); !errors.Is(err, apitoken.ErrInvalid) || len(reused) != 1 {
+			t.Fatalf("old token: %v reused=%d", err, len(reused))
+		}
+
+		// 空闲超时后 refresh token 失效。
+		idle := jwtLogin(t, j, alice, apitoken.Device{})
+		time.Sleep(time.Hour)
+		if _, err := j.Refresh(ctx, idle.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
+			t.Fatalf("idle refresh: %v", err)
+		}
 	})
 }
 
 // access token 的过期时间不晚于登录本身。
 func TestJWTAccessCappedByLogin(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		short := apitoken.NewStore(dbtesting.Open(t, sqlite.Driver, apitoken.Migrations()), apitoken.Config{Lifetime: 15 * time.Minute})
+		short := apitoken.NewStore(dbtest.Open(t, apitoken.Migrations()), apitoken.Config{Lifetime: 15 * time.Minute})
 		j := apitoken.NewJWT(short, apitoken.JWTConfig{Keys: hmacKeys(appKey)})
 		p := jwtLogin(t, j, alice, apitoken.Device{})
 		time.Sleep(10 * time.Minute)
@@ -207,80 +201,76 @@ func TestJWTAccessCappedByLogin(t *testing.T) {
 
 // 并发刷新同一个 refresh token：只有一个得到新的 refresh token，其余在宽限期内只得到 access token。
 func TestJWTConcurrentRefresh(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		j, _ := newJWT(t, driver, apitoken.JWTConfig{})
-		p := jwtLogin(t, j, alice, apitoken.Device{})
-		const n = 8
-		var (
-			wg      sync.WaitGroup
-			mu      sync.Mutex
-			rotated int
-			errs    []error
-		)
-		for range n {
-			wg.Go(func() {
-				next, err := j.Refresh(context.Background(), p.Refresh)
-				mu.Lock()
-				defer mu.Unlock()
-				switch {
-				case err != nil:
-					errs = append(errs, err)
-				case next.Access == "":
-					errs = append(errs, errors.New("no access token"))
-				case next.Refresh != "":
-					rotated++
-				}
-			})
-		}
-		wg.Wait()
-		if rotated != 1 || len(errs) != 0 {
-			t.Fatalf("rotated=%d errs=%v", rotated, errs)
-		}
-	})
+	j, _ := newJWT(t, apitoken.JWTConfig{})
+	p := jwtLogin(t, j, alice, apitoken.Device{})
+	const n = 8
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		rotated int
+		errs    []error
+	)
+	for range n {
+		wg.Go(func() {
+			next, err := j.Refresh(context.Background(), p.Refresh)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err != nil:
+				errs = append(errs, err)
+			case next.Access == "":
+				errs = append(errs, errors.New("no access token"))
+			case next.Refresh != "":
+				rotated++
+			}
+		})
+	}
+	wg.Wait()
+	if rotated != 1 || len(errs) != 0 {
+		t.Fatalf("rotated=%d errs=%v", rotated, errs)
+	}
 }
 
 func TestJWTRevoke(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		j, s := newJWT(t, driver, apitoken.JWTConfig{})
-		a := jwtLogin(t, j, alice, apitoken.Device{})
-		b := jwtLogin(t, j, alice, apitoken.Device{})
-		opaque := login(t, s, alice, apitoken.Device{})
-		sub, _ := access(t, j, a.Access)
+	ctx := context.Background()
+	j, s := newJWT(t, apitoken.JWTConfig{})
+	a := jwtLogin(t, j, alice, apitoken.Device{})
+	b := jwtLogin(t, j, alice, apitoken.Device{})
+	opaque := login(t, s, alice, apitoken.Device{})
+	sub, _ := access(t, j, a.Access)
 
-		// 退出其他设备：JWT 模式的登录和不透明 token 一起撤销。
-		if n, err := s.RevokeOthers(ctx, sub); err != nil || n != 2 {
-			t.Fatalf("revoke others: %d %v", n, err)
-		}
-		if _, err := j.Refresh(ctx, b.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
-			t.Fatalf("other device refreshed: %v", err)
-		}
-		if _, ok := valid(t, s, opaque); ok {
-			t.Fatal("opaque token survived")
-		}
-		// 登出当前设备：refresh token 立即失效，已签发的 access token 在有效期内仍可用，
-		// 但长连接复查时查询登录，连接随之结束。
-		if err := recheck(j, sub, a.Access); err != nil {
-			t.Fatalf("recheck before revoke: %v", err)
-		}
-		if err := s.Revoke(ctx, sub, sub.Credential); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := j.Refresh(ctx, a.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
-			t.Fatalf("revoked refresh: %v", err)
-		}
-		if _, ok := access(t, j, a.Access); !ok {
-			t.Fatal("access token is expected to stay valid until it expires")
-		}
-		if err := recheck(j, sub, a.Access); !errors.Is(err, identity.ErrUnauthenticated) {
-			t.Fatalf("recheck after revoke: %v", err)
-		}
-	})
+	// 退出其他设备：JWT 模式的登录和不透明 token 一起撤销。
+	if n, err := s.RevokeOthers(ctx, sub); err != nil || n != 2 {
+		t.Fatalf("revoke others: %d %v", n, err)
+	}
+	if _, err := j.Refresh(ctx, b.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
+		t.Fatalf("other device refreshed: %v", err)
+	}
+	if _, ok := valid(t, s, opaque); ok {
+		t.Fatal("opaque token survived")
+	}
+	// 登出当前设备：refresh token 立即失效，已签发的 access token 在有效期内仍可用，
+	// 但长连接复查时查询登录，连接随之结束。
+	if err := recheck(j, sub, a.Access); err != nil {
+		t.Fatalf("recheck before revoke: %v", err)
+	}
+	if err := s.Revoke(ctx, sub, sub.Credential); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.Refresh(ctx, a.Refresh); !errors.Is(err, apitoken.ErrInvalid) {
+		t.Fatalf("revoked refresh: %v", err)
+	}
+	if _, ok := access(t, j, a.Access); !ok {
+		t.Fatal("access token is expected to stay valid until it expires")
+	}
+	if err := recheck(j, sub, a.Access); !errors.Is(err, identity.ErrUnauthenticated) {
+		t.Fatalf("recheck after revoke: %v", err)
+	}
 }
 
 func TestJWTKeys(t *testing.T) {
 	oldKey, newKey := crypt.GenerateKey(), crypt.GenerateKey()
-	s := newStore(t, sqlite.Driver)
+	s := newStore(t)
 	old := apitoken.NewJWT(s, apitoken.JWTConfig{Keys: hmacKeys(oldKey)})
 	token := jwtLogin(t, old, alice, apitoken.Device{}).Access
 
@@ -337,7 +327,7 @@ func TestJWTKeys(t *testing.T) {
 }
 
 func TestNewJWTPanics(t *testing.T) {
-	s := newStore(t, sqlite.Driver)
+	s := newStore(t)
 	keys := hmacKeys(appKey)
 	for name, build := range map[string]func(){
 		"nil store":    func() { apitoken.NewJWT(nil, apitoken.JWTConfig{Keys: keys}) },
@@ -360,7 +350,7 @@ func TestNewJWTPanics(t *testing.T) {
 
 // TestJWTRequireBearer 确认 JWT.Validate 可以直接作为 rest.RequireBearer 的校验器，权限仍由 Resolver 加载。
 func TestJWTRequireBearer(t *testing.T) {
-	j, _ := newJWT(t, sqlite.Driver, apitoken.JWTConfig{})
+	j, _ := newJWT(t, apitoken.JWTConfig{})
 	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
 		if sub.ID == "alice" {
 			sub.Permissions = []string{"articles:read"}
@@ -387,7 +377,7 @@ func TestJWTRequireBearer(t *testing.T) {
 
 // 通过 RequireBearer 建立的长连接：撤销登录后复查失败，连接应当结束。
 func TestJWTRequireBearerRecheck(t *testing.T) {
-	j, s := newJWT(t, sqlite.Driver, apitoken.JWTConfig{})
+	j, s := newJWT(t, apitoken.JWTConfig{})
 	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}})
 	op := huma.Operation{OperationID: "events", Method: http.MethodGet, Path: "/events"}
 	rest.RequireBearer(api, j.Validate)(&op)

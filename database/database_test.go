@@ -10,8 +10,6 @@ import (
 
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/migrate"
-	"github.com/ryan053857/mygoravel/database/postgres"
-	"github.com/ryan053857/mygoravel/database/sqlite"
 	"github.com/ryan053857/mygoravel/errorx"
 )
 
@@ -81,7 +79,7 @@ func TestOpenRunsConfigurationChecks(t *testing.T) {
 		{DSN: "postgres://localhost/db", ConnMaxLifetime: -1},
 	} {
 		validation := cfg.Validate()
-		db, err := database.Open(context.Background(), postgres.Driver, cfg)
+		db, err := database.Open(context.Background(), cfg)
 		if db != nil || validation == nil || err == nil || err.Error() != "database: "+validation.Error() {
 			t.Fatalf("validation=%v open=%v db=%v", validation, err, db)
 		}
@@ -92,7 +90,7 @@ func TestOpenReportsUnreachableDatabaseAsUnavailable(t *testing.T) {
 	// 端口 1 上没有 PostgreSQL，连接会立即被拒绝
 	cfg := database.DefaultConfig()
 	cfg.DSN = "postgres://postgres@127.0.0.1:1/blog?sslmode=disable&connect_timeout=2"
-	db, err := database.Open(context.Background(), postgres.Driver, cfg)
+	db, err := database.Open(context.Background(), cfg)
 	if db != nil || !errors.Is(err, database.ErrUnavailable) || errorx.KindOf(err) != errorx.Unavailable {
 		t.Fatalf("db=%v err=%v kind=%v", db, err, errorx.KindOf(err))
 	}
@@ -101,24 +99,10 @@ func TestOpenReportsUnreachableDatabaseAsUnavailable(t *testing.T) {
 	}
 }
 
-func TestDriversRejectInvalidDSN(t *testing.T) {
-	for _, tc := range []struct {
-		driver database.Driver
-		dsn    string
-	}{
-		{postgres.Driver, "postgres://user:pass@host:not-a-port/db"},
-		{sqlite.Driver, ":memory:"},
-		{sqlite.Driver, "file:app.db"},
-		{sqlite.Driver, "app.db?_pragma=foreign_keys(0)"},
-		{sqlite.Driver, filepath.Join(os.TempDir(), "missing-dir-for-test", "app.db")},
-	} {
-		db, err := database.Open(context.Background(), tc.driver, database.Config{DSN: tc.dsn})
-		if db != nil || err == nil || !strings.HasPrefix(err.Error(), "database: "+tc.driver.Name()+": ") {
-			t.Errorf("%s %q: db=%v err=%v", tc.driver.Name(), tc.dsn, db, err)
-		}
-	}
-	if _, err := database.Open(context.Background(), nil, database.Config{DSN: "x"}); err == nil {
-		t.Error("nil driver accepted")
+func TestOpenRejectsInvalidDSN(t *testing.T) {
+	db, err := database.Open(context.Background(), database.Config{DSN: "postgres://user:pass@host:not-a-port/db"})
+	if db != nil || err == nil || !strings.HasPrefix(err.Error(), "database: invalid dsn: ") {
+		t.Errorf("db=%v err=%v", db, err)
 	}
 }
 

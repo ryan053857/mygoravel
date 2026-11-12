@@ -127,11 +127,11 @@ return web.SSE(w, r, func(s *web.Stream) error {
 
 | 后端 | 消息经由 | 适合 |
 | --- | --- | --- |
-| `broadcast.NewDatabase(db, logger)` | `broadcasts` 表，PostgreSQL、MySQL、SQLite 通用 | 多实例部署，不想引入其他组件 |
+| `broadcast.NewDatabase(db, logger)` | `broadcasts` 表 | 多实例部署，不想引入其他组件 |
 | `redisbroadcast.New(rdb, channel)` | Redis Pub/Sub | 已经使用 [Redis](redis.md) |
 | `natsbroadcast.New(nc, prefix)` | NATS 核心发布订阅 | 已经使用 NATS，或者消息量很大 |
 
-单机部署也要经由后端传递：[不停机升级](deployment.md#upgrade-overlap)或滚动发布时新旧进程短暂并存，旧进程中还没结束的请求和任务发布的事件，要送到已经重连到新进程的浏览器。数据库后端在 SQLite 上同样可用。
+单机部署也要经由后端传递：[不停机升级](deployment.md#upgrade-overlap)或滚动发布时新旧进程短暂并存，旧进程中还没结束的请求和任务发布的事件，要送到已经重连到新进程的浏览器。
 
 <a id="database-backend"></a>
 ### 数据库
@@ -139,7 +139,7 @@ return web.SSE(w, r, func(s *web.Stream) error {
 `NewDatabase` 把每条消息插入 `broadcasts` 表，并立即投递给本进程中的订阅；其他实例每 100 毫秒读取新的行，所以跨进程的消息最多延迟一个轮询间隔。同一个进程发布的消息按发布顺序到达；不同进程同时发布的消息没有确定的先后。使用前先发布迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "broadcast", FS: broadcast.Migrations()},
 ))
 ```

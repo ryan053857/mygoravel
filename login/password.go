@@ -95,7 +95,7 @@ func (r *Realm) storePassword(ctx context.Context, db bun.IDB, subjectID, passwo
 		return errors.Wrap(err, "login: hash password")
 	}
 	row := &passwordRow{SubjectType: string(r.opts.Type), SubjectID: subjectID, Hash: hash, ChangedAt: r.now().UTC()}
-	_, err = upsert(db, db.NewInsert().Model(row), "subject_type, subject_id", "hash", "changed_at").Exec(ctx)
+	_, err = upsert(db.NewInsert().Model(row), "subject_type, subject_id", "hash", "changed_at").Exec(ctx)
 	return errors.Wrap(err, "login: save password")
 }
 

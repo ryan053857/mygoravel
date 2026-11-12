@@ -80,7 +80,6 @@ func (ix *Index[D]) Search(ctx context.Context, db bun.IDB, q Query) (*Result[D]
 	if p.PerPage < 1 {
 		p.PerPage = DefaultPerPage
 	}
-	st := storeOf(db)
 	terms := parseQuery(ix.tok, q.Text)
 	text := len(terms.terms) > 0
 
@@ -90,9 +89,9 @@ func (ix *Index[D]) Search(ctx context.Context, db bun.IDB, q Query) (*Result[D]
 		" AND e.tenant = ?", ix.name, ix.name, q.Tenant)
 	columns, scoreArgs := "e.doc_key, e.doc", []any(nil)
 	if text {
-		cond, condArgs, score, sArgs := st.match(terms)
-		where.add(" AND "+cond, condArgs...)
-		columns, scoreArgs = columns+", "+score+" AS score", sArgs
+		query := tsquery(terms)
+		where.add(" AND e.tokens @@ ?::tsquery", query)
+		columns, scoreArgs = columns+", ts_rank(e.tokens, ?::tsquery) AS score", []any{query}
 	}
 	if q.Filter != nil {
 		where.add(" AND ")
@@ -100,7 +99,7 @@ func (ix *Index[D]) Search(ctx context.Context, db bun.IDB, q Query) (*Result[D]
 			return nil, err
 		}
 	}
-	from := st.from(text)
+	const from = "search_entries AS e"
 
 	var order sqlExpr
 	for _, s := range q.Sort {

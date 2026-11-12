@@ -17,8 +17,7 @@ import (
 	"github.com/ryan053857/mygoravel/ai/chat/chattest"
 	"github.com/ryan053857/mygoravel/broadcast"
 	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/lock/locktest"
 )
@@ -60,16 +59,14 @@ func TestClusterMirrorsRunOnOtherInstance(t *testing.T) {
 
 // TestClusterOnDatabase 用数据库广播和数据库锁运行同一个场景，消息经由轮询的 broadcasts 表送达。
 func TestClusterOnDatabase(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		bdb := dbtesting.Open(t, driver, broadcast.Migrations())
-		ldb := dbtesting.Open(t, driver, lock.Migrations())
-		m := chattest.NewModel(
-			chattest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []chattest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
-			chattest.Text("都 查好了"),
-		)
-		a, b := twoInstancesOn(t, m, []tool.Tool{getOrder(1500 * time.Millisecond)}, broadcast.NewDatabase(bdb, nil), lock.NewDatabase(ldb))
-		mirrorScenario(t, m, a, b)
-	})
+	bdb := dbtest.Open(t, broadcast.Migrations())
+	ldb := dbtest.Open(t, lock.Migrations())
+	m := chattest.NewModel(
+		chattest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []chattest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
+		chattest.Text("都 查好了"),
+	)
+	a, b := twoInstancesOn(t, m, []tool.Tool{getOrder(1500 * time.Millisecond)}, broadcast.NewDatabase(bdb, nil), lock.NewDatabase(ldb))
+	mirrorScenario(t, m, a, b)
 }
 
 func mirrorScenario(t *testing.T, m *chattest.Model, a, b *chat.Runs) {

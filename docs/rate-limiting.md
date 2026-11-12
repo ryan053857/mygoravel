@@ -124,12 +124,12 @@ attempts := ratelimit.NewDatabase(db, "article-passcode", ratelimit.Config{Rate:
 <a id="database-limiter"></a>
 ## 使用数据库存储
 
-`ratelimit.NewDatabase` 接收应用的 `*bun.DB`，支持 PostgreSQL、SQLite 和 MySQL。第二个参数 `name` 区分共用一张表的不同限流器：同名的限流器共享配额，所以每个 `name` 应该只对应一种配额。
+`ratelimit.NewDatabase` 接收应用的 `*bun.DB`，第二个参数 `name` 区分共用一张表的不同限流器：同名的限流器共享配额，所以每个 `name` 应该只对应一种配额。
 
 使用前先发布 `rate_limits` 表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "ratelimit", FS: ratelimit.Migrations()},
 ))
 ```

@@ -11,8 +11,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/queue"
 )
 
@@ -37,7 +35,7 @@ func pending(t *testing.T, db *bun.DB, topic string) []int {
 }
 
 func TestUniqueKeyValidation(t *testing.T) {
-	db := openDB(t, dbtesting.Drivers()[0])
+	db := openDB(t)
 	ctx := context.Background()
 	for _, key := range []string{"", strings.Repeat("k", queue.MaxUniqueLen+1)} {
 		if err := jobs.Publish(ctx, queue.Database(db), payload{N: 1}, queue.Unique(key)); err == nil {
@@ -50,82 +48,78 @@ func TestUniqueKeyValidation(t *testing.T) {
 }
 
 func TestUniqueInTransactions(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		db := openDB(t, driver)
-		boom := errors.New("boom")
+	ctx := context.Background()
+	db := openDB(t)
+	boom := errors.New("boom")
 
-		// 回滚的事务不占用键。
-		err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-			if err := jobs.Publish(ctx, queue.Database(tx), payload{N: 1}, queue.Unique("k")); err != nil {
+	// 回滚的事务不占用键。
+	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if err := jobs.Publish(ctx, queue.Database(tx), payload{N: 1}, queue.Unique("k")); err != nil {
+			return err
+		}
+		return boom
+	})
+	if !errors.Is(err, boom) {
+		t.Fatal(err)
+	}
+
+	// 事务中合并重复的任务不会让事务中止，之后的语句照常执行。
+	err = db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for n := 2; n <= 3; n++ {
+			if err := jobs.Publish(ctx, queue.Database(tx), payload{N: n}, queue.Unique("k")); err != nil {
 				return err
 			}
-			return boom
-		})
-		if !errors.Is(err, boom) {
-			t.Fatal(err)
 		}
-
-		// 事务中合并重复的任务不会让事务中止，之后的语句照常执行。
-		err = db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-			for n := 2; n <= 3; n++ {
-				if err := jobs.Publish(ctx, queue.Database(tx), payload{N: n}, queue.Unique("k")); err != nil {
-					return err
-				}
-			}
-			return jobs.Publish(ctx, queue.Database(tx), payload{N: 4})
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := pending(t, db, "jobs"); !slices.Equal(got, []int{2, 4}) {
-			t.Fatalf("pending = %v", got)
-		}
+		return jobs.Publish(ctx, queue.Database(tx), payload{N: 4})
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pending(t, db, "jobs"); !slices.Equal(got, []int{2, 4}) {
+		t.Fatalf("pending = %v", got)
+	}
 }
 
 // 两个事务同时发布同一个键：后者等前者结束，前者提交则跳过，回滚则插入。
 func TestUniqueConcurrentTransactions(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		for _, commit := range []bool{true, false} {
-			ctx := context.Background()
-			db := openDB(t, driver)
-			first, err := db.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := jobs.Publish(ctx, queue.Database(first), payload{N: 1}, queue.Unique("k")); err != nil {
-				t.Fatal(err)
-			}
-			done := make(chan error, 1)
-			go func() {
-				done <- db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-					return jobs.Publish(ctx, queue.Database(tx), payload{N: 2}, queue.Unique("k"))
-				})
-			}()
-			select {
-			case err := <-done:
-				t.Fatalf("second transaction did not wait for the first: %v", err)
-			case <-time.After(200 * time.Millisecond):
-			}
-			if commit {
-				err = first.Commit()
-			} else {
-				err = first.Rollback()
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			want := []int{1}
-			if !commit {
-				want = []int{2}
-			}
-			if got := pending(t, db, "jobs"); !slices.Equal(got, want) {
-				t.Fatalf("commit=%v: pending = %v, want %v", commit, got, want)
-			}
+	for _, commit := range []bool{true, false} {
+		ctx := context.Background()
+		db := openDB(t)
+		first, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
+		if err := jobs.Publish(ctx, queue.Database(first), payload{N: 1}, queue.Unique("k")); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			done <- db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+				return jobs.Publish(ctx, queue.Database(tx), payload{N: 2}, queue.Unique("k"))
+			})
+		}()
+		select {
+		case err := <-done:
+			t.Fatalf("second transaction did not wait for the first: %v", err)
+		case <-time.After(200 * time.Millisecond):
+		}
+		if commit {
+			err = first.Commit()
+		} else {
+			err = first.Rollback()
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		want := []int{1}
+		if !commit {
+			want = []int{2}
+		}
+		if got := pending(t, db, "jobs"); !slices.Equal(got, want) {
+			t.Fatalf("commit=%v: pending = %v, want %v", commit, got, want)
+		}
+	}
 }

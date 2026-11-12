@@ -11,8 +11,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/monitor"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/queue/queuecmd"
@@ -49,7 +48,7 @@ func insertFailed(t *testing.T, db *bun.DB, topic, msg string, at time.Time) uui
 }
 
 func TestStats(t *testing.T) {
-	db := dbtesting.Open(t, sqlite.Driver, queue.Migrations())
+	db := dbtest.Open(t, queue.Migrations())
 	ctx := context.Background()
 	d, failed := queue.Database(db), queue.NewFailedJobs(db)
 	for i := range 2 {
@@ -87,7 +86,7 @@ func (partial) Stats(context.Context) ([]queue.TopicStats, error) {
 }
 
 func TestStatsMultipleDrivers(t *testing.T) {
-	db := dbtesting.Open(t, sqlite.Driver, queue.Migrations())
+	db := dbtest.Open(t, queue.Migrations())
 	rows := run(t, queue.NewFailedJobs(db), nil, []queue.Driver{queue.Database(db), partial{}}, "stats")
 	want := "DRIVER TOPIC READY DELAYED RETRYING RUNNING FAILED WAITING | partial events 4 - - 1 0 -"
 	got := make([]string, len(rows))
@@ -100,7 +99,7 @@ func TestStatsMultipleDrivers(t *testing.T) {
 }
 
 func TestFailed(t *testing.T) {
-	db := dbtesting.Open(t, sqlite.Driver, queue.Migrations())
+	db := dbtest.Open(t, queue.Migrations())
 	now := time.Now()
 	old := insertFailed(t, db, "mail", "smtp down\nstack trace", now.Add(-time.Hour))
 	recent := insertFailed(t, db, "mail", strings.Repeat("长", 100), now)
@@ -125,8 +124,8 @@ func TestFailed(t *testing.T) {
 
 func TestStatsActivity(t *testing.T) {
 	ctx := context.Background()
-	db := dbtesting.Open(t, sqlite.Driver, queue.Migrations())
-	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	db := dbtest.Open(t, queue.Migrations())
+	mon := monitor.New(dbtest.Open(t, monitor.Migrations()), nil)
 	t.Cleanup(func() { _ = mon.Close(ctx) })
 	mon.RecordDuration(queue.MetricSucceeded, "mail", 200*time.Millisecond)
 	mon.RecordDuration(queue.MetricSucceeded, "mail", 400*time.Millisecond)

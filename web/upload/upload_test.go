@@ -20,13 +20,12 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/filesystem/local"
 	s3disk "github.com/ryan053857/mygoravel/filesystem/s3"
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 	"github.com/ryan053857/mygoravel/web/ui"
@@ -39,7 +38,7 @@ var alice = identity.Subject{ID: "alice", Type: "user"}
 // setup 返回文件服务（local 与 s3 两个磁盘，max_upload_size 1MiB）和注册了 /uploads、/uploads/s3 的页面。
 func setup(t *testing.T) (*filesystem.Service, http.Handler, *web.Pages) {
 	t.Helper()
-	db := dbtesting.Open(t, sqlite.Driver, filesystem.Migrations())
+	db := dbtest.Open(t, filesystem.Migrations())
 	localDisk, err := local.Open(filesystem.LocalConfig{Root: filepath.Join(t.TempDir(), "files"), PublicURL: "/storage"})
 	if err != nil {
 		t.Fatal(err)

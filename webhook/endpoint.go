@@ -99,9 +99,6 @@ func CreateEndpoint(ctx context.Context, db bun.IDB, tenant string, in EndpointI
 	if err := in.check(); err != nil {
 		return nil, err
 	}
-	if len(tenant) > maxKey {
-		return nil, errors.Newf("webhook: tenant longer than %d bytes", maxKey)
-	}
 	id, err := uuid.NewV7()
 	if err != nil {
 		return nil, errors.Wrap(err, "webhook: new endpoint id")

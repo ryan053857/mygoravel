@@ -7,7 +7,7 @@
 // Hub 结束受影响的订阅，而不是悄悄丢弃消息：长连接随之结束，客户端重连后由应用按
 // Last-Event-ID 从自己的数据（例如消息表）补发。
 //
-// Backend：Database 使用一张表，支持 PostgreSQL、MySQL 和 SQLite，本进程发布的消息立即投递；
+// Backend：Database 使用一张表，本进程发布的消息立即投递；
 // 子包 redisbroadcast、natsbroadcast 使用 Redis Pub/Sub 和 NATS；broadcasttest 提供测试用的内存 Backend。
 //
 //	hub := broadcast.New(broadcast.NewDatabase(db, nil), nil)

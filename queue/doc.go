@@ -1,6 +1,6 @@
 // Package queue 提供持久化的异步任务队列。
 //
-// 任务由 Driver 保存。Database 驱动把任务保存在 PostgreSQL、MySQL 或 SQLite 的 queue_jobs 表中，
+// 任务由 Driver 保存。Database 驱动把任务保存在 PostgreSQL 的 queue_jobs 表中，
 // 表结构由 Migrations 提供，传入 bun.Tx 时任务与业务写入在同一个事务里提交。
 // Worker 从驱动领取到期的任务交给处理函数，多个实例竞争领取；处理失败的任务按退避时间重试，
 // 次数用完后转入 queue_failed_jobs。重试、失败任务、并发和平滑停止与驱动无关。

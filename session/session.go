@@ -21,7 +21,7 @@ const (
 	confirmedKey = "mygoravel.confirmed_at"
 )
 
-// maxUserAgent 是保存的 User-Agent 的最大字符数，与 MySQL 迁移中的列宽一致。
+// maxUserAgent 是保存的 User-Agent 的最大字符数，超出的部分截掉。
 const maxUserAgent = 255
 
 func init() {

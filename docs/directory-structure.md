@@ -183,8 +183,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `lock` | 带过期时间的原子锁，数据库存储；`lock/redislock` 是 Redis 存储，`lock/locktest` 是测试用的内存存储与存储的契约测试 | [原子锁](locks.md)、[Redis 存储](locks.md#redis-store) |
 | `outbound` | 只能访问公网地址的 HTTP 客户端，防止服务端请求伪造；临时失败时重试可以安全重复的请求 | [出站请求](outbound.md) |
 | `outbound/outboundtest` | 不连接网络的 HTTP 传输层：登记响应、记录请求，用于测试 | [测试](outbound.md#testing) |
-| `database` | 用应用选定的驱动打开连接池，`RunInTx` 与提交后回调 | [数据库](database.md) |
-| `database/postgres`、`database/sqlite`、`database/mysql` | 数据库驱动与约束错误判断，应用只 import 自己用的一个 | [数据库](database.md#sqlite) |
+| `database` | 打开 PostgreSQL 连接池，`RunInTx` 与提交后回调，约束错误判断 | [数据库](database.md) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
 | `ratelimit` | 按 key 限制操作频率，数据库与内存限流器，`Observe` 报告指标；`ratelimit/redislimit` 是 Redis 限流器 | [限流](rate-limiting.md)、[Redis 限流器](rate-limiting.md#redis-limiter) |
@@ -259,7 +258,6 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `ai/systemone` | 用 System One 格式调用决策模型 | [决策](ai.md#decisions) |
 | `ai/aitest` | 图片、语音、向量、重排和决策的替身 | [测试](ai.md#testing) |
 | `ai/chat` | 对话式 agent：后台运行、插话、工具审批、事件推送 | [AI 助手](ai.md) |
-| `ai/chat/postgres`、`ai/chat/sqlite`、`ai/chat/mysql` | 把对话保存在对应数据库中 | [AI 助手](ai.md#assembling) |
 | `ai/chat/chattest` | 按脚本回复的模型，测试 agent 时不访问真实服务 | [测试](ai.md#testing) |
 
 缓存不在框架包中，你可以直接使用 [eko/gocache](https://github.com/eko/gocache)，详见[缓存](cache.md)；数据库查询直接使用 Bun 的原生 API，事务用 `database.RunInTx`，见[事务](database.md#transactions)。

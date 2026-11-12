@@ -74,8 +74,7 @@ const (
 	maxUserAgent = 255
 )
 
-// Store 是基于 Bun 的 token 存储，查询兼容 PostgreSQL、MySQL 与 SQLite，
-// Migrations 提供三种数据库的表结构。可以并发使用。
+// Store 是基于 Bun 的 token 存储，Migrations 提供表结构。可以并发使用。
 //
 // Config 只在 Login 签发时使用：登录 token 的空闲时长和最长期限写入 token 本身，Validate、List、Revoke 等不读取它。
 // 所以多个 Store 可以共用一张表，例如每套账号体系用自己的 Config 创建一个 Store 签发 token，
@@ -317,11 +316,10 @@ func (s *Store) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("apitoken: cleanup limit must be positive")
 	}
-	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 	expired := s.db.NewSelect().Model((*row)(nil)).Column("id").
 		Where("expires_at <= ?", time.Now().UTC()).OrderExpr("expires_at").Limit(int64(limit))
 	return affected(s.db.NewDelete().Model((*row)(nil)).
-		Where("id IN (SELECT id FROM (?) AS expired)", expired).Exec(ctx))
+		Where("id IN (?)", expired).Exec(ctx))
 }
 
 func (r *row) token() Token {
