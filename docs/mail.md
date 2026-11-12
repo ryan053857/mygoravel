@@ -10,6 +10,7 @@
 - [测试](#testing)
 - [使用 SMTP](#smtp)
 - [使用 Resend](#resend)
+- [使用 Amazon SES](#ses)
 - [自定义发送器](#custom-mailers)
 
 <a id="introduction"></a>
@@ -30,6 +31,7 @@ type Mailer interface {
 | `mail/logmail` | 开发时把邮件写进日志，不真正发送 |
 | `mail/smtp` | 通过 SMTP 服务器发送，基于 [go-mail](https://github.com/wneessen/go-mail) |
 | `mail/resend` | 通过 [Resend](https://resend.com) 发送，基于官方 SDK [resend-go](https://github.com/resend/resend-go) |
+| `mail/ses` | 通过 [Amazon SES](https://aws.amazon.com/ses/) 发送，基于 [AWS SDK for Go v2](https://github.com/aws/aws-sdk-go-v2) |
 | `mail/mailtest` | 测试中记录发出的邮件 |
 
 业务代码只依赖 `mail.Mailer`，换驱动只需要改入口。
@@ -46,14 +48,16 @@ import (
     "github.com/ryan053857/mygoravel/mail"
     "github.com/ryan053857/mygoravel/mail/logmail"
     "github.com/ryan053857/mygoravel/mail/resend"
+    "github.com/ryan053857/mygoravel/mail/ses"
     "github.com/ryan053857/mygoravel/mail/smtp"
 )
 
 type MailConfig struct {
-    Driver  string        `yaml:"driver"`  // log、smtp 或 resend
+    Driver  string        `yaml:"driver"`  // log、smtp、resend 或 ses
     Editors mail.Address  `yaml:"editors"` // 编辑部邮箱
     SMTP    smtp.Config   `yaml:"smtp"`
     Resend  resend.Config `yaml:"resend"`
+    SES     ses.Config    `yaml:"ses"`
 }
 
 type Config struct {
@@ -79,6 +83,8 @@ func newMailer(cfg settings.MailConfig) (mail.Mailer, error) {
         return smtp.New(cfg.SMTP)
     case "resend":
         return resend.New(cfg.Resend)
+    case "ses":
+        return ses.New(cfg.SES)
     default:
         return logmail.New(nil), nil
     }
@@ -337,17 +343,48 @@ client := resendsdk.NewCustomClient(httpClient, cfg.Mail.Resend.APIKey)
 mailer, err := resend.NewWithClient(client, cfg.Mail.Resend.From)
 ```
 
+<a id="ses"></a>
+## 使用 Amazon SES
+
+```yaml
+mail:
+  driver: ses
+  ses:
+    from: 博客 <no-reply@example.com>
+    region: us-east-1
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `from` | 默认发件人，必填，域名或地址需要先在 SES 中验证 |
+| `region` | 为空时从 `AWS_REGION` 或共享配置读取 |
+| `access_key`、`secret_key` | 为空时使用 AWS 默认凭证链 |
+| `configuration_set` | 可选，发送时使用的配置集 |
+
+部署在 EC2、ECS 或 EKS 上时不用填密钥，给实例或任务的 IAM 角色授予 `ses:SendEmail` 和 `ses:SendRawEmail` 即可。SES 也提供 SMTP 端点，可以用 `mail/smtp` 发送，但需要另外生成 SMTP 密码。
+
+驱动把邮件生成 MIME 原文后交给 SES，附件和自定义头与 SMTP 驱动一致；Bcc 只作为收件人传给 SES，不会写进邮件头。SES 没有幂等键，重试可能重复发送。
+
+新账号处于沙箱模式，只能发给已验证的地址，正式使用前需要申请移出沙箱。退信和投诉通过配置集的事件目标发到 SNS 或 EventBridge，由应用自己处理。
+
+需要 SES 特有的功能（模板、抑制列表）时，`Client()` 返回底层的 SDK 客户端。需要自定义 `http.Client` 或端点时，自己创建客户端，再交给 `ses.NewWithClient`：
+
+```go
+client := sesv2.NewFromConfig(awsCfg, func(o *sesv2.Options) { o.HTTPClient = httpClient })
+mailer, err := ses.NewWithClient(client, cfg.Mail.SES.From)
+```
+
 <a id="custom-mailers"></a>
 ## 自定义发送器
 
 接入其他邮件服务时，实现 `mail.Mailer` 即可。发送前用 `WithDefaultFrom` 补上默认发件人，再调用 `Validate`：
 
 ```go
-func (m *SESMailer) Send(ctx context.Context, msg mail.Message) error {
+func (m *PostmarkMailer) Send(ctx context.Context, msg mail.Message) error {
     msg = msg.WithDefaultFrom(m.from)
     if err := msg.Validate(); err != nil {
         return err
     }
-    // 调用 SES API
+    // 调用 Postmark API
 }
 ```

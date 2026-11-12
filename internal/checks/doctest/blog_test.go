@@ -110,6 +110,7 @@ import (
 	"github.com/ryan053857/mygoravel/mail"
 	"github.com/ryan053857/mygoravel/mail/logmail"
 	"github.com/ryan053857/mygoravel/mail/resend"
+	"github.com/ryan053857/mygoravel/mail/ses"
 	"github.com/ryan053857/mygoravel/mail/smtp"
 )
 `},

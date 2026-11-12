@@ -10,6 +10,7 @@ import (
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/mail"
 	"github.com/ryan053857/mygoravel/mail/resend"
+	"github.com/ryan053857/mygoravel/mail/ses"
 	"github.com/ryan053857/mygoravel/mail/smtp"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/schedule"
@@ -33,4 +34,5 @@ type MailConfig struct {
 	Editors mail.Address  `yaml:"editors"`
 	SMTP    smtp.Config   `yaml:"smtp"`
 	Resend  resend.Config `yaml:"resend"`
+	SES     ses.Config    `yaml:"ses"`
 }

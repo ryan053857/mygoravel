@@ -193,7 +193,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `pdf` | 把 templ 页面生成为 PDF 的接口 | [生成 PDF](pdf.md) |
 | `pdf/gotenberg`、`pdf/pdftest` | 通过 Gotenberg 生成、测试时只记录 HTML 的生成器 | [启动 Gotenberg](pdf.md#running-gotenberg)、[测试](pdf.md#testing) |
 | `mail` | 邮件消息、发送接口与模板渲染 | [邮件](mail.md) |
-| `mail/smtp`、`mail/resend` | 通过 SMTP 服务器或 Resend API 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend) |
+| `mail/smtp`、`mail/resend`、`mail/ses` | 通过 SMTP 服务器、Resend API 或 Amazon SES 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend)、[SES](mail.md#ses) |
 | `mail/logmail`、`mail/mailtest` | 开发时写进日志、测试时记录在内存中的发送器 | [邮件](mail.md#assembling-mailer)、[测试](mail.md#testing) |
 | `queue` | 持久化的异步任务队列，数据库驱动、重试、失败任务与指标 | [队列](queue.md) |
 | `queue/redisqueue`、`queue/natsqueue` | Redis 与 NATS JetStream 队列驱动 | [Redis 驱动](queue.md#redis-driver)、[NATS 驱动](queue.md#nats-driver) |
