@@ -351,7 +351,7 @@ func (h *Handlers) Preview(w http.ResponseWriter, r *http.Request) error {
 
 后台的文章列表可以搜索、按状态筛选、排序和翻页。列表的状态全部放在地址的查询参数中，例如 `/admin/articles?status=draft&sort=title&page=2`。这样刷新、后退、复制链接都能回到同一个状态。
 
-查询参数用一个结构体描述，写法与[表单](forms.md#defining-forms)相同：字段名取 `json` 标签，规则写在 Huma 标签上。查询参数都是可选的，字段要带 `omitempty`。分页嵌入 `page.OffsetParams`。下面的 `ListQuery` 放在文章模块中，同时带上 `query` 标签，[列表接口](responses.md#offset-pagination)也可以直接使用它：
+查询参数用一个结构体描述，写法与[表单](forms.md#defining-forms)相同：字段名取 `json` 标签，规则写在 Huma 标签上。查询参数都是可选的，字段要带 `omitempty`。分页嵌入 `page.OffsetParams`。下面的 `ListQuery` 放在文章模块中，同时带上 `query` 标签，[列表接口](responses.md#filtering-and-sorting)也可以直接使用它：
 
 ```go
 type ListQuery struct {
@@ -384,7 +384,7 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-`article.List` 是列表 action，用 `q.Limit()`、`q.Offset()` 查询当前页，同时返回总数。筛选、排序、翻页都只替换列表区域，`web.PushURL` 让 htmx 把地址栏改为这个状态的地址。
+`article.List` 是列表 action，按筛选条件和排序查询当前页，同时返回总数，代码见[筛选与排序](responses.md#filtering-and-sorting)。筛选、排序、翻页都只替换列表区域，`web.PushURL` 让 htmx 把地址栏改为这个状态的地址。
 
 链接由 `web.QueryURL` 生成，它是 `ParseQuery` 的逆操作。零值和等于 `default` 的参数会被省略，同一个状态总是得到同一个地址。在视图包中写几个小函数：
 

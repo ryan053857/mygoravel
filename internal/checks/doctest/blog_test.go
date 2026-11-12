@@ -76,6 +76,33 @@ import (
 	"github.com/ryan053857/mygoravel/sheet"
 )
 `},
+	{"internal/article/list_query.go", "responses.md", "type ListQuery struct", `package article
+
+import "github.com/ryan053857/mygoravel/page"
+`},
+	{"internal/article/list.go", "responses.md", "// orders 是", `package article
+
+import (
+	"context"
+
+	"github.com/cockroachdb/errors"
+	"github.com/uptrace/bun"
+
+	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/page"
+)
+
+// List 和 toDTOs 在文档中没有给出。
+type List struct{ db *bun.DB }
+
+func toDTOs(items []Article) []ArticleDTO {
+	out := make([]ArticleDTO, len(items))
+	for i := range items {
+		out[i] = toDTO(&items[i])
+	}
+	return out
+}
+`},
 	{"internal/bootstrap/mailer.go", "mail.md", "func newMailer(", `package bootstrap
 
 import (

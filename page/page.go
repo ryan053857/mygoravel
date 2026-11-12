@@ -18,21 +18,21 @@ type OffsetParams struct {
 }
 
 // Limit 返回 SQL 的 LIMIT。
-func (p OffsetParams) Limit() int { return p.PerPage }
+func (p OffsetParams) Limit() int64 { return int64(p.PerPage) }
 
 // Offset 返回 SQL 的 OFFSET。
-func (p OffsetParams) Offset() int { return (p.Page - 1) * p.PerPage }
+func (p OffsetParams) Offset() int64 { return int64(p.Page-1) * int64(p.PerPage) }
 
 // Offset 是固定分页的响应体。
 type Offset[T any] struct {
-	Items   []T `json:"items"`
-	Page    int `json:"page"`
-	PerPage int `json:"per_page"`
-	Total   int `json:"total" doc:"Total number of items across all pages."`
+	Items   []T   `json:"items"`
+	Page    int   `json:"page"`
+	PerPage int   `json:"per_page"`
+	Total   int64 `json:"total" doc:"Total number of items across all pages."`
 }
 
 // NewOffset 组装固定分页响应，nil items 编码为 []。
-func NewOffset[T any](items []T, p OffsetParams, total int) Offset[T] {
+func NewOffset[T any](items []T, p OffsetParams, total int64) Offset[T] {
 	return Offset[T]{Items: nonNil(items), Page: p.Page, PerPage: p.PerPage, Total: total}
 }
 
@@ -44,7 +44,7 @@ func (o Offset[T]) LastPage() int {
 	if o.PerPage < 1 || o.Total <= 0 {
 		return 1
 	}
-	return (o.Total + o.PerPage - 1) / o.PerPage
+	return int((o.Total + int64(o.PerPage) - 1) / int64(o.PerPage))
 }
 
 // Links 返回分页导航中要显示的页码：首页、末页和当前页两侧各 onEachSide 页，
@@ -73,7 +73,7 @@ type CursorParams struct {
 }
 
 // Limit 返回 SQL 的 LIMIT，比 PerPage 多取一条用于判断是否还有下一页。
-func (p CursorParams) Limit() int { return p.PerPage + 1 }
+func (p CursorParams) Limit() int64 { return int64(p.PerPage) + 1 }
 
 // After 把游标解码到 v，报告请求是否携带游标；游标无效时返回 ErrInvalidCursor。
 // v 的结构与 NewCursor 的 key 返回值一致。

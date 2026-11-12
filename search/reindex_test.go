@@ -267,7 +267,7 @@ func TestReindexWithConcurrentSyncs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res.Total != len(all) {
+		if res.Total != int64(len(all)) {
 			t.Fatalf("total = %d, want %d", res.Total, len(all))
 		}
 		for _, h := range res.Items {

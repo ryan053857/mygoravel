@@ -65,8 +65,9 @@ func TestInvalidCursor(t *testing.T) {
 
 func TestOffsetLinks(t *testing.T) {
 	cases := []struct {
-		page, total int
-		want        []int
+		page  int
+		total int64
+		want  []int
 	}{
 		{1, 0, []int{1}},
 		{1, 10, []int{1}},

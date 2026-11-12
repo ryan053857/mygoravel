@@ -132,7 +132,7 @@ func expectKeys(t *testing.T, res *search.Result[articleDoc], want ...string) {
 	if got := keys(res); !slices.Equal(sorted(got), sorted(want)) {
 		t.Fatalf("keys = %v, want %v", got, want)
 	}
-	if res.Total != len(want) {
+	if res.Total != int64(len(want)) {
 		t.Fatalf("total = %d, want %d", res.Total, len(want))
 	}
 }

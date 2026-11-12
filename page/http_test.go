@@ -38,9 +38,9 @@ func newAPI() *rest.API {
 	rest.Register(api, huma.Operation{Security: []map[string][]string{},
 		OperationID: "list-offset", Method: http.MethodGet, Path: "/offset",
 	}, func(_ context.Context, in *listOffsetIn) (*listOffsetOut, error) {
-		lo := min(in.Offset(), len(all))
-		hi := min(lo+in.Limit(), len(all))
-		return &listOffsetOut{Body: page.NewOffset(all[lo:hi], in.OffsetParams, len(all))}, nil
+		lo := min(int(in.Offset()), len(all))
+		hi := min(lo+int(in.Limit()), len(all))
+		return &listOffsetOut{Body: page.NewOffset(all[lo:hi], in.OffsetParams, int64(len(all)))}, nil
 	})
 	rest.Register(api, huma.Operation{Security: []map[string][]string{},
 		OperationID: "list-cursor", Method: http.MethodGet, Path: "/cursor",
@@ -54,7 +54,7 @@ func newAPI() *rest.API {
 		if ok {
 			tail = all[after.ID:]
 		}
-		tail = tail[:min(in.Limit(), len(tail))]
+		tail = tail[:min(int(in.Limit()), len(tail))]
 		return &listCursorOut{Body: page.NewCursor(tail, in.CursorParams, func(d itemDTO) any { return key(d) })}, nil
 	})
 	return api

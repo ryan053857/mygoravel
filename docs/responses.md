@@ -8,6 +8,7 @@
 - [分页](#pagination)
     - [固定分页](#offset-pagination)
     - [游标分页](#cursor-pagination)
+    - [筛选与排序](#filtering-and-sorting)
 - [返回错误](#returning-errors)
 
 <a id="creating-responses"></a>
@@ -233,6 +234,78 @@ return &ListPublishedOutput{Body: body}, nil
 > 排序必须**确定且唯一**，例如 `ORDER BY published_at DESC, id DESC`，并且 `WHERE` 中的比较方向要与排序一致。只按 `published_at` 排序时，同一时间发布的文章可能在翻页时重复或遗漏。
 
 两种分页的响应在没有数据时都返回 `"items": []`，不会出现 `null`。
+
+<a id="filtering-and-sorting"></a>
+### 筛选与排序
+
+筛选和排序也是查询参数，和分页参数写在同一个结构体中。下面是文章列表的查询参数，它同时带 `json` 标签，后台的[列表页](views.md#list-pages)用 `web.ParseQuery` 解析同一个结构体：
+
+```go
+type ListQuery struct {
+    Q      string `query:"q" json:"q,omitempty"`
+    Status string `query:"status" json:"status,omitempty" enum:"draft,published"`
+    Sort   string `query:"sort" json:"sort,omitempty" default:"-created" enum:"-created,created,title,-title"`
+    page.OffsetParams
+}
+```
+
+`sort` 的值是列名，前面加 `-` 表示降序，和页面上的 [`ui.SortHead`](views.md#list-pages) 一致。Huma 在调用处理器之前检查这些参数：`?sort=views`、`?status=archived` 返回 `422`；空值等同于没有这个参数，取 `default` 的值。
+
+列表 action 把参数转换为查询条件。每个 `sort` 值对应一个固定的 `ORDER BY`：
+
+```go
+// orders 是 ListQuery.Sort 每个取值对应的排序。
+var orders = map[string]string{
+    "created":  "created_at, id",
+    "-created": "created_at DESC, id DESC",
+    "title":    "title, id",
+    "-title":   "title DESC, id DESC",
+}
+
+// Handle 返回符合条件的一页文章和总数。
+func (a *List) Handle(ctx context.Context, subject identity.Subject, q ListQuery) ([]Article, int64, error) {
+    var items []Article
+    sel := a.db.NewSelect().Model(&items).
+        OrderExpr(orders[q.Sort]).
+        Limit(q.Limit()).
+        Offset(q.Offset())
+    if q.Status != "" {
+        sel.Where("status = ?", q.Status)
+    }
+    if q.Q != "" {
+        sel.Where("title LIKE ?", "%"+q.Q+"%")
+    }
+    total, err := sel.ScanAndCount(ctx)
+    if err != nil {
+        return nil, 0, errors.Wrap(err, "list articles")
+    }
+    return items, total, nil
+}
+
+type ListOutput struct {
+    Body page.Offset[ArticleDTO]
+}
+
+// HTTP 处理 GET /articles。
+func (a *List) HTTP(ctx context.Context, in *ListQuery) (*ListOutput, error) {
+    subject, _ := identity.FromContext(ctx)
+    items, total, err := a.Handle(ctx, subject, *in)
+    if err != nil {
+        return nil, err
+    }
+    return &ListOutput{Body: page.NewOffset(toDTOs(items), in.OffsetParams, total)}, nil
+}
+```
+
+`ListQuery` 可以直接作为输入类型。客户端请求 `/articles?status=draft&sort=title&page=2` 时，得到按标题排列的第二页草稿。
+
+几点说明：
+
+- `sort` 的值已经由 `enum` 检查过，`orders[q.Sort]` 一定能查到，客户端传来的字符串不会进入 SQL。增加排序方式时，`enum` 和 `orders` 一起修改。
+- 每种排序都以 `id` 结尾，原因与游标分页相同：只按 `title` 排序时，标题相同的文章在两次查询之间的顺序不固定，翻页时可能重复或遗漏。
+- 参数为空时不添加对应的条件。按调用者限定范围的条件（例如只看到自己的草稿）写在同一个查询中，见[列表查询中的授权](authorization.md#scoping-queries)。
+- `LIKE` 只适合简单的标题匹配。需要分词、按相关度排序时，使用[搜索](search.md)。
+- 游标分页的排序固定写在 action 中，不提供 `sort` 参数：游标保存的是排序位置，换一种排序，原来的游标就失效了。需要让用户选择排序的列表，使用固定分页。
 
 <a id="returning-errors"></a>
 ## 返回错误

@@ -120,7 +120,7 @@ func (ix *Index[D]) Search(ctx context.Context, db bun.IDB, q Query) (*Result[D]
 	}
 	order.add("e.doc_key, e.position")
 
-	var total int
+	var total int64
 	err := db.NewRaw("SELECT COUNT(*) FROM "+from+" WHERE "+where.sql(), where.args...).Scan(ctx, &total)
 	if err != nil {
 		return nil, errors.Wrap(err, "search: count")

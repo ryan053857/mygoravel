@@ -282,7 +282,7 @@ var ErrAlreadyPublished = errorx.Define(errorx.Conflict, "article.already_publis
 列表、搜索和导出要在**查询条件**中限定范围，而不是查出来之后再过滤：后者既浪费，又容易在分页、计数时漏掉。下面的文章列表让编辑看到全部文章，其他人只看到已发布的和自己的草稿：
 
 ```go
-func (a *List) Handle(ctx context.Context, subject identity.Subject, limit int) ([]Article, error) {
+func (a *List) Handle(ctx context.Context, subject identity.Subject, limit int64) ([]Article, error) {
     var items []Article
     q := a.db.NewSelect().Model(&items).OrderExpr("created_at DESC").Limit(limit)
     if !subject.Can("articles:read-drafts") {
