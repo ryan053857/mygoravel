@@ -131,7 +131,16 @@ func TestWorkersApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-r.Done()
-	next, err := d.web.Approve(ctx, "u1", "c1", "r1")
+	// 镜像收到结束事件时，执行它的 worker 可能还没释放对话的锁，这期间 Approve 返回 ErrBusy。
+	var next *chat.Run
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		next, err = d.web.Approve(ctx, "u1", "c1", "r1")
+		if !errors.Is(err, chat.ErrBusy) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if err != nil || next == nil {
 		t.Fatalf("approve: %v %v", next, err)
 	}

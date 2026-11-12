@@ -281,16 +281,29 @@ func (rs *Runs) startLocal(ctx context.Context, userID, sessionID string, msg mo
 
 // start 开始运行。results 非空表示审批之后继续：运行先发出这些调用结果，
 // 上一次运行停下时还没送达的插话消息随之送达。msg 为 nil 表示使用 UseHistory 时由 Load 读出全部输入。
-func (rs *Runs) start(ctx context.Context, key session.Key, msg *model.Message, opts []agent.RunOption, results []Event) (_ *Run, err error) {
+func (rs *Runs) start(ctx context.Context, key session.Key, msg *model.Message, opts []agent.RunOption, results []Event) (*Run, error) {
+	own, err := rs.own(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return rs.startOwned(ctx, key, own, msg, opts, results)
+}
+
+// own 检查本实例上没有正在运行的对话；多实例时还取得对话的锁，其他实例上正在运行时返回 ErrBusy。
+// 单实例时返回的 owner 为 nil。
+func (rs *Runs) own(ctx context.Context, key session.Key) (*owner, error) {
 	if rs.localBusy(key) {
 		return nil, ErrBusy.New()
 	}
-	// 多实例时先取得对话的锁：其他实例上正在运行时返回 ErrBusy。
-	var own *owner
-	if rs.cluster != nil {
-		if own, err = rs.cluster.acquire(ctx, key); err != nil {
-			return nil, err
-		}
+	if rs.cluster == nil {
+		return nil, nil
+	}
+	return rs.cluster.acquire(ctx, key)
+}
+
+// startOwned 与 start 相同，own 是已经取得的对话的锁（单实例时为 nil），出错时释放它。
+func (rs *Runs) startOwned(ctx context.Context, key session.Key, own *owner, msg *model.Message, opts []agent.RunOption, results []Event) (_ *Run, err error) {
+	if own != nil {
 		defer func() {
 			if err != nil {
 				own.release()
@@ -468,9 +481,17 @@ func (rs *Runs) rejectLocal(ctx context.Context, userID, sessionID, callID, reas
 }
 
 func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opts []agent.RunOption, result func(ToolCall) string) (*Run, error) {
-	if rs.localBusy(key) {
-		return nil, ErrBusy.New()
+	// 先取得对话的锁再执行批准的工具：对话正忙时返回 ErrBusy，工具不会执行，重试也不会执行两次。
+	own, err := rs.own(ctx, key)
+	if err != nil {
+		return nil, err
 	}
+	started := false
+	defer func() {
+		if !started && own != nil {
+			own.release()
+		}
+	}()
 	t, pending, err := rs.pending(ctx, key)
 	if err != nil {
 		return nil, err
@@ -512,7 +533,8 @@ func (rs *Runs) resolve(ctx context.Context, key session.Key, callID string, opt
 			results = append(results, Event{Name: EventToolResult, Data: newToolResult(c.ID, c.Name, text)})
 		}
 	}
-	return rs.start(ctx, key, &msg, opts, results)
+	started = true // startOwned 出错时自己释放锁
+	return rs.startOwned(ctx, key, own, &msg, opts, results)
 }
 
 // approvalTool 返回批准后执行的工具：RequireApproval 登记的工具；使用 AgentFor 时，
