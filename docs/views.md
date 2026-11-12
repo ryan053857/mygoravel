@@ -30,6 +30,8 @@
 
 `web` 包负责把它们接到框架上：渲染 templ 组件、加载会话和检查登录、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。`web/ui` 包内置了界面组件的样式表和脚本，按主题加载，不需要安装 Tailwind。
 
+服务端渲染的页面用于运营后台和内部管理后台。面向用户的一端，无论是网页、桌面客户端还是移动端，都调用 [JSON API](routing.md)，前端技术由产品自己选择。
+
 页面总是使用[会话](session.md)：用户登录后，服务器把身份记在会话里，浏览器通过 cookie 自动携带。JSON API 则只用 Bearer token，不使用会话，见[认证](authentication.md)。
 
 本章把博客的编辑后台做成服务端渲染的页面：编辑登录后打开文章的编辑页，预览并保存修改。表单见[表单](forms.md)，实时推送见[服务端推送](sse.md)。
@@ -264,12 +266,12 @@ pages := web.New(web.Options{
 | 其他 4xx 类错误（例如不是这个租户的成员） | 按分类呈现错误页，例如 `404`，不登出 |
 | 5xx 类错误（例如数据库故障） | 呈现错误页 |
 
-`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 Resolver 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。租户在路径中时，`Login` 写成 `/t/{tenant}/login`，跳转时 `{tenant}` 换成当前请求的路径参数。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
+`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)，例如运营后台按路径进入某个租户查看数据：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 Resolver 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。租户在路径中时，`Login` 写成 `/t/{tenant}/login`，跳转时 `{tenant}` 换成当前请求的路径参数。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
 
 <a id="multiple-areas"></a>
 ## 多组页面
 
-一个应用可以有几组页面，例如运营后台和租户端，各用一个 `web.Pages`，挂在各自的子路由上。每组有自己的会话 cookie、登录页、主题和错误呈现，互不影响：登录运营后台不会登录租户端。
+一个应用可以有几组页面，例如平台的运营后台和给合作伙伴用的代理后台，各用一个 `web.Pages`，挂在各自的子路由上。每组有自己的会话 cookie、登录页、主题和错误呈现，互不影响：登录运营后台不会登录代理后台。
 
 ```go
 ops := web.New(web.Options{
@@ -279,26 +281,25 @@ ops := web.New(web.Options{
     ErrorPage: ui.ErrorPage,
     Theme:     a.cfg.Ops.Theme,
 })
-tenant := web.New(web.Options{
-    Sessions:  session.New(a.cfg.Tenant.Session, session.NewStore(a.db)),
-    Login:     "/t/{tenant}/login",
-    Accounts:  identity.Accounts{user.Type: roles.Resolve},
+partners := web.New(web.Options{
+    Sessions:  session.New(a.cfg.Partners.Session, session.NewStore(a.db)),
+    Login:     "/partners/login",
+    Accounts:  identity.Accounts{partner.Type: partner.Resolve},
     ErrorPage: ui.ErrorPage,
-    Theme:     a.cfg.Tenant.Theme,
-    Tenant:    func(r *http.Request) string { return chi.URLParam(r, "tenant") },
+    Theme:     a.cfg.Partners.Theme,
     Static:    static,
 })
 router.Route("/ops", func(r chi.Router) {
     r.NotFound(ops.NotFound)
     opsweb.Register(r, ops, a.db)
 })
-router.Route("/t/{tenant}", func(r chi.Router) {
-    r.NotFound(tenant.NotFound)
-    tenantweb.Register(r, tenant, a.db)
+router.Route("/partners", func(r chi.Router) {
+    r.NotFound(partners.NotFound)
+    partnerweb.Register(r, partners, a.db)
 })
 ```
 
-两组会话的 `cookie.name` 要不同，例如 `ops_session` 和 `session`。两组页面各自用 `Accounts` 声明接受的账号体系，即使会话被带到另一组页面，属于其他账号体系的主体也会按未登录处理。主题、提示和错误样式的差异见[不同区域的界面](components.md#areas)。
+两组会话的 `cookie.name` 要不同，例如 `ops_session` 和 `partner_session`。两组页面各自用 `Accounts` 声明接受的[账号体系](authentication.md#account-systems)，即使会话被带到另一组页面，属于其他账号体系的主体也会按未登录处理。主题、提示和错误样式的差异见[不同区域的界面](components.md#areas)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面

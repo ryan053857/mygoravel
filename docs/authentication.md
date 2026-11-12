@@ -6,6 +6,7 @@
 - [保护路由](#protecting-routes)
     - [认证失败的响应](#failed-authentication)
 - [每次请求加载权限](#resolving-subjects)
+- [多套账号体系](#account-systems)
 - [多租户](#tenants)
 - [代为登录](#impersonation)
 - [获取已认证的主体](#retrieving-the-subject)
@@ -16,7 +17,7 @@
 
 很多 API 都需要知道“是谁在调用”。mygoravel 内置了基于 Bearer Token 的认证：客户端在请求头中携带 `Authorization: Bearer <token>`，框架调用你提供的校验函数确认身份，然后把身份信息交给处理器。
 
-JSON API 只使用 Bearer token，不使用会话。浏览器访问的服务端渲染页面使用会话登录，见[页面登录](views.md#login)。两者产生的都是 `identity.Subject`，action 和[授权](authorization.md)规则不需要区分。
+JSON API 只使用 Bearer token，不使用会话。面向用户的一端，无论是网页、桌面客户端还是移动端，都调用 JSON API。服务端渲染的页面用于运营后台和内部管理后台，使用会话登录，见[页面登录](views.md#login)。两者产生的都是 `identity.Subject`，action 和[授权](authorization.md)规则不需要区分。
 
 mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API Key，也可以是由认证服务签发的 JWT——你只需要写一个函数，告诉框架这个 token 对应谁。
 
@@ -165,7 +166,7 @@ auth:
 api := rest.New(rest.Options{Accounts: identity.Accounts{user.Type: nil}})
 ```
 
-键是账号体系，值是这套账号的 `identity.Resolver`，`nil` 表示直接使用校验器给出的主体，见[每次请求加载权限](#resolving-subjects)。校验器给出的主体的 `Type` 不在其中时，请求与 token 无效一样返回 `401`。产品有多套账号时，每个 API 只接受它服务的那几种，例如商家后台的 API 是 `identity.Accounts{member.Type: roles.Resolve}`，同一个校验器交给面向终端客户的 API 也不会让商家成员的 token 通过。没有设置 `Accounts` 就注册需要认证的路由会 panic。
+键是账号体系，值是这套账号的 `identity.Resolver`，`nil` 表示直接使用校验器给出的主体，见[每次请求加载权限](#resolving-subjects)。校验器给出的主体的 `Type` 不在其中时，请求与 token 无效一样返回 `401`。产品有多套账号时，每个 API 只接受它服务的那几种，见[多套账号体系](#account-systems)。没有设置 `Accounts` 就注册需要认证的路由会 panic。
 
 使用 `rest.RequireBearer` 为路由启用认证。它的参数是 API 实例、校验器，以及调用者必须能执行的权限。
 
@@ -265,6 +266,42 @@ Resolver 只负责加载权限和租户：返回的主体中 `Type`、`ID`、`Me
 
 页面的 [`web.Options.Accounts`](views.md#login) 和实时频道的 [`realtime.Options.Accounts`](realtime.md#tokens) 与它是同一个类型 `identity.Accounts`，所以同一个 Resolver 可以同时交给它们，三者按相同的规则处理它的返回值。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
 
+<a id="account-systems"></a>
+## 多套账号体系
+
+框架不定义用户表。一个产品可以有几套互相独立的账号，例如平台的运营人员、商家的员工、商家的终端客户，各自一张表，主键、登录方式都由产品决定。框架只需要知道每个主体属于哪一套，也就是它的 `Type`。
+
+**1. 每套账号声明一个类型**，放在拥有那张表的模块中：
+
+```go
+// internal/staff/staff.go
+const Type identity.SubjectType = "staff"
+
+// internal/member/member.go
+const Type identity.SubjectType = "member"
+
+// internal/customer/customer.go
+const Type identity.SubjectType = "customer"
+```
+
+登录时用它构造主体，例如 `identity.Subject{Type: customer.Type, ID: c.ID}`。
+
+**2. 每个入口声明接受哪几套账号。** 运营后台的页面只接受运营人员，商家后台的 API 只接受商家员工，App 和小程序调用的 API 只接受客户：
+
+```go
+ops := web.New(web.Options{Accounts: identity.Accounts{staff.Type: roles.Resolve} /* 其余字段见视图 */})
+console := rest.New(rest.Options{Accounts: identity.Accounts{member.Type: roles.Resolve}, Tenant: fromPath})
+shop := rest.New(rest.Options{Accounts: identity.Accounts{customer.Type: customers.Resolve}, Tenant: fromHost})
+```
+
+几个 API 可以共用一个 token 校验器：客户的 token 发到商家后台的 API，与无效 token 一样返回 `401`。一个入口也可以接受多套账号，例如 `identity.Accounts{member.Type: roles.Resolve, customer.Type: customers.Resolve}`，`sub.Can` 和 action 不需要区分。[`authz`](authorization.md#roles) 按主体的类型和 ID 保存角色，可以同时服务几套账号；终端客户通常不需要角色，它的 Resolver 只要检查账号是否停用、按“数据归属本人”授权即可。
+
+**3. 每套账号可以有自己的令牌有效期**，用各自的配置创建 `apitoken.Store` 签发，见[装配](api-tokens.md#assembling)。
+
+**4. ID 只需在同一套账号中唯一。** 会话、令牌、角色、[操作日志](activity.md)、[通知](notifications.md)、[功能开关](features.md)和实时频道的在线成员都同时保存主体的类型和 ID，员工表和客户表都用自增 ID 也不会混淆。主键是 `(tenant_id, id)` 这类组合时，把租户编进 ID，例如 `t42:1001`。新表推荐使用 UUIDv7。需要把主体放进一个字符串时，例如缓存键、广播主题，使用 `sub.Ref().String()`，结果形如 `customer:42`。
+
+[代为登录](#impersonation)也可以跨账号体系：运营人员代客户登录时，主体是客户，`Impersonator` 是运营人员的 `identity.Ref`。
+
 <a id="tenants"></a>
 ## 多租户
 
@@ -300,7 +337,7 @@ func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error
 
 客服排查问题时常常需要“以用户的身份看一看”。代为登录得到的主体就是这个用户，权限也是他的，`Impersonator` 记录实际操作的人。`Impersonator` 和其他字段一起保存在会话或令牌中，之后的每个请求都带着它。
 
-运营后台的“以此用户登录”按钮提交到一个要求 `users:impersonate` 的页面路由：
+运营人员和用户在同一组页面中时，例如内部管理后台里“以这位同事的身份看一看”，“以此用户登录”按钮提交到一个要求 `users:impersonate` 的页面路由：
 
 ```go
 func (h *Handlers) Impersonate(w http.ResponseWriter, r *http.Request) error {
@@ -330,11 +367,13 @@ func (h *Handlers) StopImpersonating(w http.ResponseWriter, r *http.Request) err
 
 `StopImpersonating` 注册为只要求登录的路由，页面顶部在 `sub.Impersonator` 不为零值时显示“正在代 {用户} 操作”和退出按钮。`pages.Login` 每次都更换会话 token，代为登录期间的会话在退出后不能继续使用。
 
-单页应用用[登录令牌](api-tokens.md#login-and-logout)完成同样的事：后台接口为目标用户签发一个带 `Impersonator` 的令牌，前端保留客服自己的令牌，退出时[撤销](api-tokens.md#revoking-tokens)代为登录的令牌，换回自己的：
+用户使用的是调用 API 的网页或 App 时，用[登录令牌](api-tokens.md#login-and-logout)完成同样的事：运营后台为目标用户签发一个带 `Impersonator` 的令牌，交给用户端的前端使用，排查完毕[撤销](api-tokens.md#revoking-tokens)它。运营人员和用户属于不同的[账号体系](#account-systems)时也是如此，主体是用户，`Impersonator` 是运营人员：
 
 ```go
-plain, err := tokens.Login(ctx, identity.Subject{Type: user.Type, ID: userID, Impersonator: staff.Ref()}, device)
+plain, err := tokens.Login(ctx, identity.Subject{Type: customer.Type, ID: customerID, Impersonator: staff.Ref()}, device)
 ```
+
+令牌不要放进跳转地址的查询参数，它会留在浏览器历史和访问日志中。
 
 几件需要应用自己决定的事：
 

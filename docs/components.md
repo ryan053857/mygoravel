@@ -312,13 +312,13 @@ return nil
 <a id="areas"></a>
 ## 不同区域的界面
 
-同一个应用常有几块界面，例如运营后台和租户端。它们各用一个 `web.Pages`，各有自己的主题、登录页、会话 cookie 和错误呈现，见[多组页面](views.md#multiple-areas)：
+同一个应用常有几块后台界面，例如运营后台和代理后台。它们各用一个 `web.Pages`，各有自己的主题、登录页、会话 cookie 和错误呈现，见[多组页面](views.md#multiple-areas)：
 
 ```yaml
 ops:
   theme:
     style: nova
-tenant:
+partners:
   theme:
     style: maia
     radius: 1rem

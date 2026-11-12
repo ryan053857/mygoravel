@@ -20,11 +20,13 @@
 
 SaaS 应用通常有三类用户：
 
-| 用户 | 例子 | 在 mygoravel 中 |
-| --- | --- | --- |
-| 运营人员 | 平台的客服、管理员 | 在平台本身（域 `""`）中拥有角色 |
-| 租户成员 | 某个公司的员工 | 在该租户中拥有角色，同一个人可以属于多个租户 |
-| 租户的客户 | 公司的终端客户 | 同样在租户中拥有角色，例如 `customer` |
+| 用户 | 例子 | 在 mygoravel 中 | 通常使用 |
+| --- | --- | --- | --- |
+| 运营人员 | 平台的客服、管理员 | 在平台本身（域 `""`）中拥有角色 | 服务端渲染的运营后台 |
+| 租户成员 | 某个公司的员工 | 在该租户中拥有角色，同一个人可以属于多个租户 | 调用 JSON API 的网页或客户端 |
+| 租户的客户 | 公司的终端客户 | 在租户中拥有客户角色，或者是单独的一套账号，见[租户的客户](#customers) | 调用 JSON API 的网页、App 或小程序 |
+
+三类用户可以共用一张用户表，也可以各自一张表、各是一套账号体系，见[多套账号体系](authentication.md#account-systems)。
 
 所有租户的数据存在同一个数据库中，用 `tenant_id` 区分。框架不提供按租户切换数据库：会话、队列、令牌和角色都只有一份，同一个库就是最简单、也最不容易出错的结构；需要更强的隔离时，用 PostgreSQL 的[行级安全策略](#data-isolation)兜底。实现多租户需要三件事：
 
@@ -37,7 +39,7 @@ SaaS 应用通常有三类用户：
 <a id="identifying-tenants"></a>
 ## 确定租户
 
-本次请求属于哪个租户由请求本身决定。用 `Tenant` 选项告诉 API 和页面怎样取出它，常见的三种方式（SPA 和移动端用 token 连接的[实时频道](realtime.md#tokens)也有同样的选项）：
+本次请求属于哪个租户由请求本身决定。用 `Tenant` 选项告诉 API 怎样取出它，常见的三种方式（用 token 连接的[实时频道](realtime.md#tokens)和[页面](views.md)也有同样的选项）：
 
 ```go
 // 路径：/t/{tenant}/articles
@@ -45,21 +47,16 @@ api := rest.New(rest.Options{
     Tenant:   func(ctx huma.Context) string { return ctx.Param("tenant") },
     Accounts: identity.Accounts{user.Type: roles.Resolve},
 })
-pages := web.New(web.Options{
-    Tenant:   func(r *http.Request) string { return chi.URLParam(r, "tenant") },
-    Accounts: identity.Accounts{user.Type: roles.Resolve},
-    // ...
-})
 
 // 子域名：acme.example.com；主域名 example.com 是平台本身
-Tenant: func(r *http.Request) string {
-    if tenant, ok := strings.CutSuffix(r.Host, ".example.com"); ok {
+Tenant: func(ctx huma.Context) string {
+    if tenant, ok := strings.CutSuffix(ctx.Host(), ".example.com"); ok {
         return tenant
     }
     return ""
 },
 
-// 请求头：适合只有 API 的应用
+// 请求头：App 和小程序常用
 Tenant: func(ctx huma.Context) string { return ctx.Header("X-Tenant") },
 ```
 
@@ -276,18 +273,17 @@ err = roles.Assign(ctx, staff, authz.AllTenants, support.ID)
 <a id="customers"></a>
 ## 租户的客户
 
-租户的终端客户也是主体，在租户中分配一个只有客户权限的角色即可，例如 `customer`。客户账号有两种设计：
+租户的终端客户也是主体。客户账号有两种设计：
 
-- **平台统一账号**：客户注册一次，可以成为多个租户的客户，和租户成员的处理完全相同；
-- **租户内账号**：每个租户的客户是独立的账号，同一个邮箱在两个租户中各注册一次。它们通常是单独的一张表、单独的一套账号体系，例如 `customer.Type`。登录时把租户写进主体，凭据就只能在这个租户中使用：
+- **平台统一账号**：客户注册一次，可以成为多个租户的客户，在租户中分配一个只有客户权限的角色，例如 `customer`，和租户成员的处理完全相同；
+- **租户内账号**：每个租户的客户是独立的账号，同一个邮箱在两个租户中各注册一次。它们通常是单独的一张表、单独的一套[账号体系](authentication.md#account-systems)，例如 `customer.Type`。客户的 App 和网页调用一个只接受客户的 API，登录接口签发令牌时把租户写进主体，令牌就只能在这个租户中使用：
 
 ```go
 sub := identity.Subject{Type: customer.Type, ID: c.ID, Tenant: identity.TenantFromContext(ctx)}
-err := pages.Login(r, sub)                   // 页面
-plain, err := tokens.Login(ctx, sub, device) // 单页应用或 App
+plain, err := customerTokens.Login(ctx, sub, device)
 ```
 
-带着这样的会话或令牌访问其他租户时，请求返回 `403`。租户内账号的唯一约束应当是 `(tenant_id, email)`，第三方登录的[账号关联](social-login.md#linking-accounts)也要加上租户。
+带着这样的令牌访问其他租户时，请求返回 `403`。租户内账号的唯一约束应当是 `(tenant_id, email)`，第三方登录的[账号关联](social-login.md#linking-accounts)也要加上租户。
 
 <a id="tokens"></a>
 ## 令牌与租户
