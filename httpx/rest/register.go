@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -61,6 +62,7 @@ func Register[I, O any](api *API, op huma.Operation, handler func(context.Contex
 			return out, se
 		}
 	}
+	api.names.bodies(reflect.TypeFor[I](), reflect.TypeFor[O]())
 	huma.Register(api.API, op, handler)
 }
 

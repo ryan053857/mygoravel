@@ -52,3 +52,25 @@ func TestSchemaName(t *testing.T) {
 		}
 	}
 }
+
+type rejectInput struct {
+	ID   string `path:"id"`
+	Body struct {
+		Reason string `json:"reason"`
+	}
+}
+
+func TestSchemaNamesAnonymousBody(t *testing.T) {
+	// 让本包的类型像应用的类型一样加包名。
+	defer func(old []string) { bare = old }(bare)
+	bare = bare[1:]
+	n := &schemaNames{anon: map[reflect.Type]string{}}
+	n.bodies(reflect.TypeFor[*rejectInput]())
+	body := reflect.TypeFor[rejectInput]().Field(1).Type
+	if got := n.name(body, "RejectInputBody"); got != "RestRejectInputBody" {
+		t.Errorf("anonymous body = %q", got)
+	}
+	if got := n.name(reflect.TypeFor[struct{ X int }](), "otherHint"); got != "OtherHint" {
+		t.Errorf("unregistered anonymous = %q", got)
+	}
+}

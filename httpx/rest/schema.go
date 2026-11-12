@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -16,16 +17,56 @@ var bare = []string{
 	"github.com/danielgtaylor/huma/v2",
 }
 
-// schemaName 生成 OpenAPI 中的 schema 名，也是客户端生成器生成的类型名。
+// schemaNames 生成 OpenAPI 中的 schema 名，也是客户端生成器生成的类型名。
 //
 // 名称是包名加类型名，例如 article.Changes 为 ArticleChanges、comment.Changes 为 CommentChanges，
 // 不同包的同名类型因此不会冲突；类型名已经以包名开头时不重复，例如 article.ArticleDTO 仍为 ArticleDTO。
 // 泛型实参按同样的规则拼接，例如 page.Offset[article.ArticleDTO] 为 OffsetArticleDTO。
-// main 包、框架和 Huma 的类型只用类型名；匿名类型使用 Huma 给出的 hint，例如请求体为 PublishArticleRequest。
-func schemaName(t reflect.Type, hint string) string {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+// main 包、框架和 Huma 的类型只用类型名。
+//
+// 匿名类型使用 Huma 给出的 hint。输入、输出类型中匿名结构体字段的 hint 是外层类型名加字段名，
+// 例如 article.RejectInput 的匿名 Body 为 RejectInputBody；Register 事先用 bodies 登记带包名的名称
+// ArticleRejectInputBody，comment.RejectInput 的匿名 Body 就不会与它冲突。
+type schemaNames struct {
+	mu   sync.Mutex
+	anon map[reflect.Type]string
+}
+
+// bodies 为 types 中匿名结构体字段的类型登记名称：外层类型的 schema 名加字段名。
+func (n *schemaNames) bodies(types ...reflect.Type) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, t := range types {
+		t = deref(t)
+		if t.Kind() != reflect.Struct || t.Name() == "" {
+			continue
+		}
+		for _, f := range reflect.VisibleFields(t) {
+			ft := deref(f.Type)
+			if ft.Kind() != reflect.Struct || ft.Name() != "" {
+				continue
+			}
+			if _, ok := n.anon[ft]; !ok {
+				n.anon[ft] = schemaName(t, "") + f.Name
+			}
+		}
 	}
+}
+
+func (n *schemaNames) name(t reflect.Type, hint string) string {
+	if deref(t).Name() == "" {
+		n.mu.Lock()
+		name, ok := n.anon[deref(t)]
+		n.mu.Unlock()
+		if ok {
+			return name
+		}
+	}
+	return schemaName(t, hint)
+}
+
+func schemaName(t reflect.Type, hint string) string {
+	t = deref(t)
 	name := t.Name()
 	if name == "" {
 		return upperFirst(hint)
@@ -42,6 +83,13 @@ func schemaName(t reflect.Type, hint string) string {
 		b.WriteString(qualify(part))
 	}
 	return b.String()
+}
+
+func deref(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t
 }
 
 // qualify 把 "github.com/x/article.Changes" 这样的完整名称转换为 ArticleChanges。

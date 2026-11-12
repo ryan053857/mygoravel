@@ -32,6 +32,7 @@ type API struct {
 	logger   *slog.Logger
 	accounts identity.Accounts
 	watcher  httpx.CredentialWatcher
+	names    *schemaNames
 }
 
 // Options 创建 API。
@@ -91,8 +92,9 @@ func New(opts Options) *API {
 	cfg := huma.DefaultConfig(opts.Title, opts.Version)
 	// 默认的唯一创建钩子会在响应体加入 $schema 字段并设置 Link 响应头，对 API 使用者价值不大，不启用。
 	cfg.CreateHooks = nil
-	// schema 名带包名，不同包的同名类型（例如 article.Changes 和 comment.Changes）不会冲突，见 schemaName。
-	cfg.OpenAPI.Components.Schemas = huma.NewMapRegistry("#/components/schemas/", schemaName)
+	// schema 名带包名，不同包的同名类型（例如 article.Changes 和 comment.Changes）不会冲突，见 schemaNames。
+	names := &schemaNames{anon: map[reflect.Type]string{}}
+	cfg.OpenAPI.Components.Schemas = huma.NewMapRegistry("#/components/schemas/", names.name)
 	// huma.ErrorModel 的 JSON 是 ErrorModel 的合法实例，因此文档统一描述为 ErrorModel；
 	// 不覆盖全局 huma.NewError，避免影响同一进程中的其他 Huma API。
 	cfg.OpenAPI.Components.Schemas.RegisterTypeAlias(reflect.TypeOf(huma.ErrorModel{}), reflect.TypeOf(ErrorModel{}))
@@ -106,7 +108,7 @@ func New(opts Options) *API {
 			next(huma.WithContext(ctx, identity.WithTenant(ctx.Context(), tenant(ctx))))
 		})
 	}
-	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, accounts: opts.Accounts, watcher: opts.Credentials}
+	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, accounts: opts.Accounts, watcher: opts.Credentials, names: names}
 }
 
 // Mode 返回当前模式。

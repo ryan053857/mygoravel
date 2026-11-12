@@ -316,7 +316,7 @@ func toDTO(a *Article) ArticleDTO {
 
 `ArticleDTO` 决定了 API 返回哪些字段。不要把模型 `Article` 直接作为响应体：给模型加一个内部字段，就会意外地把它暴露给客户端。请求和响应类型的详细写法分别见[请求](requests.md)和[响应](responses.md)。
 
-请求和响应中的具名类型在 OpenAPI 文档中以包名加类型名命名，类型名已经以包名开头时不重复：`article.Changes` 为 `ArticleChanges`，`comment.Changes` 为 `CommentChanges`，`article.ArticleDTO` 仍为 `ArticleDTO`。所以每个包都可以用 `Changes` 这样的短名，前端[生成的类型](#exporting-openapi)也不会重名。
+请求和响应中的具名类型在 OpenAPI 文档中以包名加类型名命名，类型名已经以包名开头时不重复：`article.Changes` 为 `ArticleChanges`，`comment.Changes` 为 `CommentChanges`，`article.ArticleDTO` 仍为 `ArticleDTO`；匿名的请求体以外层类型的名称加字段名命名，例如 `article.RejectInput` 的 `Body` 为 `ArticleRejectInputBody`。所以每个包都可以用 `Changes` 这样的短名，前端[生成的类型](#exporting-openapi)也不会重名。
 
 <a id="listing-routes"></a>
 ### 查看全部路由
