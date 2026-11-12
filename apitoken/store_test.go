@@ -423,10 +423,10 @@ func TestImpersonation(t *testing.T) {
 func TestRequireBearer(t *testing.T) {
 	s, _ := newStore(t, sqlite.Driver)
 	permissions := map[string][]string{"alice": {"articles:*"}}
-	api := rest.New(rest.Options{Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
 		sub.Permissions = permissions[sub.ID]
 		return sub, nil
-	}})
+	}}})
 	op := huma.Operation{OperationID: "me", Method: http.MethodGet, Path: "/me"}
 	rest.RequireBearer(api, s.Validate, "articles:read")(&op)
 	type meOut struct {

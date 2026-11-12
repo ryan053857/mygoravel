@@ -32,7 +32,7 @@ func tenantAPI(t *testing.T) *rest.API {
 	members := map[string]map[string][]string{"acme": {"alice": {"articles:*"}, "reader": {"articles:*"}}, "globex": {"bound": {"articles:*"}}}
 	api := rest.New(rest.Options{
 		Tenant: func(ctx huma.Context) string { return ctx.Param("tenant") },
-		Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+		Accounts: identity.Accounts{"user": func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
 			switch sub.ID {
 			case "down":
 				return identity.Subject{}, errorx.Define(errorx.Unavailable, "users.unavailable").New()
@@ -46,10 +46,10 @@ func tenantAPI(t *testing.T) *rest.API {
 			}
 			sub.Tenant, sub.Permissions = tenant, perms
 			return sub, nil
-		},
+		}},
 	})
 	validate := func(_ context.Context, token string) (identity.Subject, error) {
-		sub := identity.Subject{ID: token}
+		sub := identity.Subject{Type: "user", ID: token}
 		switch token {
 		case "bound":
 			sub.Tenant = "globex"

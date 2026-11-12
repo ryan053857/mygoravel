@@ -33,7 +33,7 @@ func TestMissingSecurityRejectedBeforeFactory(t *testing.T) {
 					t.Fatal("unmarked endpoint accepted")
 				}
 			}()
-			rest.Register(rest.New(rest.Options{Mode: mode}), huma.Operation{OperationID: "missing", Method: "GET", Path: "/missing"}, func(context.Context, *pingIn) (*pingOut, error) { t.Fatal("handler ran"); return nil, nil })
+			rest.Register(rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}, Mode: mode}), huma.Operation{OperationID: "missing", Method: "GET", Path: "/missing"}, func(context.Context, *pingIn) (*pingOut, error) { t.Fatal("handler ran"); return nil, nil })
 		}()
 	}
 }
@@ -49,7 +49,7 @@ func TestWrappedErrorsAndMapping(t *testing.T) {
 	}
 }
 func TestErrorResponsesMatchDocumentedSchema(t *testing.T) {
-	api := rest.New(rest.Options{})
+	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}})
 	register := func(path string, err error) {
 		op := huma.Operation{OperationID: strings.TrimPrefix(path, "/"), Method: "POST", Path: path}
 		rest.Public()(&op)
@@ -116,7 +116,7 @@ func TestLocalizedBusinessErrorUsesPublicParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	api := withLanguages(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil))}, bundle)
+	api := withLanguages(rest.Options{Accounts: identity.Accounts{"user": nil}, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}, bundle)
 	busy := errorx.Define(errorx.Unavailable, "demo.busy")
 	untranslated := errorx.Define(errorx.Conflict, "demo.untranslated")
 	enOnly := errorx.Define(errorx.Conflict, "demo.en_only")
@@ -150,7 +150,7 @@ func TestLocalizedBusinessErrorUsesPublicParams(t *testing.T) {
 }
 
 func TestBearerRejectsEmptySubjectAndDocumentsNoOAuthScopes(t *testing.T) {
-	api := rest.New(rest.Options{})
+	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}})
 	op := huma.Operation{OperationID: "auth", Method: http.MethodGet, Path: "/auth"}
 	rest.RequireBearer(api, func(context.Context, string) (identity.Subject, error) { return identity.Subject{}, nil }, "orders")(&op)
 	if len(op.Security[0]["bearer"]) != 0 {
@@ -171,7 +171,7 @@ func TestBearerRejectsEmptySubjectAndDocumentsNoOAuthScopes(t *testing.T) {
 
 func TestConflictingRouteRejectedBeforeBinding(t *testing.T) {
 	for _, mode := range []rest.Mode{rest.ModeServe, rest.ModeOpenAPI} {
-		api := rest.New(rest.Options{Mode: mode})
+		api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}, Mode: mode})
 		first := huma.Operation{OperationID: "first", Method: "GET", Path: "/same"}
 		rest.Public()(&first)
 		rest.Register(api, first, func(context.Context, *pingIn) (*pingOut, error) { return &pingOut{}, nil })
@@ -201,7 +201,7 @@ func TestLanguageAndLoggerAreInstanceLocal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		api := withLanguages(rest.Options{Logger: slog.New(slog.NewJSONHandler(tc.buf, nil))}, bundle)
+		api := withLanguages(rest.Options{Accounts: identity.Accounts{"user": nil}, Logger: slog.New(slog.NewJSONHandler(tc.buf, nil))}, bundle)
 		op := huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"}
 		rest.Public()(&op)
 		rest.Register(api, op, func(context.Context, *pingIn) (*pingOut, error) {
@@ -242,7 +242,7 @@ func TestLanguageAndLoggerAreInstanceLocal(t *testing.T) {
 
 func TestAccessLogCarriesBusinessCode(t *testing.T) {
 	var logs bytes.Buffer
-	api := withDefaults(rest.Options{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+	api := withDefaults(rest.Options{Accounts: identity.Accounts{"user": nil}, Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
 	op := huma.Operation{OperationID: "conflict", Method: "GET", Path: "/conflict"}
 	rest.Public()(&op)
 	rest.Register(api, op, func(context.Context, *pingIn) (*pingOut, error) {
@@ -277,7 +277,7 @@ func withLanguages(opts rest.Options, languages *goi18n.Bundle) *rest.API {
 }
 
 func TestNewInstallsNoMiddleware(t *testing.T) {
-	api := rest.New(rest.Options{})
+	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}})
 	op := huma.Operation{OperationID: "ping", Method: "GET", Path: "/ping"}
 	rest.Public()(&op)
 	rest.Register(api, op, func(ctx context.Context, _ *pingIn) (*pingOut, error) {

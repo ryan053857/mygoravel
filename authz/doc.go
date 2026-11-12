@@ -3,10 +3,11 @@
 //
 // 全局角色（Tenant 为 ""）是 owner、admin、member 这类模板，可以在任何租户和平台中分配；
 // 租户也可以创建只在本租户中使用的角色。Store.Resolve 在每个请求中按 identity.TenantFromContext
-// 加载主体的权限，可以直接赋给 rest.Options.Resolve 和 web.Options.Resolve。
+// 加载主体的权限，可以直接作为 rest、web、realtime 的 Options.Accounts 中一套账号的 Resolver。
+// 分配按主体的类型和 ID（identity.Ref）保存，同一个 Store 可以用于多套账号体系。
 //
 //	store := authz.NewStore(db, catalog)
-//	api := rest.New(rest.Options{Tenant: tenantOf, Resolve: store.Resolve})
+//	api := rest.New(rest.Options{Tenant: tenantOf, Accounts: identity.Accounts{Member: store.Resolve}})
 //	role, err := store.CreateRole(ctx, authz.Role{Name: "editor", Permissions: []string{"articles:*"}})
-//	err = store.Assign(ctx, userID, tenantID, role.ID)
+//	err = store.Assign(ctx, identity.Ref{Type: Member, ID: userID}, tenantID, role.ID)
 package authz

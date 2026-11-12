@@ -58,12 +58,15 @@ type Options struct {
 	// Tenant 从请求中取出本次请求所在的租户，例如路径参数 chi.URLParam(r, "tenant")、子域名或自定义域名；
 	// 结果在每条页面路由（包括公开路由）开始时写入 identity.WithTenant。nil 表示始终是平台本身（""）。
 	Tenant func(r *http.Request) string
-	// Resolve 在 Require 保护的每个请求中，把登录时保存的主体转换为本次请求的主体，
-	// 例如重新查询用户的状态、按 identity.TenantFromContext 加载用户在租户中的权限；nil 时直接使用保存的主体。
-	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效：销毁会话并按未登录处理；
+	// Accounts 是这组页面接受的账号体系，以及每一种的 Resolver：Require 保护的每个请求中，按登录时保存的主体的 Type
+	// 调用对应的 Resolver，得到本次请求的主体，例如重新查询用户的状态、按 identity.TenantFromContext 加载用户在租户中的权限；
+	// Resolver 为 nil 时直接使用保存的主体。Type 不在其中的会话按未登录处理：销毁会话并跳转到登录页。
+	// Resolver 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效，同样销毁会话；
 	// 其他错误按分类呈现错误页，例如不是租户成员时返回 errorx.NotFound 得到 404。
-	// 权限检查使用返回的主体；其中 Method、Credential、Scopes、Impersonator 总是取自会话，Resolve 改变它们不起作用。
-	Resolve identity.Resolver
+	// 权限检查使用返回的主体；其中 Type、ID、Method、Credential、Scopes、Impersonator 总是取自会话。
+	//
+	// 运行模式下注册 Require 的路由时必须设置；名称不合法时 New panic。
+	Accounts identity.Accounts
 	// ErrorPage 渲染整页错误，用于普通请求和整页 htmx 请求，例如 ui.ErrorPage。
 	// message 来自 httpx.ErrorDetail：业务错误的译文，或状态描述。
 	ErrorPage func(status int, message string) templ.Component
@@ -100,6 +103,9 @@ func New(opts Options) *Pages {
 	if opts.Sessions == nil || opts.Login == "" {
 		panic("web: Sessions and Login are required")
 	}
+	if err := opts.Accounts.Validate(); err != nil {
+		panic(errors.Wrap(err, "web"))
+	}
 	if opts.ErrorPage == nil {
 		panic("web: ErrorPage is required")
 	}
@@ -123,7 +129,7 @@ func New(opts Options) *Pages {
 }
 
 // authorize 按 access 检查登录和权限，通过后把主体写入 identity.WithSubject。
-// 设置了 Options.Resolve 时，主体和权限取自它的返回值。
+// 主体和权限取自 Options.Accounts 中对应账号体系的 Resolver。
 func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 	if !access.login {
 		return next
@@ -155,7 +161,7 @@ func (p *Pages) recheck(ctx context.Context, token string, was identity.Subject,
 		stored, _, err := session.Lookup(ctx, p.opts.Sessions, token)
 		return stored, err
 	}
-	return identity.Reestablish(ctx, was, lookup, p.opts.Resolve, access.permissions...)
+	return identity.Reestablish(ctx, was, lookup, p.opts.Accounts.Resolve, access.permissions...)
 }
 
 // Login 把 sub 记为当前会话的主体，并记录 r 的客户端地址和 User-Agent 作为登录设备，见 session.Login。
@@ -177,7 +183,7 @@ func (p *Pages) Logout(ctx context.Context) error {
 }
 
 // subject 返回当前请求的主体：会话中保存的主体经过 identity.Establish，并能执行 permissions 中的全部权限。
-// 未登录，或 Resolve 认为主体已失效（此时销毁会话）时返回 ok 为 false；需要呈现错误页时返回 err，
+// 未登录、会话中的主体不属于 Options.Accounts，或 Resolver 认为主体已失效（后两者销毁会话）时返回 ok 为 false；需要呈现错误页时返回 err，
 // 例如保存的主体绑定了其他租户、不是租户成员、缺少权限。
 func (p *Pages) subject(r *http.Request, permissions []string) (identity.Subject, bool, error) {
 	ctx := r.Context()
@@ -186,7 +192,7 @@ func (p *Pages) subject(r *http.Request, permissions []string) (identity.Subject
 		return identity.Subject{}, false, nil
 	}
 	saved := func(context.Context) (identity.Subject, error) { return stored, nil }
-	sub, err := identity.Establish(ctx, saved, p.opts.Resolve, permissions...)
+	sub, err := identity.Establish(ctx, saved, p.opts.Accounts.Resolve, permissions...)
 	switch {
 	case err == nil:
 		return sub, true, nil

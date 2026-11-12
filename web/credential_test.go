@@ -30,7 +30,7 @@ func TestRequireInstallsCredentialCheck(t *testing.T) {
 	store := memstore.New()
 	o := options()
 	o.Sessions.Store = store
-	o.Resolve = func(_ context.Context, stored identity.Subject) (identity.Subject, error) {
+	o.Accounts = identity.Accounts{"user": func(_ context.Context, stored identity.Subject) (identity.Subject, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch state {
@@ -40,7 +40,7 @@ func TestRequireInstallsCredentialCheck(t *testing.T) {
 			return identity.Subject{}, errorx.Define(errorx.Unauthenticated, "users.disabled").New()
 		}
 		return identity.Subject{ID: stored.ID, Type: stored.Type, Permissions: scopes}, nil
-	}
+	}}
 	pages := web.New(o)
 	router := chi.NewRouter()
 	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {

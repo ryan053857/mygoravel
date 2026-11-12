@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 )
@@ -36,6 +37,7 @@ func options() web.Options {
 	cfg.SetDefaults()
 	cfg.Cookie.Secure = false
 	return web.Options{
+		Accounts:      identity.Accounts{"user": nil},
 		Sessions:      session.New(cfg, memstore.New()),
 		Login:         "/login",
 		ErrorPage:     func(status int, msg string) templ.Component { return text("page %d %s", status, msg) },

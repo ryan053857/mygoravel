@@ -49,7 +49,7 @@ func TestBehindPageRoutes(t *testing.T) {
 			return err
 		})
 	}
-	pages := web.New(web.Options{
+	pages := web.New(web.Options{Accounts: identity.Accounts{"user": nil},
 		Sessions:      session.New(cfg, store),
 		Login:         "/login",
 		ErrorPage:     func(status int, msg string) templ.Component { return text("page %d %s", status, msg) },

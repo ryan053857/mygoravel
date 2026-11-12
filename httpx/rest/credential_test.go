@@ -35,7 +35,7 @@ func TestRequireBearerInstallsCredentialCheck(t *testing.T) {
 		}
 		return subject, nil
 	}
-	api := rest.New(rest.Options{})
+	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}})
 	captured := make(chan context.Context, 1)
 	op := huma.Operation{OperationID: "events", Method: http.MethodGet, Path: "/events"}
 	rest.RequireBearer(api, validate, "events")(&op)

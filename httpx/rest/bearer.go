@@ -22,7 +22,7 @@ const authMetadata = "mygoravel.auth"
 
 // RequireBearer 要求请求携带有效的 Authorization: Bearer token，校验器返回有效主体，
 // 并且主体能执行 permissions 中的全部权限（identity.Subject.Can）。
-func RequireBearer(api huma.API, validate TokenValidator, permissions ...string) func(op *huma.Operation) {
+func RequireBearer(api *API, validate TokenValidator, permissions ...string) func(op *huma.Operation) {
 	if validate == nil {
 		panic("rest: nil token validator")
 	}
@@ -43,15 +43,18 @@ func RequireBearer(api huma.API, validate TokenValidator, permissions ...string)
 //
 //   - authenticate 识别调用者：没有凭据或凭据无效返回 401，认证后端故障返回对应的 5xx；
 //   - 主体的 Tenant 由凭据设置且与本次请求的租户（identity.TenantFromContext）不同时返回 403；
-//   - 调用 Options.Resolve（如果有）得到本次请求的主体，错误的处理见 Options.Resolve；
+//   - 主体的 Type 不在 Options.Accounts 中时返回 401，否则调用这套账号的 Resolver 得到本次请求的主体，见 Options.Accounts；
 //   - 主体不能执行 permissions 中的某项权限时返回 403。
 //
 // 认证通过后安装 httpx.CredentialCheck：SSE 等长连接期间定期重新执行以上检查（identity.Reestablish），
 // 凭据失效或失去权限时结束连接。
-// 每条路由只能声明一种认证方案。RequireBearer 基于它实现。
-func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authenticate Authenticator, permissions ...string) func(op *huma.Operation) {
+// 每条路由只能声明一种认证方案。RequireBearer 基于它实现。运行模式下 Options.Accounts 为空时 panic。
+func RequireAuth(api *API, name string, scheme *huma.SecurityScheme, authenticate Authenticator, permissions ...string) func(op *huma.Operation) {
 	if name == "" || scheme == nil || authenticate == nil {
 		panic("rest: RequireAuth requires a scheme name, a security scheme and an authenticator")
+	}
+	if api.mode == ModeServe && len(api.accounts) == 0 {
+		panic("rest: Options.Accounts is required for authenticated operations")
 	}
 	registerScheme(api, name, scheme)
 	challenge := ""
@@ -59,11 +62,7 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 		challenge = strings.ToUpper(scheme.Scheme[:1]) + scheme.Scheme[1:]
 	}
 	required := append([]string(nil), permissions...)
-	var resolve identity.Resolver
-	var watcher httpx.CredentialWatcher
-	if a, ok := api.(*API); ok {
-		resolve, watcher = a.resolve, a.watcher
-	}
+	resolve := api.accounts.Resolve
 	return func(op *huma.Operation) {
 		if op.Metadata == nil {
 			op.Metadata = map[string]any{}
@@ -89,9 +88,7 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 			switch {
 			case err == nil:
 			case identity.Failed(err):
-				if a, ok := api.(*API); ok {
-					a.logger.ErrorContext(ctx.Context(), "authentication backend failed", "scheme", name, "error", err)
-				}
+				api.logger.ErrorContext(ctx.Context(), "authentication backend failed", "scheme", name, "error", err)
 				writeError(api, ctx, huma.NewErrorWithContext(ctx, httpx.StatusOf(err), "authentication unavailable"))
 				return
 			case errors.Is(err, identity.ErrUnauthenticated):
@@ -109,8 +106,8 @@ func RequireAuth(api huma.API, name string, scheme *huma.SecurityScheme, authent
 				return identity.Reestablish(c, sub, auth, resolve, required...)
 			}
 			reqCtx := httpx.WithCredentialCheck(identity.WithSubject(ctx.Context(), sub), recheck)
-			if watcher != nil {
-				reqCtx = httpx.WithCredentialWatcher(reqCtx, watcher)
+			if api.watcher != nil {
+				reqCtx = httpx.WithCredentialWatcher(reqCtx, api.watcher)
 			}
 			next(huma.WithContext(ctx, reqCtx))
 		})

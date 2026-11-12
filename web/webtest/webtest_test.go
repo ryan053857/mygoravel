@@ -48,7 +48,7 @@ func pages(cookie, prefix string) *web.Pages {
 	var cfg session.Config
 	cfg.SetDefaults() // 默认 Secure
 	cfg.Cookie.Name = cookie
-	return web.New(web.Options{
+	return web.New(web.Options{Accounts: identity.Accounts{"user": nil},
 		Sessions:  session.New(cfg, memstore.New()),
 		Login:     prefix + "/login",
 		ErrorPage: func(status int, msg string) templ.Component { return text("error %d %s", status, msg) },

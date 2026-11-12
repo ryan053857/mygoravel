@@ -35,14 +35,17 @@ type Options struct {
 	//
 	// nil 时带 token 的连接一律拒绝。请求已经由认证中间件识别出主体时（例如同源页面的会话），不使用 token。
 	Authenticate func(ctx context.Context, token string) (identity.Subject, error)
-	// Resolve 把 Authenticate 给出的主体转换为这个连接的主体，例如按 identity.TenantFromContext 加载用户在租户中的权限，
-	// 通常与 rest.Options.Resolve 相同（authz.Store.Resolve）；nil 时直接使用 Authenticate 给出的主体。
-	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效，其他 4xx 类错误同样拒绝连接；
+	// Accounts 是用 token 连接时接受的账号体系，以及每一种的 Resolver：按 Authenticate 给出的主体的 Type
+	// 调用对应的 Resolver，得到这个连接的主体，例如按 identity.TenantFromContext 加载用户在租户中的权限，
+	// 通常与 rest.Options.Accounts 相同；Type 不在其中的 token 被拒绝，Resolver 为 nil 时直接使用 Authenticate 给出的主体。
+	// Resolver 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效，其他 4xx 类错误同样拒绝连接；
 	// 连接期间与 Authenticate 一起定期重新调用，用户被停用或移出租户后连接结束。
-	// 认证中间件识别出的主体（例如同源页面的会话）已经由 web.Options.Resolve 处理，不再经过它。
-	Resolve identity.Resolver
+	// 认证中间件识别出的主体（例如同源页面的会话）已经由 web.Options.Accounts 处理，不再经过它。
+	//
+	// 设置了 Authenticate 时必须设置；名称不合法时 New panic。
+	Accounts identity.Accounts
 	// Tenant 从连接请求中取出它所在的租户，例如路径参数 chi.URLParam(r, "tenant")、子域名或请求头，
-	// 结果写入 identity.WithTenant：Resolve 据此加载权限，绑定了其他租户的 token 被拒绝。
+	// 结果写入 identity.WithTenant：Resolver 据此加载权限，绑定了其他租户的 token 被拒绝。
 	// 与 rest.Options.Tenant、web.Options.Tenant 的作用相同。nil 时使用外层中间件已经写入的租户
 	// （页面路由由 web.Options.Tenant 写入），都没有时是平台本身（""）。
 	Tenant func(r *http.Request) string
@@ -84,7 +87,8 @@ type Realtime struct {
 }
 
 // New 创建 Realtime 并开始把 hub 收到的消息转给客户端，直到 Shutdown。hub 由应用创建和关闭，
-// 所有实例必须使用相同的后端。hub 为 nil、TrustedOrigins 格式不正确或 PresenceGrace 超过上限时 panic。
+// 所有实例必须使用相同的后端。hub 为 nil、TrustedOrigins 格式不正确、PresenceGrace 超过上限，
+// 或设置了 Authenticate 而 Accounts 为空、Accounts 的名称不合法时 panic。
 func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 	if hub == nil {
 		panic("realtime: nil hub")
@@ -95,6 +99,12 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 		logger:  logging.Or(opts.Logger).With(logging.AttrComponent, "realtime"),
 		origins: map[string]struct{}{},
 		recheck: credentialInterval,
+	}
+	if opts.Authenticate != nil && len(opts.Accounts) == 0 {
+		panic("realtime: Accounts is required with Authenticate")
+	}
+	if err := opts.Accounts.Validate(); err != nil {
+		panic(errors.Wrap(err, "realtime"))
 	}
 	if opts.PresenceGrace > MaxPresenceGrace {
 		panic("realtime: PresenceGrace is longer than MaxPresenceGrace")

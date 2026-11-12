@@ -31,7 +31,7 @@ func TestRequireBearerRechecksOnSignal(t *testing.T) {
 		}
 		return identity.Subject{ID: "alice", Type: "user", Credential: "token-1"}, nil
 	}
-	api := rest.New(rest.Options{Credentials: creds})
+	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}, Credentials: creds})
 	op := huma.Operation{OperationID: "events", Method: http.MethodGet, Path: "/events"}
 	rest.RequireBearer(api, validate)(&op)
 	rest.RegisterSSE(api, op, map[string]any{}, func(context.Context, *struct{}) (*huma.StreamResponse, error) {

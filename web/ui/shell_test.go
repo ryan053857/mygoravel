@@ -42,7 +42,7 @@ func shell(t *testing.T, permissions ...string) *webtest.Client {
 	t.Helper()
 	var cfg session.Config
 	cfg.SetDefaults()
-	pages := web.New(web.Options{Sessions: session.New(cfg, memstore.New()), Login: "/login", ErrorPage: ui.ErrorPage})
+	pages := web.New(web.Options{Accounts: identity.Accounts{"user": nil}, Sessions: session.New(cfg, memstore.New()), Login: "/login", ErrorPage: ui.ErrorPage})
 	r := chi.NewRouter()
 	user := &ui.ShellUser{Name: "alice", Email: "alice@example.com", Menu: []ui.MenuItem{
 		{Label: "个人设置", Href: "/admin/profile", Icon: icon.User},

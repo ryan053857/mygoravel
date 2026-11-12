@@ -124,12 +124,12 @@ editor.Get("/realtime", func(w http.ResponseWriter, r *http.Request) error {
 <a id="tokens"></a>
 ### SPA 与移动端
 
-浏览器的 WebSocket 不能设置 `Authorization` 请求头，所以 SDK 在连接时传入 token，由 `Options.Authenticate` 校验，它通常就是 [API 令牌](api-tokens.md)的校验器。token 不保存权限，`Options.Resolve` 加载它，与 API 的 [`rest.Options.Resolve`](authorization.md#resolving-permissions) 是同一个函数：
+浏览器的 WebSocket 不能设置 `Authorization` 请求头，所以 SDK 在连接时传入 token，由 `Options.Authenticate` 校验，它通常就是 [API 令牌](api-tokens.md)的校验器。token 不保存权限，`Options.Accounts` 中这套账号的 Resolver 加载它，与 API 的 [`rest.Options.Accounts`](authorization.md#resolving-permissions) 相同；token 属于其他账号体系时连接被拒绝。设置了 `Authenticate` 就必须设置 `Accounts`：
 
 ```go
 rt, err := realtime.New(hub, realtime.Options{
     Authenticate: tokens.Validate,
-    Resolve:      roles.Resolve,
+    Accounts:     identity.Accounts{user.Type: roles.Resolve},
 })
 router.Handle("/realtime", rt.Handler())
 ```
@@ -138,12 +138,12 @@ router.Handle("/realtime", rt.Handler())
 const centrifuge = new Centrifuge('wss://api.example.com/realtime', { token: apiToken });
 ```
 
-[多租户](tenancy.md#identifying-tenants)应用还要告诉它连接属于哪个租户，`Options.Tenant` 与 API 的 `rest.Options.Tenant` 作用相同：`Resolve` 据此加载用户在这个租户中的权限，[租户频道](#private-channels)的授权函数才能与 `sub.Tenant` 比较，绑定了其他租户的 token 会被拒绝。
+[多租户](tenancy.md#identifying-tenants)应用还要告诉它连接属于哪个租户，`Options.Tenant` 与 API 的 `rest.Options.Tenant` 作用相同：Resolver 据此加载用户在这个租户中的权限，[租户频道](#private-channels)的授权函数才能与 `sub.Tenant` 比较，绑定了其他租户的 token 会被拒绝。
 
 ```go
 rt, err := realtime.New(hub, realtime.Options{
     Authenticate: tokens.Validate,
-    Resolve:      roles.Resolve,
+    Accounts:     identity.Accounts{user.Type: roles.Resolve},
     Tenant:       func(r *http.Request) string { return chi.URLParam(r, "tenant") },
 })
 router.Handle("/t/{tenant}/realtime", rt.Handler())
@@ -151,7 +151,7 @@ router.Handle("/t/{tenant}/realtime", rt.Handler())
 
 同源页面不需要设置它：连接经过页面路由，租户已经由 `web.Options.Tenant` 写入。
 
-token 无效或 `Resolve` 拒绝主体时，连接以 3500 关闭，SDK 不再重连。连接期间两者每 30 秒重新运行一次，token 被撤销、用户被停用或移出租户后连接结束。既没有会话也没有 token 的连接是匿名的，只能订阅公开频道。
+token 无效、属于其他账号体系，或 Resolver 拒绝主体时，连接以 3500 关闭，SDK 不再重连。连接期间两者每 30 秒重新运行一次，token 被撤销、用户被停用或移出租户后连接结束。既没有会话也没有 token 的连接是匿名的，只能订阅公开频道。
 
 <a id="revocation"></a>
 ### 撤销后断开

@@ -234,26 +234,28 @@ func (a *SignOutOthers) Handle(ctx context.Context, subject identity.Subject) er
 <a id="loading-permissions"></a>
 ## 加载权限
 
-token 不保存用户的权限，所以权限变化、账号停用都能立即生效。权限由 `rest.Options.Resolve` 在每个请求中按用户当前的状态加载，见[每次请求加载权限](authentication.md#resolving-subjects)：
+token 不保存用户的权限，所以权限变化、账号停用都能立即生效。权限由 `rest.Options.Accounts` 中这套账号的 Resolver 在每个请求中按用户当前的状态加载，见[每次请求加载权限](authentication.md#resolving-subjects)：
 
 ```go
 api := rest.New(rest.Options{
-    Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
-        u, err := user.Find(ctx, a.db, sub.ID)
-        if err != nil {
-            return identity.Subject{}, err
-        }
-        if u.Disabled {
-            return identity.Subject{}, auth.ErrUnauthenticated.New()
-        }
-        sub.Permissions = u.Permissions
-        return sub, nil
+    Accounts: identity.Accounts{
+        user.Type: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+            u, err := user.Find(ctx, a.db, sub.ID)
+            if err != nil {
+                return identity.Subject{}, err
+            }
+            if u.Disabled {
+                return identity.Subject{}, auth.ErrUnauthenticated.New()
+            }
+            sub.Permissions = u.Permissions
+            return sub, nil
+        },
     },
     // ...
 })
 ```
 
-个人访问令牌的 `Scopes` 由 `Validate` 填入，`Resolve` 不需要处理：`sub.Can` 同时检查两者。
+个人访问令牌的 `Scopes` 由 `Validate` 填入，Resolver 不需要处理：`sub.Can` 同时检查两者。
 
 <a id="cleanup"></a>
 ## 过期清理

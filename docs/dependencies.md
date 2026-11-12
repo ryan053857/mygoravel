@@ -161,15 +161,17 @@ import (
 
     "example.com/blog/internal/article"
     "example.com/blog/internal/auth"
+    "example.com/blog/internal/user"
     "github.com/go-chi/chi/v5"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/httpx"
     "github.com/ryan053857/mygoravel/httpx/rest"
+    "github.com/ryan053857/mygoravel/identity"
     "github.com/uptrace/bun"
 )
 
-// API 是应用的 API 选项，serve、openapi 和 routes 命令共用它。
-var API = rest.Options{Title: "Blog API", Version: "1.0.0"}
+// API 是应用的 API 选项，serve、openapi 和 routes 命令共用它。API 只接受博客用户这一套账号。
+var API = rest.Options{Title: "Blog API", Version: "1.0.0", Accounts: identity.Accounts{user.Type: nil}}
 
 // Routes 注册应用的全部路由，serve、openapi 和 routes 命令共用它。
 func Routes(api *rest.API, validate rest.TokenValidator, db *bun.DB) {

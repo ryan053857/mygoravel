@@ -82,18 +82,18 @@ func TestEstablish(t *testing.T) {
 	}
 }
 
-// Resolver 加载权限和租户；认证方式、凭据、凭据的限制和代为登录者总是取自凭据。
+// Resolver 加载权限和租户；主体本身、认证方式、凭据、凭据的限制和代为登录者总是取自凭据。
 func TestEstablishKeepsCredentialFields(t *testing.T) {
 	cred := identity.Subject{ID: "alice", Type: "user", Method: "bearer", Credential: "tok1", Scopes: []string{"articles:read"}, Impersonator: support}
 	rebuilt := func(context.Context, identity.Subject) (identity.Subject, error) {
-		return identity.Subject{ID: "alice", Tenant: "acme", Permissions: []string{"*"}, Method: "forged", Credential: "other", Impersonator: identity.Ref{Type: "staff", ID: "nobody"}}, nil
+		return identity.Subject{Type: "staff", ID: "mallory", Tenant: "acme", Permissions: []string{"*"}, Method: "forged", Credential: "other", Impersonator: identity.Ref{Type: "staff", ID: "nobody"}}, nil
 	}
 	auth := func(context.Context) (identity.Subject, error) { return cred, nil }
 	sub, err := identity.Establish(context.Background(), auth, rebuilt, "articles:read")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := identity.Subject{ID: "alice", Tenant: "acme", Permissions: []string{"*"}, Method: "bearer", Credential: "tok1", Scopes: []string{"articles:read"}, Impersonator: support}
+	want := identity.Subject{Type: "user", ID: "alice", Tenant: "acme", Permissions: []string{"*"}, Method: "bearer", Credential: "tok1", Scopes: []string{"articles:read"}, Impersonator: support}
 	if !reflect.DeepEqual(sub, want) {
 		t.Fatalf("%+v", sub)
 	}

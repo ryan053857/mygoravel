@@ -68,7 +68,7 @@ func setup(t *testing.T) (*filesystem.Service, http.Handler, *web.Pages) {
 
 	var scfg session.Config
 	scfg.SetDefaults()
-	pages := web.New(web.Options{
+	pages := web.New(web.Options{Accounts: identity.Accounts{"user": nil},
 		Sessions: session.New(scfg, memstore.New()), Login: "/login",
 		ErrorPage: ui.ErrorPage,
 	})

@@ -117,7 +117,7 @@ func NewStore(db bun.IDB, catalog Catalog) *Store {
 // Catalog 返回权限目录，供角色编辑界面列出可选的权限。
 func (s *Store) Catalog() Catalog { return slices.Clone(s.catalog) }
 
-// Resolve 可以直接赋给 rest.Options.Resolve 和 web.Options.Resolve：按 identity.TenantFromContext 加载 sub
+// Resolve 是一个 identity.Resolver，可以直接作为 Options.Accounts 中一套账号的 Resolver：按 identity.TenantFromContext 加载 sub
 // 在本次请求的租户中的权限，写入 sub.Permissions 和 sub.Tenant。
 // sub 在租户中没有任何角色时返回 ErrNotMember（404）；在平台中没有角色是正常的，权限为空。
 func (s *Store) Resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error) {

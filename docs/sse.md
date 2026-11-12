@@ -214,12 +214,12 @@ editor.Post("/admin/articles/publish", h.Publish)
 | 校验结果 | 连接 |
 | --- | --- |
 | 仍然有效 | 保持 |
-| 会话不存在或已撤销、token 校验不通过、主体变了、`Resolve` 返回 4xx 类错误、缺少所需的 scope | 结束 |
-| 暂时无法判断，例如数据库故障、`Resolve` 返回 5xx 类错误 | 保持，30 秒后再查 |
+| 会话不存在或已撤销、token 校验不通过、主体变了、Resolver 返回 4xx 类错误、缺少所需的 scope | 结束 |
+| 暂时无法判断，例如数据库故障、Resolver 返回 5xx 类错误 | 保持，30 秒后再查 |
 
 连接结束后，浏览器重连时按普通请求重新认证：页面跳转到登录页，JSON API 返回 `401`。所以凭据失效后，最多 30 秒连接就会断开，处理器不需要自己检查。
 
-页面会重新读取会话存储并经过 [`Options.Resolve`](views.md#login)；JSON API 会重新运行 token 校验器，校验器有副作用时（例如 `apitoken` 延长登录 token 的有效期），长连接期间也会每 30 秒发生一次。自己实现认证中间件时，用 `httpx.WithCredentialCheck` 登记同样的校验函数，SSE 会照样运行它。
+页面会重新读取会话存储并经过 [`Options.Accounts`](views.md#login) 中的 Resolver；JSON API 会重新运行 token 校验器，校验器有副作用时（例如 `apitoken` 延长登录 token 的有效期），长连接期间也会每 30 秒发生一次。自己实现认证中间件时，用 `httpx.WithCredentialCheck` 登记同样的校验函数，SSE 会照样运行它。
 
 <a id="immediate-revocation"></a>
 ### 立即断开
@@ -228,8 +228,9 @@ editor.Post("/admin/articles/publish", h.Publish)
 
 ```go
 creds := broadcast.NewCredentials(hub)
-api := rest.New(rest.Options{Resolve: roles.Resolve, Credentials: creds})
-pages := web.New(web.Options{Resolve: roles.Resolve, Credentials: creds /* 其余字段见视图 */})
+accounts := identity.Accounts{user.Type: roles.Resolve}
+api := rest.New(rest.Options{Accounts: accounts, Credentials: creds})
+pages := web.New(web.Options{Accounts: accounts, Credentials: creds /* 其余字段见视图 */})
 ```
 
 凭据变化之后，调用对应的方法：

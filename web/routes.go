@@ -26,7 +26,7 @@ var Public = Access{declared: true}
 
 // Require 要求请求属于已登录的会话，并且主体能执行 permissions 中的全部权限（identity.Subject.Can）：
 // 未登录时跳转到 Options.Login，并在 next 参数中带上原地址（htmx 请求取自 HX-Current-URL）；
-// 权限不足时呈现 403。设置了 Options.Resolve 时，主体和权限取自它的返回值。
+// 权限不足时呈现 403。主体和权限取自 Options.Accounts 中对应账号体系的 Resolver。
 // 通过后主体写入 identity.WithSubject，处理器用 identity.FromContext 读取。
 func Require(permissions ...string) Access {
 	return Access{declared: true, login: true, permissions: slices.Clone(permissions)}
@@ -40,13 +40,17 @@ type Routes struct {
 }
 
 // Routes 返回在 r 上注册页面路由的注册器，每条路由都使用 access。
-// 页面路由只能通过注册器注册，因此每条路由都显式声明了访问策略；access 是零值时 panic。
+// 页面路由只能通过注册器注册，因此每条路由都显式声明了访问策略；access 是零值，
+// 或运行模式下 access 要求登录而 Options.Accounts 为空时 panic。
 //
 // 注册的每条路由依次：拒绝跨站的非安全请求（http.CrossOriginProtection，不需要 CSRF token）、
 // 加载和保存会话、按 access 检查登录，最后调用处理器并呈现它返回的错误。
 func (p *Pages) Routes(r chi.Router, access Access) *Routes {
 	if !access.declared {
 		panic("web: page routes must declare web.Public or web.Require")
+	}
+	if access.login && p.opts.Mode != ModeRoutes && len(p.opts.Accounts) == 0 {
+		panic("web: Options.Accounts is required for web.Require routes")
 	}
 	return &Routes{pages: p, router: r, access: access}
 }

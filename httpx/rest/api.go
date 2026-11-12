@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
@@ -26,11 +27,11 @@ const (
 // API 包装 huma.API，携带模式与实例级策略。
 type API struct {
 	huma.API
-	mode    Mode
-	router  chi.Router
-	logger  *slog.Logger
-	resolve identity.Resolver
-	watcher httpx.CredentialWatcher
+	mode     Mode
+	router   chi.Router
+	logger   *slog.Logger
+	accounts identity.Accounts
+	watcher  httpx.CredentialWatcher
 }
 
 // Options 创建 API。
@@ -51,12 +52,15 @@ type Options struct {
 	// Tenant 从请求中取出本次请求所在的租户，例如路径参数 ctx.Param("tenant")、子域名或请求头；
 	// 结果在每个操作（包括公开的操作）开始时写入 identity.WithTenant。nil 表示始终是平台本身（""）。
 	Tenant func(ctx huma.Context) string
-	// Resolve 在认证通过后把凭据给出的主体转换为本次请求的主体，例如按 identity.TenantFromContext
-	// 加载用户在租户中的权限；nil 时直接使用凭据给出的主体。
-	// 返回 errorx.Unauthenticated 类错误或 ID 为空的主体时响应 401，其他 4xx 类错误按其分类响应，
+	// Accounts 是这个 API 接受的账号体系，以及每一种的 Resolver：认证通过后，按凭据给出的主体的 Type
+	// 调用对应的 Resolver，得到本次请求的主体，例如按 identity.TenantFromContext 加载用户在租户中的权限。
+	// Type 不在其中的凭据响应 401，与凭据无效相同；Resolver 为 nil 时直接使用凭据给出的主体。
+	// Resolver 返回 errorx.Unauthenticated 类错误或 ID 为空的主体时响应 401，其他 4xx 类错误按其分类响应，
 	// 例如不是租户成员时返回 errorx.NotFound 得到 404；5xx 类错误响应对应的状态码。
-	// 返回的主体中 Method、Credential、Scopes、Impersonator 总是取自凭据，Resolve 改变它们不起作用。
-	Resolve identity.Resolver
+	// 返回的主体中 Type、ID、Method、Credential、Scopes、Impersonator 总是取自凭据。
+	//
+	// 运行模式下注册需要认证的操作（RequireAuth、RequireBearer）时必须设置；名称不合法时 New panic。
+	Accounts identity.Accounts
 	// Credentials 让 RequireAuth 保护的长连接（例如 SSE）在收到复查信号时立即重新校验凭据，
 	// 撤销 token、停用用户后连接随即结束；nil 时只按 30 秒的间隔定期校验。通常是 broadcast.NewCredentials 的返回值。
 	Credentials httpx.CredentialWatcher
@@ -64,6 +68,9 @@ type Options struct {
 
 // New 创建 chi + Huma API，并让未匹配的路由与方法返回 Problem Details。
 func New(opts Options) *API {
+	if err := opts.Accounts.Validate(); err != nil {
+		panic(errors.Wrap(err, "rest"))
+	}
 	opts.Logger = logging.Or(opts.Logger).With(logging.AttrComponent, "http")
 	if opts.Title == "" {
 		opts.Title = "API"
@@ -97,7 +104,7 @@ func New(opts Options) *API {
 			next(huma.WithContext(ctx, identity.WithTenant(ctx.Context(), tenant(ctx))))
 		})
 	}
-	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, resolve: opts.Resolve, watcher: opts.Credentials}
+	return &API{API: h, mode: opts.Mode, router: r, logger: opts.Logger, accounts: opts.Accounts, watcher: opts.Credentials}
 }
 
 // Mode 返回当前模式。

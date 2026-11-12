@@ -186,7 +186,7 @@ func TestRoutesUnderMountedAPI(t *testing.T) {
 func TestDocsPageUsesBasePath(t *testing.T) {
 	router := chi.NewRouter()
 	router.Route("/api/v1", func(r chi.Router) {
-		rest.New(rest.Options{Router: r, BasePath: "/api/v1"})
+		rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}, Router: r, BasePath: "/api/v1"})
 	})
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/docs", nil))

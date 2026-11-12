@@ -58,11 +58,13 @@ import (
 
     "example.com/blog/internal/article"
     "example.com/blog/internal/auth"
+    "example.com/blog/internal/user"
     "github.com/ryan053857/mygoravel/httpx/rest"
+    "github.com/ryan053857/mygoravel/identity"
 )
 
 func newTestAPI() *rest.API {
-    api := rest.New(rest.Options{})
+    api := rest.New(rest.Options{Accounts: identity.Accounts{user.Type: nil}})
     validate := auth.Validator(auth.Config{Credentials: []auth.Credential{
         {Token: "alice-token", SubjectID: "alice", Permissions: []string{"articles"}},
         {Token: "guest-token", SubjectID: "guest"},
@@ -175,7 +177,12 @@ func TestUpdate(t *testing.T) {
 
     var cfg session.Config
     cfg.SetDefaults()
-    pages := web.New(web.Options{Sessions: session.New(cfg, memstore.New()), Login: "/login", ErrorPage: ui.ErrorPage})
+    pages := web.New(web.Options{
+        Sessions:  session.New(cfg, memstore.New()),
+        Login:     "/login",
+        Accounts:  identity.Accounts{user.Type: nil},
+        ErrorPage: ui.ErrorPage,
+    })
     router := chi.NewRouter()
     articleweb.Register(router, pages, db)
     c := webtest.New(t, router)

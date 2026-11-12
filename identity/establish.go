@@ -19,8 +19,9 @@ type Authenticator func(ctx context.Context) (Subject, error)
 
 // Resolver 把凭据给出的主体转换为本次请求的主体，例如按 TenantFromContext 加载主体在租户中的权限。
 // 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效；其他 4xx 类错误按其分类处理，
-// 例如不是租户成员时返回 errorx.NotFound。返回的主体中 Method、Credential、Scopes、Impersonator
-// 总是取自凭据，Resolver 改变它们不起作用。
+// 例如不是租户成员时返回 errorx.NotFound。返回的主体中 Type、ID、Method、Credential、Scopes、Impersonator
+// 总是取自凭据，Resolver 改变它们不起作用：它只加载权限和租户，不能把主体换成另一个人。
+// 入口通过 Accounts 为每套账号体系指定 Resolver。
 type Resolver func(ctx context.Context, sub Subject) (Subject, error)
 
 // Establish 得到本次请求的主体，JSON API、页面和实时频道的入口都用它。依次：
@@ -54,7 +55,8 @@ func Establish(ctx context.Context, authenticate Authenticator, resolve Resolver
 		case err != nil:
 			return Subject{}, err
 		}
-		// resolve 加载权限和租户；认证方式、凭据、凭据的限制和代为登录者由凭据决定，不随 resolve 改变。
+		// resolve 加载权限和租户；主体本身、认证方式、凭据、凭据的限制和代为登录者由凭据决定，不随 resolve 改变。
+		sub.Type, sub.ID = cred.Type, cred.ID
 		sub.Method, sub.Credential, sub.Scopes, sub.Impersonator = cred.Method, cred.Credential, cred.Scopes, cred.Impersonator
 	}
 	for _, perm := range permissions {

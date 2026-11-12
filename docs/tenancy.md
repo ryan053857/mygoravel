@@ -42,12 +42,12 @@ SaaS 应用通常有三类用户：
 ```go
 // 路径：/t/{tenant}/articles
 api := rest.New(rest.Options{
-    Tenant:  func(ctx huma.Context) string { return ctx.Param("tenant") },
-    Resolve: roles.Resolve,
+    Tenant:   func(ctx huma.Context) string { return ctx.Param("tenant") },
+    Accounts: identity.Accounts{user.Type: roles.Resolve},
 })
 pages := web.New(web.Options{
-    Tenant:  func(r *http.Request) string { return chi.URLParam(r, "tenant") },
-    Resolve: roles.Resolve,
+    Tenant:   func(r *http.Request) string { return chi.URLParam(r, "tenant") },
+    Accounts: identity.Accounts{user.Type: roles.Resolve},
     // ...
 })
 

@@ -2,7 +2,7 @@
 //
 // 页面使用会话：New 接收 session.New 创建的会话管理器。页面路由只能通过 Pages.Routes 注册，
 // 并必须声明访问策略（Public 或 Require）；每条路由自动防御跨站请求伪造、加载会话、检查登录
-// （Options.Resolve 可在每个请求中重新加载主体），
+// （Options.Accounts 为每套账号指定 Resolver，在每个请求中重新加载主体），
 // 并呈现处理器返回的错误：错误按 errorx 分类映射状态码，整页请求渲染错误页，
 // 局部 htmx 请求的错误作为提示随 FlashEvent 送达（或渲染 Options.ErrorFragment）；
 // htmx 请求收到的 3xx 跳转自动改写为 HX-Redirect。一个应用可以有多组 Pages，各有会话、登录页和 Theme。

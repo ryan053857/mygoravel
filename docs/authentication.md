@@ -159,6 +159,14 @@ auth:
 <a id="protecting-routes"></a>
 ## 保护路由
 
+需要认证的 API 先用 `rest.Options.Accounts` 声明它接受哪些账号体系。博客只有一套账号：
+
+```go
+api := rest.New(rest.Options{Accounts: identity.Accounts{user.Type: nil}})
+```
+
+键是账号体系，值是这套账号的 `identity.Resolver`，`nil` 表示直接使用校验器给出的主体，见[每次请求加载权限](#resolving-subjects)。校验器给出的主体的 `Type` 不在其中时，请求与 token 无效一样返回 `401`。产品有多套账号时，每个 API 只接受它服务的那几种，例如商家后台的 API 是 `identity.Accounts{member.Type: roles.Resolve}`，同一个校验器交给面向终端客户的 API 也不会让商家成员的 token 通过。没有设置 `Accounts` 就注册需要认证的路由会 panic。
+
 使用 `rest.RequireBearer` 为路由启用认证。它的参数是 API 实例、校验器，以及调用者必须能执行的权限。
 
 下面是注册“获取文章”接口的片段：`api` 由 `rest.New` 创建，`validate` 是入口中用 `auth.Validator(a.cfg.Auth)` 创建的校验器，`db` 是入口打开的数据库。`Get` action 的定义见[路由](routing.md#http-actions)：
@@ -196,6 +204,7 @@ rest.Register(api, op, NewGet(db).HTTP)
 | --- | --- | --- |
 | 没有携带 `Authorization` 头，或格式不是 `Bearer <token>` | 401 | `auth.unauthenticated` |
 | 校验器拒绝了 token | 401 | `auth.unauthenticated` |
+| token 属于 API 不接受的账号体系 | 401 | `auth.unauthenticated` |
 | 缺少所需的权限 | 403 | `auth.forbidden` |
 | 校验器返回 5xx 类错误 | 与错误分类对应，例如 503 | 无 |
 
@@ -225,34 +234,36 @@ Www-Authenticate: Bearer
 <a id="resolving-subjects"></a>
 ## 每次请求加载权限
 
-上面的校验器直接给出了权限。更常见的情况是：凭据只说明“这是谁”，权限来自数据库中用户的角色，而且应当随时生效。这时设置 `rest.Options.Resolve`，它在认证通过后、权限检查之前运行，收到凭据给出的主体，返回本次请求的主体：
+上面的校验器直接给出了权限。更常见的情况是：凭据只说明“这是谁”，权限来自数据库中用户的角色，而且应当随时生效。这时在 `Accounts` 中为这套账号指定 Resolver，它在认证通过后、权限检查之前运行，收到凭据给出的主体，返回本次请求的主体：
 
 ```go
 api := rest.New(rest.Options{
-    Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
-        u, err := users.Get(ctx, sub.ID)
-        if err != nil {
-            return identity.Subject{}, err
-        }
-        if u.Disabled {
-            return identity.Subject{}, auth.ErrUnauthenticated.New()
-        }
-        sub.Permissions = u.Permissions
-        return sub, nil
+    Accounts: identity.Accounts{
+        user.Type: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+            u, err := users.Get(ctx, sub.ID)
+            if err != nil {
+                return identity.Subject{}, err
+            }
+            if u.Disabled {
+                return identity.Subject{}, auth.ErrUnauthenticated.New()
+            }
+            sub.Permissions = u.Permissions
+            return sub, nil
+        },
     },
 })
 ```
 
-| `Resolve` 返回 | 结果 |
+| Resolver 返回 | 结果 |
 | --- | --- |
 | 主体 | 权限检查和处理器都使用它 |
 | `errorx.Unauthenticated` 类错误，或 `ID` 为空的主体 | `401`，与凭据无效相同 |
 | 其他 4xx 类错误 | 按错误分类响应，错误码就是你定义的业务错误码，例如不是租户成员时返回 `errorx.NotFound` 得到 `404` |
 | 5xx 类错误 | 与校验器的 5xx 相同 |
 
-`Resolve` 只负责加载权限和租户：返回的主体中 `Method`、`Credential`、`Scopes` 和 `Impersonator` 总是取自凭据，像上面这样修改收到的主体，或者新建一个主体返回，结果都一样。
+Resolver 只负责加载权限和租户：返回的主体中 `Type`、`ID`、`Method`、`Credential`、`Scopes` 和 `Impersonator` 总是取自凭据，像上面这样修改收到的主体，或者新建一个主体返回，结果都一样，Resolver 不能把主体换成另一个人。
 
-页面的 [`web.Options.Resolve`](views.md#login) 和实时频道的 [`realtime.Options.Resolve`](realtime.md#tokens) 都是同一个类型 `identity.Resolver`，所以同一个函数可以同时交给它们，三者按相同的规则处理它的返回值。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
+页面的 [`web.Options.Accounts`](views.md#login) 和实时频道的 [`realtime.Options.Accounts`](realtime.md#tokens) 与它是同一个类型 `identity.Accounts`，所以同一个 Resolver 可以同时交给它们，三者按相同的规则处理它的返回值。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
 
 <a id="tenants"></a>
 ## 多租户
@@ -261,12 +272,12 @@ api := rest.New(rest.Options{
 
 ```go
 api := rest.New(rest.Options{
-    Tenant:  func(ctx huma.Context) string { return ctx.Param("tenant") },
-    Resolve: resolve,
+    Tenant:   func(ctx huma.Context) string { return ctx.Param("tenant") },
+    Accounts: identity.Accounts{user.Type: resolve},
 })
 ```
 
-`Tenant` 的结果在每个操作开始时写入 context，公开的操作也一样，用 `identity.TenantFromContext` 读取；没有设置 `Tenant` 或取到空字符串时，租户是 `""`，表示平台本身，例如个人中心和运营后台。`Resolve` 据此加载用户在这个租户中的权限，并把租户写入主体：
+`Tenant` 的结果在每个操作开始时写入 context，公开的操作也一样，用 `identity.TenantFromContext` 读取；没有设置 `Tenant` 或取到空字符串时，租户是 `""`，表示平台本身，例如个人中心和运营后台。Resolver 据此加载用户在这个租户中的权限，并把租户写入主体：
 
 ```go
 func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
@@ -280,9 +291,9 @@ func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error
 }
 ```
 
-凭据也可以绑定一个租户，例如只属于某个租户的个人访问令牌：校验器返回的主体 `Tenant` 不为空时，它与本次请求的租户不同的请求一律返回 `403`，不会调用 `Resolve`。
+凭据也可以绑定一个租户，例如只属于某个租户的个人访问令牌：校验器返回的主体 `Tenant` 不为空时，它与本次请求的租户不同的请求一律返回 `403`，不会调用 Resolver。
 
-角色和成员可以交给 [`authz`](authorization.md#roles) 管理，它的 `Resolve` 就是上面这样的函数。租户的确定方式、成员管理、数据隔离和运营后台，见[多租户](tenancy.md)。
+角色和成员可以交给 [`authz`](authorization.md#roles) 管理，它的 `Resolve` 方法就是上面这样的函数。租户的确定方式、成员管理、数据隔离和运营后台，见[多租户](tenancy.md)。
 
 <a id="impersonation"></a>
 ## 代为登录
@@ -327,7 +338,7 @@ plain, err := tokens.Login(ctx, identity.Subject{Type: user.Type, ID: userID, Im
 
 几件需要应用自己决定的事：
 
-- **操作者仍然有效**：在 `Resolve` 中检查 `Impersonator` 仍然拥有代为登录的权限。客服离职或被收回权限后，他代为登录的会话和令牌在下一个请求就失效：
+- **操作者仍然有效**：在 Resolver 中检查 `Impersonator` 仍然拥有代为登录的权限。客服离职或被收回权限后，他代为登录的会话和令牌在下一个请求就失效：
 
   ```go
   if !sub.Impersonator.IsZero() {

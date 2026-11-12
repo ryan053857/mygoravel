@@ -20,7 +20,7 @@ func TestCORSPreflightBeforeRoutes(t *testing.T) {
 	cfg.AllowedOrigins = []string{"https://app.example.com"}
 	r := chi.NewRouter()
 	r.Use(httpx.CORS(cfg))
-	api := rest.New(rest.Options{Router: r})
+	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}, Router: r})
 	op := huma.Operation{OperationID: "create", Method: http.MethodPost, Path: "/articles"}
 	rest.RequireBearer(api, func(context.Context, string) (identity.Subject, error) { return identity.Subject{}, nil })(&op)
 	rest.Register(api, op, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })

@@ -24,10 +24,10 @@ var catalog = authz.Catalog{
 	{Name: "platform:tenants", Description: "管理租户"},
 }
 
-// Resolve 的签名与 rest、web 的 Options.Resolve 相同，可以直接赋值。
+// Resolve 是一个 identity.Resolver，可以直接作为 rest、web 的 Options.Accounts 中一套账号的 Resolver。
 var (
-	_ = rest.Options{Resolve: (*authz.Store)(nil).Resolve}
-	_ = web.Options{Resolve: (*authz.Store)(nil).Resolve}
+	_ = rest.Options{Accounts: identity.Accounts{"user": (*authz.Store)(nil).Resolve}}
+	_ = web.Options{Accounts: identity.Accounts{"user": (*authz.Store)(nil).Resolve}}
 )
 
 func newStore(t *testing.T, driver database.Driver) *authz.Store {

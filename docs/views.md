@@ -87,6 +87,7 @@ func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
         Sessions:  sessions,
         Static:    static,
         Login:     "/login",
+        Accounts:  identity.Accounts{user.Type: nil},
         ErrorPage: ui.ErrorPage,
         Theme:     a.cfg.Theme,
     })
@@ -234,34 +235,36 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
 
 `pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效；它还从请求中记录客户端地址和 User-Agent，用于[设备列表](session.md#listing-sessions)。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
 
-会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时设置 `Options.Resolve`，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回本次请求的主体。它与 API 的 [`rest.Options.Resolve`](authentication.md#resolving-subjects) 签名相同，同一个函数可以交给两者：
+会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时，在 `Options.Accounts` 中为这套账号指定 Resolver，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回本次请求的主体。它与 API 的 [`rest.Options.Accounts`](authentication.md#resolving-subjects) 是同一个类型，同一个 Resolver 可以交给两者：
 
 ```go
 pages := web.New(web.Options{
     Sessions: sessions,
     Login:    "/login",
-    Resolve: func(ctx context.Context, stored identity.Subject) (identity.Subject, error) {
-        u, err := user.Find(ctx, a.db, stored.ID)
-        if err != nil {
-            return identity.Subject{}, err
-        }
-        if u.Disabled {
-            return identity.Subject{}, user.ErrDisabled.New()
-        }
-        return identity.Subject{Type: user.Type, ID: u.ID, Permissions: u.Permissions}, nil
+    Accounts: identity.Accounts{
+        user.Type: func(ctx context.Context, stored identity.Subject) (identity.Subject, error) {
+            u, err := user.Find(ctx, a.db, stored.ID)
+            if err != nil {
+                return identity.Subject{}, err
+            }
+            if u.Disabled {
+                return identity.Subject{}, user.ErrDisabled.New()
+            }
+            return identity.Subject{Type: user.Type, ID: u.ID, Permissions: u.Permissions}, nil
+        },
     },
     // ErrorPage 等其余字段同上
 })
 ```
 
-| `Resolve` 返回 | 结果 |
+| Resolver 返回 | 结果 |
 | --- | --- |
 | 主体 | 权限检查和处理器都使用它，`Method` 为 `session` |
 | `errorx.Unauthenticated` 类错误（例如账号已停用），或 `ID` 为空的主体 | 销毁会话，按未登录跳转到登录页 |
 | 其他 4xx 类错误（例如不是这个租户的成员） | 按分类呈现错误页，例如 `404`，不登出 |
 | 5xx 类错误（例如数据库故障） | 呈现错误页 |
 
-`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 `Resolve` 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。租户在路径中时，`Login` 写成 `/t/{tenant}/login`，跳转时 `{tenant}` 换成当前请求的路径参数。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
+`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 Resolver 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。租户在路径中时，`Login` 写成 `/t/{tenant}/login`，跳转时 `{tenant}` 换成当前请求的路径参数。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
 
 <a id="multiple-areas"></a>
 ## 多组页面
@@ -272,12 +275,14 @@ pages := web.New(web.Options{
 ops := web.New(web.Options{
     Sessions:  session.New(a.cfg.Ops.Session, session.NewStore(a.db)),
     Login:     "/ops/login",
+    Accounts:  identity.Accounts{staff.Type: roles.Resolve},
     ErrorPage: ui.ErrorPage,
     Theme:     a.cfg.Ops.Theme,
 })
 tenant := web.New(web.Options{
     Sessions:  session.New(a.cfg.Tenant.Session, session.NewStore(a.db)),
     Login:     "/t/{tenant}/login",
+    Accounts:  identity.Accounts{user.Type: roles.Resolve},
     ErrorPage: ui.ErrorPage,
     Theme:     a.cfg.Tenant.Theme,
     Tenant:    func(r *http.Request) string { return chi.URLParam(r, "tenant") },
@@ -293,7 +298,7 @@ router.Route("/t/{tenant}", func(r chi.Router) {
 })
 ```
 
-两组会话的 `cookie.name` 要不同，例如 `ops_session` 和 `session`。主题、提示和错误样式的差异见[不同区域的界面](components.md#areas)。
+两组会话的 `cookie.name` 要不同，例如 `ops_session` 和 `session`。两组页面各自用 `Accounts` 声明接受的账号体系，即使会话被带到另一组页面，属于其他账号体系的主体也会按未登录处理。主题、提示和错误样式的差异见[不同区域的界面](components.md#areas)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面

@@ -187,7 +187,7 @@ func registerFileRoutes(api *rest.API, auth func(*huma.Operation), files *filesy
 func TestRESTUploadAndConfirm(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		e := newEnv(t, driver)
-		api := rest.New(rest.Options{Title: "test"})
+		api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}, Title: "test"})
 		users := map[string]identity.Subject{"alice": alice, "bob": bob}
 		auth := rest.RequireBearer(api, func(_ context.Context, token string) (identity.Subject, error) {
 			return users[token], nil

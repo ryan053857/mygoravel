@@ -83,6 +83,9 @@ type node struct {
 func start(t *testing.T, backend broadcast.Backend, opts realtime.Options, wrap func(http.Handler) http.Handler) *node {
 	t.Helper()
 	hub := broadcast.New(backend, nil)
+	if opts.Authenticate != nil && opts.Accounts == nil {
+		opts.Accounts = identity.Accounts{"user": nil}
+	}
 	rt, err := realtime.New(hub, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -309,6 +312,28 @@ func TestClientPublishNeedsRuleAndSubscription(t *testing.T) {
 	c.push()
 }
 
+// Options.Accounts 之外的账号体系的 token 被拒绝，与无效 token 相同。
+func TestTokenAccounts(t *testing.T) {
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{
+		Authenticate: (&tokens{}).validate, // 给出 user 类型的主体
+		Accounts:     identity.Accounts{"customer": nil},
+	}, nil)
+	if rejected(t, n.url, "alice", nil) != 3500 {
+		t.Fatal("token of another account type was accepted")
+	}
+}
+
+func TestAccountsRequired(t *testing.T) {
+	hub := broadcast.New(broadcasttest.NewBackend(), nil)
+	t.Cleanup(func() { _ = hub.Close() })
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Authenticate without Accounts: expected panic")
+		}
+	}()
+	_, _ = realtime.New(hub, realtime.Options{Authenticate: (&tokens{}).validate})
+}
+
 func TestTokenAuthentication(t *testing.T) {
 	store := &tokens{}
 	store.revoke("revoked")
@@ -358,7 +383,7 @@ func TestResolveTokenSubject(t *testing.T) {
 	set := func(v string) { mu.Lock(); state = v; mu.Unlock() }
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{
 		Authenticate: (&tokens{}).validate,
-		Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+		Accounts: identity.Accounts{"user": func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			switch state {
@@ -369,7 +394,7 @@ func TestResolveTokenSubject(t *testing.T) {
 			}
 			// 重新构造主体：凭据字段不由 Resolve 决定。
 			return identity.Subject{Type: sub.Type, ID: sub.ID, Permissions: []string{"articles:read"}}, nil
-		},
+		}},
 	}, nil)
 	seen := make(chan identity.Subject, 1)
 	n.rt.Channel("articles", realtime.Private(func(_ context.Context, sub identity.Subject, _ realtime.Params) (bool, error) {
@@ -401,7 +426,7 @@ func TestResolveRecheckDisconnects(t *testing.T) {
 	set := func(v string) { mu.Lock(); state = v; mu.Unlock() }
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{
 		Authenticate: (&tokens{}).validate,
-		Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+		Accounts: identity.Accounts{"user": func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			switch state {
@@ -411,7 +436,7 @@ func TestResolveRecheckDisconnects(t *testing.T) {
 				return identity.Subject{}, errorx.Define(errorx.NotFound, "test.not_member").New()
 			}
 			return sub, nil
-		},
+		}},
 	}, nil)
 	c := mustConnect(t, n.url, "alice", nil)
 	set("down")
@@ -435,10 +460,10 @@ func TestTenantOption(t *testing.T) {
 			}
 			return identity.Subject{Type: "user", ID: "alice", Tenant: bound}, nil
 		},
-		Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+		Accounts: identity.Accounts{"user": func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
 			sub.Tenant, sub.Permissions = identity.TenantFromContext(ctx), []string{"articles"}
 			return sub, nil
-		},
+		}},
 		Tenant: func(r *http.Request) string { return r.Header.Get("X-Tenant") },
 	}, nil)
 	n.rt.Channel("t:{tenant}:articles", realtime.Private(func(_ context.Context, sub identity.Subject, p realtime.Params) (bool, error) {

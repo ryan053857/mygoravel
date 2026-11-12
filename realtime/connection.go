@@ -26,7 +26,7 @@ func (rt *Realtime) connecting(ctx context.Context, e centrifuge.ConnectEvent) (
 	if sub, ok := identity.FromContext(ctx); ok && sub.ID != "" {
 		conn.sub = sub
 	} else if e.Token != "" {
-		sub, err := identity.Establish(ctx, rt.authenticator(e.Token), rt.opts.Resolve)
+		sub, err := identity.Establish(ctx, rt.authenticator(e.Token), rt.opts.Accounts.Resolve)
 		switch {
 		case identity.Failed(err):
 			rt.logger.ErrorContext(ctx, "authentication backend failed", "error", err)
@@ -60,7 +60,7 @@ func (rt *Realtime) valid(ctx context.Context, conn *connection) bool {
 	if conn.token == "" {
 		return httpx.CheckCredential(ctx) == nil
 	}
-	err := identity.Reestablish(ctx, conn.sub, rt.authenticator(conn.token), rt.opts.Resolve)
+	err := identity.Reestablish(ctx, conn.sub, rt.authenticator(conn.token), rt.opts.Accounts.Resolve)
 	return err == nil || identity.Failed(err)
 }
 

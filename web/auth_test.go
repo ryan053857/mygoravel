@@ -126,7 +126,7 @@ func TestRequireResolve(t *testing.T) {
 		}
 		return identity.Subject{ID: stored.ID, Type: stored.Type, Permissions: perms}, nil
 	}
-	srv := authServer(t, memstore.New(), func(o *web.Options) { o.Resolve = resolve })
+	srv := authServer(t, memstore.New(), func(o *web.Options) { o.Accounts = identity.Accounts{"user": resolve} })
 	c := noFollow(t)
 	login := func() {
 		t.Helper()
@@ -225,7 +225,7 @@ func TestTenantPages(t *testing.T) {
 	members := map[string]map[string][]string{"acme": {"alice": {"articles:*"}}, "globex": {"carol": {"articles:*"}}}
 	o := options()
 	o.Tenant = func(r *http.Request) string { return chi.URLParam(r, "tenant") }
-	o.Resolve = func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
+	o.Accounts = identity.Accounts{"user": func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
 		tenant := identity.TenantFromContext(ctx)
 		perms, ok := members[tenant][sub.ID]
 		if !ok {
@@ -233,7 +233,7 @@ func TestTenantPages(t *testing.T) {
 		}
 		sub.Tenant, sub.Permissions = tenant, perms
 		return sub, nil
-	}
+	}}
 	pages := web.New(o)
 	router := chi.NewRouter()
 	show := func(w http.ResponseWriter, r *http.Request) error {
@@ -291,7 +291,7 @@ func TestImpersonation(t *testing.T) {
 	}
 	o := options()
 	o.Sessions.Store = memstore.New()
-	o.Resolve = resolve
+	o.Accounts = identity.Accounts{"user": resolve}
 	pages := web.New(o)
 	router := chi.NewRouter()
 	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {
