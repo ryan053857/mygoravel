@@ -47,9 +47,9 @@ func (ix *Index[D]) Search(ctx context.Context, s *Store, q Query) ([]Hit[D], er
 		limit = DefaultLimit
 	}
 	// 读到版本之后、查询之前，重建可能刚好切换并删除了这个版本：重新读取版本再查一次
-	found, gone, err := ix.query(ctx, s, q.Text, filter, limit, q.MinScore)
-	if gone {
-		found, _, err = ix.query(ctx, s, q.Text, filter, limit, q.MinScore)
+	found, err := ix.query(ctx, s, q.Text, filter, limit, q.MinScore)
+	if notFound(err) {
+		found, err = ix.query(ctx, s, q.Text, filter, limit, q.MinScore)
 	}
 	if err != nil {
 		return nil, err
@@ -88,23 +88,22 @@ func (ix *Index[D]) filter(q Query) (*qdrant.Filter, error) {
 }
 
 // query 在查询使用的版本中检索与 text 最接近的 limit 个文档，用建立这个版本的模型计算 text 的向量。
-// 查询出错、而这个版本的 collection 已经不存在时 gone 为 true。
-func (ix *Index[D]) query(ctx context.Context, s *Store, text string, filter *qdrant.Filter, limit int, minScore float64) (found []*qdrant.ScoredPoint, gone bool, err error) {
+func (ix *Index[D]) query(ctx context.Context, s *Store, text string, filter *qdrant.Filter, limit int, minScore float64) ([]*qdrant.ScoredPoint, error) {
 	st, err := readState(ctx, s.db, ix.name, false)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	collection := s.collection(ix.name, st.Version)
 	m, ok, err := s.open(ctx, collection, ix.schema, false)
 	if err != nil || !ok {
-		return nil, false, err
+		return nil, err
 	}
 	vecs, err := m.Embedder.Embed(ctx, []string{text})
 	if err != nil {
-		return nil, false, errors.Wrap(err, "vector: embed query")
+		return nil, errors.Wrap(err, "vector: embed query")
 	}
 	if len(vecs) != 1 || len(vecs[0]) != m.Dims {
-		return nil, false, errors.Newf("vector: embedder returned an unexpected vector for model %q", m.Name)
+		return nil, errors.Newf("vector: embedder returned an unexpected vector for model %q", m.Name)
 	}
 	req := &qdrant.QueryPoints{
 		CollectionName: collection,
@@ -116,15 +115,11 @@ func (ix *Index[D]) query(ctx context.Context, s *Store, text string, filter *qd
 	if minScore != 0 {
 		req.ScoreThreshold = qdrant.PtrOf(float32(minScore))
 	}
-	found, err = s.client.Query(ctx, req)
-	if err != nil {
-		err = errors.Wrapf(err, "vector: query %s", ix.name)
-		if exists, checkErr := s.client.CollectionExists(ctx, collection); checkErr == nil && !exists {
-			s.mu.Lock()
-			delete(s.ready, collection)
-			s.mu.Unlock()
-			return nil, true, err
-		}
+	found, err := s.client.Query(ctx, req)
+	if notFound(err) {
+		s.mu.Lock()
+		delete(s.ready, collection)
+		s.mu.Unlock()
 	}
-	return found, false, err
+	return found, errors.Wrapf(err, "vector: query %s", ix.name)
 }

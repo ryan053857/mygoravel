@@ -9,6 +9,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/uptrace/bun"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/ryan053857/mygoravel/ai"
 )
@@ -106,19 +108,16 @@ func (s *Store) open(ctx context.Context, collection string, sc *schema, create 
 		return m, true, nil
 	}
 
-	exists, err := s.client.CollectionExists(ctx, collection)
-	if err != nil {
-		return Model{}, false, errors.Wrapf(err, "vector: check collection %s", collection)
-	}
-	if !exists {
+	info, err := s.client.GetCollectionInfo(ctx, collection)
+	if notFound(err) {
 		if !create {
 			return Model{}, false, nil
 		}
 		if err := s.create(ctx, collection, sc); err != nil {
 			return Model{}, false, err
 		}
+		info, err = s.client.GetCollectionInfo(ctx, collection)
 	}
-	info, err := s.client.GetCollectionInfo(ctx, collection)
 	if err != nil {
 		return Model{}, false, errors.Wrapf(err, "vector: get collection %s", collection)
 	}
@@ -167,14 +166,15 @@ func (s *Store) create(ctx context.Context, collection string, sc *schema) error
 		// 查询总是限定在一个租户中：只给每个租户建立 HNSW 图，不建全局的图
 		req.HnswConfig = &qdrant.HnswConfigDiff{M: qdrant.PtrOf(uint64(0)), PayloadM: qdrant.PtrOf(uint64(16))}
 	}
-	if err := s.client.CreateCollection(ctx, req); err != nil {
-		// 另一个进程同时创建成功时沿用它
-		if exists, _ := s.client.CollectionExists(ctx, collection); !exists {
-			return errors.Wrapf(err, "vector: create collection %s", collection)
-		}
+	err := s.client.CreateCollection(ctx, req)
+	if status.Code(err) == codes.AlreadyExists {
+		return nil // 另一个进程同时创建成功，沿用它
 	}
-	return nil
+	return errors.Wrapf(err, "vector: create collection %s", collection)
 }
+
+// notFound 报告 err 是不是 Qdrant 返回的 collection 不存在。
+func notFound(err error) bool { return status.Code(err) == codes.NotFound }
 
 // createFieldIndexes 给框架使用的 _key、租户和过滤字段建立 payload 索引，已经存在的不变。
 func (s *Store) createFieldIndexes(ctx context.Context, name string, sc *schema) error {
