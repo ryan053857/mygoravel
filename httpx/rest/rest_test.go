@@ -211,4 +211,20 @@ func TestOpenAPI30DropsWebhooks(t *testing.T) {
 	if api.OpenAPI().Webhooks == nil {
 		t.Fatal("webhooks removed from the 3.1 document")
 	}
+	for path, want := range map[string]struct {
+		contentType, version string
+		webhooks             bool
+	}{
+		"/openapi.json":     {"application/openapi+json", `"openapi":"3.1.0"`, true},
+		"/openapi-3.0.json": {"application/openapi+json", `"openapi":"3.0.3"`, false},
+		"/openapi-3.0.yaml": {"application/openapi+yaml", "openapi: 3.0.3", false},
+	} {
+		rr := httptest.NewRecorder()
+		api.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		body := rr.Body.String()
+		if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != want.contentType ||
+			!strings.Contains(body, want.version) || strings.Contains(body, "webhooks") != want.webhooks {
+			t.Errorf("%s: status=%d type=%q body=%.200s", path, rr.Code, rr.Header().Get("Content-Type"), body)
+		}
+	}
 }

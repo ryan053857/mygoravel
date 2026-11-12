@@ -102,7 +102,7 @@ func New(opts Options) *API {
 	if opts.BasePath != "" {
 		cfg.OpenAPI.Servers = []*huma.Server{{URL: opts.BasePath}}
 	}
-	h := huma.NewAPI(cfg, newAdapter(r, docRoutes(cfg)))
+	h := huma.NewAPI(cfg, newAdapter(r, cfg))
 	if tenant := opts.Tenant; tenant != nil {
 		h.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
 			next(huma.WithContext(ctx, identity.WithTenant(ctx.Context(), tenant(ctx))))
@@ -126,9 +126,14 @@ func (a *API) OpenAPIJSON() ([]byte, error) {
 }
 
 // OpenAPI30JSON 返回转换为 OpenAPI 3.0.3 的文档，供只支持 3.0 的客户端生成器使用。
-// 3.0 没有 webhooks，转换时去掉。
+// 3.0 没有 webhooks，转换时去掉；文档端点 /openapi-3.0.json 和 /openapi-3.0.yaml 也是这样。
 func (a *API) OpenAPI30JSON() ([]byte, error) {
-	doc := *a.OpenAPI()
-	doc.Webhooks = nil
-	return doc.Downgrade()
+	return without30(a.OpenAPI()).Downgrade()
+}
+
+// without30 返回去掉 3.0 不支持的 webhooks 的浅拷贝，原文档不变。
+func without30(doc *huma.OpenAPI) *huma.OpenAPI {
+	d := *doc
+	d.Webhooks = nil
+	return &d
 }

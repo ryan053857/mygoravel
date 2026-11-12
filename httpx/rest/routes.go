@@ -21,14 +21,41 @@ type adapter struct {
 	router chi.Router
 	chi    huma.Adapter
 	docs   map[string]bool
+	// spec30 是 3.0 文档端点的路径和它们的处理器，代替 Huma 自带的处理器。
+	spec30 map[string]func(huma.Context)
 }
 
-func newAdapter(r chi.Router, docs map[string]bool) *adapter {
-	return &adapter{router: r, chi: humachi.NewAdapter(r), docs: docs}
+func newAdapter(r chi.Router, cfg huma.Config) *adapter {
+	a := &adapter{router: r, chi: humachi.NewAdapter(r), docs: docRoutes(cfg)}
+	if cfg.OpenAPIPath != "" {
+		doc := cfg.OpenAPI
+		a.spec30 = map[string]func(huma.Context){
+			cfg.OpenAPIPath + "-3.0.json": spec30("application/openapi+json", func() ([]byte, error) { return without30(doc).Downgrade() }),
+			cfg.OpenAPIPath + "-3.0.yaml": spec30("application/openapi+yaml", func() ([]byte, error) { return without30(doc).DowngradeYAML() }),
+		}
+	}
+	return a
 }
 
 func (a *adapter) Handle(op *huma.Operation, handler func(huma.Context)) {
+	if h, ok := a.spec30[op.Path]; ok && op.Method == http.MethodGet {
+		handler = h
+	}
 	a.router.Method(op.Method, op.Path, &route{op: op, handler: handler, docs: a.docs[op.Path]})
+}
+
+// spec30 返回 3.0 文档端点的处理器。Huma 自带的处理器转换时保留 webhooks，而 3.0 没有这一项。
+// 每次请求时转换，文档总是最新的。
+func spec30(contentType string, render func() ([]byte, error)) func(huma.Context) {
+	return func(ctx huma.Context) {
+		data, err := render()
+		if err != nil {
+			ctx.SetStatus(http.StatusInternalServerError)
+			return
+		}
+		ctx.SetHeader("Content-Type", contentType)
+		_, _ = ctx.BodyWriter().Write(data)
+	}
 }
 
 func (a *adapter) ServeHTTP(w http.ResponseWriter, r *http.Request) { a.router.ServeHTTP(w, r) }
