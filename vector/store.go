@@ -5,10 +5,12 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/uptrace/bun"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -38,8 +40,9 @@ type Store struct {
 	models map[modelID]Model // 所有模型：model 和 WithPrevious 传入的旧模型
 	prefix string
 
-	mu    sync.Mutex
-	ready map[string]collectionInfo // 已经确认模型、建好 payload 索引的 collection
+	opening singleflight.Group
+	mu      sync.Mutex
+	ready   map[string]collectionInfo // 已经确认模型、建好 payload 索引的 collection
 }
 
 // Option 是 New 的选项。
@@ -122,8 +125,25 @@ func (s *Store) open(ctx context.Context, collection string, sc *schema, create 
 	if ok {
 		return c, true, nil
 	}
+	// 同一个进程中同时打开同一个 collection 的只有一个去读取、创建，其余的等它的结果
+	type result struct {
+		c  collectionInfo
+		ok bool
+	}
+	v, err, _ := s.opening.Do(collection+"\x00"+strconv.FormatBool(create), func() (any, error) {
+		c, ok, err := s.load(ctx, collection, sc, create)
+		return result{c, ok}, err
+	})
+	if err != nil {
+		return c, false, err
+	}
+	r := v.(result)
+	return r.c, r.ok, nil
+}
 
-	info, err := s.client.GetCollectionInfo(ctx, collection)
+// load 读取 collection 的结构，建立 payload 索引，缓存在 s.ready 中。不存在时，create 为 true 则创建，否则 ok 为 false。
+func (s *Store) load(ctx context.Context, collection string, sc *schema, create bool) (c collectionInfo, ok bool, err error) {
+	info, err := s.info(ctx, collection, false)
 	if notFound(err) {
 		if !create {
 			return c, false, nil
@@ -131,7 +151,7 @@ func (s *Store) open(ctx context.Context, collection string, sc *schema, create 
 		if err := s.create(ctx, collection, sc); err != nil {
 			return c, false, err
 		}
-		info, err = s.client.GetCollectionInfo(ctx, collection)
+		info, err = s.info(ctx, collection, true)
 	}
 	if err != nil {
 		return c, false, errors.Wrapf(err, "vector: get collection %s", collection)
@@ -191,6 +211,30 @@ func (s *Store) create(ctx context.Context, collection string, sc *schema) error
 	}
 	return errors.Wrapf(err, "vector: create collection %s", collection)
 }
+
+// info 读取 collection 的信息。collection 刚被创建、还在初始化时，Qdrant 会返回 Internal 或 Unavailable，
+// 例如另一个进程同时创建了它：这时稍等再读，最多等 infoAttempts 次。created 为 true 时刚刚创建过，NotFound 也稍等再读。
+func (s *Store) info(ctx context.Context, collection string, created bool) (*qdrant.CollectionInfo, error) {
+	for attempt := 1; ; attempt++ {
+		info, err := s.client.GetCollectionInfo(ctx, collection)
+		code := status.Code(err)
+		initializing := code == codes.Internal || code == codes.Unavailable || (created && code == codes.NotFound)
+		if err == nil || !initializing || attempt == infoAttempts {
+			return info, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(infoInterval):
+		}
+	}
+}
+
+// 等待 collection 初始化：最多读取 infoAttempts 次，每次间隔 infoInterval。
+const (
+	infoAttempts = 50
+	infoInterval = 100 * time.Millisecond
+)
 
 // notFound 报告 err 是不是 Qdrant 返回的 collection 不存在。
 func notFound(err error) bool { return status.Code(err) == codes.NotFound }

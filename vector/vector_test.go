@@ -448,3 +448,34 @@ func TestDuplicateModels(t *testing.T) {
 	}()
 	newShared(t, f.db).store(m, vector.WithPrevious(m))
 }
+
+func TestConcurrentFirstSync(t *testing.T) {
+	// 索引还没有 collection 时多个进程（这里是共用前缀的 4 个 Store）的同步同时开始：
+	// 一个创建，其余的等它就绪后照常写入
+	for round := range 5 {
+		f := setup(t)
+		shared := newShared(t, f.db)
+		stores := make([]*vector.Store, 4)
+		for i := range stores {
+			stores[i] = shared.store(vector.Model{Name: "test", Dims: dims, Embedder: f.emb})
+		}
+		var wg sync.WaitGroup
+		errs := make(chan error, 32)
+		for i := range 32 {
+			key := strconv.Itoa(i)
+			f.src.set(key, chunkDoc{Text: "第" + key + "段"})
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs <- chunks.Refresh(context.Background(), stores[i%len(stores)], f.src.load, key)
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+	}
+}
