@@ -16,9 +16,8 @@ import (
 func TestMonitor(t *testing.T) {
 	ctx := context.Background()
 	db := openDB(t, sqlite.Driver)
-	stats := monitor.NewStore(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()))
-	rec := monitor.NewRecorder(stats, nil)
-	t.Cleanup(func() { _ = rec.Close(ctx) })
+	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	t.Cleanup(func() { _ = mon.Close(ctx) })
 
 	var attempts atomic.Int64
 	var done atomic.Int64
@@ -34,26 +33,27 @@ func TestMonitor(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 			return nil
 		})
-	}, queue.WithMonitor(rec))
+	}, queue.WithMonitor(mon))
 	for n := range 3 {
 		publish(t, db, n+1)
 	}
 	eventually(t, 5*time.Second, func() bool { return done.Load() == 4 })
 	stop()
-	if err := rec.Flush(ctx); err != nil {
+	if err := mon.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
 
 	now := time.Now()
-	topics, err := queue.Activity(ctx, stats, now.Add(-time.Hour), now.Add(time.Minute))
+	topics, err := queue.Activity(ctx, mon, now.Add(-time.Hour), now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := topics["jobs"]
-	if len(topics) != 1 || a.Succeeded != 2 || a.Retried != 1 || a.Failed != 1 {
+	if len(topics) != 1 || a.Succeeded.Count != 2 || a.Retried.Count != 1 || a.Failed.Count != 1 || a.Wait.Count != 4 {
 		t.Fatalf("activity %+v", topics)
 	}
-	if a.MaxDuration < 20*time.Millisecond || a.MeanDuration <= 0 || a.MeanDuration > a.MaxDuration || a.MaxWait < a.MeanWait {
+	runs := a.Executions()
+	if runs.Count != 4 || runs.MaxDuration() < 20*time.Millisecond || runs.MeanDuration() > runs.MaxDuration() || a.Wait.MaxDuration() < a.Wait.MeanDuration() {
 		t.Fatalf("durations %+v", a)
 	}
 }

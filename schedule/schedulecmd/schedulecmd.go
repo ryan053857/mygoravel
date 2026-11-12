@@ -20,9 +20,9 @@ import (
 // 不会再执行的任务的下一次执行时间显示为 -，没有执行记录的任务的上一次执行显示为 -。
 //
 // tasks 返回注册了全部任务的调度器，命令执行时才调用，通常是应用中注册任务的方法，例如 a.tasks。
-// stats 是 schedule.WithMonitor 记录的运行统计，在执行时为 nil 表示没有记录，不显示上一次执行。
+// m 是 schedule.WithMonitor 记录运行统计的 Monitor，在执行时为 nil 表示没有记录，不显示上一次执行。
 // 它和其他需要数据库的命令一样在 command.Bind 中声明，声明时 App 还没有装配，所以传入的是方法而不是调度器。
-func New(tasks func() *schedule.Scheduler, stats *monitor.Store) *cobra.Command {
+func New(tasks func() *schedule.Scheduler, m *monitor.Monitor) *cobra.Command {
 	return &cobra.Command{
 		Use:   "schedules",
 		Short: "列出定时任务",
@@ -35,14 +35,14 @@ func New(tasks func() *schedule.Scheduler, stats *monitor.Store) *cobra.Command 
 			}
 			now := time.Now()
 			var last map[string]schedule.Run
-			if stats != nil {
-				if last, err = schedule.LastRuns(cmd.Context(), stats); err != nil {
+			if m != nil {
+				if last, err = schedule.LastRuns(cmd.Context(), m); err != nil {
 					return err
 				}
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			columns := []string{"TASK", "EXPRESSION", "NEXT RUN", "IN", "RUNNING"}
-			if stats != nil {
+			if m != nil {
 				columns = append(columns, "LAST RUN", "RESULT", "TOOK")
 			}
 			fmt.Fprintln(w, strings.Join(append(columns, "DESCRIPTION"), "\t"))
@@ -59,7 +59,7 @@ func New(tasks func() *schedule.Scheduler, stats *monitor.Store) *cobra.Command 
 					state = "no"
 				}
 				cells := []string{t.Name, t.Expr, next, in, state}
-				if stats != nil {
+				if m != nil {
 					cells = append(cells, lastRun(last[t.Name])...)
 				}
 				fmt.Fprintln(w, strings.Join(append(cells, t.Description), "\t"))

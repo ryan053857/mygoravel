@@ -19,11 +19,11 @@ import (
 
 // New 返回 cache 命令：
 //
-//	cache stats [--since 1h]  每个缓存最近一段时间的命中、未命中、出错次数和命中率
+//	cache stats [--since 1h]  每个缓存最近一段时间的命中、未命中、出错次数、命中率和读取的平均耗时
 //
-// stats 是 cachemon.Wrap 记录的运行统计。和其他需要数据库的命令一样在 command.Bind 中声明：
+// m 是 cachemon.Wrap 记录运行统计的 Monitor。和其他需要数据库的命令一样在 command.Bind 中声明：
 // New 只保存参数，命令执行时才使用。
-func New(stats *monitor.Store) *cobra.Command {
+func New(m *monitor.Monitor) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stats",
 		Short: "查看缓存的命中率",
@@ -34,21 +34,22 @@ func New(stats *monitor.Store) *cobra.Command {
 				return command.AsExitError(command.ExitUsage, errors.New("cachecmd: --since must be positive"))
 			}
 			now := time.Now()
-			caches, err := cachemon.Activity(cmd.Context(), stats, now.Add(-since), now)
+			caches, err := cachemon.Activity(cmd.Context(), m, now.Add(-since), now)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "最近 %s\n", shortDuration(since))
 			w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "CACHE\tHITS\tMISSES\tERRORS\tHIT RATE")
+			fmt.Fprintln(w, "CACHE\tHITS\tMISSES\tERRORS\tHIT RATE\tAVG GET")
 			for _, name := range slices.Sorted(maps.Keys(caches)) {
 				a := caches[name]
-				rate := "-"
-				if a.Hits+a.Misses > 0 {
+				rate, get := "-", "-"
+				if gets := a.Gets(); gets.Count > 0 {
 					rate = fmt.Sprintf("%.1f%%", a.HitRate()*100)
+					get = gets.MeanDuration().Round(time.Microsecond).String()
 				}
-				fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\n", name, a.Hits, a.Misses, a.Errors, rate)
+				fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\t%s\n", name, a.Hits.Count, a.Misses.Count, a.Errors, rate, get)
 			}
 			return w.Flush()
 		},

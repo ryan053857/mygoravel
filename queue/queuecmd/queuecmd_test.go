@@ -21,9 +21,9 @@ import (
 var mail = queue.Topic[int]("mail")
 
 // run 执行命令，返回每行按空白分隔的字段。
-func run(t *testing.T, failed *queue.FailedJobs, stats *monitor.Store, drivers []queue.Driver, args ...string) [][]string {
+func run(t *testing.T, failed *queue.FailedJobs, mon *monitor.Monitor, drivers []queue.Driver, args ...string) [][]string {
 	t.Helper()
-	cmd := queuecmd.New(failed, stats, drivers...)
+	cmd := queuecmd.New(failed, mon, drivers...)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs(args)
@@ -126,19 +126,18 @@ func TestFailed(t *testing.T) {
 func TestStatsActivity(t *testing.T) {
 	ctx := context.Background()
 	db := dbtesting.Open(t, sqlite.Driver, queue.Migrations())
-	stats := monitor.NewStore(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()))
-	rec := monitor.NewRecorder(stats, nil)
-	t.Cleanup(func() { _ = rec.Close(ctx) })
-	rec.Record(queue.MetricSucceeded, "mail", 0.2)
-	rec.Record(queue.MetricSucceeded, "mail", 0.4)
-	rec.Record(queue.MetricFailed, "mail", 0.6)
-	rec.Record(queue.MetricWait, "mail", 1.5)
-	rec.Record(queue.MetricSucceeded, "report", 2)
-	if err := rec.Flush(ctx); err != nil {
+	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	t.Cleanup(func() { _ = mon.Close(ctx) })
+	mon.RecordDuration(queue.MetricSucceeded, "mail", 200*time.Millisecond)
+	mon.RecordDuration(queue.MetricSucceeded, "mail", 400*time.Millisecond)
+	mon.RecordDuration(queue.MetricFailed, "mail", 600*time.Millisecond)
+	mon.RecordDuration(queue.MetricWait, "mail", 1500*time.Millisecond)
+	mon.RecordDuration(queue.MetricSucceeded, "report", 2*time.Second)
+	if err := mon.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	rows := run(t, queue.NewFailedJobs(db), stats, []queue.Driver{queue.Database(db)}, "stats", "--since", "30m")
+	rows := run(t, queue.NewFailedJobs(db), mon, []queue.Driver{queue.Database(db)}, "stats", "--since", "30m")
 	got := make([]string, len(rows))
 	for i, r := range rows {
 		got[i] = strings.Join(r, " ")
@@ -149,13 +148,13 @@ func TestStatsActivity(t *testing.T) {
 		"最近 30m",
 		"TOPIC SUCCEEDED RETRIED FAILED AVG TIME MAX TIME AVG WAIT MAX WAIT",
 		"mail 2 0 1 400ms 600ms 1.5s 1.5s",
-		"report 1 0 0 2s 2s 0s 0s",
+		"report 1 0 0 2s 2s - -", // 没有等待时长的记录
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got\n%s", strings.Join(got, "\n"))
 	}
 
-	cmd := queuecmd.New(queue.NewFailedJobs(db), stats, queue.Database(db))
+	cmd := queuecmd.New(queue.NewFailedJobs(db), mon, queue.Database(db))
 	cmd.SetArgs([]string{"stats", "--since", "0s"})
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})

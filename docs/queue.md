@@ -200,7 +200,7 @@ func (a *App) Worker(*command.Daemon) (func(context.Context) error, error) {
     }
 
     w := queue.NewWorker(a.queue, a.cfg.Queue, nil,
-        queue.WithTelemetry(a.meters, a.tracers), queue.WithMonitor(a.recorder))
+        queue.WithTelemetry(a.meters, a.tracers), queue.WithMonitor(a.monitor))
     mailjob.Send.Handle(w, mailer.Send)
     return w.Run, nil
 }
@@ -410,13 +410,14 @@ HTTP 请求和定时任务的指标见[可观测性](telemetry.md)。
 
 ```go
 now := time.Now()
-topics, err := queue.Activity(ctx, a.stats, now.Add(-time.Hour), now)
+topics, err := queue.Activity(ctx, a.monitor, now.Add(-time.Hour), now)
 mail := topics["mail.send"]
-// mail.Succeeded、Retried、Failed：处理成功、失败后等待重试、转入失败任务表的执行次数
-// mail.MeanDuration、MaxDuration：处理耗时；MeanWait、MaxWait：从可以执行到开始处理的等待时长
+// mail.Succeeded.Count、Retried.Count、Failed.Count：处理成功、失败后等待重试、转入失败任务表的执行次数
+// mail.Executions().MeanDuration()、MaxDuration()：全部执行的平均和最长处理耗时
+// mail.Wait.MeanDuration()、MaxDuration()：从可以执行到开始处理的等待时长，驱动给不出时 Wait.Count 为 0
 ```
 
-画趋势图时用 `Store.Series` 查询 `queue.MetricSucceeded` 等 metric，label 是 topic。统计记录的是发生过的事，与驱动无关；队列中现在有多少任务要问驱动，见[队列状态](#queue-stats)。
+画趋势图时用 `Monitor.Series` 查询 `queue.MetricSucceeded` 等 metric，label 是 topic。统计记录的是发生过的事，与驱动无关；队列中现在有多少任务要问驱动，见[队列状态](#queue-stats)。
 
 <a id="job-events"></a>
 ### 任务事件
@@ -482,7 +483,7 @@ for _, s := range stats {
 `queuecmd.New` 返回 `queue` 命令，它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明。声明时 `App` 的字段都是零值，命令只保存它们，执行时才使用：
 
 ```go
-queuecmd.New(a.failed, a.stats, a.queue),
+queuecmd.New(a.failed, a.monitor, a.queue),
 ```
 
 `queue stats` 先列出每个 topic 现在的任务数，`WAITING` 是积压最久的任务已经等了多久，驱动给不出的数显示为 `-`；再列出最近一段时间的[运行统计](#monitoring)，`--since` 指定时长，默认一小时：
@@ -504,7 +505,7 @@ mail.send        4182       37       1       240ms     3.214s    1.1s      2m3s
 webhook.deliver  926        58       2       312ms     10.001s   95ms      1.2s
 ```
 
-`a.stats` 在执行时为 `nil` 时只列出现在的任务数。
+驱动给不出等待时长时 `AVG WAIT`、`MAX WAIT` 显示为 `-`。`a.monitor` 在执行时为 `nil` 时只列出现在的任务数。
 
 `queue failed` 从新到旧列出失败任务，错误信息只显示第一行，完整的错误和堆栈用 `FailedJobs.Get` 查看：
 

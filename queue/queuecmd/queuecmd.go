@@ -24,17 +24,17 @@ import (
 // errorWidth 是 queue failed 显示的错误信息的最大长度（字符）。
 const errorWidth = 80
 
-// New 返回 queue 命令。failed 是失败任务表，stats 是 queue.WithMonitor 记录的运行统计，drivers 是要统计的驱动：
+// New 返回 queue 命令。failed 是失败任务表，m 是 queue.WithMonitor 记录运行统计的 Monitor，drivers 是要统计的驱动：
 //
 //	queue stats [--since 1h]             每个 topic 当前各状态的任务数、积压最久的任务已经等了多久，
 //	                                     以及最近一段时间的处理次数、耗时和等待时长
 //	queue failed [--topic t] [--limit n] 从新到旧列出失败任务
 //
 // 驱动给不出的数显示为 -。传入多个驱动时，当前状态多一列驱动名；处理情况与驱动无关，按 topic 汇总。
-// stats 在执行时为 nil 表示没有记录运行统计，只显示当前状态。
+// m 在执行时为 nil 表示没有记录运行统计，只显示当前状态。
 // 和其他需要数据库的命令一样，在 command.Bind 中声明：New 只保存参数，命令执行时才使用它们。
 // 没有传入驱动时 panic。
-func New(failed *queue.FailedJobs, stats *monitor.Store, drivers ...queue.Driver) *cobra.Command {
+func New(failed *queue.FailedJobs, m *monitor.Monitor, drivers ...queue.Driver) *cobra.Command {
 	if len(drivers) == 0 {
 		panic("queuecmd: no drivers")
 	}
@@ -60,10 +60,10 @@ func New(failed *queue.FailedJobs, stats *monitor.Store, drivers ...queue.Driver
 						count(s, queue.StateRetrying), count(s, queue.StateRunning), count(s, queue.StateFailed), waiting(s))
 				}
 			}
-			if err := w.Flush(); err != nil || stats == nil {
+			if err := w.Flush(); err != nil || m == nil {
 				return err
 			}
-			return activity(cmd.Context(), cmd.OutOrStdout(), stats, since)
+			return activity(cmd.Context(), cmd.OutOrStdout(), m, since)
 		},
 	}
 	current.Flags().Duration("since", time.Hour, "统计最近多长时间的处理情况")
@@ -98,9 +98,9 @@ func New(failed *queue.FailedJobs, stats *monitor.Store, drivers ...queue.Driver
 }
 
 // activity 输出每个 topic 最近 since 内的处理情况。
-func activity(ctx context.Context, out io.Writer, stats *monitor.Store, since time.Duration) error {
+func activity(ctx context.Context, out io.Writer, m *monitor.Monitor, since time.Duration) error {
 	now := time.Now()
-	topics, err := queue.Activity(ctx, stats, now.Add(-since), now)
+	topics, err := queue.Activity(ctx, m, now.Add(-since), now)
 	if err != nil {
 		return err
 	}
@@ -109,8 +109,10 @@ func activity(ctx context.Context, out io.Writer, stats *monitor.Store, since ti
 	fmt.Fprintln(w, "TOPIC\tSUCCEEDED\tRETRIED\tFAILED\tAVG TIME\tMAX TIME\tAVG WAIT\tMAX WAIT")
 	for _, topic := range slices.Sorted(maps.Keys(topics)) {
 		a := topics[topic]
-		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n", topic, a.Succeeded, a.Retried, a.Failed,
-			duration(a.MeanDuration), duration(a.MaxDuration), duration(a.MeanWait), duration(a.MaxWait))
+		runs := a.Executions()
+		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n", topic, a.Succeeded.Count, a.Retried.Count, a.Failed.Count,
+			duration(runs, runs.MeanDuration()), duration(runs, runs.MaxDuration()),
+			duration(a.Wait, a.Wait.MeanDuration()), duration(a.Wait, a.Wait.MaxDuration()))
 	}
 	return errors.Wrap(w.Flush(), "queuecmd: write")
 }
@@ -136,8 +138,13 @@ func shortDuration(d time.Duration) string {
 	return s
 }
 
-// duration 以毫秒精度显示时长。
-func duration(d time.Duration) string { return d.Round(time.Millisecond).String() }
+// duration 以毫秒精度显示从 a 中算出的时长 d，a 没有记录时显示为 -。
+func duration(a monitor.Aggregate, d time.Duration) string {
+	if a.Count == 0 {
+		return "-"
+	}
+	return d.Round(time.Millisecond).String()
+}
 
 // header 输出表头，多个驱动时以 DRIVER 列开头。
 func header(w io.Writer, multi bool, columns string) {

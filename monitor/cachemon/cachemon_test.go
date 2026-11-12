@@ -30,11 +30,10 @@ func (broken) Clear(context.Context) error                                 { ret
 
 func TestWrap(t *testing.T) {
 	ctx := context.Background()
-	stats := monitor.NewStore(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()))
-	rec := monitor.NewRecorder(stats, nil)
-	t.Cleanup(func() { _ = rec.Close(ctx) })
+	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	t.Cleanup(func() { _ = mon.Close(ctx) })
 
-	articles := cachemon.Wrap("articles", cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0))), rec)
+	articles := cachemon.Wrap("articles", cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0))), mon)
 	if _, err := articles.Get(ctx, "a"); !errors.Is(err, store.NotFound{}) {
 		t.Fatalf("miss: %v", err)
 	}
@@ -50,7 +49,7 @@ func TestWrap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	down := cachemon.Wrap("sessions", cache.CacheInterface[string](broken{}), rec)
+	down := cachemon.Wrap("sessions", cache.CacheInterface[string](broken{}), mon)
 	if _, err := down.Get(ctx, "a"); !errors.Is(err, errDown) {
 		t.Fatalf("get: %v", err)
 	}
@@ -59,20 +58,20 @@ func TestWrap(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 	}
-	if err := rec.Flush(ctx); err != nil {
+	if err := mon.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
 
 	now := time.Now()
-	caches, err := cachemon.Activity(ctx, stats, now.Add(-time.Hour), now.Add(time.Minute))
+	caches, err := cachemon.Activity(ctx, mon, now.Add(-time.Hour), now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	a, s := caches["articles"], caches["sessions"]
-	if a.Hits != 3 || a.Misses != 1 || a.Errors != 0 || a.HitRate() != 0.75 {
+	if a.Hits.Count != 3 || a.Misses.Count != 1 || a.Errors != 0 || a.HitRate() != 0.75 || a.Gets().Count != 4 || a.Gets().MeanDuration() <= 0 {
 		t.Fatalf("articles %+v", a)
 	}
-	if s.Hits != 0 || s.Misses != 0 || s.Errors != 5 || s.HitRate() != 0 {
+	if s.Hits.Count != 0 || s.Misses.Count != 0 || s.Errors != 5 || s.HitRate() != 0 {
 		t.Fatalf("sessions %+v", s)
 	}
 }

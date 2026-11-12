@@ -257,20 +257,20 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 缓存有没有起作用，要看命中率。`cachemon.Wrap` 包装一个缓存，把每次读取命中、未命中还是出错记录为[运行统计](monitor.md)。包装后仍是 `cache.CacheInterface`，action 不用修改：
 
 ```go
-articleCache := cachemon.Wrap("articles", cache.New[string](gocachestore.NewGoCache(memoryClient)), recorder)
+articleCache := cachemon.Wrap("articles", cache.New[string](gocachestore.NewGoCache(memoryClient)), mon)
 ```
 
-第一个参数是缓存名，`recorder` 是 `open` 中创建的 [Recorder](dependencies.md#assembling-the-application)。键不存在或已过期记为未命中，其他错误记为出错：Redis 断线表现为出错次数增加，而不是命中率下降。
+第一个参数是缓存名，`mon` 是 `open` 中创建的 [Monitor](dependencies.md#assembling-the-application)。键不存在或已过期记为未命中，其他错误记为出错：Redis 断线表现为出错次数增加，而不是命中率下降。
 
-`cachecmd.New(a.stats)` 返回 `cache stats` 命令，和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明。它列出每个缓存最近一段时间的情况，`--since` 默认一小时：
+`cachecmd.New(a.monitor)` 返回 `cache stats` 命令，和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明。它列出每个缓存最近一段时间的情况，`AVG GET` 是读取的平均耗时，`--since` 默认一小时：
 
 ```text
 最近 1h
-CACHE     HITS   MISSES  ERRORS  HIT RATE
-articles  18342  1204    0       93.8%
+CACHE     HITS   MISSES  ERRORS  HIT RATE  AVG GET
+articles  18342  1204    0       93.8%     41µs
 ```
 
-后台页面用 `cachemon.Activity(ctx, a.stats, from, to)` 查询同样的数据。
+后台页面用 `cachemon.Activity(ctx, a.monitor, from, to)` 查询同样的数据。
 
 <a id="testing"></a>
 ## 测试

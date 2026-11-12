@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ryan053857/mygoravel/database/sqlite"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
@@ -15,19 +16,18 @@ import (
 
 func TestStats(t *testing.T) {
 	ctx := context.Background()
-	stats := monitor.NewStore(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()))
-	rec := monitor.NewRecorder(stats, nil)
-	t.Cleanup(func() { _ = rec.Close(ctx) })
+	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	t.Cleanup(func() { _ = mon.Close(ctx) })
 	for range 3 {
-		rec.Record(cachemon.MetricHit, "articles", 0.001)
+		mon.RecordDuration(cachemon.MetricHit, "articles", time.Millisecond)
 	}
-	rec.Record(cachemon.MetricMiss, "articles", 0.001)
-	rec.Record(cachemon.MetricError, "sessions", 0.5)
-	if err := rec.Flush(ctx); err != nil {
+	mon.RecordDuration(cachemon.MetricMiss, "articles", 5*time.Millisecond)
+	mon.RecordDuration(cachemon.MetricError, "sessions", 500*time.Millisecond)
+	if err := mon.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	cmd := cachecmd.New(stats)
+	cmd := cachecmd.New(mon)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"stats", "--since", "24h"})
@@ -38,7 +38,7 @@ func TestStats(t *testing.T) {
 	for line := range strings.Lines(out.String()) {
 		got = append(got, strings.Join(strings.Fields(line), " "))
 	}
-	want := []string{"最近 24h", "CACHE HITS MISSES ERRORS HIT RATE", "articles 3 1 0 75.0%", "sessions 0 0 1 -"}
+	want := []string{"最近 24h", "CACHE HITS MISSES ERRORS HIT RATE AVG GET", "articles 3 1 0 75.0% 2ms", "sessions 0 0 1 - -"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got\n%s", strings.Join(got, "\n"))
 	}

@@ -62,12 +62,11 @@ func TestSchedules(t *testing.T) {
 
 func TestSchedulesLastRun(t *testing.T) {
 	ctx := context.Background()
-	stats := monitor.NewStore(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()))
-	rec := monitor.NewRecorder(stats, nil)
-	t.Cleanup(func() { _ = rec.Close(ctx) })
+	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	t.Cleanup(func() { _ = mon.Close(ctx) })
 	started := time.Date(2026, 11, 12, 3, 0, 0, 0, time.Local)
-	rec.Set(schedule.MetricLastRun, "reports:daily", schedule.Run{Tick: started, Started: started, Duration: 1500 * time.Millisecond, Error: "smtp down"})
-	if err := rec.Flush(ctx); err != nil {
+	mon.Set(schedule.MetricLastRun, "reports:daily", schedule.Run{Tick: started, Started: started, Duration: 1500 * time.Millisecond, Error: "smtp down"})
+	if err := mon.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
 	noop := func(context.Context) error { return nil }
@@ -76,7 +75,7 @@ func TestSchedulesLastRun(t *testing.T) {
 		s.Add("reports:daily", "@daily", noop)
 		s.Add("sessions:cleanup", "@hourly", noop)
 		return s
-	}, stats)
+	}, mon)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs(nil)
