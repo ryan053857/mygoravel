@@ -1,5 +1,3 @@
-//go:build integration
-
 package natsqueue_test
 
 import (
@@ -11,8 +9,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/queue/natsqueue"
 	"github.com/ryan053857/mygoravel/queue/queuetest"
@@ -37,7 +34,7 @@ func TestDriver(t *testing.T) {
 		New: func(t *testing.T) (queue.Driver, *bun.DB) {
 			// 每个场景使用独立的流，测试之间互不影响。
 			stream := "TEST_QUEUE_" + strings.ToUpper(rand.Text())
-			return natsqueue.New(connect(t), stream), dbtesting.Open(t, sqlite.Driver, queue.Migrations())
+			return natsqueue.New(connect(t), stream), dbtest.Open(t, queue.Migrations())
 		},
 		NoFencing:    true,
 		PartialStats: true, NoRedeliveryTime: true, NoUnique: true,

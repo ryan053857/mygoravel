@@ -109,7 +109,6 @@ func isCJKRune(r rune) bool {
 }
 
 // maxTerm 是一个词进入索引的最大字节数，更长的词截断到这个长度。
-// MySQL 的全文索引默认忽略超过 84 个字符的词，编码之后不超过这个限制。
 const maxTerm = 32
 
 // maxQueryTerms 是一次查询最多使用的词数，更多的词被忽略。

@@ -1,5 +1,3 @@
-//go:build integration
-
 package redisqueue_test
 
 import (
@@ -14,8 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/queue/queuetest"
 	"github.com/ryan053857/mygoravel/queue/redisqueue"
@@ -46,8 +43,8 @@ func newDriver(t *testing.T) (*redisqueue.Driver, *redis.Client, string) {
 func TestDriver(t *testing.T) {
 	queuetest.TestDriver(t, queuetest.Options{New: func(t *testing.T) (queue.Driver, *bun.DB) {
 		d, _, _ := newDriver(t)
-		// 失败任务写入数据库，这里用 SQLite。
-		return d, dbtesting.Open(t, sqlite.Driver, queue.Migrations())
+		// 失败任务写入数据库。
+		return d, dbtest.Open(t, queue.Migrations())
 	}})
 }
 

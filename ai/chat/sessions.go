@@ -1,5 +1,4 @@
-// Package postgres 把对话保存在 PostgreSQL 中，表由 chat.Migrations 创建。
-package postgres
+package chat
 
 import (
 	"context"
@@ -12,7 +11,7 @@ import (
 	storage "trpc.group/trpc-go/trpc-agent-go/storage/postgres"
 )
 
-// NewSessions 创建保存对话的 session.Service，使用应用的数据库连接池。
+// NewSessions 创建把对话保存在 PostgreSQL 中的 session.Service，使用应用的数据库连接池，表由 Migrations 创建。
 //
 // 它使用 trpc-agent-go 的 session/postgres，表名前缀为 agent_，不自动建表。
 // opts 原样传入，例如 tpg.WithSessionTTL 让对话过期。Close 不关闭 db。

@@ -31,7 +31,7 @@
 先发布 `login` 的迁移；默认的限流器存在数据库中，同时发布 `ratelimit` 的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "login", FS: login.Migrations()},
     migrate.Source{Name: "ratelimit", FS: ratelimit.Migrations()},
 ))

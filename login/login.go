@@ -9,7 +9,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 
 	"github.com/ryan053857/mygoravel/crypt"
 	"github.com/ryan053857/mygoravel/errorx"
@@ -210,27 +209,12 @@ func (r *Realm) signedIn(ctx context.Context, id, tenant string) (Outcome, error
 }
 
 // upsert 让 q 在主键冲突时改为更新 set 中的列。
-func upsert(db bun.IDB, q *bun.InsertQuery, conflict string, set ...string) *bun.InsertQuery {
-	if db.Dialect().Name() == dialect.MySQL {
-		q = q.On("DUPLICATE KEY UPDATE")
-		for _, c := range set {
-			q = q.Set("? = VALUES(?)", bun.Ident(c), bun.Ident(c))
-		}
-		return q
-	}
+func upsert(q *bun.InsertQuery, conflict string, set ...string) *bun.InsertQuery {
 	q = q.On("CONFLICT (" + conflict + ") DO UPDATE")
 	for _, c := range set {
 		q = q.Set("? = EXCLUDED.?", bun.Ident(c), bun.Ident(c))
 	}
 	return q
-}
-
-// insertIgnore 让 q 在主键冲突时什么也不做。
-func insertIgnore(db bun.IDB, q *bun.InsertQuery, conflict, noop string) *bun.InsertQuery {
-	if db.Dialect().Name() == dialect.MySQL {
-		return q.On("DUPLICATE KEY UPDATE").Set("? = ?", bun.Ident(noop), bun.Ident(noop))
-	}
-	return q.On("CONFLICT (" + conflict + ") DO NOTHING")
 }
 
 // affected 返回语句影响的行数。

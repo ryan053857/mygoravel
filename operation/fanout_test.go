@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
 )
@@ -72,90 +71,86 @@ func (e env) wait(t *testing.T, id uuid.UUID, done func(op *operation.Operation)
 }
 
 func TestFanout(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		e := newEnv(t, driver)
-		rec := &recorder{}
-		var mu sync.Mutex
-		seen := map[string]int{}
-		worker(t, e, 3, operation.HandleUnit(e.ops, func(ctx context.Context, op *operation.Operation, item string) error {
-			mu.Lock()
-			seen[item]++
-			mu.Unlock()
-			if op.Owner().ID != alice.ID || op.Kind != "articles.summarize" {
-				return errors.Newf("wrong operation %+v", op)
-			}
-			if item == "gone" {
-				return errBadFile.New() // 业务错误：这个单位失败，不再重试
-			}
-			return nil
-		}, rec.saved))
-
-		op := e.fanout(t, "a", "b", "c", "gone")
-		if got := e.get(t, op.ID); got.Total != 4 || got.Status == operation.StatusPending {
-			t.Fatalf("after fanout: %+v", got)
-		}
-		got := e.wait(t, op.ID, (*operation.Operation).Finished)
-		if got.Status != operation.StatusCompleted || got.Processed != 4 || got.Failed != 1 || got.CompletedAt == nil {
-			t.Fatalf("completed: %+v", got)
-		}
+	e := newEnv(t)
+	rec := &recorder{}
+	var mu sync.Mutex
+	seen := map[string]int{}
+	worker(t, e, 3, operation.HandleUnit(e.ops, func(ctx context.Context, op *operation.Operation, item string) error {
 		mu.Lock()
-		defer mu.Unlock()
-		for _, item := range []string{"a", "b", "c", "gone"} {
-			if seen[item] != 1 {
-				t.Fatalf("seen: %v", seen)
-			}
+		seen[item]++
+		mu.Unlock()
+		if op.Owner().ID != alice.ID || op.Kind != "articles.summarize" {
+			return errors.Newf("wrong operation %+v", op)
 		}
-		p := rec.progress()
-		if len(p) != 4 || p[3] != "completed:4/4-1" {
-			t.Fatalf("saves: %v", p)
+		if item == "gone" {
+			return errBadFile.New() // 业务错误：这个单位失败，不再重试
 		}
-	})
+		return nil
+	}, rec.saved))
+
+	op := e.fanout(t, "a", "b", "c", "gone")
+	if got := e.get(t, op.ID); got.Total != 4 || got.Status == operation.StatusPending {
+		t.Fatalf("after fanout: %+v", got)
+	}
+	got := e.wait(t, op.ID, (*operation.Operation).Finished)
+	if got.Status != operation.StatusCompleted || got.Processed != 4 || got.Failed != 1 || got.CompletedAt == nil {
+		t.Fatalf("completed: %+v", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, item := range []string{"a", "b", "c", "gone"} {
+		if seen[item] != 1 {
+			t.Fatalf("seen: %v", seen)
+		}
+	}
+	p := rec.progress()
+	if len(p) != 4 || p[3] != "completed:4/4-1" {
+		t.Fatalf("saves: %v", p)
+	}
 }
 
 func TestHandleUnitSkipsSettledUnits(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newEnv(t, driver)
-		var calls []string
-		handle := operation.HandleUnit(e.ops, func(_ context.Context, _ *operation.Operation, item string) error {
-			calls = append(calls, item)
-			return nil
-		}, nil)
-		op := e.fanout(t, "a", "b")
-		var units []operation.Unit[string]
-		e.claimAll(t, &units)
-		if len(units) != 2 {
-			t.Fatalf("units: %+v", units)
-		}
-		// 第一个单位投递两次（例如确认之前进程崩溃），第二次不再执行。
-		for _, u := range []operation.Unit[string]{units[0], units[0], units[1]} {
-			if err := handle(ctx, u); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if !slices.Equal(calls, []string{units[0].Data, units[1].Data}) {
-			t.Fatalf("calls: %v", calls)
-		}
-		if got := e.get(t, op.ID); got.Status != operation.StatusCompleted || got.Processed != 2 {
-			t.Fatalf("completed: %+v", got)
-		}
-		// 已经结束的操作不能再加入单位。
-		if err := operation.Fanout(ctx, e.db, queue.Database(e.db), op.ID, unitTopic, "late"); err == nil {
-			t.Fatal("fanout to finished operation")
-		}
-		if err := operation.Fanout(ctx, e.db, queue.Database(e.db), op.ID, unitTopic); err == nil {
-			t.Fatal("fanout without items")
-		}
-		// 操作被删除后，剩下的任务什么也不做。
-		other := e.fanout(t, "x")
-		e.claimAll(t, &units)
-		if _, err := e.db.NewDelete().Model((*operation.Operation)(nil)).Where("id = ?", other.ID).Exec(ctx); err != nil {
+	ctx := context.Background()
+	e := newEnv(t)
+	var calls []string
+	handle := operation.HandleUnit(e.ops, func(_ context.Context, _ *operation.Operation, item string) error {
+		calls = append(calls, item)
+		return nil
+	}, nil)
+	op := e.fanout(t, "a", "b")
+	var units []operation.Unit[string]
+	e.claimAll(t, &units)
+	if len(units) != 2 {
+		t.Fatalf("units: %+v", units)
+	}
+	// 第一个单位投递两次（例如确认之前进程崩溃），第二次不再执行。
+	for _, u := range []operation.Unit[string]{units[0], units[0], units[1]} {
+		if err := handle(ctx, u); err != nil {
 			t.Fatal(err)
 		}
-		if err := handle(ctx, units[0]); err != nil || len(calls) != 2 {
-			t.Fatalf("deleted operation: %v %v", err, calls)
-		}
-	})
+	}
+	if !slices.Equal(calls, []string{units[0].Data, units[1].Data}) {
+		t.Fatalf("calls: %v", calls)
+	}
+	if got := e.get(t, op.ID); got.Status != operation.StatusCompleted || got.Processed != 2 {
+		t.Fatalf("completed: %+v", got)
+	}
+	// 已经结束的操作不能再加入单位。
+	if err := operation.Fanout(ctx, e.db, queue.Database(e.db), op.ID, unitTopic, "late"); err == nil {
+		t.Fatal("fanout to finished operation")
+	}
+	if err := operation.Fanout(ctx, e.db, queue.Database(e.db), op.ID, unitTopic); err == nil {
+		t.Fatal("fanout without items")
+	}
+	// 操作被删除后，剩下的任务什么也不做。
+	other := e.fanout(t, "x")
+	e.claimAll(t, &units)
+	if _, err := e.db.NewDelete().Model((*operation.Operation)(nil)).Where("id = ?", other.ID).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := handle(ctx, units[0]); err != nil || len(calls) != 2 {
+		t.Fatalf("deleted operation: %v %v", err, calls)
+	}
 }
 
 // claimAll 领取 unitTopic 中全部到期的任务，解码到 units。
@@ -182,57 +177,55 @@ func (e env) claimAll(t *testing.T, units *[]operation.Unit[string]) {
 }
 
 func TestRetryFailedUnit(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newEnv(t, driver)
-		rec := &recorder{}
-		var mu sync.Mutex
-		down := true
-		worker(t, e, 2, operation.HandleUnit(e.ops, func(_ context.Context, _ *operation.Operation, item string) error {
-			mu.Lock()
-			defer mu.Unlock()
-			if item == "flaky" && down {
-				return queue.RetryAfter(errors.New("service down"), 0)
-			}
-			return nil
-		}, rec.saved))
-
-		op := e.fanout(t, "ok", "flaky")
-		got := e.wait(t, op.ID, (*operation.Operation).Finished)
-		if got.Status != operation.StatusCompleted || got.Processed != 2 || got.Failed != 1 {
-			t.Fatalf("completed with failure: %+v", got)
-		}
-		saves := len(rec.progress())
-
-		// 服务恢复后重试失败任务，计数随之修正，但不再调用 saved。
+	ctx := context.Background()
+	e := newEnv(t)
+	rec := &recorder{}
+	var mu sync.Mutex
+	down := true
+	worker(t, e, 2, operation.HandleUnit(e.ops, func(_ context.Context, _ *operation.Operation, item string) error {
 		mu.Lock()
-		down = false
-		mu.Unlock()
-		// 单位先在 settle 中记为失败、操作随之结束，处理函数返回之后队列才把任务移进失败任务表，
-		// 所以操作结束时失败任务可能还没出现。
-		failed := queue.NewFailedJobs(e.db)
-		var jobs []queue.FailedJob
-		for deadline := time.Now().Add(10 * time.Second); len(jobs) == 0; time.Sleep(20 * time.Millisecond) {
-			var err error
-			if jobs, err = failed.List(ctx, queue.FailedQuery{Topic: string(unitTopic)}); err != nil {
-				t.Fatal(err)
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("failed job never appeared")
-			}
+		defer mu.Unlock()
+		if item == "flaky" && down {
+			return queue.RetryAfter(errors.New("service down"), 0)
 		}
-		if len(jobs) != 1 {
-			t.Fatalf("failed jobs: %+v", jobs)
-		}
-		if err := failed.Retry(ctx, jobs[0].ID); err != nil {
+		return nil
+	}, rec.saved))
+
+	op := e.fanout(t, "ok", "flaky")
+	got := e.wait(t, op.ID, (*operation.Operation).Finished)
+	if got.Status != operation.StatusCompleted || got.Processed != 2 || got.Failed != 1 {
+		t.Fatalf("completed with failure: %+v", got)
+	}
+	saves := len(rec.progress())
+
+	// 服务恢复后重试失败任务，计数随之修正，但不再调用 saved。
+	mu.Lock()
+	down = false
+	mu.Unlock()
+	// 单位先在 settle 中记为失败、操作随之结束，处理函数返回之后队列才把任务移进失败任务表，
+	// 所以操作结束时失败任务可能还没出现。
+	failed := queue.NewFailedJobs(e.db)
+	var jobs []queue.FailedJob
+	for deadline := time.Now().Add(10 * time.Second); len(jobs) == 0; time.Sleep(20 * time.Millisecond) {
+		var err error
+		if jobs, err = failed.List(ctx, queue.FailedQuery{Topic: string(unitTopic)}); err != nil {
 			t.Fatal(err)
 		}
-		got = e.wait(t, op.ID, func(op *operation.Operation) bool { return op.Failed == 0 })
-		if got.Status != operation.StatusCompleted || got.Processed != 2 {
-			t.Fatalf("after retry: %+v", got)
+		if time.Now().After(deadline) {
+			t.Fatal("failed job never appeared")
 		}
-		if p := rec.progress(); len(p) != saves {
-			t.Fatalf("saved after finish: %v", p)
-		}
-	})
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("failed jobs: %+v", jobs)
+	}
+	if err := failed.Retry(ctx, jobs[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	got = e.wait(t, op.ID, func(op *operation.Operation) bool { return op.Failed == 0 })
+	if got.Status != operation.StatusCompleted || got.Processed != 2 {
+		t.Fatalf("after retry: %+v", got)
+	}
+	if p := rec.progress(); len(p) != saves {
+		t.Fatalf("saved after finish: %v", p)
+	}
 }

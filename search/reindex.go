@@ -41,7 +41,7 @@ func (ix *Index[D]) Reindex(ctx context.Context, tx bun.IDB, ops *operation.Serv
 	if err != nil {
 		return nil, err
 	}
-	if _, err := storeOf(tx).startBuild(ctx, tx, ix.name, op.ID); err != nil {
+	if _, err := startBuild(ctx, tx, ix.name, op.ID); err != nil {
 		return nil, err
 	}
 	if err := ix.reindex.Publish(ctx, queue.Database(tx), op.ID); err != nil {
@@ -52,13 +52,12 @@ func (ix *Index[D]) Reindex(ctx context.Context, tx bun.IDB, ops *operation.Serv
 
 // rebuild 执行操作 id 的重建。
 func (ix *Index[D]) rebuild(ctx context.Context, db *bun.DB, ops *operation.Service, load LoadFunc[D], scan ScanFunc, id uuid.UUID) error {
-	st := storeOf(db)
 	// 先清理之前被取代或者切换后没有删完的版本
-	if err := st.dropStale(ctx, db, ix.name); err != nil {
+	if err := dropStale(ctx, db, ix.name); err != nil {
 		return err
 	}
 	err := ops.Run(ctx, id, func(ctx context.Context, r *operation.Run) error {
-		b, err := st.build(ctx, db, ix.name, id, false)
+		b, err := currentBuild(ctx, db, ix.name, id, false)
 		if err != nil {
 			return err
 		}
@@ -69,7 +68,7 @@ func (ix *Index[D]) rebuild(ctx context.Context, db *bun.DB, ops *operation.Serv
 		op := r.Operation()
 		total, processed := op.Total, op.Processed
 		if after == "" {
-			if total, err = st.countKeys(ctx, db, ix.name); err != nil {
+			if total, err = countKeys(ctx, db, ix.name); err != nil {
 				return err
 			}
 			r.SetTotal(total)
@@ -105,19 +104,19 @@ func (ix *Index[D]) rebuild(ctx context.Context, db *bun.DB, ops *operation.Serv
 				r.SetTotal(total)
 			}
 			err = r.Save(ctx, func(ctx context.Context, tx database.Tx) error {
-				return st.saveProgress(ctx, tx, ix.name, id, after)
+				return saveProgress(ctx, tx, ix.name, id, after)
 			})
 			if err != nil {
 				return err
 			}
 		}
 		return r.Complete(ctx, func(ctx context.Context, tx database.Tx) error {
-			return st.finishBuild(ctx, tx, ix.name, id)
+			return finishBuild(ctx, tx, ix.name, id)
 		})
 	}, nil)
 	if err != nil {
 		return err
 	}
 	// 切换之后删除原来的版本；失败时任务重试，Run 不再执行已经结束的操作，直接回到这里
-	return st.dropStale(ctx, db, ix.name)
+	return dropStale(ctx, db, ix.name)
 }

@@ -39,7 +39,7 @@ go test ./...
 go test -race ./...
 ```
 
-需要真实数据库的测试通过 `integration` 构建标签与普通测试区分开，见[数据库测试](#database-tests)。
+需要真实数据库的测试见[数据库测试](#database-tests)。
 
 <a id="http-tests"></a>
 ## HTTP 测试
@@ -142,8 +142,6 @@ func TestCreateRejectsBadRequests(t *testing.T) {
 [服务端渲染的页面](views.md)用 `web/webtest` 测试。`webtest.Client` 像浏览器一样向页面路由发送请求，保存会话 cookie，`Login` 不经过登录页就能以某个主体登录。下面是 `internal/article/articleweb/update_test.go`，它测试[表单](forms.md#handling-submissions)一章的修改文章：
 
 ```go
-//go:build integration
-
 package articleweb_test
 
 import (
@@ -161,7 +159,6 @@ import (
     "example.com/blog/internal/user"
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/database/dbtest"
-    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/identity"
     "github.com/ryan053857/mygoravel/session"
     "github.com/ryan053857/mygoravel/web"
@@ -170,7 +167,7 @@ import (
 )
 
 func TestUpdate(t *testing.T) {
-    db := dbtest.Open(t, postgres.Driver, migrations.FS)
+    db := dbtest.Open(t, migrations.FS)
     alice := identity.Subject{Type: user.Type, ID: "alice", Permissions: []string{"articles"}}
     item, err := article.NewCreate(db).Handle(context.Background(), alice, article.Changes{Title: "Hello", Slug: "hello"})
     if err != nil {
@@ -231,8 +228,6 @@ func TestUpdate(t *testing.T) {
 业务规则（尤其是资源所有权检查）应当通过直接调用 action 的 `Handle` 来测试。由于主体是作为参数传入的，你可以很方便地模拟不同的调用者。下面是 `internal/article/article_test.go`，它在一个真实的测试数据库上验证草稿的可见性和发布规则：
 
 ```go
-//go:build integration
-
 package article_test
 
 import (
@@ -244,13 +239,12 @@ import (
     "example.com/blog/internal/user"
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/database/dbtest"
-    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/identity"
 )
 
 func TestDraftVisibilityAndPublishing(t *testing.T) {
     ctx := context.Background()
-    db := dbtest.Open(t, postgres.Driver, migrations.FS)
+    db := dbtest.Open(t, migrations.FS)
     create, get, publish := article.NewCreate(db), article.NewGet(db), article.NewPublish(db)
     alice := identity.Subject{Type: user.Type, ID: "alice"}
     bob := identity.Subject{Type: user.Type, ID: "bob"}
@@ -294,8 +288,6 @@ func TestDraftVisibilityAndPublishing(t *testing.T) {
 action 的[命令入口](actions.md#as-commands)通过模块的 `Commands` 测试。它返回原生的 `*cobra.Command`，直接传入测试数据库即可，不需要配置文件，也不经过 `command.Bind`。下面是 `internal/article/commands_test.go`：
 
 ```go
-//go:build integration
-
 package article_test
 
 import (
@@ -308,13 +300,12 @@ import (
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/database/dbtest"
-    "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/identity"
 )
 
 func TestPublishCommand(t *testing.T) {
     ctx := context.Background()
-    db := dbtest.Open(t, postgres.Driver, migrations.FS)
+    db := dbtest.Open(t, migrations.FS)
     alice := identity.Subject{Type: user.Type, ID: "alice"}
     item, err := article.NewCreate(db).Handle(ctx, alice, article.Changes{Title: "Hello World", Slug: "hello-world"})
     if err != nil {
@@ -391,7 +382,7 @@ item := newArticle(t, db, alice, func(c *article.Changes) { c.Slug = "hello-worl
 func TestPublishRecordsTime(t *testing.T) {
     synctest.Test(t, func(t *testing.T) {
         ctx := context.Background()
-        db := dbtest.Open(t, postgres.Driver, migrations.FS)
+        db := dbtest.Open(t, migrations.FS)
         alice := identity.Subject{Type: user.Type, ID: "alice"}
         item := newArticle(t, db, alice, nil)
 
@@ -454,24 +445,20 @@ func TestLoadConfig(t *testing.T) {
 上一节的 `article_test.go` 就是这样使用它的：
 
 ```go
-db := dbtest.Open(t, postgres.Driver, migrations.FS)
+db := dbtest.Open(t, migrations.FS)
 ```
 
 `dbtest.Open` 返回一个已执行迁移的 `*bun.DB`，你可以把它直接传给 action 的构造函数。迁移参数传 `nil` 时会创建一个空数据库。
 
-使用 SQLite 的应用传入 `sqlite.Driver`，`dbtest` 在 `t.TempDir()` 中创建数据库文件。它不需要任何外部服务，也不需要环境变量，可以和普通测试一样直接用 `go test ./...` 运行，不必加 `integration` 构建标签。
-
-PostgreSQL 和 MySQL 的 `dbtest` 分别通过环境变量 `POSTGRES_TEST_URL` 和 `MYSQL_TEST_URL` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
+`dbtest` 通过环境变量 `POSTGRES_TEST_URL` 获取一个管理员连接，该账户需要有创建和删除数据库的权限。没有设置这个变量时，测试会直接失败，而不是被跳过——这样可以避免数据库测试在 CI 中被悄悄忽略。
 
 > [!WARNING]
-> 请为这两个变量使用专门的测试数据库实例，不要指向任何存放真实数据的数据库。
-
-PostgreSQL 和 MySQL 测试文件开头的 `//go:build integration` 让这些测试只在显式指定 `-tags=integration` 时运行，普通的 `go test ./...` 不会执行它们。
+> 请为这个变量使用专门的测试数据库实例，不要指向任何存放真实数据的数据库。
 
 <a id="running-database-tests-locally"></a>
 ### 在本地运行数据库测试
 
-使用 SQLite 时不需要准备任何东西。使用 PostgreSQL 时，在项目根目录放一个只给测试用的 `compose.test.yml`。博客应用还用 Redis 记录浏览量，见 [Redis](redis.md#testing)，所以一起启动：
+在项目根目录放一个只给测试用的 `compose.test.yml`。博客应用还用 Redis 记录浏览量，见 [Redis](redis.md#testing)，所以一起启动：
 
 ```yaml
 # compose.test.yml
@@ -509,27 +496,10 @@ services:
 docker compose -f compose.test.yml up -d --wait
 export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
 export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
-go test -race -count=1 -tags=integration ./...
+go test -race -count=1 ./...
 ```
 
 每个测试使用自己的临时库，服务可以一直开着反复运行测试。数据放在 tmpfs 中，执行 `docker compose -f compose.test.yml down -v` 清理后不会留下任何数据。
-
-使用 MySQL 时，把 `postgres` 服务换成下面的配置，并设置 `MYSQL_TEST_URL='mysql://root:mysql@127.0.0.1:53306/'`。健康检查必须用 `-h 127.0.0.1` 走 TCP：MySQL 初始化期间只监听本地 socket，这时通过 socket 的 `ping` 已经成功，但还不能从外部连接。
-
-```yaml
-  mysql:
-    image: mysql:8.4
-    environment:
-      MYSQL_ROOT_PASSWORD: mysql
-    ports:
-      - 127.0.0.1:53306:3306
-    tmpfs:
-      - /var/lib/mysql
-    healthcheck:
-      test: mysqladmin ping -h 127.0.0.1 -pmysql --silent
-      interval: 1s
-      retries: 120
-```
 
 Redis 的集成测试见 [Redis](redis.md#testing)。
 

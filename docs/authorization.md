@@ -68,12 +68,12 @@ if subject.Can("articles:read-drafts") {
 <a id="roles"></a>
 ## 角色
 
-`authz` 包提供基于角色的权限，对应 Laravel 的 spatie/laravel-permission：权限组成角色，角色分配给用户。权限变化立即生效，不需要重新登录。它把数据存在应用的数据库中，支持 PostgreSQL、SQLite 和 MySQL。
+`authz` 包提供基于角色的权限，对应 Laravel 的 spatie/laravel-permission：权限组成角色，角色分配给用户。权限变化立即生效，不需要重新登录。它把数据存在应用的数据库中，
 
 使用前先发布它的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "authz", FS: authz.Migrations()},
 ))
 ```
@@ -261,9 +261,6 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
     return item, nil
 }
 ```
-
-> [!NOTE]
-> SQLite 不支持 `FOR UPDATE`。使用 `sqlite.Driver` 时，写事务在 `BEGIN` 时就独占了数据库，去掉 `.For("UPDATE")` 即可得到同样的保证，见[使用 SQLite](database.md#sqlite)。
 
 重复发布时返回的 `ErrAlreadyPublished` 与其他文章错误定义在一起，重复发布时客户端会收到 `409`：
 

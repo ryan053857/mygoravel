@@ -10,12 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/feature"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
 var (
@@ -36,9 +34,9 @@ func user(id, tenant string) identity.Subject {
 
 func userRef(id string) identity.Ref { return identity.Ref{Type: "user", ID: id} }
 
-func newStore(t *testing.T, driver database.Driver) *feature.Store {
+func newStore(t *testing.T) *feature.Store {
 	t.Helper()
-	return feature.NewStore(dbtesting.Open(t, driver, feature.Migrations()), catalog)
+	return feature.NewStore(dbtest.Open(t, feature.Migrations()), catalog)
 }
 
 func set(t *testing.T, s *feature.Store, f feature.Flag, scope feature.Scope, state feature.State) {
@@ -55,73 +53,67 @@ func check(t *testing.T, s *feature.Store, sub identity.Subject, f feature.Flag,
 }
 
 func TestPrecedence(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		s := newStore(t, driver)
-		alice := user("alice", "acme")
-		staff := user("bob", "acme")
-		staff.Permissions = []string{"platform:*"}
+	s := newStore(t)
+	alice := user("alice", "acme")
+	staff := user("bob", "acme")
+	staff.Permissions = []string{"platform:*"}
 
-		check(t, s, alice, editor, false, "default")
-		check(t, s, staff, editor, true, "default for staff")
-		check(t, s, alice, search, false, "nil default")
+	check(t, s, alice, editor, false, "default")
+	check(t, s, staff, editor, true, "default for staff")
+	check(t, s, alice, search, false, "nil default")
 
-		set(t, s, editor, feature.Tenant("acme"), feature.On)
-		check(t, s, alice, editor, true, "tenant on")
-		check(t, s, user("carol", "globex"), editor, false, "other tenant")
+	set(t, s, editor, feature.Tenant("acme"), feature.On)
+	check(t, s, alice, editor, true, "tenant on")
+	check(t, s, user("carol", "globex"), editor, false, "other tenant")
 
-		set(t, s, editor, feature.Subject(userRef("alice")), feature.Off)
-		check(t, s, alice, editor, false, "user beats tenant")
-		check(t, s, user("dave", "acme"), editor, true, "tenant still on for others")
+	set(t, s, editor, feature.Subject(userRef("alice")), feature.Off)
+	check(t, s, alice, editor, false, "user beats tenant")
+	check(t, s, user("dave", "acme"), editor, true, "tenant still on for others")
 
-		set(t, s, editor, feature.Everyone, feature.Percent(0))
-		check(t, s, alice, editor, false, "targets beat percent")
-		check(t, s, user("dave", "acme"), editor, true, "tenant beats percent")
-		check(t, s, staff, editor, true, "tenant beats percent for staff")
-		check(t, s, user("carol", "globex"), editor, false, "percent 0 ignores default")
+	set(t, s, editor, feature.Everyone, feature.Percent(0))
+	check(t, s, alice, editor, false, "targets beat percent")
+	check(t, s, user("dave", "acme"), editor, true, "tenant beats percent")
+	check(t, s, staff, editor, true, "tenant beats percent for staff")
+	check(t, s, user("carol", "globex"), editor, false, "percent 0 ignores default")
 
-		set(t, s, editor, feature.Everyone, feature.Off)
-		check(t, s, user("dave", "acme"), editor, false, "everyone off is a kill switch")
-		check(t, s, staff, editor, false, "kill switch beats default")
+	set(t, s, editor, feature.Everyone, feature.Off)
+	check(t, s, user("dave", "acme"), editor, false, "everyone off is a kill switch")
+	check(t, s, staff, editor, false, "kill switch beats default")
 
-		set(t, s, editor, feature.Everyone, feature.On)
-		check(t, s, alice, editor, true, "everyone on beats user off")
-		check(t, s, identity.Subject{}, editor, true, "everyone on includes anonymous")
+	set(t, s, editor, feature.Everyone, feature.On)
+	check(t, s, alice, editor, true, "everyone on beats user off")
+	check(t, s, identity.Subject{}, editor, true, "everyone on includes anonymous")
 
-		require.NoError(t, s.Clear(context.Background(), editor, feature.Everyone))
-		check(t, s, alice, editor, false, "cleared everyone, user off again")
-		check(t, s, alice, search, false, "other flag unaffected")
-	})
+	require.NoError(t, s.Clear(context.Background(), editor, feature.Everyone))
+	check(t, s, alice, editor, false, "cleared everyone, user off again")
+	check(t, s, alice, search, false, "other flag unaffected")
 }
 
 func TestServiceSubject(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		s := newStore(t, driver)
-		system := identity.Subject{ID: "system", Type: identity.System, Tenant: "acme"}
-		set(t, s, search, feature.Subject(identity.Ref{Type: identity.System, ID: "system"}), feature.On)
-		check(t, s, system, search, false, "subject settings do not apply to identity.System")
-		set(t, s, search, feature.Tenant("acme"), feature.On)
-		check(t, s, system, search, true, "tenant settings apply")
+	s := newStore(t)
+	system := identity.Subject{ID: "system", Type: identity.System, Tenant: "acme"}
+	set(t, s, search, feature.Subject(identity.Ref{Type: identity.System, ID: "system"}), feature.On)
+	check(t, s, system, search, false, "subject settings do not apply to identity.System")
+	set(t, s, search, feature.Tenant("acme"), feature.On)
+	check(t, s, system, search, true, "tenant settings apply")
 
-		set(t, s, search, feature.Everyone, feature.Percent(99))
-		require.NoError(t, s.Clear(context.Background(), search, feature.Tenant("acme")))
-		check(t, s, system, search, false, "no user ID, not in a user rollout below 100")
-		check(t, s, system, editor, false, "default without staff permission")
-	})
+	set(t, s, search, feature.Everyone, feature.Percent(99))
+	require.NoError(t, s.Clear(context.Background(), search, feature.Tenant("acme")))
+	check(t, s, system, search, false, "no user ID, not in a user rollout below 100")
+	check(t, s, system, editor, false, "default without staff permission")
 }
 
 // 主体的设置按类型和 ID 一起区分：另一套账号体系中的 alice 是另一个人。
 func TestAccountSystems(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		s := newStore(t, driver)
-		staffAlice := identity.Subject{ID: "alice", Type: "staff"}
-		set(t, s, search, feature.Subject(staffAlice.Ref()), feature.On)
-		check(t, s, staffAlice, search, true, "staff alice on")
-		check(t, s, user("alice", ""), search, false, "user alice unaffected")
-	})
+	s := newStore(t)
+	staffAlice := identity.Subject{ID: "alice", Type: "staff"}
+	set(t, s, search, feature.Subject(staffAlice.Ref()), feature.On)
+	check(t, s, staffAlice, search, true, "staff alice on")
+	check(t, s, user("alice", ""), search, false, "user alice unaffected")
 }
 
 func TestRollout(t *testing.T) {
-	s := newStore(t, sqlite.Driver)
+	s := newStore(t)
 	ctx := context.Background()
 	active := func(f feature.Flag, sub identity.Subject) bool { return s.Active(ctx, sub, f) }
 
@@ -160,7 +152,7 @@ func TestRollout(t *testing.T) {
 
 	// 不同开关选中的人不同。
 	other := feature.Flag{Name: "other"}
-	s2 := feature.NewStore(dbtesting.Open(t, sqlite.Driver, feature.Migrations()), feature.Catalog{search, other})
+	s2 := feature.NewStore(dbtest.Open(t, feature.Migrations()), feature.Catalog{search, other})
 	set(t, s2, search, feature.Everyone, feature.Percent(50))
 	set(t, s2, other, feature.Everyone, feature.Percent(50))
 	same := 0
@@ -177,7 +169,7 @@ func TestRollout(t *testing.T) {
 }
 
 func TestRolloutByTenant(t *testing.T) {
-	s := newStore(t, sqlite.Driver)
+	s := newStore(t)
 	ctx := context.Background()
 	set(t, s, editor, feature.Everyone, feature.Percent(50))
 	on := 0
@@ -196,7 +188,7 @@ func TestRolloutByTenant(t *testing.T) {
 }
 
 func TestWithDB(t *testing.T) {
-	db := dbtesting.Open(t, sqlite.Driver, feature.Migrations())
+	db := dbtest.Open(t, feature.Migrations())
 	s := feature.NewStore(db, catalog)
 	ctx := context.Background()
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -208,7 +200,7 @@ func TestWithDB(t *testing.T) {
 }
 
 func TestForReadsOnce(t *testing.T) {
-	s := newStore(t, sqlite.Driver)
+	s := newStore(t)
 	set(t, s, editor, feature.Tenant("acme"), feature.On)
 	set(t, s, search, feature.Subject(userRef("alice")), feature.On)
 	set(t, s, search, feature.Tenant("globex"), feature.On)
@@ -220,7 +212,7 @@ func TestForReadsOnce(t *testing.T) {
 }
 
 func TestLoadErrorUsesDefault(t *testing.T) {
-	db := dbtesting.Open(t, sqlite.Driver, nil) // 没有迁移，表不存在
+	db := dbtest.Open(t, nil) // 没有迁移，表不存在
 	s := feature.NewStore(db, catalog)
 	staff := user("bob", "acme")
 	staff.Permissions = []string{"platform:staff"}
@@ -229,7 +221,7 @@ func TestLoadErrorUsesDefault(t *testing.T) {
 }
 
 func TestSetValidation(t *testing.T) {
-	s := newStore(t, sqlite.Driver)
+	s := newStore(t)
 	ctx := context.Background()
 	for name, tc := range map[string]struct {
 		f     feature.Flag
@@ -240,7 +232,6 @@ func TestSetValidation(t *testing.T) {
 		"empty tenant":      {search, feature.Tenant(""), feature.On},
 		"empty subject":     {search, feature.Subject(identity.Ref{}), feature.On},
 		"subject no type":   {search, feature.Subject(identity.Ref{ID: "alice"}), feature.On},
-		"long tenant":       {search, feature.Tenant(string(make([]byte, 192))), feature.On},
 		"tenant percent":    {search, feature.Tenant("acme"), feature.Percent(10)},
 		"user percent":      {search, feature.Subject(userRef("alice")), feature.Percent(10)},
 		"negative percent":  {search, feature.Everyone, feature.Percent(-1)},
@@ -258,69 +249,65 @@ func TestSetValidation(t *testing.T) {
 }
 
 func TestSettings(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		s := newStore(t, driver)
-		ctx := context.Background()
-		set(t, s, search, feature.Subject(userRef("bob")), feature.On)
-		set(t, s, search, feature.Tenant("globex"), feature.Off)
-		set(t, s, search, feature.Everyone, feature.Percent(20))
-		set(t, s, search, feature.Subject(userRef("alice")), feature.Off)
-		set(t, s, search, feature.Tenant("acme"), feature.On)
-		set(t, s, search, feature.Everyone, feature.Percent(30))         // 覆盖
-		set(t, s, search, feature.Subject(userRef("alice")), feature.On) // 覆盖
-		set(t, s, editor, feature.Tenant("acme"), feature.On)
+	s := newStore(t)
+	ctx := context.Background()
+	set(t, s, search, feature.Subject(userRef("bob")), feature.On)
+	set(t, s, search, feature.Tenant("globex"), feature.Off)
+	set(t, s, search, feature.Everyone, feature.Percent(20))
+	set(t, s, search, feature.Subject(userRef("alice")), feature.Off)
+	set(t, s, search, feature.Tenant("acme"), feature.On)
+	set(t, s, search, feature.Everyone, feature.Percent(30))         // 覆盖
+	set(t, s, search, feature.Subject(userRef("alice")), feature.On) // 覆盖
+	set(t, s, editor, feature.Tenant("acme"), feature.On)
 
-		settings, err := s.Settings(ctx, search)
-		require.NoError(t, err)
-		var got []string
-		for _, st := range settings {
-			assert.False(t, st.UpdatedAt.IsZero())
-			got = append(got, fmt.Sprintf("%s/%s=%s:%d", st.Scope.Tenant(), st.Scope.Subject().ID, st.State.Mode, st.State.Percent))
-		}
-		assert.Equal(t, []string{
-			"/=percent:30",
-			"acme/=on:0",
-			"globex/=off:0",
-			"/alice=on:0",
-			"/bob=on:0",
-		}, got)
-		assert.Equal(t, feature.Everyone, settings[0].Scope)
-		assert.Equal(t, feature.Tenant("acme"), settings[1].Scope)
-		assert.Equal(t, feature.Subject(userRef("alice")), settings[3].Scope)
+	settings, err := s.Settings(ctx, search)
+	require.NoError(t, err)
+	var got []string
+	for _, st := range settings {
+		assert.False(t, st.UpdatedAt.IsZero())
+		got = append(got, fmt.Sprintf("%s/%s=%s:%d", st.Scope.Tenant(), st.Scope.Subject().ID, st.State.Mode, st.State.Percent))
+	}
+	assert.Equal(t, []string{
+		"/=percent:30",
+		"acme/=on:0",
+		"globex/=off:0",
+		"/alice=on:0",
+		"/bob=on:0",
+	}, got)
+	assert.Equal(t, feature.Everyone, settings[0].Scope)
+	assert.Equal(t, feature.Tenant("acme"), settings[1].Scope)
+	assert.Equal(t, feature.Subject(userRef("alice")), settings[3].Scope)
 
-		require.NoError(t, s.Clear(ctx, search, feature.Subject(userRef("bob"))))
-		require.NoError(t, s.Clear(ctx, search, feature.Subject(userRef("nobody"))))
-		settings, err = s.Settings(ctx, search)
-		require.NoError(t, err)
-		assert.Len(t, settings, 4)
-	})
+	require.NoError(t, s.Clear(ctx, search, feature.Subject(userRef("bob"))))
+	require.NoError(t, s.Clear(ctx, search, feature.Subject(userRef("nobody"))))
+	settings, err = s.Settings(ctx, search)
+	require.NoError(t, err)
+	assert.Len(t, settings, 4)
 }
 
 func TestPrune(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		db := dbtesting.Open(t, driver, feature.Migrations())
-		ctx := context.Background()
-		old := feature.Flag{Name: "old"}
-		before := feature.NewStore(db, feature.Catalog{editor, search, old})
-		set(t, before, old, feature.Everyone, feature.On)
-		set(t, before, old, feature.Tenant("acme"), feature.Off)
-		set(t, before, search, feature.Everyone, feature.On)
+	db := dbtest.Open(t, feature.Migrations())
+	ctx := context.Background()
+	old := feature.Flag{Name: "old"}
+	before := feature.NewStore(db, feature.Catalog{editor, search, old})
+	set(t, before, old, feature.Everyone, feature.On)
+	set(t, before, old, feature.Tenant("acme"), feature.Off)
+	set(t, before, search, feature.Everyone, feature.On)
 
-		n, err := feature.NewStore(db, catalog).Prune(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, 2, n)
-		settings, err := before.Settings(ctx, search)
-		require.NoError(t, err)
-		assert.Len(t, settings, 1)
+	n, err := feature.NewStore(db, catalog).Prune(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+	settings, err := before.Settings(ctx, search)
+	require.NoError(t, err)
+	assert.Len(t, settings, 1)
 
-		n, err = feature.NewStore(db, nil).Prune(ctx)
-		require.NoError(t, err)
-		assert.Equal(t, 1, n)
-	})
+	n, err = feature.NewStore(db, nil).Prune(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
 }
 
 func TestNewStorePanics(t *testing.T) {
-	db := dbtesting.Open(t, sqlite.Driver, feature.Migrations())
+	db := dbtest.Open(t, feature.Migrations())
 	assert.NotPanics(t, func() { feature.NewStore(db, nil) })
 	for name, c := range map[string]feature.Catalog{
 		"empty name": {{Name: ""}},

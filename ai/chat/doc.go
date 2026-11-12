@@ -7,7 +7,7 @@
 //   - RequireApproval 让指定的工具停下等待审批，Runs.Approve 和 Runs.Reject 在任意进程中继续；
 //   - UIStream、Submit、UIMessages 实现 Vercel AI SDK 的 UI 消息流协议，前端直接使用 useChat。
 //
-// 对话默认保存在 trpc-agent-go 的会话存储中，由子包 postgres、mysql 和 sqlite 的 NewSessions 创建。
+// 对话默认保存在 trpc-agent-go 的会话存储中，由 NewSessions 创建，保存在应用的 PostgreSQL 中。
 // 已经有自己消息表的产品（群聊、客服会话、外部渠道）用 UseHistory 让 Runs 从应用的表读取上下文、
 // 把产出交给应用保存，用 Runs.Notify 在有新消息时触发运行。
 //

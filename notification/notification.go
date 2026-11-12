@@ -13,9 +13,6 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 )
 
-// maxKey 是字符串列的最大长度，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
-const maxKey = 191
-
 // DefaultLimit 是 List 在 Query.Limit 不大于 0 时返回的条数。
 const DefaultLimit = 50
 
@@ -64,9 +61,6 @@ func Send(ctx context.Context, db bun.IDB, n Notification, to ...Recipient) ([]N
 	if n.Event == "" {
 		return nil, errors.New("notification: empty event")
 	}
-	if len(n.Event) > maxKey {
-		return nil, errors.Newf("notification: event longer than %d bytes", maxKey)
-	}
 	if n.Data == nil {
 		n.Data = map[string]any{}
 	}
@@ -100,13 +94,7 @@ func Send(ctx context.Context, db bun.IDB, n Notification, to ...Recipient) ([]N
 }
 
 func check(r Recipient) error {
-	if err := r.Validate(); err != nil {
-		return errors.Wrap(err, "notification: recipient")
-	}
-	if len(r.Tenant) > maxKey {
-		return errors.Newf("notification: tenant longer than %d bytes", maxKey)
-	}
-	return nil
+	return errors.Wrap(r.Validate(), "notification: recipient")
 }
 
 // of 把查询限定在 r 的通知上。
@@ -210,7 +198,7 @@ func Cleanup(db bun.IDB, keep time.Duration) func(ctx context.Context, limit int
 		old := db.NewSelect().Model((*Notification)(nil)).Column("id").
 			Where("created_at < ?", time.Now().Add(-keep).UTC()).OrderExpr("created_at").Limit(int64(limit))
 		res, err := db.NewDelete().Model((*Notification)(nil)).
-			Where("id IN (SELECT id FROM (?) AS old)", old).Exec(ctx)
+			Where("id IN (?)", old).Exec(ctx)
 		if err != nil {
 			return 0, errors.Wrap(err, "notification: cleanup")
 		}

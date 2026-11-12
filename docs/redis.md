@@ -143,11 +143,9 @@ scs 的 `goredisstore.New` 要求传入 `*redis.Client`，不接受集群客户�
 <a id="testing"></a>
 ## 测试
 
-依赖 Redis 的代码用真实的 Redis 测试。和[数据库测试](testing.md#database-tests)一样，测试文件加上 `integration` 构建标签。下面是 `internal/article/views_test.go`：
+依赖 Redis 的代码用真实的 Redis 测试。和[数据库测试](testing.md#database-tests)一样，通过环境变量取得测试服务器的地址。下面是 `internal/article/views_test.go`：
 
 ```go
-//go:build integration
-
 package article_test
 
 import (

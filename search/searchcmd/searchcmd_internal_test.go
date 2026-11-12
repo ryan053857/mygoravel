@@ -15,8 +15,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/search"
@@ -56,7 +55,7 @@ func open(t *testing.T) *bun.DB {
 			t.Fatal(err)
 		}
 	}
-	return dbtesting.Open(t, sqlite.Driver, merged)
+	return dbtest.Open(t, merged)
 }
 
 func execute(ctx context.Context, db *bun.DB, args ...string) (string, error) {

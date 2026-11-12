@@ -8,8 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/lock/locktest"
 	"github.com/ryan053857/mygoravel/monitor"
@@ -18,7 +17,7 @@ import (
 
 func TestMonitor(t *testing.T) {
 	ctx := context.Background()
-	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	mon := monitor.New(dbtest.Open(t, monitor.Migrations()), nil)
 	t.Cleanup(func() { _ = mon.Close(ctx) })
 
 	locker := lock.New(locktest.NewStore())
@@ -68,7 +67,7 @@ func TestMonitor(t *testing.T) {
 // 失败的执行保存错误信息。
 func TestMonitorLastFailure(t *testing.T) {
 	ctx := context.Background()
-	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	mon := monitor.New(dbtest.Open(t, monitor.Migrations()), nil)
 	t.Cleanup(func() { _ = mon.Close(ctx) })
 	s := schedule.New(lock.New(locktest.NewStore()), schedule.DefaultConfig(), slog.New(slog.DiscardHandler), schedule.WithMonitor(mon))
 	s.Add("reports", "@everysecond", func(context.Context) error { return errors.New("smtp down") })

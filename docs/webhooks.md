@@ -22,7 +22,7 @@ SaaS 的租户常常要把你的应用接进他们自己的系统：文章发布
 
 `webhook` 包负责发送这一端：租户管理自己的**端点**（接收地址和订阅的事件），业务代码发出事件，worker 签名并投递，失败时重试，每次投递都留下**投递记录**供租户排查。签名遵循 [Standard Webhooks](https://www.standardwebhooks.com/) 规范，租户可以直接用 Svix 等现成的库校验。它也提供 `Verify`，用来校验别人按这个规范发给你的 webhook。
 
-支持 PostgreSQL、SQLite 和 MySQL。本章的例子：文章发布后，通知租户配置的端点。
+本章的例子：文章发布后，通知租户配置的端点。
 
 <a id="installation"></a>
 ## 安装
@@ -30,7 +30,7 @@ SaaS 的租户常常要把你的应用接进他们自己的系统：文章发布
 webhook 的投递任务使用[数据库队列](queue.md)，把两者的迁移都加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`：
 
 ```go
-migratecmd.Publish(postgres.Driver,
+migratecmd.Publish(
     migrate.Source{Name: "queue", FS: queue.Migrations()},
     migrate.Source{Name: "webhook", FS: webhook.Migrations()},
 )

@@ -12,7 +12,7 @@ import (
 	"github.com/ryan053857/mygoravel/logging"
 )
 
-// Database 是使用 broadcasts 表的 Backend，支持 PostgreSQL、MySQL 和 SQLite，Migrations 提供三种数据库的表结构。
+// Database 是使用 broadcasts 表的 Backend，Migrations 提供表结构。
 //
 // Publish 插入一行，并立即投递给本进程中的 Hub；每个实例每 100 毫秒按 id 读取新行，投递其他进程发布的消息，
 // 所以它们最多延迟一个轮询间隔。同一个 Database 发布的消息按发布顺序投递；不同进程同时发布的消息没有确定的先后，
@@ -182,11 +182,10 @@ func (d *Database) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("broadcast: cleanup limit must be positive")
 	}
-	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 	old := d.db.NewSelect().Model((*row)(nil)).Column("id").
 		Where("created_at < ?", time.Now().UTC().Add(-d.retention)).OrderExpr("id").Limit(int64(limit))
 	res, err := d.db.NewDelete().Model((*row)(nil)).
-		Where("id IN (SELECT id FROM (?) AS old)", old).Exec(ctx)
+		Where("id IN (?)", old).Exec(ctx)
 	if err != nil {
 		return 0, errors.Wrap(err, "broadcast: cleanup")
 	}

@@ -32,9 +32,6 @@ var (
 	ErrInvalid = errorx.Define(errorx.InvalidArgument, "authz.invalid")
 )
 
-// maxKey 是租户、主体 ID、角色名和权限名的最大长度，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
-const maxKey = 191
-
 // Permission 是权限目录中的一项。
 type Permission struct {
 	Name        string // 以冒号分隔的权限名，例如 articles:write
@@ -59,8 +56,7 @@ type Member struct {
 	Roles   []Role
 }
 
-// Store 是基于 Bun 的角色与分配存储，查询兼容 PostgreSQL、MySQL 与 SQLite，
-// Migrations 提供三种数据库的表结构。可以并发使用。
+// Store 是基于 Bun 的角色与分配存储，Migrations 提供表结构。可以并发使用。
 //
 // 权限属于角色，角色在某个域中分配给主体。域是租户 ID、平台本身（""）或所有租户（AllTenants）。
 // 主体在租户 t 中的权限，是它在 t 和 AllTenants 中全部角色的权限之和；在平台中的权限只来自 "" 中的角色。
@@ -319,9 +315,6 @@ func (s *Store) Assign(ctx context.Context, ref identity.Ref, tenant, roleID str
 	if ref.Validate() != nil {
 		return ErrInvalid.New(errorx.Public("field", "subject"))
 	}
-	if len(tenant) > maxKey {
-		return ErrInvalid.New(errorx.Public("field", "tenant"))
-	}
 	rid, err := uuid.Parse(roleID)
 	if err != nil {
 		return ErrRoleNotFound.New()
@@ -441,7 +434,7 @@ func (s *Store) Tenants(ctx context.Context, ref identity.Ref) ([]string, error)
 
 // checkRole 检查角色的租户、名称和权限。
 func (s *Store) checkRole(r Role) error {
-	if r.Tenant == AllTenants || len(r.Tenant) > maxKey {
+	if r.Tenant == AllTenants {
 		return ErrInvalid.New(errorx.Public("field", "tenant"))
 	}
 	if err := checkName(r.Name, "name"); err != nil {
@@ -471,9 +464,9 @@ func (s *Store) known(perm string) bool {
 	return false
 }
 
-// checkName 检查名称不为空、不超过 maxKey 个字节，也不包含空白。
+// checkName 检查名称不为空，也不包含空白。
 func checkName(name, field string) error {
-	if name == "" || len(name) > maxKey || strings.ContainsFunc(name, unicode.IsSpace) {
+	if name == "" || strings.ContainsFunc(name, unicode.IsSpace) {
 		return ErrInvalid.New(errorx.Public("field", field))
 	}
 	return nil

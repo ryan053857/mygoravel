@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"github.com/uptrace/bun/dialect"
 )
 
 // batchSize 是一条 INSERT 最多写入的行数。
@@ -30,11 +29,7 @@ type value struct {
 func (m *Monitor) addAggregates(ctx context.Context, rows []aggregate) error {
 	insert := `INSERT INTO monitor_aggregates (metric, label, bucket, count, sum, max) VALUES `
 	upsert := ` ON CONFLICT (metric, label, bucket) DO UPDATE SET count = monitor_aggregates.count + excluded.count,
-sum = monitor_aggregates.sum + excluded.sum, max = ` + m.greatest("monitor_aggregates.max", "excluded.max")
-	if m.db.Dialect().Name() == dialect.MySQL {
-		upsert = ` AS new ON DUPLICATE KEY UPDATE count = monitor_aggregates.count + new.count,
-sum = monitor_aggregates.sum + new.sum, max = GREATEST(monitor_aggregates.max, new.max)`
-	}
+sum = monitor_aggregates.sum + excluded.sum, max = ` + "GREATEST(monitor_aggregates.max, excluded.max)"
 	for chunk := range chunks(rows) {
 		args := make([]any, 0, len(chunk)*6)
 		for _, r := range chunk {
@@ -53,12 +48,6 @@ func (m *Monitor) setValues(ctx context.Context, rows []value) error {
 	insert := `INSERT INTO monitor_values (metric, label, value, recorded_at) VALUES `
 	upsert := ` ON CONFLICT (metric, label) DO UPDATE SET value = excluded.value, recorded_at = excluded.recorded_at
 WHERE monitor_values.recorded_at <= excluded.recorded_at`
-	if m.db.Dialect().Name() == dialect.MySQL {
-		// 赋值从左到右进行，value 先比较原来的 recorded_at。
-		upsert = ` AS new ON DUPLICATE KEY UPDATE
-value = IF(new.recorded_at >= monitor_values.recorded_at, new.value, monitor_values.value),
-recorded_at = GREATEST(monitor_values.recorded_at, new.recorded_at)`
-	}
 	for chunk := range chunks(rows) {
 		args := make([]any, 0, len(chunk)*4)
 		for _, r := range chunk {
@@ -70,14 +59,6 @@ recorded_at = GREATEST(monitor_values.recorded_at, new.recorded_at)`
 		}
 	}
 	return nil
-}
-
-// greatest 返回取两个值中较大者的表达式：SQLite 用多参数的 max，其他数据库用 GREATEST。
-func (m *Monitor) greatest(a, b string) string {
-	if m.db.Dialect().Name() == dialect.SQLite {
-		return "max(" + a + ", " + b + ")"
-	}
-	return "GREATEST(" + a + ", " + b + ")"
 }
 
 // chunks 把 rows 按 batchSize 分段。

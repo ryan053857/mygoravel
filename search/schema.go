@@ -12,9 +12,6 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-// maxValue 是过滤字段的值、租户和 key 的最大字节数，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
-const maxValue = 191
-
 // maxField 是字段名的最大字节数，与迁移中 field 列的宽度一致。
 const maxField = 64
 
@@ -272,9 +269,6 @@ func (f *field) encode(v reflect.Value) (string, error) {
 			bits = ^bits
 		}
 		s = fmt.Sprintf("%016x", bits)
-	}
-	if len(s) > maxValue {
-		return "", errors.Newf("search: field %q value longer than %d bytes", f.name, maxValue)
 	}
 	return s, nil
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/alexedwards/scs/v2"
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/identity"
@@ -18,7 +17,7 @@ import (
 var ErrNotFound = errorx.Define(errorx.NotFound, "session.not_found")
 
 // Store 是基于 Bun 的会话存储，实现 scs.CtxStore 和 scs.IterableCtxStore，
-// 查询兼容 PostgreSQL、MySQL 与 SQLite，Migrations 提供三种数据库的表结构。
+// Migrations 提供表结构。
 //
 // 每行记录登录主体（类型和 ID）、会话 ID（主体的 Credential）和登录设备，List 据此列出设备，
 // Revoke、RevokeOthers 和 RevokeSubject 据此撤销某个主体的会话。
@@ -92,39 +91,12 @@ func (s *Store) CommitCtx(ctx context.Context, token string, b []byte, expiry ti
 		Token: token, SubjectType: string(sub.Type), SubjectID: sub.ID, ID: sub.Credential,
 		ImpersonatorType: string(sub.Impersonator.Type), ImpersonatorID: sub.Impersonator.ID, IP: l.IP, UserAgent: l.UserAgent, LoggedInAt: l.At, Data: b, Expiry: expiry.UTC(),
 	}
-	if s.db.Dialect().Name() == dialect.MySQL {
-		// MySQL 8 用行别名引用新值，VALUES() 函数已不推荐使用；Bun 的插入构造器不生成行别名。
-		_, err = s.db.NewRaw(`INSERT INTO sessions (token, subject_type, subject_id, id, impersonator_type, impersonator_id,
-ip, user_agent, logged_in_at, data, expiry)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) AS new
-ON DUPLICATE KEY UPDATE subject_type = new.subject_type, subject_id = new.subject_id, id = new.id,
-impersonator_type = new.impersonator_type, impersonator_id = new.impersonator_id, ip = new.ip,
-user_agent = new.user_agent, logged_in_at = new.logged_in_at, data = new.data, expiry = new.expiry`,
-			r.Token, null(r.SubjectType), null(r.SubjectID), null(r.ID), r.ImpersonatorType, r.ImpersonatorID,
-			r.IP, r.UserAgent, nullTime(r.LoggedInAt), r.Data, r.Expiry).Exec(ctx)
-		return errors.Wrap(err, "session: commit")
-	}
 	q := s.db.NewInsert().Model(r).On("CONFLICT (token) DO UPDATE")
 	for _, col := range []string{"subject_type", "subject_id", "id", "impersonator_type", "impersonator_id", "ip", "user_agent", "logged_in_at", "data", "expiry"} {
 		q = q.Set("? = EXCLUDED.?", bun.Ident(col), bun.Ident(col))
 	}
 	_, err = q.Exec(ctx)
 	return errors.Wrap(err, "session: commit")
-}
-
-// null 把空字符串转换为 NULL，供原生 SQL 使用，与 nullzero 一致。
-func null(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
-func nullTime(t time.Time) any {
-	if t.IsZero() {
-		return nil
-	}
-	return t
 }
 
 // DeleteCtx 撤销会话；token 不存在时什么也不做。
@@ -229,11 +201,10 @@ func (s *Store) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("session: cleanup limit must be positive")
 	}
-	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 	expired := s.db.NewSelect().Model((*row)(nil)).Column("token").
 		Where("expiry <= ?", time.Now().UTC()).OrderExpr("expiry").Limit(int64(limit))
 	res, err := s.db.NewDelete().Model((*row)(nil)).
-		Where("token IN (SELECT token FROM (?) AS expired)", expired).Exec(ctx)
+		Where("token IN (?)", expired).Exec(ctx)
 	if err != nil {
 		return 0, errors.Wrap(err, "session: cleanup")
 	}

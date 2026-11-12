@@ -345,12 +345,11 @@ func (s *Store) Cleanup(ctx context.Context, limit int) (int, error) {
 	}
 	bound := s.db.NewSelect().Table("auth_identifiers").Column("value").
 		Where("subject_type = ? AND kind = ?", s.realm.Type(), Kind)
-	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 	orphans := s.db.NewSelect().Model((*row)(nil)).Column("credential_id").
 		Where("subject_type = ?", s.realm.Type()).Where("created_at < ?", s.now().UTC().Add(-24*time.Hour)).
 		Where("credential_id NOT IN (?)", bound).OrderExpr("created_at").Limit(int64(limit))
 	res, err := s.db.NewDelete().Model((*row)(nil)).
-		Where("credential_id IN (SELECT credential_id FROM (?) AS orphans)", orphans).Exec(ctx)
+		Where("credential_id IN (?)", orphans).Exec(ctx)
 	if err != nil {
 		return 0, errors.Wrap(err, "passkey: cleanup")
 	}

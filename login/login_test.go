@@ -13,10 +13,9 @@ import (
 
 	"github.com/ryan053857/mygoravel/crypt"
 	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/hashing"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/login"
 	"github.com/ryan053857/mygoravel/ratelimit"
 )
@@ -82,9 +81,9 @@ type env struct {
 }
 
 // newRealm 创建测试用的 Realm：限流器在内存中，宽松到不影响其他测试，限流本身在 TestAttemptsLimit 中检查。
-func newRealm(t *testing.T, driver database.Driver, opts login.Options) *env {
+func newRealm(t *testing.T, opts login.Options) *env {
 	t.Helper()
-	e := &env{db: dbtesting.Open(t, driver, login.Migrations()), mail: &mailbox{}, clock: &clock{t: time.Now().UTC().Truncate(time.Second)}}
+	e := &env{db: dbtest.Open(t, login.Migrations()), mail: &mailbox{}, clock: &clock{t: time.Now().UTC().Truncate(time.Second)}}
 	opts.Type = customer
 	if opts.Hasher == nil {
 		opts.Hasher = hasher(4)
@@ -177,61 +176,59 @@ func TestIdentifierNormalize(t *testing.T) {
 }
 
 func TestPassword(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		var resolved []identity.Subject
-		e := newRealm(t, driver, login.Options{
-			Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
-				resolved = append(resolved, sub)
-				if sub.ID == "blocked" {
-					return identity.Subject{}, errors.New("blocked")
-				}
-				// Resolver 不能改变是谁、在哪个租户。
-				return identity.Subject{Type: "staff", ID: "mallory", Tenant: "other", Permissions: []string{"orders:read"}}, nil
-			},
-		})
-		e.account(t, ctx, "c1", "alice@example.com", "correct horse")
-		if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Username("alice"), false); err != nil {
-			t.Fatal(err)
-		}
-
-		for _, id := range []login.Identifier{login.Email(" ALICE@example.com"), login.Username("Alice")} {
-			out, err := e.realm.Password(ctx, id, "correct horse")
-			if err != nil || out.Proof != "" || out.Subject.Type != customer || out.Subject.ID != "c1" ||
-				out.Subject.Tenant != "" || len(out.Subject.Permissions) != 1 {
-				t.Fatalf("%v: %+v %v", id, out, err)
+	ctx := context.Background()
+	var resolved []identity.Subject
+	e := newRealm(t, login.Options{
+		Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+			resolved = append(resolved, sub)
+			if sub.ID == "blocked" {
+				return identity.Subject{}, errors.New("blocked")
 			}
-		}
-		if len(resolved) != 2 || resolved[0].Ref() != ref("c1") {
-			t.Fatalf("resolved=%+v", resolved)
-		}
-
-		// 密码错误、标识不存在、没有密码、标识类型不能用于密码登录，都是同一个错误。
-		e.account(t, ctx, "c2", "nopass@example.com", "")
-		for id, password := range map[login.Identifier]string{
-			login.Email("alice@example.com"):  "wrong",
-			login.Email("nobody@example.com"): "correct horse",
-			login.Email("nopass@example.com"): "",
-			login.Phone("+8613800138000"):     "correct horse",
-			{Kind: "wechat", Value: "o1"}:     "correct horse",
-			login.Email("bad"):                "correct horse",
-		} {
-			_, err := e.realm.Password(ctx, id, password)
-			is(t, err, login.ErrInvalidCredentials)
-		}
-
-		// Resolve 拒绝时登录失败。
-		e.account(t, ctx, "blocked", "blocked@example.com", "correct horse")
-		if _, err := e.realm.Password(ctx, login.Email("blocked@example.com"), "correct horse"); err == nil || err.Error() != "blocked" {
-			t.Fatalf("blocked: %v", err)
-		}
+			// Resolver 不能改变是谁、在哪个租户。
+			return identity.Subject{Type: "staff", ID: "mallory", Tenant: "other", Permissions: []string{"orders:read"}}, nil
+		},
 	})
+	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Username("alice"), false); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range []login.Identifier{login.Email(" ALICE@example.com"), login.Username("Alice")} {
+		out, err := e.realm.Password(ctx, id, "correct horse")
+		if err != nil || out.Proof != "" || out.Subject.Type != customer || out.Subject.ID != "c1" ||
+			out.Subject.Tenant != "" || len(out.Subject.Permissions) != 1 {
+			t.Fatalf("%v: %+v %v", id, out, err)
+		}
+	}
+	if len(resolved) != 2 || resolved[0].Ref() != ref("c1") {
+		t.Fatalf("resolved=%+v", resolved)
+	}
+
+	// 密码错误、标识不存在、没有密码、标识类型不能用于密码登录，都是同一个错误。
+	e.account(t, ctx, "c2", "nopass@example.com", "")
+	for id, password := range map[login.Identifier]string{
+		login.Email("alice@example.com"):  "wrong",
+		login.Email("nobody@example.com"): "correct horse",
+		login.Email("nopass@example.com"): "",
+		login.Phone("+8613800138000"):     "correct horse",
+		{Kind: "wechat", Value: "o1"}:     "correct horse",
+		login.Email("bad"):                "correct horse",
+	} {
+		_, err := e.realm.Password(ctx, id, password)
+		is(t, err, login.ErrInvalidCredentials)
+	}
+
+	// Resolve 拒绝时登录失败。
+	e.account(t, ctx, "blocked", "blocked@example.com", "correct horse")
+	if _, err := e.realm.Password(ctx, login.Email("blocked@example.com"), "correct horse"); err == nil || err.Error() != "blocked" {
+		t.Fatalf("blocked: %v", err)
+	}
 }
 
 // 每次尝试消耗配额，成功后清零：只有连续的失败受到限制。
 func TestAttemptsLimit(t *testing.T) {
 	ctx := context.Background()
-	e := newRealm(t, sqlite.Driver, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 3, Interval: time.Hour, Burst: 3})})
+	e := newRealm(t, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 3, Interval: time.Hour, Burst: 3})})
 	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
 	alice := login.Email("alice@example.com")
 	for range 2 {
@@ -257,7 +254,7 @@ func TestAttemptsLimit(t *testing.T) {
 // 哈希参数过时时，登录成功后按当前配置重新哈希。
 func TestRehash(t *testing.T) {
 	ctx := context.Background()
-	e := newRealm(t, sqlite.Driver, login.Options{Hasher: hasher(4)})
+	e := newRealm(t, login.Options{Hasher: hasher(4)})
 	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
 	stored := func() string {
 		var h string
@@ -278,172 +275,166 @@ func TestRehash(t *testing.T) {
 }
 
 func TestSignInWithCode(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newRealm(t, driver, login.Options{})
-		if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Phone("+8613800138000"), false); err != nil {
-			t.Fatal(err)
-		}
-		phone := login.Phone("+8613800138000")
+	ctx := context.Background()
+	e := newRealm(t, login.Options{})
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Phone("+8613800138000"), false); err != nil {
+		t.Fatal(err)
+	}
+	phone := login.Phone("+8613800138000")
 
-		requestID, c := e.code(t, ctx, login.SignIn, phone)
-		if !c.Registered || len(c.Code) != 6 || !c.ExpiresAt.Equal(e.clock.now().Add(15*time.Minute)) {
-			t.Fatalf("code=%+v", c)
-		}
-		out, err := e.realm.VerifyCode(ctx, requestID, c.Code)
-		if err != nil || out.Subject.Ref() != ref("c1") || out.Proof != "" {
-			t.Fatalf("verify: %+v %v", out, err)
-		}
-		// 登录后标识标为已验证，验证码不能再用。
-		list, _ := e.realm.Identifiers(ctx, ref("c1"))
-		if len(list) != 1 || !list[0].Verified {
-			t.Fatalf("identifiers=%+v", list)
-		}
-		_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
+	requestID, c := e.code(t, ctx, login.SignIn, phone)
+	if !c.Registered || len(c.Code) != 6 || !c.ExpiresAt.Equal(e.clock.now().Add(15*time.Minute)) {
+		t.Fatalf("code=%+v", c)
+	}
+	out, err := e.realm.VerifyCode(ctx, requestID, c.Code)
+	if err != nil || out.Subject.Ref() != ref("c1") || out.Proof != "" {
+		t.Fatalf("verify: %+v %v", out, err)
+	}
+	// 登录后标识标为已验证，验证码不能再用。
+	list, _ := e.realm.Identifiers(ctx, ref("c1"))
+	if len(list) != 1 || !list[0].Verified {
+		t.Fatalf("identifiers=%+v", list)
+	}
+	_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
+	is(t, err, login.ErrInvalidCode)
+
+	// 每个验证码最多试 3 次，之后正确的也不行。
+	requestID, c = e.code(t, ctx, login.SignIn, phone)
+	for range 3 {
+		_, err := e.realm.VerifyCode(ctx, requestID, "000000x")
 		is(t, err, login.ErrInvalidCode)
+	}
+	_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
+	is(t, err, login.ErrInvalidCode)
 
-		// 每个验证码最多试 3 次，之后正确的也不行。
-		requestID, c = e.code(t, ctx, login.SignIn, phone)
-		for range 3 {
-			_, err := e.realm.VerifyCode(ctx, requestID, "000000x")
-			is(t, err, login.ErrInvalidCode)
-		}
-		_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
+	// 过期后无效。
+	requestID, c = e.code(t, ctx, login.SignIn, phone)
+	e.clock.add(15 * time.Minute)
+	_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
+	is(t, err, login.ErrInvalidCode)
+
+	// 发送之后标识被移除：不能登录。
+	requestID, c = e.code(t, ctx, login.SignIn, phone)
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Email("c1@example.com"), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.realm.Detach(ctx, e.db, ref("c1"), phone); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
+	is(t, err, login.ErrInvalidCode)
+
+	for _, bad := range []string{"", "not-a-uuid", "0190a6a1-0000-7000-8000-000000000000"} {
+		_, err := e.realm.VerifyCode(ctx, bad, "123456")
 		is(t, err, login.ErrInvalidCode)
-
-		// 过期后无效。
-		requestID, c = e.code(t, ctx, login.SignIn, phone)
-		e.clock.add(15 * time.Minute)
-		_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
-		is(t, err, login.ErrInvalidCode)
-
-		// 发送之后标识被移除：不能登录。
-		requestID, c = e.code(t, ctx, login.SignIn, phone)
-		if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Email("c1@example.com"), true); err != nil {
-			t.Fatal(err)
-		}
-		if err := e.realm.Detach(ctx, e.db, ref("c1"), phone); err != nil {
-			t.Fatal(err)
-		}
-		_, err = e.realm.VerifyCode(ctx, requestID, c.Code)
-		is(t, err, login.ErrInvalidCode)
-
-		for _, bad := range []string{"", "not-a-uuid", "0190a6a1-0000-7000-8000-000000000000"} {
-			_, err := e.realm.VerifyCode(ctx, bad, "123456")
-			is(t, err, login.ErrInvalidCode)
-		}
-	})
+	}
 }
 
 // 并发提交同一个验证码，只有一次成功。
 func TestConcurrentVerify(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newRealm(t, driver, login.Options{CodeAttempts: 20})
-		e.account(t, ctx, "c1", "alice@example.com", "")
-		for _, purpose := range []login.Purpose{login.SignIn, login.Reset} {
-			requestID, c := e.code(t, ctx, purpose, login.Email("alice@example.com"))
-			var (
-				wg sync.WaitGroup
-				mu sync.Mutex
-				ok int
-			)
-			for range 8 {
-				wg.Go(func() {
-					_, err := e.realm.VerifyCode(ctx, requestID, c.Code)
-					if err != nil && !errors.Is(err, login.ErrInvalidCode) {
-						t.Error(err)
-					}
-					mu.Lock()
-					defer mu.Unlock()
-					if err == nil {
-						ok++
-					}
-				})
-			}
-			wg.Wait()
-			if ok != 1 {
-				t.Fatalf("%s: %d verifications succeeded", purpose, ok)
-			}
+	ctx := context.Background()
+	e := newRealm(t, login.Options{CodeAttempts: 20})
+	e.account(t, ctx, "c1", "alice@example.com", "")
+	for _, purpose := range []login.Purpose{login.SignIn, login.Reset} {
+		requestID, c := e.code(t, ctx, purpose, login.Email("alice@example.com"))
+		var (
+			wg sync.WaitGroup
+			mu sync.Mutex
+			ok int
+		)
+		for range 8 {
+			wg.Go(func() {
+				_, err := e.realm.VerifyCode(ctx, requestID, c.Code)
+				if err != nil && !errors.Is(err, login.ErrInvalidCode) {
+					t.Error(err)
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				if err == nil {
+					ok++
+				}
+			})
 		}
-	})
+		wg.Wait()
+		if ok != 1 {
+			t.Fatalf("%s: %d verifications succeeded", purpose, ok)
+		}
+	}
 }
 
 func TestRegister(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newRealm(t, driver, login.Options{Register: true})
-		email := login.Email("new@example.com")
-		requestID, c := e.code(t, ctx, login.SignIn, email)
-		if c.Registered {
-			t.Fatal("unregistered identifier reported as registered")
-		}
-		out, err := e.realm.VerifyCode(ctx, requestID, c.Code)
-		if err != nil || out.Proof == "" || !out.Subject.Ref().IsZero() {
-			t.Fatalf("verify: %+v %v", out, err)
-		}
+	ctx := context.Background()
+	e := newRealm(t, login.Options{Register: true})
+	email := login.Email("new@example.com")
+	requestID, c := e.code(t, ctx, login.SignIn, email)
+	if c.Registered {
+		t.Fatal("unregistered identifier reported as registered")
+	}
+	out, err := e.realm.VerifyCode(ctx, requestID, c.Code)
+	if err != nil || out.Proof == "" || !out.Subject.Ref().IsZero() {
+		t.Fatalf("verify: %+v %v", out, err)
+	}
 
-		// 应用的注册在事务中失败：一起回滚，凭证仍可使用。
-		failed := errors.New("insert account failed")
-		err = database.RunInTx(ctx, e.db, nil, func(ctx context.Context, tx database.Tx) error {
-			if _, err := e.realm.Register(ctx, tx, out.Proof, ref("c9")); err != nil {
-				return err
-			}
-			return failed
-		})
-		is(t, err, failed)
-		// 密码不符合策略时不消耗凭证。
-		_, err = e.realm.Register(ctx, e.db, out.Proof, ref("c9"), login.WithPassword("short"))
-		is(t, err, login.ErrWeakPassword)
-
-		var sub identity.Subject
-		err = database.RunInTx(ctx, e.db, nil, func(ctx context.Context, tx database.Tx) error {
-			sub, err = e.realm.Register(ctx, tx, out.Proof, ref("c9"), login.WithPassword("correct horse"))
+	// 应用的注册在事务中失败：一起回滚，凭证仍可使用。
+	failed := errors.New("insert account failed")
+	err = database.RunInTx(ctx, e.db, nil, func(ctx context.Context, tx database.Tx) error {
+		if _, err := e.realm.Register(ctx, tx, out.Proof, ref("c9")); err != nil {
 			return err
-		})
-		if err != nil || sub.Ref() != ref("c9") {
-			t.Fatalf("register: %+v %v", sub, err)
 		}
-		list, _ := e.realm.Identifiers(ctx, ref("c9"))
-		if len(list) != 1 || list[0].Identifier != email || !list[0].Verified {
-			t.Fatalf("identifiers=%+v", list)
-		}
-		if _, err := e.realm.Password(ctx, email, "correct horse"); err != nil {
-			t.Fatal(err)
-		}
-		_, err = e.realm.Register(ctx, e.db, out.Proof, ref("c10"))
-		is(t, err, login.ErrInvalidProof)
-
-		// 两个人同时用同一个邮箱注册：后完成的得到 ErrTaken，凭证不被消耗。
-		taken := login.Email("race@example.com")
-		first, second := e.proof(t, ctx, login.SignIn, taken), e.proof(t, ctx, login.SignIn, taken)
-		if _, err := e.realm.Register(ctx, e.db, first, ref("c11")); err != nil {
-			t.Fatal(err)
-		}
-		_, err = e.realm.Register(ctx, e.db, second, ref("c12"))
-		is(t, err, login.ErrTaken)
-		if err := e.realm.Link(ctx, e.db, ref("c11"), second); err != nil {
-			t.Fatalf("proof consumed by the failed registration: %v", err)
-		}
-
-		// Reset 的凭证不能用于注册；凭证过期后无效。
-		_, err = e.realm.Register(ctx, e.db, e.proof(t, ctx, login.Reset, email), ref("c13"))
-		is(t, err, login.ErrInvalidProof)
-		late := e.proof(t, ctx, login.SignIn, login.Email("late@example.com"))
-		e.clock.add(15 * time.Minute)
-		_, err = e.realm.Register(ctx, e.db, late, ref("c14"))
-		is(t, err, login.ErrInvalidProof)
-		for _, bad := range []string{"", "x", out.Proof + "x", strings.Split(out.Proof, ".")[0] + ".x"} {
-			_, err := e.realm.Register(ctx, e.db, bad, ref("c15"))
-			is(t, err, login.ErrInvalidProof)
-		}
+		return failed
 	})
+	is(t, err, failed)
+	// 密码不符合策略时不消耗凭证。
+	_, err = e.realm.Register(ctx, e.db, out.Proof, ref("c9"), login.WithPassword("short"))
+	is(t, err, login.ErrWeakPassword)
+
+	var sub identity.Subject
+	err = database.RunInTx(ctx, e.db, nil, func(ctx context.Context, tx database.Tx) error {
+		sub, err = e.realm.Register(ctx, tx, out.Proof, ref("c9"), login.WithPassword("correct horse"))
+		return err
+	})
+	if err != nil || sub.Ref() != ref("c9") {
+		t.Fatalf("register: %+v %v", sub, err)
+	}
+	list, _ := e.realm.Identifiers(ctx, ref("c9"))
+	if len(list) != 1 || list[0].Identifier != email || !list[0].Verified {
+		t.Fatalf("identifiers=%+v", list)
+	}
+	if _, err := e.realm.Password(ctx, email, "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.realm.Register(ctx, e.db, out.Proof, ref("c10"))
+	is(t, err, login.ErrInvalidProof)
+
+	// 两个人同时用同一个邮箱注册：后完成的得到 ErrTaken，凭证不被消耗。
+	taken := login.Email("race@example.com")
+	first, second := e.proof(t, ctx, login.SignIn, taken), e.proof(t, ctx, login.SignIn, taken)
+	if _, err := e.realm.Register(ctx, e.db, first, ref("c11")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.realm.Register(ctx, e.db, second, ref("c12"))
+	is(t, err, login.ErrTaken)
+	if err := e.realm.Link(ctx, e.db, ref("c11"), second); err != nil {
+		t.Fatalf("proof consumed by the failed registration: %v", err)
+	}
+
+	// Reset 的凭证不能用于注册；凭证过期后无效。
+	_, err = e.realm.Register(ctx, e.db, e.proof(t, ctx, login.Reset, email), ref("c13"))
+	is(t, err, login.ErrInvalidProof)
+	late := e.proof(t, ctx, login.SignIn, login.Email("late@example.com"))
+	e.clock.add(15 * time.Minute)
+	_, err = e.realm.Register(ctx, e.db, late, ref("c14"))
+	is(t, err, login.ErrInvalidProof)
+	for _, bad := range []string{"", "x", out.Proof + "x", strings.Split(out.Proof, ".")[0] + ".x"} {
+		_, err := e.realm.Register(ctx, e.db, bad, ref("c15"))
+		is(t, err, login.ErrInvalidProof)
+	}
 }
 
 // 不开放注册、或者找回密码时，未注册的标识不发送验证码，但仍返回请求 ID。
 func TestUnregisteredGetsNoCode(t *testing.T) {
 	ctx := context.Background()
-	e := newRealm(t, sqlite.Driver, login.Options{})
+	e := newRealm(t, login.Options{})
 	for _, purpose := range []login.Purpose{login.SignIn, login.Reset} {
 		requestID, err := e.realm.SendCode(ctx, purpose, login.Email("nobody@example.com"))
 		if err != nil || requestID == "" {
@@ -467,7 +458,7 @@ func TestUnregisteredGetsNoCode(t *testing.T) {
 
 func TestSendFailure(t *testing.T) {
 	ctx := context.Background()
-	e := newRealm(t, sqlite.Driver, login.Options{Register: true})
+	e := newRealm(t, login.Options{Register: true})
 	e.mail.fail = errors.New("smtp down")
 	_, err := e.realm.SendCode(ctx, login.SignIn, login.Email("a@example.com"))
 	is(t, err, e.mail.fail)
@@ -482,7 +473,7 @@ func TestSendFailure(t *testing.T) {
 
 func TestSendLimit(t *testing.T) {
 	ctx := context.Background()
-	e := newRealm(t, sqlite.Driver, login.Options{Register: true, Sends: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
+	e := newRealm(t, login.Options{Register: true, Sends: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
 	for range 2 {
 		e.code(t, ctx, login.SignIn, login.Email("a@example.com"))
 	}
@@ -492,181 +483,173 @@ func TestSendLimit(t *testing.T) {
 }
 
 func TestResetPassword(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newRealm(t, driver, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
-		e.account(t, ctx, "c1", "alice@example.com", "")
-		alice := login.Email("alice@example.com")
-		if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Username("alice"), false); err != nil {
-			t.Fatal(err)
-		}
-		// 被猜过密码，计数接近上限。
-		_, err := e.realm.Password(ctx, alice, "guess")
-		is(t, err, login.ErrInvalidCredentials)
+	ctx := context.Background()
+	e := newRealm(t, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
+	e.account(t, ctx, "c1", "alice@example.com", "")
+	alice := login.Email("alice@example.com")
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Username("alice"), false); err != nil {
+		t.Fatal(err)
+	}
+	// 被猜过密码，计数接近上限。
+	_, err := e.realm.Password(ctx, alice, "guess")
+	is(t, err, login.ErrInvalidCredentials)
 
-		proof := e.proof(t, ctx, login.Reset, alice)
-		_, err = e.realm.ResetPassword(ctx, proof, " short ")
-		is(t, err, login.ErrWeakPassword)
-		who, err := e.realm.ResetPassword(ctx, proof, "new password")
-		if err != nil || who != ref("c1") {
-			t.Fatalf("reset: %+v %v", who, err)
-		}
-		// 找回密码后失败计数清零：再失败一次仍能登录（配额为 2）。
-		_, err = e.realm.Password(ctx, alice, "guess")
-		is(t, err, login.ErrInvalidCredentials)
-		if _, err := e.realm.Password(ctx, alice, "new password"); err != nil {
-			t.Fatal(err)
-		}
-		_, err = e.realm.ResetPassword(ctx, proof, "another password")
-		is(t, err, login.ErrInvalidProof)
+	proof := e.proof(t, ctx, login.Reset, alice)
+	_, err = e.realm.ResetPassword(ctx, proof, " short ")
+	is(t, err, login.ErrWeakPassword)
+	who, err := e.realm.ResetPassword(ctx, proof, "new password")
+	if err != nil || who != ref("c1") {
+		t.Fatalf("reset: %+v %v", who, err)
+	}
+	// 找回密码后失败计数清零：再失败一次仍能登录（配额为 2）。
+	_, err = e.realm.Password(ctx, alice, "guess")
+	is(t, err, login.ErrInvalidCredentials)
+	if _, err := e.realm.Password(ctx, alice, "new password"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.realm.ResetPassword(ctx, proof, "another password")
+	is(t, err, login.ErrInvalidProof)
 
-		// 发送之后标识转给了别人：凭证失效。
-		proof = e.proof(t, ctx, login.Reset, alice)
-		if err := e.realm.Detach(ctx, e.db, ref("c1"), alice); err != nil {
-			t.Fatal(err)
-		}
-		e.account(t, ctx, "c2", "alice@example.com", "")
-		_, err = e.realm.ResetPassword(ctx, proof, "hijacked password")
-		is(t, err, login.ErrInvalidProof)
-		if ok, _ := e.realm.HasPassword(ctx, ref("c2")); ok {
-			t.Fatal("password set on the new owner")
-		}
-	})
+	// 发送之后标识转给了别人：凭证失效。
+	proof = e.proof(t, ctx, login.Reset, alice)
+	if err := e.realm.Detach(ctx, e.db, ref("c1"), alice); err != nil {
+		t.Fatal(err)
+	}
+	e.account(t, ctx, "c2", "alice@example.com", "")
+	_, err = e.realm.ResetPassword(ctx, proof, "hijacked password")
+	is(t, err, login.ErrInvalidProof)
+	if ok, _ := e.realm.HasPassword(ctx, ref("c2")); ok {
+		t.Fatal("password set on the new owner")
+	}
 }
 
 func TestLink(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newRealm(t, driver, login.Options{})
-		e.account(t, ctx, "c1", "alice@example.com", "")
-		e.account(t, ctx, "c2", "bob@example.com", "")
-		phone := login.Phone("+8613800138000")
+	ctx := context.Background()
+	e := newRealm(t, login.Options{})
+	e.account(t, ctx, "c1", "alice@example.com", "")
+	e.account(t, ctx, "c2", "bob@example.com", "")
+	phone := login.Phone("+8613800138000")
 
-		// 标识属于别人：ErrTaken，凭证不被消耗，属于自己后仍可使用。
-		bobs := e.proof(t, ctx, login.Verify, login.Email("bob@example.com"))
-		is(t, e.realm.Link(ctx, e.db, ref("c1"), bobs), login.ErrTaken)
-		if err := e.realm.Link(ctx, e.db, ref("c2"), bobs); err != nil {
-			t.Fatal(err)
-		}
+	// 标识属于别人：ErrTaken，凭证不被消耗，属于自己后仍可使用。
+	bobs := e.proof(t, ctx, login.Verify, login.Email("bob@example.com"))
+	is(t, e.realm.Link(ctx, e.db, ref("c1"), bobs), login.ErrTaken)
+	if err := e.realm.Link(ctx, e.db, ref("c2"), bobs); err != nil {
+		t.Fatal(err)
+	}
 
-		if err := e.realm.Link(ctx, e.db, ref("c1"), e.proof(t, ctx, login.Verify, phone)); err != nil {
-			t.Fatal(err)
+	if err := e.realm.Link(ctx, e.db, ref("c1"), e.proof(t, ctx, login.Verify, phone)); err != nil {
+		t.Fatal(err)
+	}
+	// 已属于自己的未验证标识，绑定后标为已验证。
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Email("alice2@example.com"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.realm.Link(ctx, e.db, ref("c1"), e.proof(t, ctx, login.Verify, login.Email("alice2@example.com"))); err != nil {
+		t.Fatal(err)
+	}
+	list, err := e.realm.Identifiers(ctx, ref("c1"))
+	if err != nil || len(list) != 3 {
+		t.Fatalf("identifiers=%+v %v", list, err)
+	}
+	for _, a := range list {
+		if !a.Verified {
+			t.Fatalf("%v not verified", a.Identifier)
 		}
-		// 已属于自己的未验证标识，绑定后标为已验证。
-		if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Email("alice2@example.com"), false); err != nil {
-			t.Fatal(err)
+	}
+	// 更换邮箱：在同一个事务中绑定新的、移除旧的；只有一个邮箱的账号也可以更换。
+	e.account(t, ctx, "c3", "carol@example.com", "")
+	newEmail := e.proof(t, ctx, login.Verify, login.Email("carol@new.example.com"))
+	err = database.RunInTx(ctx, e.db, nil, func(ctx context.Context, tx database.Tx) error {
+		if err := e.realm.Link(ctx, tx, ref("c3"), newEmail); err != nil {
+			return err
 		}
-		if err := e.realm.Link(ctx, e.db, ref("c1"), e.proof(t, ctx, login.Verify, login.Email("alice2@example.com"))); err != nil {
-			t.Fatal(err)
-		}
-		list, err := e.realm.Identifiers(ctx, ref("c1"))
-		if err != nil || len(list) != 3 {
-			t.Fatalf("identifiers=%+v %v", list, err)
-		}
-		for _, a := range list {
-			if !a.Verified {
-				t.Fatalf("%v not verified", a.Identifier)
-			}
-		}
-		// 更换邮箱：在同一个事务中绑定新的、移除旧的；只有一个邮箱的账号也可以更换。
-		e.account(t, ctx, "c3", "carol@example.com", "")
-		newEmail := e.proof(t, ctx, login.Verify, login.Email("carol@new.example.com"))
-		err = database.RunInTx(ctx, e.db, nil, func(ctx context.Context, tx database.Tx) error {
-			if err := e.realm.Link(ctx, tx, ref("c3"), newEmail); err != nil {
-				return err
-			}
-			return e.realm.Detach(ctx, tx, ref("c3"), login.Email("carol@example.com"))
-		})
-		if list, _ := e.realm.Identifiers(ctx, ref("c3")); err != nil || len(list) != 1 || list[0].Value != "carol@new.example.com" {
-			t.Fatalf("change email: %+v %v", list, err)
-		}
-		if got, err := e.realm.Lookup(ctx, login.Phone("+8613800138000")); err != nil || got != ref("c1") {
-			t.Fatalf("lookup: %v %v", got, err)
-		}
-		_, err = e.realm.Lookup(ctx, login.Email("nobody@example.com"))
-		is(t, err, login.ErrNotFound)
+		return e.realm.Detach(ctx, tx, ref("c3"), login.Email("carol@example.com"))
 	})
+	if list, _ := e.realm.Identifiers(ctx, ref("c3")); err != nil || len(list) != 1 || list[0].Value != "carol@new.example.com" {
+		t.Fatalf("change email: %+v %v", list, err)
+	}
+	if got, err := e.realm.Lookup(ctx, login.Phone("+8613800138000")); err != nil || got != ref("c1") {
+		t.Fatalf("lookup: %v %v", got, err)
+	}
+	_, err = e.realm.Lookup(ctx, login.Email("nobody@example.com"))
+	is(t, err, login.ErrNotFound)
 }
 
 // PerTenant：标识在租户内唯一，验证码和凭证只能在发送时的租户中使用，主体带有租户。
 func TestPerTenant(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		acme := identity.WithTenant(context.Background(), "acme")
-		globex := identity.WithTenant(context.Background(), "globex")
-		e := newRealm(t, driver, login.Options{PerTenant: true, Register: true})
-		email := login.Email("alice@example.com")
-		e.account(t, acme, "acme:1", "alice@example.com", "acme password")
-		e.account(t, globex, "globex:1", "alice@example.com", "globex password")
+	acme := identity.WithTenant(context.Background(), "acme")
+	globex := identity.WithTenant(context.Background(), "globex")
+	e := newRealm(t, login.Options{PerTenant: true, Register: true})
+	email := login.Email("alice@example.com")
+	e.account(t, acme, "acme:1", "alice@example.com", "acme password")
+	e.account(t, globex, "globex:1", "alice@example.com", "globex password")
 
-		out, err := e.realm.Password(acme, email, "acme password")
-		if err != nil || out.Subject.ID != "acme:1" || out.Subject.Tenant != "acme" {
-			t.Fatalf("acme: %+v %v", out, err)
-		}
-		_, err = e.realm.Password(globex, email, "acme password")
-		is(t, err, login.ErrInvalidCredentials)
-		_, err = e.realm.Password(context.Background(), email, "acme password")
-		is(t, err, login.ErrInvalidCredentials)
+	out, err := e.realm.Password(acme, email, "acme password")
+	if err != nil || out.Subject.ID != "acme:1" || out.Subject.Tenant != "acme" {
+		t.Fatalf("acme: %+v %v", out, err)
+	}
+	_, err = e.realm.Password(globex, email, "acme password")
+	is(t, err, login.ErrInvalidCredentials)
+	_, err = e.realm.Password(context.Background(), email, "acme password")
+	is(t, err, login.ErrInvalidCredentials)
 
-		requestID, c := e.code(t, acme, login.SignIn, email)
-		if c.Tenant != "acme" {
-			t.Fatalf("code tenant=%q", c.Tenant)
-		}
-		_, err = e.realm.VerifyCode(globex, requestID, c.Code)
-		is(t, err, login.ErrInvalidCode)
-		if out, err := e.realm.VerifyCode(acme, requestID, c.Code); err != nil || out.Subject.Tenant != "acme" {
-			t.Fatalf("verify: %+v %v", out, err)
-		}
+	requestID, c := e.code(t, acme, login.SignIn, email)
+	if c.Tenant != "acme" {
+		t.Fatalf("code tenant=%q", c.Tenant)
+	}
+	_, err = e.realm.VerifyCode(globex, requestID, c.Code)
+	is(t, err, login.ErrInvalidCode)
+	if out, err := e.realm.VerifyCode(acme, requestID, c.Code); err != nil || out.Subject.Tenant != "acme" {
+		t.Fatalf("verify: %+v %v", out, err)
+	}
 
-		newcomer := e.proof(t, acme, login.SignIn, login.Email("new@example.com"))
-		_, err = e.realm.Register(globex, e.db, newcomer, ref("globex:2"))
-		is(t, err, login.ErrInvalidProof)
-		sub, err := e.realm.Register(acme, e.db, newcomer, ref("acme:2"))
-		if err != nil || sub.Tenant != "acme" {
-			t.Fatalf("register: %+v %v", sub, err)
-		}
-		if _, err := e.realm.Lookup(globex, login.Email("new@example.com")); !errors.Is(err, login.ErrNotFound) {
-			t.Fatalf("identifier leaked to another tenant: %v", err)
-		}
-	})
+	newcomer := e.proof(t, acme, login.SignIn, login.Email("new@example.com"))
+	_, err = e.realm.Register(globex, e.db, newcomer, ref("globex:2"))
+	is(t, err, login.ErrInvalidProof)
+	sub, err := e.realm.Register(acme, e.db, newcomer, ref("acme:2"))
+	if err != nil || sub.Tenant != "acme" {
+		t.Fatalf("register: %+v %v", sub, err)
+	}
+	if _, err := e.realm.Lookup(globex, login.Email("new@example.com")); !errors.Is(err, login.ErrNotFound) {
+		t.Fatalf("identifier leaked to another tenant: %v", err)
+	}
 }
 
 func TestDetachAndForget(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newRealm(t, driver, login.Options{Register: true})
-		e.account(t, ctx, "c1", "alice@example.com", "correct horse")
-		phone := login.Phone("+8613800138000")
-		if err := e.realm.Attach(ctx, e.db, ref("c1"), phone, true); err != nil {
-			t.Fatal(err)
-		}
-		is(t, e.realm.Attach(ctx, e.db, ref("c2"), phone, true), login.ErrTaken)
+	ctx := context.Background()
+	e := newRealm(t, login.Options{Register: true})
+	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
+	phone := login.Phone("+8613800138000")
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), phone, true); err != nil {
+		t.Fatal(err)
+	}
+	is(t, e.realm.Attach(ctx, e.db, ref("c2"), phone, true), login.ErrTaken)
 
-		is(t, e.realm.Detach(ctx, e.db, ref("c1"), login.Email("other@example.com")), login.ErrNotFound)
-		is(t, e.realm.Detach(ctx, e.db, ref("c2"), phone), login.ErrNotFound)
-		if err := e.realm.Detach(ctx, e.db, ref("c1"), login.Email("ALICE@example.com")); err != nil {
-			t.Fatal(err)
-		}
-		is(t, e.realm.Detach(ctx, e.db, ref("c1"), phone), login.ErrLastIdentifier)
+	is(t, e.realm.Detach(ctx, e.db, ref("c1"), login.Email("other@example.com")), login.ErrNotFound)
+	is(t, e.realm.Detach(ctx, e.db, ref("c2"), phone), login.ErrNotFound)
+	if err := e.realm.Detach(ctx, e.db, ref("c1"), login.Email("ALICE@example.com")); err != nil {
+		t.Fatal(err)
+	}
+	is(t, e.realm.Detach(ctx, e.db, ref("c1"), phone), login.ErrLastIdentifier)
 
-		e.code(t, ctx, login.SignIn, phone)
-		if err := e.realm.Forget(ctx, e.db, ref("c1")); err != nil {
-			t.Fatal(err)
+	e.code(t, ctx, login.SignIn, phone)
+	if err := e.realm.Forget(ctx, e.db, ref("c1")); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"auth_identifiers", "auth_passwords", "auth_challenges"} {
+		if n, _ := e.db.NewSelect().Table(table).Count(ctx); n != 0 {
+			t.Fatalf("%s has %d rows after Forget", table, n)
 		}
-		for _, table := range []string{"auth_identifiers", "auth_passwords", "auth_challenges"} {
-			if n, _ := e.db.NewSelect().Table(table).Count(ctx); n != 0 {
-				t.Fatalf("%s has %d rows after Forget", table, n)
-			}
-		}
-		// 注销后标识可以被别人注册。
-		if err := e.realm.Attach(ctx, e.db, ref("c2"), phone, true); err != nil {
-			t.Fatal(err)
-		}
-	})
+	}
+	// 注销后标识可以被别人注册。
+	if err := e.realm.Attach(ctx, e.db, ref("c2"), phone, true); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPasswordManagement(t *testing.T) {
 	ctx := context.Background()
-	e := newRealm(t, sqlite.Driver, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
+	e := newRealm(t, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
 	e.account(t, ctx, "c1", "alice@example.com", "")
 	if ok, err := e.realm.HasPassword(ctx, ref("c1")); ok || err != nil {
 		t.Fatalf("has password: %v %v", ok, err)
@@ -698,32 +681,30 @@ func TestPasswordManagement(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newRealm(t, driver, login.Options{Register: true})
-		e.account(t, ctx, "c1", "alice@example.com", "")
-		used, c := e.code(t, ctx, login.SignIn, login.Email("alice@example.com"))
-		if _, err := e.realm.VerifyCode(ctx, used, c.Code); err != nil {
-			t.Fatal(err)
-		}
-		e.code(t, ctx, login.SignIn, login.Email("expired@example.com"))
-		e.clock.add(16 * time.Minute)
-		pending, _ := e.code(t, ctx, login.SignIn, login.Email("pending@example.com"))
-		n, err := e.realm.Cleanup(ctx, 10)
-		if err != nil || n != 2 {
-			t.Fatalf("cleanup: %d %v", n, err)
-		}
-		var ids []string
-		if err := e.db.NewSelect().Table("auth_challenges").Column("id").Scan(ctx, &ids); err != nil || len(ids) != 1 || ids[0] != pending {
-			t.Fatalf("left=%v %v", ids, err)
-		}
-	})
+	ctx := context.Background()
+	e := newRealm(t, login.Options{Register: true})
+	e.account(t, ctx, "c1", "alice@example.com", "")
+	used, c := e.code(t, ctx, login.SignIn, login.Email("alice@example.com"))
+	if _, err := e.realm.VerifyCode(ctx, used, c.Code); err != nil {
+		t.Fatal(err)
+	}
+	e.code(t, ctx, login.SignIn, login.Email("expired@example.com"))
+	e.clock.add(16 * time.Minute)
+	pending, _ := e.code(t, ctx, login.SignIn, login.Email("pending@example.com"))
+	n, err := e.realm.Cleanup(ctx, 10)
+	if err != nil || n != 2 {
+		t.Fatalf("cleanup: %d %v", n, err)
+	}
+	var ids []string
+	if err := e.db.NewSelect().Table("auth_challenges").Column("id").Scan(ctx, &ids); err != nil || len(ids) != 1 || ids[0] != pending {
+		t.Fatalf("left=%v %v", ids, err)
+	}
 }
 
 // 轮换应用密钥后，之前发出的验证码仍然有效。
 func TestCodeSurvivesKeyRotation(t *testing.T) {
 	ctx := context.Background()
-	e := newRealm(t, sqlite.Driver, login.Options{Register: true})
+	e := newRealm(t, login.Options{Register: true})
 	requestID, c := e.code(t, ctx, login.SignIn, login.Email("a@example.com"))
 	rotated := login.New(e.db, login.Options{Type: customer, Hasher: hasher(4),
 		Crypt: crypt.New(crypt.Config{Key: crypt.GenerateKey(), PreviousKeys: []string{appKey}})})
@@ -735,8 +716,8 @@ func TestCodeSurvivesKeyRotation(t *testing.T) {
 // 默认限流器存在数据库中，需要 ratelimit 的迁移。
 func TestDefaultLimiters(t *testing.T) {
 	ctx := context.Background()
-	db := dbtesting.Open(t, sqlite.Driver, login.Migrations())
-	up, err := fs.ReadFile(ratelimit.Migrations(), "sqlite/0001_create_rate_limits.sql")
+	db := dbtest.Open(t, login.Migrations())
+	up, err := fs.ReadFile(ratelimit.Migrations(), "0001_create_rate_limits.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -754,7 +735,7 @@ func TestDefaultLimiters(t *testing.T) {
 }
 
 func TestNewPanics(t *testing.T) {
-	db := dbtesting.Open(t, sqlite.Driver, login.Migrations())
+	db := dbtest.Open(t, login.Migrations())
 	c := crypt.New(crypt.Config{Key: appKey})
 	for name, opts := range map[string]login.Options{
 		"no type":        {Hasher: hasher(4), Crypt: c},

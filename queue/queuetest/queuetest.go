@@ -431,7 +431,7 @@ func permanentFailures(t *testing.T, s *setup) {
 	}
 }
 
-// 多个任务同时转入失败表时不能互相阻塞（MySQL 可重复读下的间隙锁会让它们死锁）。
+// 多个任务同时转入失败表时不能互相阻塞。
 func concurrentFailures(t *testing.T, s *setup) {
 	const n = 20
 	s.start(t, config(), func(w *queue.Worker) {

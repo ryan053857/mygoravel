@@ -12,9 +12,6 @@ import (
 	"github.com/ryan053857/mygoravel/logging"
 )
 
-// maxKey 是字符串列的最大长度，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
-const maxKey = 191
-
 // DefaultLimit 是 List 在 Query.Limit 不大于 0 时返回的条数。
 const DefaultLimit = 50
 
@@ -74,15 +71,6 @@ func check(a Activity) error {
 	}
 	if a.TargetID != "" && a.TargetType == "" {
 		return errors.Newf("activity: target id %q without target type", a.TargetID)
-	}
-	for field, v := range map[string]string{
-		"tenant": a.Tenant, "actor type": string(a.ActorType), "actor id": a.ActorID,
-		"impersonator type": string(a.ImpersonatorType), "impersonator id": a.ImpersonatorID, "event": a.Event,
-		"target type": a.TargetType, "target id": a.TargetID, "request id": a.RequestID,
-	} {
-		if len(v) > maxKey {
-			return errors.Newf("activity: %s longer than %d bytes", field, maxKey)
-		}
 	}
 	return nil
 }
@@ -154,7 +142,7 @@ func Cleanup(db bun.IDB, keep time.Duration) func(ctx context.Context, limit int
 		old := db.NewSelect().Model((*Activity)(nil)).Column("id").
 			Where("created_at < ?", time.Now().Add(-keep).UTC()).OrderExpr("created_at").Limit(int64(limit))
 		res, err := db.NewDelete().Model((*Activity)(nil)).
-			Where("id IN (SELECT id FROM (?) AS old)", old).Exec(ctx)
+			Where("id IN (?)", old).Exec(ctx)
 		if err != nil {
 			return 0, errors.Wrap(err, "activity: cleanup")
 		}

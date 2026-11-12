@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/monitor"
 	"github.com/ryan053857/mygoravel/monitor/cachemon"
 	"github.com/ryan053857/mygoravel/monitor/cachemon/cachecmd"
@@ -16,7 +15,7 @@ import (
 
 func TestStats(t *testing.T) {
 	ctx := context.Background()
-	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	mon := monitor.New(dbtest.Open(t, monitor.Migrations()), nil)
 	t.Cleanup(func() { _ = mon.Close(ctx) })
 	for range 3 {
 		mon.RecordDuration(cachemon.MetricHit, "articles", time.Millisecond)

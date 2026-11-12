@@ -5,12 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/cockroachdb/errors"
-	"github.com/uptrace/bun"
-
-	"github.com/ryan053857/mygoravel/database/postgres"
-	"github.com/ryan053857/mygoravel/database/sqlite"
 )
 
 func TestCreateGuessesTableFromName(t *testing.T) {
@@ -22,7 +16,7 @@ func TestCreateGuessesTableFromName(t *testing.T) {
 		{"backfill_slugs", "-- +goose Up\n\n-- +goose Down\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path, err := Create(postgres.Driver, t.TempDir(), tc.name)
+			path, err := Create(t.TempDir(), tc.name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -35,32 +29,29 @@ func TestCreateGuessesTableFromName(t *testing.T) {
 			}
 		})
 	}
-	data, _ := os.ReadFile(must(Create(postgres.Driver, t.TempDir(), "create_articles_table")))
+	data, _ := os.ReadFile(must(Create(t.TempDir(), "create_articles_table")))
 	if !strings.Contains(string(data), "DROP TABLE articles;") {
 		t.Fatalf("data=%s", data)
 	}
 }
 
-func TestCreateUsesDriverTypes(t *testing.T) {
-	data, _ := os.ReadFile(must(Create(sqlite.Driver, t.TempDir(), "create_articles_table")))
-	if !strings.Contains(string(data), "id         TEXT PRIMARY KEY") || strings.Contains(string(data), "DEFAULT") {
+func TestCreateUsesPostgresTypes(t *testing.T) {
+	data, _ := os.ReadFile(must(Create(t.TempDir(), "create_articles_table")))
+	if !strings.Contains(string(data), "id         uuid PRIMARY KEY") || strings.Contains(string(data), "DEFAULT") {
 		t.Fatalf("data=%s", data)
-	}
-	if _, err := Create(fakeDriver("oracle"), t.TempDir(), "create_articles_table"); err == nil {
-		t.Fatal("unsupported driver accepted")
 	}
 }
 
 func TestCreateVersionFollowsExistingMigrations(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "migrations") // 目录不存在时自动创建
-	first, err := Create(postgres.Driver, dir, "create_articles_table")
+	first, err := Create(dir, "create_articles_table")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "29990101000000_future.sql"), []byte(testMigration), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	second, err := Create(postgres.Driver, dir, "add_status_to_articles_table")
+	second, err := Create(dir, "add_status_to_articles_table")
 	if err != nil || filepath.Base(second) != "29990101000001_add_status_to_articles_table.sql" {
 		t.Fatalf("first=%s second=%s err=%v", first, second, err)
 	}
@@ -69,7 +60,7 @@ func TestCreateVersionFollowsExistingMigrations(t *testing.T) {
 func TestCreateRejectsNonSnakeCaseNames(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"", "CreateArticles", "create-articles", "create articles", "_create", "create__articles", "create_articles_", "1_create", "../create"} {
-		if _, err := Create(postgres.Driver, dir, name); err == nil {
+		if _, err := Create(dir, name); err == nil {
 			t.Errorf("Create(%q) succeeded", name)
 		}
 	}
@@ -84,9 +75,3 @@ func must(path string, err error) string {
 	}
 	return path
 }
-
-// fakeDriver 是只有名字的驱动，用于检查不支持的数据库。
-type fakeDriver string
-
-func (d fakeDriver) Name() string                  { return string(d) }
-func (fakeDriver) Connect(string) (*bun.DB, error) { return nil, errors.New("fake driver") }

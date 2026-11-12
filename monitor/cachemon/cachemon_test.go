@@ -11,8 +11,7 @@ import (
 	gocachestore "github.com/eko/gocache/store/go_cache/v4"
 	memory "github.com/patrickmn/go-cache"
 
-	"github.com/ryan053857/mygoravel/database/sqlite"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/monitor"
 	"github.com/ryan053857/mygoravel/monitor/cachemon"
 )
@@ -30,7 +29,7 @@ func (broken) Clear(context.Context) error                                 { ret
 
 func TestWrap(t *testing.T) {
 	ctx := context.Background()
-	mon := monitor.New(dbtesting.Open(t, sqlite.Driver, monitor.Migrations()), nil)
+	mon := monitor.New(dbtest.Open(t, monitor.Migrations()), nil)
 	t.Cleanup(func() { _ = mon.Close(ctx) })
 
 	articles := cachemon.Wrap("articles", cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0))), mon)

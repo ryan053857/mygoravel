@@ -46,9 +46,6 @@ const (
 	StatusFailed    Status = "failed"    // 整个操作无法完成，或者任务重试用完；原因见 Error
 )
 
-// maxKey 是 tenant、owner 和 kind 的最大字节数，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
-const maxKey = 191
-
 // Operation 是一个后台操作，也是 operations 表的 Bun 模型。
 //
 // 进度以单位计算，单位是什么由操作决定：导入和导出是行，批量处理是一个任务。
@@ -109,13 +106,6 @@ func New(db *bun.DB) *Service {
 func (s *Service) Start(ctx context.Context, tx bun.IDB, owner identity.Subject, kind string) (*Operation, error) {
 	if kind == "" {
 		return nil, errors.New("operation: empty kind")
-	}
-	for field, v := range map[string]string{
-		"tenant": owner.Tenant, "owner type": string(owner.Type), "owner id": owner.ID, "kind": kind,
-	} {
-		if len(v) > maxKey {
-			return nil, errors.Newf("operation: %s longer than %d bytes", field, maxKey)
-		}
 	}
 	now := time.Now().UTC()
 	op := &Operation{
@@ -181,7 +171,7 @@ func (s *Service) Cleanup(keep time.Duration) func(ctx context.Context, limit in
 		}
 		old := s.db.NewSelect().Model((*Operation)(nil)).Column("id").
 			Where("created_at < ?", time.Now().Add(-keep).UTC()).OrderExpr("created_at").Limit(int64(limit))
-		res, err := s.db.NewDelete().Model((*Operation)(nil)).Where("id IN (SELECT id FROM (?) AS old)", old).Exec(ctx)
+		res, err := s.db.NewDelete().Model((*Operation)(nil)).Where("id IN (?)", old).Exec(ctx)
 		if err != nil {
 			return 0, errors.Wrap(err, "operation: cleanup")
 		}

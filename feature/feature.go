@@ -14,7 +14,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/identity"
@@ -23,14 +22,10 @@ import (
 // ErrInvalid 表示设置不合法，例如开关不在目录中、给租户或主体设置比例、比例不在 0 到 100 之间。
 var ErrInvalid = errorx.Define(errorx.InvalidArgument, "feature.invalid")
 
-// maxKey 是开关名和租户的最大长度，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
-const maxKey = 191
-
 //go:embed migrations
 var migrationFiles embed.FS
 
 // Migrations 返回 Store 使用的 feature_settings 表的迁移，供应用发布。
-// 根目录下按数据库类型分为 postgres、mysql 和 sqlite 三个目录，由 migrate.Publish 按应用的数据库选择。
 func Migrations() fs.FS {
 	f, err := fs.Sub(migrationFiles, "migrations")
 	if err != nil {
@@ -130,7 +125,7 @@ type row struct {
 	UpdatedAt   time.Time `bun:"updated_at,notnull"`
 }
 
-// Store 是基于 Bun 的开关设置存储，查询兼容 PostgreSQL、MySQL 与 SQLite，可以并发使用。
+// Store 是基于 Bun 的开关设置存储，可以并发使用。
 type Store struct {
 	db      bun.IDB
 	catalog Catalog
@@ -287,13 +282,7 @@ func (s *Store) Set(ctx context.Context, f Flag, scope Scope, state State) error
 		Name: f.Name, Tenant: scope.tenant, SubjectType: string(scope.ref.Type), SubjectID: scope.ref.ID,
 		Mode: state.Mode, Percent: state.Percent, UpdatedAt: time.Now().UTC(),
 	}
-	q := s.db.NewInsert().Model(r)
-	if s.db.Dialect().Name() == dialect.MySQL {
-		q = q.On("DUPLICATE KEY UPDATE")
-	} else {
-		q = q.On("CONFLICT (name, tenant, subject_type, subject_id) DO UPDATE")
-	}
-	_, err := q.Set("mode = ?", r.Mode).Set("percent = ?", r.Percent).Set("updated_at = ?", r.UpdatedAt).Exec(ctx)
+	_, err := s.db.NewInsert().Model(r).On("CONFLICT (name, tenant, subject_type, subject_id) DO UPDATE").Set("mode = ?", r.Mode).Set("percent = ?", r.Percent).Set("updated_at = ?", r.UpdatedAt).Exec(ctx)
 	return errors.Wrap(err, "feature: set")
 }
 
@@ -366,7 +355,7 @@ func scopeOf(r row) Scope {
 	return Everyone
 }
 
-// validKey 报告名称不为空、不超过 maxKey 个字节，也不包含空白。
+// validKey 报告名称不为空，也不包含空白。
 func validKey(s string) bool {
-	return s != "" && len(s) <= maxKey && !strings.ContainsFunc(s, unicode.IsSpace)
+	return s != "" && !strings.ContainsFunc(s, unicode.IsSpace)
 }

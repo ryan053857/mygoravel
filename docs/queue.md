@@ -41,18 +41,12 @@
 队列使用两张表：`queue_jobs` 保存待处理和处理中的任务，处理成功后删除；`queue_failed_jobs` 保存失败的任务。使用前先[发布](migrations.md#publishing-framework-migrations)它们的迁移：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "queue", FS: queue.Migrations()},
 ))
 ```
 
-队列支持 PostgreSQL、MySQL 和 SQLite，发布时按应用的数据库选择对应的迁移。PostgreSQL 和 MySQL 上，多个 worker 用 `SKIP LOCKED` 跳过彼此正在领取的任务，可以部署在多台机器上。
-
-使用 SQLite 时，同一时刻只有一个连接可以写入，领取、确认任务和业务写入排队进行：
-
-- 一个长时间不提交的写事务会让领取任务等待，最长等到 SQLite 的 `busy_timeout`（5 秒）后报错重试。事务中不要做耗时的外部调用。
-- 多个 worker 进程可以打开同一个数据库文件，每个任务只会被其中一个领取；但它们必须在同一台机器上，见[使用 SQLite 部署](deployment.md#sqlite)。
-- 写入量由单个写者的吞吐决定，任务量大时请改用 PostgreSQL。
+多个 worker 用 `SKIP LOCKED` 跳过彼此正在领取的任务，可以部署在多台机器上。
 
 <a id="publishing-jobs"></a>
 ## 发布任务
@@ -526,7 +520,7 @@ ID                                    TOPIC      ATTEMPTS  FAILED AT            
 处理函数是普通的函数，直接调用它测试即可。发布任务的一方，用 [`dbtest.Open`](testing.md) 打开执行过 `queue.Migrations()` 的测试数据库，检查 `queue_jobs` 中的任务：
 
 ```go
-db := dbtest.Open(t, postgres.Driver, migrations.FS) // 包含已发布的 queue 迁移
+db := dbtest.Open(t, migrations.FS) // 包含已发布的 queue 迁移
 publish := article.NewPublish(db, emails, editors)
 
 // ... 创建并发布一篇文章
@@ -636,7 +630,7 @@ import "github.com/ryan053857/mygoravel/queue/queuetest"
 func TestDriver(t *testing.T) {
     queuetest.TestDriver(t, queuetest.Options{
         New: func(t *testing.T) (queue.Driver, *bun.DB) {
-            return mydriver.New(connect(t)), dbtest.Open(t, sqlite.Driver, migrations.FS) // 包含已发布的 queue 迁移
+            return mydriver.New(connect(t)), dbtest.Open(t, migrations.FS) // 包含已发布的 queue 迁移
         },
     })
 }

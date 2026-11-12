@@ -12,8 +12,8 @@ import (
 
 var _ PresenceStore = (*DatabasePresence)(nil)
 
-// DatabasePresence 把在线记录保存在 realtime_presence 表中，PostgreSQL、MySQL 和 SQLite 通用，
-// Migrations 提供三种数据库的表结构。过期时间按应用服务器时钟计算，各实例的时钟需要同步。
+// DatabasePresence 把在线记录保存在 realtime_presence 表中，
+// Migrations 提供表结构。过期时间按应用服务器时钟计算，各实例的时钟需要同步。
 //
 // 每个连接在每个 presence 频道中每 25 秒续期一次，也就是一次写入：presence 订阅很多时改用 redispresence。
 // 过期的行不会被 List 返回，残留行由应用定时调用 Cleanup 删除。
@@ -97,11 +97,10 @@ func (s *DatabasePresence) Cleanup(ctx context.Context, limit int) (int, error) 
 	if limit <= 0 {
 		return 0, errors.New("realtime: cleanup limit must be positive")
 	}
-	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能使用。
 	expired := s.db.NewSelect().Model((*presenceRow)(nil)).Column("channel", "client_id").
 		Where("expires_at <= ?", time.Now().UTC()).OrderExpr("expires_at").Limit(int64(limit))
 	res, err := s.db.NewDelete().Model((*presenceRow)(nil)).
-		Where("(channel, client_id) IN (SELECT channel, client_id FROM (?) AS expired)", expired).Exec(ctx)
+		Where("(channel, client_id) IN (?)", expired).Exec(ctx)
 	if err != nil {
 		return 0, errors.Wrap(err, "realtime: cleanup presence")
 	}

@@ -1,5 +1,3 @@
-//go:build integration
-
 package database_test
 
 import (
@@ -14,11 +12,10 @@ import (
 
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/database/migrate"
-	"github.com/ryan053857/mygoravel/database/postgres"
 )
 
 func TestNonTransactionalMigrationRequiresManualRecovery(t *testing.T) {
-	db := dbtest.Open(t, postgres.Driver, nil)
+	db := dbtest.Open(t, nil)
 	ctx := context.Background()
 	source := fstest.MapFS{"00001_partial.sql": &fstest.MapFile{Data: []byte("-- +goose NO TRANSACTION\n-- +goose Up\nCREATE TABLE partial (id int);\nINSERT INTO missing_table VALUES (1);\n-- +goose Down\nDROP TABLE partial;\n")}}
 	p, err := migrate.NewProvider(db, source)
@@ -50,7 +47,7 @@ func TestNonTransactionalMigrationRequiresManualRecovery(t *testing.T) {
 }
 
 func TestDatabaseIsolationWithDSNFormats(t *testing.T) {
-	parsed, err := pgx.ParseConfig(dbtest.RequireURL(t, postgres.Driver))
+	parsed, err := pgx.ParseConfig(dbtest.URL(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +62,8 @@ func TestDatabaseIsolationWithDSNFormats(t *testing.T) {
 	uri.RawQuery = query.Encode()
 	for name, dsn := range map[string]string{"keyword": keyword, "database-query": uri.String()} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv(dbtest.EnvURL(postgres.Driver), dsn)
-			db := dbtest.Open(t, postgres.Driver, nil)
+			t.Setenv(dbtest.EnvURL, dsn)
+			db := dbtest.Open(t, nil)
 			var actual string
 			if err := db.QueryRow("select current_database()").Scan(&actual); err != nil {
 				t.Fatal(err)

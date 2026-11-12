@@ -32,7 +32,7 @@
 把 `feature` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`：
 
 ```go
-migratecmd.Publish(postgres.Driver,
+migratecmd.Publish(
     migrate.Source{Name: "feature", FS: feature.Migrations()},
 )
 ```

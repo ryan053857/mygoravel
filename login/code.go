@@ -358,11 +358,10 @@ func (r *Realm) Cleanup(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("login: cleanup limit must be positive")
 	}
-	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 	done := r.db.NewSelect().Model((*challengeRow)(nil)).Column("id").
 		Where("expires_at <= ? OR completed_at IS NOT NULL", r.now().UTC()).OrderExpr("expires_at").Limit(int64(limit))
 	n, err := affected(r.db.NewDelete().Model((*challengeRow)(nil)).
-		Where("id IN (SELECT id FROM (?) AS done)", done).Exec(ctx))
+		Where("id IN (?)", done).Exec(ctx))
 	return int(n), errors.Wrap(err, "login: cleanup")
 }
 

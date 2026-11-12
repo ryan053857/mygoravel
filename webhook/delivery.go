@@ -107,7 +107,7 @@ func Cleanup(db bun.IDB, keep time.Duration) func(ctx context.Context, limit int
 		old := db.NewSelect().Model((*Delivery)(nil)).Column("id").
 			Where("created_at < ?", time.Now().Add(-keep).UTC()).OrderExpr("created_at").Limit(int64(limit))
 		res, err := db.NewDelete().Model((*Delivery)(nil)).
-			Where("id IN (SELECT id FROM (?) AS old)", old).Exec(ctx)
+			Where("id IN (?)", old).Exec(ctx)
 		if err != nil {
 			return 0, errors.Wrap(err, "webhook: cleanup")
 		}

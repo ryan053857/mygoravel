@@ -23,7 +23,7 @@
 先发布两张表的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
 
 ```go
-migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "monitor", FS: monitor.Migrations()},
 ))
 ```
@@ -150,7 +150,7 @@ sched.Add("monitor:cleanup", "@hourly", schedule.Cleanup(a.monitor.Cleanup(7*24*
 用 [`dbtest.Open`](testing.md#database-tests) 打开执行过迁移的测试数据库。`Monitor` 定期写入，测试中调用 `Flush` 立即写入，再查询结果：
 
 ```go
-mon := monitor.New(dbtest.Open(t, postgres.Driver, migrations.FS), nil)
+mon := monitor.New(dbtest.Open(t, migrations.FS), nil)
 t.Cleanup(func() { mon.Close(context.Background()) })
 
 // ... 执行发送邮件的 action

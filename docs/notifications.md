@@ -15,7 +15,7 @@
 <a id="introduction"></a>
 ## 简介
 
-用户需要知道和自己有关的事：文章被发布了、被评论了、被邀请加入团队了。`notification` 包是站内通知的收件箱：每条通知是 `notifications` 表中的一行，属于某个租户中的某个主体，带有已读状态。支持 PostgreSQL、SQLite 和 MySQL。
+用户需要知道和自己有关的事：文章被发布了、被评论了、被邀请加入团队了。`notification` 包是站内通知的收件箱：每条通知是 `notifications` 表中的一行，属于某个租户中的某个主体，带有已读状态。
 
 Laravel 的通知把站内信、邮件、广播放在一个 `Notification` 类里，由 `via()` 决定发往哪些渠道。mygoravel 只提供其中缺少的收件箱，其他渠道已经有各自的包：[邮件](mail.md)、[队列](queue.md)、[广播](broadcasting.md)。一次通知发往哪些渠道，由 action 显式写出来，读代码就能看到会发生什么。
 
@@ -27,7 +27,7 @@ Laravel 的通知把站内信、邮件、广播放在一个 `Notification` 类�
 把 `notification` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`：
 
 ```go
-migratecmd.Publish(postgres.Driver,
+migratecmd.Publish(
     migrate.Source{Name: "notification", FS: notification.Migrations()},
 )
 ```

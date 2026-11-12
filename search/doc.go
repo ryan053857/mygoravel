@@ -1,4 +1,4 @@
-// Package search 在应用自己的数据库中提供全文搜索，PostgreSQL、SQLite 和 MySQL 的行为一致。
+// Package search 在应用自己的 PostgreSQL 中提供全文搜索。
 //
 // 索引用 Define 声明，文档类型的字段用 search 标签说明哪些参与全文检索、哪些用于过滤和排序：
 //

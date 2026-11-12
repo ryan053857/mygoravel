@@ -123,8 +123,8 @@ func (r *Realm) attach(ctx context.Context, db bun.IDB, tenant string, id Identi
 	if verified {
 		row.VerifiedAt = now
 	}
-	// 已存在时什么也不做，再读出标识的主体判断：MySQL 的 RowsAffected 不能区分插入和已存在。
-	if _, err := insertIgnore(db, db.NewInsert().Model(row), "subject_type, tenant, kind, value", "subject_id").Exec(ctx); err != nil {
+	// 已存在时什么也不做，再读出标识的主体判断。
+	if _, err := db.NewInsert().Model(row).On("CONFLICT (subject_type, tenant, kind, value) DO NOTHING").Exec(ctx); err != nil {
 		return errors.Wrap(err, "login: attach identifier")
 	}
 	owner, err := r.owner(ctx, db, tenant, id)

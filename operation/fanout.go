@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect"
 
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/queue"
@@ -31,7 +30,7 @@ type unit struct {
 	Failed      bool      `bun:"failed,notnull"`
 }
 
-// insertBatch 是一次插入的单位数。MySQL 一条语句最多 65535 个参数。
+// insertBatch 是一次插入的单位数。PostgreSQL 一条语句最多 65535 个参数。
 const insertBatch = 1000
 
 // Fanout 把 items 加入操作 id：每一项是一个单位，发布为 topic 的一个任务，由 HandleUnit 包装的函数处理，各个任务并行执行。
@@ -133,18 +132,9 @@ func HandleUnit[T any](s *Service,
 func (s *Service) settle(ctx context.Context, opID, unitID uuid.UUID, failed bool,
 	saved func(ctx context.Context, tx database.Tx, op *Operation) error,
 ) error {
-	var opts *sql.TxOptions
-	if s.db.Dialect().Name() == dialect.MySQL {
-		// MySQL 默认的可重复读会在不存在的行上加间隙锁，与并发的 Fanout 互相等待。
-		opts = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
-	}
-	err := database.RunInTx(ctx, s.db, opts, func(ctx context.Context, tx database.Tx) error {
+	err := database.RunInTx(ctx, s.db, nil, func(ctx context.Context, tx database.Tx) error {
 		op := new(Operation)
-		q := tx.NewSelect().Model(op).Where("id = ?", opID)
-		if s.db.Dialect().Name() != dialect.SQLite {
-			q = q.For("UPDATE") // SQLite 的写事务已经独占数据库
-		}
-		if err := q.Scan(ctx); errors.Is(err, sql.ErrNoRows) {
+		if err := tx.NewSelect().Model(op).Where("id = ?", opID).For("UPDATE").Scan(ctx); errors.Is(err, sql.ErrNoRows) {
 			return nil
 		} else if err != nil {
 			return err

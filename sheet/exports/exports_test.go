@@ -19,12 +19,12 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/filesystem"
 	"github.com/ryan053857/mygoravel/filesystem/local"
 	"github.com/ryan053857/mygoravel/i18n"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/sheet"
@@ -63,10 +63,10 @@ func migrations(t *testing.T) fs.FS {
 	return merged
 }
 
-func newEnv(t *testing.T, driver database.Driver) env {
+func newEnv(t *testing.T) env {
 	t.Helper()
 	t.Cleanup(exports.SetSaveInterval(0)) // 每一行都保存进度，使保存的序列可以预期
-	db := dbtesting.Open(t, driver, migrations(t))
+	db := dbtest.Open(t, migrations(t))
 	disk, err := local.Open(filesystem.LocalConfig{Root: filepath.Join(t.TempDir(), "files"), PublicURL: "/storage"})
 	if err != nil {
 		t.Fatal(err)
@@ -143,181 +143,173 @@ func rows(n int) func(ctx context.Context, exp *exports.Export, w *exports.Write
 }
 
 func TestProcess(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newEnv(t, driver)
-		exp := e.start(t, sheet.XLSX)
-		if exp.Status != operation.StatusPending {
-			t.Fatalf("started: %+v", exp)
-		}
-		rec := &recorder{}
-		if err := e.exports.Process(ctx, exp.ID, rows(3), rec.saved); err != nil {
-			t.Fatal(err)
-		}
-		want := []string{"running:0/0", "running:0/3", "running:1/3", "running:2/3", "running:3/3", "completed:3/3"}
-		if got := rec.progress(); !slices.Equal(got, want) {
-			t.Fatalf("saves: %v", got)
-		}
+	ctx := context.Background()
+	e := newEnv(t)
+	exp := e.start(t, sheet.XLSX)
+	if exp.Status != operation.StatusPending {
+		t.Fatalf("started: %+v", exp)
+	}
+	rec := &recorder{}
+	if err := e.exports.Process(ctx, exp.ID, rows(3), rec.saved); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"running:0/0", "running:0/3", "running:1/3", "running:2/3", "running:3/3", "completed:3/3"}
+	if got := rec.progress(); !slices.Equal(got, want) {
+		t.Fatalf("saves: %v", got)
+	}
 
-		got := e.get(t, exp.ID)
-		name := "articles-export-" + time.Now().Format("20060102") + ".xlsx"
-		if !got.Finished() || got.Filename != name || got.ExpiresAt == nil || !strings.HasPrefix(got.URL, "/storage/") || got.CompletedAt == nil {
-			t.Fatalf("completed: %+v", got)
-		}
-		body, file, err := e.files.Open(ctx, got.FileID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer body.Close()
-		if file.Status != filesystem.StatusTemporary || file.OwnerID != "u1" || file.URL != got.URL {
-			t.Fatalf("file: %+v", file)
-		}
-		r, err := sheet.NewReader(body, sheet.XLSX)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer r.Close()
-		n := 0
-		for range r.Rows() {
-			n++
-		}
-		if !slices.Equal(r.Header(), []string{"标题", "序号"}) || n != 3 {
-			t.Fatalf("file content: %v %d", r.Header(), n)
-		}
+	got := e.get(t, exp.ID)
+	name := "articles-export-" + time.Now().Format("20060102") + ".xlsx"
+	if !got.Finished() || got.Filename != name || got.ExpiresAt == nil || !strings.HasPrefix(got.URL, "/storage/") || got.CompletedAt == nil {
+		t.Fatalf("completed: %+v", got)
+	}
+	body, file, err := e.files.Open(ctx, got.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer body.Close()
+	if file.Status != filesystem.StatusTemporary || file.OwnerID != "u1" || file.URL != got.URL {
+		t.Fatalf("file: %+v", file)
+	}
+	r, err := sheet.NewReader(body, sheet.XLSX)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	n := 0
+	for range r.Rows() {
+		n++
+	}
+	if !slices.Equal(r.Header(), []string{"标题", "序号"}) || n != 3 {
+		t.Fatalf("file content: %v %d", r.Header(), n)
+	}
 
-		// 已经结束的导出再处理一次什么也不做。
-		if err := e.exports.Process(ctx, exp.ID, rows(3), rec.saved); err != nil || len(rec.progress()) != len(want) {
-			t.Fatalf("again: %v %v", err, rec.progress())
-		}
-	})
+	// 已经结束的导出再处理一次什么也不做。
+	if err := e.exports.Process(ctx, exp.ID, rows(3), rec.saved); err != nil || len(rec.progress()) != len(want) {
+		t.Fatalf("again: %v %v", err, rec.progress())
+	}
 }
 
 func TestProcessErrors(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newEnv(t, driver)
+	ctx := context.Background()
+	e := newEnv(t)
 
-		// 业务错误使导出失败，不再重试。
-		exp := e.start(t, sheet.CSV)
-		rec := &recorder{}
-		unknown := func(context.Context, *exports.Export, *exports.Writer) error {
-			return sheet.ErrUnknownColumn.New(errorx.Public("column", "x"))
-		}
-		if err := e.exports.Process(ctx, exp.ID, unknown, rec.saved); err != nil {
-			t.Fatal(err)
-		}
-		got := e.get(t, exp.ID)
-		languages, err := i18n.New("zh-CN")
-		if err != nil {
-			t.Fatal(err)
-		}
-		zh := i18n.WithLocale(ctx, languages, "zh-CN")
-		if got.Status != operation.StatusFailed || got.Error != "sheet.unknown_column" || got.ErrorMessage(zh) != "没有这一列：x" {
-			t.Fatalf("failed: %+v", got)
-		}
-		if p := rec.progress(); !slices.Equal(p, []string{"running:0/0", "failed:0/0"}) {
-			t.Fatalf("saves: %v", p)
-		}
+	// 业务错误使导出失败，不再重试。
+	exp := e.start(t, sheet.CSV)
+	rec := &recorder{}
+	unknown := func(context.Context, *exports.Export, *exports.Writer) error {
+		return sheet.ErrUnknownColumn.New(errorx.Public("column", "x"))
+	}
+	if err := e.exports.Process(ctx, exp.ID, unknown, rec.saved); err != nil {
+		t.Fatal(err)
+	}
+	got := e.get(t, exp.ID)
+	languages, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zh := i18n.WithLocale(ctx, languages, "zh-CN")
+	if got.Status != operation.StatusFailed || got.Error != "sheet.unknown_column" || got.ErrorMessage(zh) != "没有这一列：x" {
+		t.Fatalf("failed: %+v", got)
+	}
+	if p := rec.progress(); !slices.Equal(p, []string{"running:0/0", "failed:0/0"}) {
+		t.Fatalf("saves: %v", p)
+	}
 
-		// 其他错误返回给队列，重试时从头开始，行数不会重复累计。
-		exp = e.start(t, sheet.CSV)
-		down := errors.New("database down")
-		flaky := func(ctx context.Context, exp *exports.Export, w *exports.Writer) error {
-			if err := rows(2)(ctx, exp, w); err != nil {
-				return err
-			}
-			return down
+	// 其他错误返回给队列，重试时从头开始，行数不会重复累计。
+	exp = e.start(t, sheet.CSV)
+	down := errors.New("database down")
+	flaky := func(ctx context.Context, exp *exports.Export, w *exports.Writer) error {
+		if err := rows(2)(ctx, exp, w); err != nil {
+			return err
 		}
-		if err := e.exports.Process(ctx, exp.ID, flaky, nil); !errors.Is(err, down) {
-			t.Fatalf("first run: %v", err)
-		}
-		if got := e.get(t, exp.ID); got.Status != operation.StatusRunning || got.Processed != 2 {
-			t.Fatalf("after first run: %+v", got)
-		}
-		if err := e.exports.Process(ctx, exp.ID, rows(2), nil); err != nil {
-			t.Fatal(err)
-		}
-		if got := e.get(t, exp.ID); got.Status != operation.StatusCompleted || got.Processed != 2 || !strings.HasSuffix(got.Filename, ".csv") {
-			t.Fatalf("retried: %+v", got)
-		}
-	})
+		return down
+	}
+	if err := e.exports.Process(ctx, exp.ID, flaky, nil); !errors.Is(err, down) {
+		t.Fatalf("first run: %v", err)
+	}
+	if got := e.get(t, exp.ID); got.Status != operation.StatusRunning || got.Processed != 2 {
+		t.Fatalf("after first run: %+v", got)
+	}
+	if err := e.exports.Process(ctx, exp.ID, rows(2), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.get(t, exp.ID); got.Status != operation.StatusCompleted || got.Processed != 2 || !strings.HasSuffix(got.Filename, ".csv") {
+		t.Fatalf("retried: %+v", got)
+	}
 }
 
 func TestFinalAttemptFailsExport(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		e := newEnv(t, driver)
-		exp := e.start(t, sheet.XLSX)
-		rec := &recorder{}
-		topic := queue.Topic[uuid.UUID]("exports.test")
-		cfg := queue.DefaultConfig()
-		cfg.PollInterval = 20 * time.Millisecond
-		cfg.MaxAttempts = 1
-		w := queue.NewWorker(queue.Database(e.db), cfg, slog.New(slog.DiscardHandler))
-		topic.Handle(w, func(ctx context.Context, id uuid.UUID) error {
-			return e.exports.Process(ctx, id, func(context.Context, *exports.Export, *exports.Writer) error {
-				return errors.New("always down")
-			}, rec.saved)
-		})
-		ctx, cancel := context.WithCancel(context.Background())
-		stopped := make(chan error, 1)
-		go func() { stopped <- w.Run(ctx) }()
-		t.Cleanup(func() {
-			cancel()
-			<-stopped
-		})
-		if err := topic.Publish(context.Background(), queue.Database(e.db), exp.ID); err != nil {
-			t.Fatal(err)
-		}
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			got := e.get(t, exp.ID)
-			if got.Status == operation.StatusFailed {
-				if got.Error != "operation.failed" {
-					t.Fatalf("failed: %+v", got)
-				}
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("export %+v did not fail", got)
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		if p := rec.progress(); !slices.Equal(p, []string{"running:0/0", "failed:0/0"}) {
-			t.Fatalf("saves: %v", p)
-		}
+	e := newEnv(t)
+	exp := e.start(t, sheet.XLSX)
+	rec := &recorder{}
+	topic := queue.Topic[uuid.UUID]("exports.test")
+	cfg := queue.DefaultConfig()
+	cfg.PollInterval = 20 * time.Millisecond
+	cfg.MaxAttempts = 1
+	w := queue.NewWorker(queue.Database(e.db), cfg, slog.New(slog.DiscardHandler))
+	topic.Handle(w, func(ctx context.Context, id uuid.UUID) error {
+		return e.exports.Process(ctx, id, func(context.Context, *exports.Export, *exports.Writer) error {
+			return errors.New("always down")
+		}, rec.saved)
 	})
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- w.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-stopped
+	})
+	if err := topic.Publish(context.Background(), queue.Database(e.db), exp.ID); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got := e.get(t, exp.ID)
+		if got.Status == operation.StatusFailed {
+			if got.Error != "operation.failed" {
+				t.Fatalf("failed: %+v", got)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("export %+v did not fail", got)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if p := rec.progress(); !slices.Equal(p, []string{"running:0/0", "failed:0/0"}) {
+		t.Fatalf("saves: %v", p)
+	}
 }
 
 func TestStartGetCleanup(t *testing.T) {
-	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		e := newEnv(t, driver)
-		if _, err := e.exports.Start(ctx, e.db, alice, "articles.export", "xls"); !errors.Is(err, sheet.ErrFormat) {
-			t.Fatalf("format: %v", err)
-		}
-		old := e.start(t, sheet.CSV)
-		recent := e.start(t, sheet.CSV)
-		if _, err := e.exports.Get(ctx, bob, old.ID); !errors.Is(err, operation.ErrNotFound) {
-			t.Fatalf("other owner: %v", err)
-		}
-		other, err := e.ops.Start(ctx, e.db, alice, "articles.bulk_publish")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := e.exports.Get(ctx, alice, other.ID); !errors.Is(err, operation.ErrNotFound) {
-			t.Fatalf("not an export: %v", err)
-		}
-		if _, err := e.db.NewUpdate().Model((*operation.Operation)(nil)).Set("created_at = ?", time.Now().Add(-48*time.Hour).UTC()).
-			Where("id = ?", old.ID).Exec(ctx); err != nil {
-			t.Fatal(err)
-		}
-		n, err := e.ops.Cleanup(24*time.Hour)(ctx, 10)
-		if err != nil || n != 1 {
-			t.Fatalf("cleanup: %d %v", n, err)
-		}
-		if _, err := e.exports.Get(ctx, alice, old.ID); !errors.Is(err, operation.ErrNotFound) {
-			t.Fatalf("old: %v", err)
-		}
-		e.get(t, recent.ID)
-	})
+	ctx := context.Background()
+	e := newEnv(t)
+	if _, err := e.exports.Start(ctx, e.db, alice, "articles.export", "xls"); !errors.Is(err, sheet.ErrFormat) {
+		t.Fatalf("format: %v", err)
+	}
+	old := e.start(t, sheet.CSV)
+	recent := e.start(t, sheet.CSV)
+	if _, err := e.exports.Get(ctx, bob, old.ID); !errors.Is(err, operation.ErrNotFound) {
+		t.Fatalf("other owner: %v", err)
+	}
+	other, err := e.ops.Start(ctx, e.db, alice, "articles.bulk_publish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.exports.Get(ctx, alice, other.ID); !errors.Is(err, operation.ErrNotFound) {
+		t.Fatalf("not an export: %v", err)
+	}
+	if _, err := e.db.NewUpdate().Model((*operation.Operation)(nil)).Set("created_at = ?", time.Now().Add(-48*time.Hour).UTC()).
+		Where("id = ?", old.ID).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	n, err := e.ops.Cleanup(24*time.Hour)(ctx, 10)
+	if err != nil || n != 1 {
+		t.Fatalf("cleanup: %d %v", n, err)
+	}
+	if _, err := e.exports.Get(ctx, alice, old.ID); !errors.Is(err, operation.ErrNotFound) {
+		t.Fatalf("old: %v", err)
+	}
+	e.get(t, recent.ID)
 }
