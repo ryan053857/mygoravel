@@ -45,6 +45,11 @@ var blogFiles = []docFile{
 	{"internal/article/commands_test.go", "testing.md"},
 	{"internal/article/commands.go", "actions.md"},
 	{"internal/bootstrap/commands.go", "actions.md"},
+	{"internal/editor/editor.go", "account-examples.md"},
+	{"internal/reader/reader.go", "account-examples.md"},
+	{"internal/accounts/accounts.go", "account-examples.md"},
+	{"internal/editor/editorweb/routes.go", "account-examples.md"},
+	{"internal/reader/readerapi/routes.go", "account-examples.md"},
 }
 
 // blogFragments 是文档中没有 package 和 import 的片段，补上它们后作为文件编译。

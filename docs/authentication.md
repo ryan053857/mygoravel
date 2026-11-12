@@ -19,7 +19,7 @@
 
 JSON API 只使用 Bearer token，不使用会话。面向用户的一端，无论是网页、桌面客户端还是移动端，都调用 JSON API。服务端渲染的页面用于运营后台和内部管理后台，使用会话登录，见[页面登录](views.md#login)。两者产生的都是 `identity.Subject`，action 和[授权](authorization.md)规则不需要区分。
 
-本章讲每个请求如何确认调用者。用户如何用密码或验证码登录、注册和找回密码，见[登录与注册](login.md)。
+本章讲每个请求如何确认调用者。用户如何用密码或验证码登录、注册和找回密码，见[登录与注册](login.md)；运营后台和用户 App 两套账号的完整代码见[完整示例](account-examples.md)。
 
 mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API Key，也可以是由认证服务签发的 JWT——你只需要写一个函数，告诉框架这个 token 对应谁。
 

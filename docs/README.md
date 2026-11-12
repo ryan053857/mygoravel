@@ -81,6 +81,7 @@
 - [登录与注册](login.md)
 - [API 令牌](api-tokens.md)
 - [第三方登录](social-login.md)
+- [完整示例：编辑后台与读者 App](account-examples.md)
 - [多租户](tenancy.md)
 - [授权](authorization.md)
 - [哈希](hashing.md)
