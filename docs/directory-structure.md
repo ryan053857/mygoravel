@@ -151,7 +151,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 功能        apitoken  login  oauthserver  authz  notification  push  activity  feature  operation  webhook  search  vector  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  mcpx  command
 基础设施    database  queue  schedule  cachex  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  sms  pdf  outbound  sheet  document
-基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt
+基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt  acquire
 ```
 
 分层由[架构测试](contributions.md#architecture-tests)保证，新增的引用违反分层时测试会失败。下面由低到高列出每一层的包。
@@ -163,6 +163,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
+| `acquire` | 在 context 中传递请求等待共享资源（例如数据库连接）的时限 | [连接用满时](database.md#pool-exhaustion) |
 | `cleanup` | 按逆序关闭入口打开的资源 | [依赖装配](dependencies.md#closing-resources) |
 | `config` | 读取 YAML 配置、展开环境变量、校验 | [配置](configuration.md) |
 | `errorx` | 定义带稳定错误码和分类的业务错误 | [错误处理](errors.md) |

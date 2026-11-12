@@ -35,6 +35,7 @@ type rule struct {
 // rules 的键是相对模块根的包路径，规则对这个包和它的子包生效；子包另有规则时用子包的（最长的键优先）。
 // 同一条规则内的包可以互相引用。internal 中是测试辅助包，可以引用任何框架包。
 var rules = map[string]rule{
+	"acquire":   {layerFoundation, nil},
 	"cleanup":   {layerFoundation, nil},
 	"config":    {layerFoundation, nil},
 	"errorx":    {layerFoundation, nil},
@@ -51,7 +52,7 @@ var rules = map[string]rule{
 	"outbound":    {layerInfrastructure, nil},
 	"captcha":     {layerInfrastructure, []string{"errorx", "outbound"}},
 	"imgproxy":    {layerInfrastructure, nil},
-	"database":    {layerInfrastructure, []string{"errorx"}},
+	"database":    {layerInfrastructure, []string{"acquire", "errorx"}},
 	"ratelimit":   {layerInfrastructure, []string{"errorx"}},
 	"document":    {layerInfrastructure, []string{"errorx"}},
 	"pdf":         {layerInfrastructure, []string{"errorx"}},
@@ -68,7 +69,7 @@ var rules = map[string]rule{
 	"filesystem":         {layerInfrastructure, []string{"errorx", "identity"}},
 	"sheet":              {layerInfrastructure, []string{"errorx", "form"}},
 
-	"httpx":                {layerEntry, []string{"database", "errorx", "form", "i18n", "identity", "logging", "ratelimit"}},
+	"httpx":                {layerEntry, []string{"acquire", "errorx", "form", "i18n", "identity", "logging", "ratelimit"}},
 	"httpx/rest/clientgen": {layerEntry, []string{"command", "errorx", "httpx", "page"}},
 	"session":              {layerEntry, []string{"errorx", "identity"}},
 	"web":                  {layerEntry, []string{"errorx", "form", "httpx", "i18n", "identity", "logging", "session"}},

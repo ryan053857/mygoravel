@@ -88,7 +88,7 @@ func (c Config) Validate() error {
 // cfg.SlowQuery 大于 0 时记录慢查询；WithTelemetry 让每条语句报告指标和链路，并报告连接池的指标。
 //
 // 连接池是 pgxpool，返回的 *bun.DB 每次执行语句或开始事务时从它取一个连接，用完立即放回。
-// 取连接时等待的时长由 ctx 决定，WithAcquireTimeout 可以只给这一步设一个较短的时限。
+// 取连接时等待的时长由 ctx 决定，acquire.WithTimeout 可以只给这一步设一个较短的时限，超过时返回 ErrBusy。
 func Open(ctx context.Context, cfg Config, opts ...Option) (*bun.DB, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, errors.Wrap(err, "database")

@@ -75,13 +75,13 @@ if err != nil {
 <a id="pool-exhaustion"></a>
 ### 连接用满时
 
-连接都在使用中时，新的语句排队等待空闲连接。HTTP 请求不应该无限排队：过载时排队只会让所有请求一起变慢、一起超时。`database.WithAcquireTimeout` 给取连接这一步设一个时限，超过时返回 `database.ErrBusy`，响应为 `503` 并带 `Retry-After`，客户端稍后重试：
+连接都在使用中时，新的语句排队等待空闲连接。HTTP 请求不应该无限排队：过载时排队只会让所有请求一起变慢、一起超时。`acquire.WithTimeout` 给取连接这一步设一个时限，超过时返回 `database.ErrBusy`，响应为 `503` 并带 `Retry-After`，客户端稍后重试：
 
 ```go
-ctx = database.WithAcquireTimeout(ctx, time.Second)
+ctx = acquire.WithTimeout(ctx, time.Second)
 ```
 
-不需要自己调用：[默认中间件](middleware.md#default-middleware)为每个请求按 `http.db_acquire_timeout`（默认 1 秒）设置它。时限只作用于取连接，不影响语句本身的执行时间。队列任务和命令不设置它，排队等待连接是它们的正常情况。连接池的使用情况和超时次数见[指标](telemetry.md#database)。
+不需要自己调用：[默认中间件](middleware.md#default-middleware)为每个请求按 `http.acquire_timeout`（默认 1 秒）设置它。`acquire` 包只在 context 中传递“最多愿意等多久去拿一个共享资源”，数据库连接池读取它，HTTP 中间件不需要依赖数据库。时限只作用于取连接，不影响语句本身的执行时间。队列任务和命令不设置它，排队等待连接是它们的正常情况。连接池的使用情况和超时次数见[指标](telemetry.md#database)。
 
 <a id="connecting"></a>
 ## 连接数据库

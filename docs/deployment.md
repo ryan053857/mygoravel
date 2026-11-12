@@ -485,7 +485,7 @@ max_prepared_statements = 200   ; pgx 默认使用命名的预编译语句，需
 - **迁移**：goose 用会话级的 advisory lock 防止多个实例同时迁移。迁移命令的 `dbConfig` 取一个直连地址，例如配置中单独的 `migrate_database` 段。
 - **队列的复制连接**：设置 `queue.replication_dsn`，见[队列](#queue)。
 
-PgBouncer 的连接数不改变数据库的处理能力：`default_pool_size` 仍然要按数据库的 CPU 和磁盘设置。应用自己的连接池用满时，请求按 [`db_acquire_timeout`](database.md#pool-exhaustion) 快速失败；PgBouncer 到数据库的连接用满时，语句在 PgBouncer 中排队，不受这个时限约束，用 PgBouncer 的 `query_wait_timeout` 限制排队时间（例如 `5`，单位秒）。
+PgBouncer 的连接数不改变数据库的处理能力：`default_pool_size` 仍然要按数据库的 CPU 和磁盘设置。应用自己的连接池用满时，请求按 [`acquire_timeout`](database.md#pool-exhaustion) 快速失败；PgBouncer 到数据库的连接用满时，语句在 PgBouncer 中排队，不受这个时限约束，用 PgBouncer 的 `query_wait_timeout` 限制排队时间（例如 `5`，单位秒）。
 
 <a id="queue"></a>
 ## 队列

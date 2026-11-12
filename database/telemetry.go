@@ -76,7 +76,7 @@ func ReadOnly() Option {
 // 参数的值不会发往链路平台。
 //
 // 连接池报告 db.client.connection.count（属性 db.client.connection.state 为 idle 或 used）、db.client.connection.max、
-// db.client.connection.wait_time（直方图，秒）和 db.client.connection.timeouts（WithAcquireTimeout 超时的次数），
+// db.client.connection.wait_time（直方图，秒）和 db.client.connection.timeouts（取连接超过 acquire 时限的次数），
 // 都带有 db.client.connection.pool.name，见 Name。
 //
 // mp 或 tp 为 nil 时 panic；只需要其中一种时，另一个传 noop 实现。

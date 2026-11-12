@@ -105,7 +105,7 @@ db, err := database.Open(ctx, cfg.Database, database.WithTelemetry(tel.Meters, t
 | `db.client.connection.count` | 仪表 | `db.client.connection.state`（`idle`、`used`） |
 | `db.client.connection.max` | 仪表 | |
 | `db.client.connection.wait_time` | 直方图，秒 | 每次取连接的等待时长 |
-| `db.client.connection.timeouts` | 计数 | 超过 [`WithAcquireTimeout`](database.md#pool-exhaustion) 的时限、返回 `ErrBusy` 的次数 |
+| `db.client.connection.timeouts` | 计数 | 取连接超过 [`acquire` 的时限](database.md#pool-exhaustion)、返回 `ErrBusy` 的次数 |
 
 属性遵循 OpenTelemetry 的[数据库语义约定](https://opentelemetry.io/docs/specs/semconv/database/database-metrics/)。连接池的指标都带有 `db.client.connection.pool.name`，用 `database.Name` 设置，默认是 `primary`，区分同一个应用的主库、只读副本和其他数据库。`used` 长时间等于 `max`、`wait_time` 变长时，连接池已经成为瓶颈。`db.collection.name` 是 Bun 查询的表，`NewRaw` 写的原始 SQL 没有这个属性。出错时 `error.type` 是 PostgreSQL 的 SQLSTATE，例如唯一约束冲突是 `23505`、死锁是 `40P01`；超时和取消分别是 `timeout`、`canceled`。没有查到行（`sql.ErrNoRows`）不算出错。
 

@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/ryan053857/mygoravel/acquire"
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/errorx"
@@ -55,12 +56,12 @@ func hold(t *testing.T, db *bun.DB, n int) (release func()) {
 	return release
 }
 
-// 连接用满时，设置了 WithAcquireTimeout 的语句在时限后返回 ErrBusy；没有设置的等到有连接为止。
+// 连接用满时，设置了 acquire 时限的语句在时限后返回 ErrBusy；没有设置的等到有连接为止。
 func TestAcquireTimeout(t *testing.T) {
 	db, reader := openPool(t, 2)
 	release := hold(t, db, 2)
 
-	ctx := database.WithAcquireTimeout(context.Background(), 100*time.Millisecond)
+	ctx := acquire.WithTimeout(context.Background(), 100*time.Millisecond)
 	start := time.Now()
 	_, err := db.NewRaw("SELECT 1").Exec(ctx)
 	if !errors.Is(err, database.ErrBusy) || errorx.RetryAfterOf(err) != time.Second {

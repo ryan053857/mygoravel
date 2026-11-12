@@ -53,7 +53,7 @@ api := rest.New(rest.Options{Router: router})
 | `AccessLog(cfg.AccessLog, logger)` | 每个请求记录一条访问日志，见[访问日志](#access-log) |
 | `Recover(logger)` | 处理器 panic 时记录堆栈；若尚未写出响应则返回通用的 500 错误，若已开始写响应则中止连接 |
 | `BodyLimit(cfg.BodyLimit)` | 限制请求体大小，超出时返回 413 |
-| `DBAcquireTimeout(cfg.DBAcquireTimeout)` | 请求等待空闲数据库连接最多 `db_acquire_timeout`，连接池用满时返回 503 并带 `Retry-After`，见[连接用满时](database.md#pool-exhaustion) |
+| `AcquireTimeout(cfg.AcquireTimeout)` | 请求等待共享资源（例如空闲的数据库连接）最多 `acquire_timeout`，连接池用满时返回 503 并带 `Retry-After`，见[连接用满时](database.md#pool-exhaustion) |
 
 以下中间件是可选的，需要时在 `httpx.Defaults` 之后另行安装：
 
@@ -108,7 +108,7 @@ http:
 | `write_timeout` | 写响应的超时 | `30s` |
 | `idle_timeout` | keep-alive 连接的空闲超时 | `1m` |
 | `shutdown_timeout` | 停机时排空请求的上限 | `10s` |
-| `db_acquire_timeout` | 请求等待空闲数据库连接的最长时间；`0` 表示等到请求超时 | `1s` |
+| `acquire_timeout` | 请求等待共享资源（例如空闲的数据库连接）的最长时间；`0` 表示等到请求超时 | `1s` |
 
 中间件参数：
 
@@ -123,7 +123,7 @@ http:
 | `cors.*` | `CORS` | 见[跨域请求](#cors) | 允许任何来源，预检结果缓存 2 小时 |
 | `app_version.minimum` | `AppVersion` | 见[App 最低版本](#app-version) | 不限制 |
 
-没有写出的字段使用默认值。除 `db_acquire_timeout` 外，所有超时和数值都必须为正数，写 `0` 或负数会在加载配置时报错；不需要某个中间件时，不安装它即可。
+没有写出的字段使用默认值。除 `acquire_timeout` 外，所有超时和数值都必须为正数，写 `0` 或负数会在加载配置时报错；不需要某个中间件时，不安装它即可。
 
 把 `httpx.Config` 放进应用的根配置结构体（`config.Load` 会自动填充默认值并校验），再把它交给 `httpx.Defaults` 和 `httpx.Serve`：
 

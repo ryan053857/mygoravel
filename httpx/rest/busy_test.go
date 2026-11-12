@@ -18,7 +18,7 @@ import (
 	"github.com/ryan053857/mygoravel/httpx/rest"
 )
 
-// 数据库连接用满时，请求在 http.db_acquire_timeout 之后以 503 和 Retry-After 快速失败。
+// 数据库连接用满时，请求在 http.acquire_timeout 之后以 503 和 Retry-After 快速失败。
 func TestBusyDatabase(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Open(ctx, database.Config{DSN: dbtest.URL(t), MaxConns: 1})
@@ -28,7 +28,7 @@ func TestBusyDatabase(t *testing.T) {
 	defer db.Close()
 
 	cfg := httpx.DefaultConfig()
-	cfg.DBAcquireTimeout = 200 * time.Millisecond
+	cfg.AcquireTimeout = 200 * time.Millisecond
 	api := rest.New(rest.Options{Title: "busy"})
 	rest.Register(api, huma.Operation{Security: []map[string][]string{}, OperationID: "ping", Method: http.MethodGet, Path: "/ping"},
 		func(ctx context.Context, _ *pingIn) (*pingOut, error) {
