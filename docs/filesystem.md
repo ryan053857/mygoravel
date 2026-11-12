@@ -447,13 +447,50 @@ err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) 
 <a id="thumbnails"></a>
 ### 图片缩略图
 
-文件都有公开地址，缩略图最简单的做法是交给图片处理服务：在 `public_url` 前面放 [imgproxy](https://imgproxy.net) 或 CDN 自带的图片处理，用 URL 参数指定尺寸和格式，不需要保存额外的文件。例如 imgproxy 的地址：
+框架不生成也不保存缩略图。文件都有公开地址，缩略图交给 [imgproxy](https://imgproxy.net)：`imgproxy` 包把文件地址和尺寸拼成一个签名的 URL，imgproxy 收到请求时下载原图，缩放后返回，结果由 CDN 缓存。
 
-```text
-https://img.example.com/<签名>/rs:fill:300:200/plain/https://cdn.example.com/2026/11/10/0193a3c2-....jpg
+```yaml
+# config/app.yaml
+imgproxy:
+  url: ${IMGPROXY_URL:-}
+  key: ${IMGPROXY_KEY:-}
+  salt: ${IMGPROXY_SALT:-}
 ```
 
-地址由应用在返回数据时拼出。请开启 imgproxy 的 URL 签名，避免它被用来处理任意图片。
+把 `imgproxy.Config` 放进根配置结构体（`yaml:"imgproxy"`），在入口创建，`New` 不访问网络：
+
+```go
+images, err := imgproxy.New(cfg.Imgproxy)
+```
+
+尺寸在代码中声明为变量，返回数据时生成地址：
+
+```go
+var coverThumb = imgproxy.Options{Width: 600, Height: 400, Resize: imgproxy.Fill, Format: "webp"}
+
+out.CoverURL = cover.URL
+out.CoverThumbURL = images.URL(cover.URL, coverThumb)
+```
+
+- `Resize` 默认是 `imgproxy.Fit`，保持比例缩到宽高以内；`imgproxy.Fill` 裁掉多余部分，结果正好是给定尺寸。宽或高为 0 时按另一边等比计算。图片比目标尺寸小时不放大。
+- `Format` 是输出格式，例如 `webp`、`avif`，为空时保持原格式。
+- `url` 为空时 `URL` 原样返回原图地址，开发环境不需要启动 imgproxy。
+- `key` 和 `salt` 是十六进制的签名密钥和盐，与 imgproxy 的 `IMGPROXY_KEY`、`IMGPROXY_SALT` 相同，可以用 `openssl rand -hex 32` 生成。不填时生成不签名的地址，任何人都能让你的 imgproxy 处理任意图片，生产环境必须填写。
+
+imgproxy 按地址下载原图。S3 磁盘的公开地址是绝对 URL，可以直接使用；本地磁盘的 `public_url` 是 `/storage` 这样的路径时，用 `IMGPROXY_BASE_URL` 设置应用的地址，imgproxy 会把它拼在相对地址前面：
+
+```yaml
+# compose.yaml
+services:
+  imgproxy:
+    image: ghcr.io/imgproxy/imgproxy:v3
+    environment:
+      IMGPROXY_KEY: ${IMGPROXY_KEY}
+      IMGPROXY_SALT: ${IMGPROXY_SALT}
+      IMGPROXY_BASE_URL: http://app:8080
+```
+
+需要把缩略图保存为文件时（例如视频封面），按[确认后异步处理](#processing-files)生成新文件。
 
 <a id="pages"></a>
 ## 在页面中上传

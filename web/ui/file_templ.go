@@ -182,7 +182,7 @@ func FileField(f Form, name, label string, p FileFieldProps) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			for _, fi := range fileItems(f, name, p.Files) {
-				templ_7745c5c3_Err = fileItem(name, fi).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = fileItem(name, fi, p.Preview).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -191,7 +191,7 @@ func FileField(f Form, name, label string, p FileFieldProps) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = fileItem(name, FileInfo{}).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = fileItem(name, FileInfo{}, nil).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -280,7 +280,7 @@ func FileField(f Form, name, label string, p FileFieldProps) templ.Component {
 	})
 }
 
-func fileItem(name string, fi FileInfo) templ.Component {
+func fileItem(name string, fi FileInfo, preview func(string) string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -333,9 +333,9 @@ func fileItem(name string, fi FileInfo) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var18 string
-			templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fi.URL).ResolveURL(ctx)
+			templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression(previewURL(fi, preview)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `file.templ`, Line: 70, Col: 15}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `file.templ`, Line: 70, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 			if templ_7745c5c3_Err != nil {

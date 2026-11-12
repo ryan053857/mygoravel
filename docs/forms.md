@@ -191,6 +191,7 @@ type Changes struct {
 - `Accept` 只用于筛选文件选择框，`MaxSize` 让超过大小的文件在浏览器中直接提示。文件的真实类型和大小由确认时的 `Accept` 检查。
 - `Multiple` 允许选择多个文件，字段对应字符串切片。
 - 博客的表单是 htmx 表单，验证失败重新渲染时，字段保留浏览器中已上传的文件。编辑页要显示已有的封面，或者整页表单验证失败后要显示已上传的文件时，用 `Files` 传入文件信息：`upload.Files(ctx, files, f.Values("cover_id")...)`。
+- 编辑页显示已保存的图片时默认加载原图。`Preview` 把地址转换为缩略图地址，例如 `Preview: func(u string) string { return images.URL(u, imgproxy.Options{Width: 80, Height: 80, Resize: imgproxy.Fill}) }`，见[图片缩略图](filesystem.md#thumbnails)。刚选择的文件在浏览器本地预览，不经过它。
 
 保存时，`Update` action 在事务中确认封面，见[确认文件](filesystem.md#confirming-files)。确认失败（例如不是图片）时把错误放到字段旁：
 

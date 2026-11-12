@@ -40,11 +40,11 @@ templ FileField(f Form, name, label string, p FileFieldProps) {
 		>
 			<ul class="flex flex-col gap-2 empty:hidden" data-web-ui-file-list>
 				for _, fi := range fileItems(f, name, p.Files) {
-					@fileItem(name, fi)
+					@fileItem(name, fi, p.Preview)
 				}
 			</ul>
 			<template data-web-ui-file-template>
-				@fileItem(name, FileInfo{})
+				@fileItem(name, FileInfo{}, nil)
 			</template>
 			@input.Input(input.Props{ID: id + "-input", Type: "file", Attributes: merge(merge(invalid("aria-invalid", msg), templ.Attributes{"accept": p.Accept}), multipleAttr(p.Multiple))})
 		</div>
@@ -63,11 +63,11 @@ templ FileField(f Form, name, label string, p FileFieldProps) {
 	}
 }
 
-templ fileItem(name string, fi FileInfo) {
+templ fileItem(name string, fi FileInfo, preview func(string) string) {
 	<li class="flex items-center gap-3 rounded-lg border p-2 text-sm" data-web-ui-file-item>
 		<input type="hidden" name={ name } value={ fi.ID }/>
 		<img class="size-10 shrink-0 rounded-md object-cover" alt="" data-preview if isImage(fi) {
-			src={ fi.URL }
+			src={ previewURL(fi, preview) }
 		} else {
 			hidden
 		}/>

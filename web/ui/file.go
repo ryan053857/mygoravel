@@ -31,6 +31,9 @@ type FileFieldProps struct {
 	// Files 是要显示的文件：编辑页已保存的文件，或整页表单验证失败后已上传的文件，见 upload.Files。
 	// htmx 表单验证失败重新渲染时，字段保留浏览器中已上传的文件，不需要传入。
 	Files []FileInfo
+	// Preview 把 Files 中图片的地址转换为预览图的地址，例如缩到 80×80 的 imgproxy 地址，
+	// 避免编辑页加载原图；为空时显示原图。刚选择的文件在浏览器本地预览，不经过它。
+	Preview func(url string) string
 	// ID 是字段的 id，默认等于字段名。
 	ID          string
 	Description string
@@ -59,6 +62,14 @@ func fileItems(f Form, name string, files []FileInfo) []FileInfo {
 }
 
 func isImage(fi FileInfo) bool { return strings.HasPrefix(fi.ContentType, "image/") && fi.URL != "" }
+
+// previewURL 返回图片预览的地址：设置了 preview 时用它转换，否则是原图地址。
+func previewURL(fi FileInfo, preview func(string) string) string {
+	if preview == nil {
+		return fi.URL
+	}
+	return preview(fi.URL)
+}
 
 // humanSize 把字节数格式化为 1.5 MB 这样的文字。
 func humanSize(n int64) string {

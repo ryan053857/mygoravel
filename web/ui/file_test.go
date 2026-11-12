@@ -35,6 +35,14 @@ func TestFileFieldWithFiles(t *testing.T) {
 	}
 }
 
+// Preview 只改变预览图的地址，文件名仍然链接到原图。
+func TestFileFieldPreview(t *testing.T) {
+	f := web.NewForm(coverForm{CoverID: cover.ID})
+	thumb := func(u string) string { return "https://img.example.com/thumb?src=" + u }
+	html := render(t, ui.FileField(f, "cover_id", "Cover", ui.FileFieldProps{Upload: "/uploads", Files: []ui.FileInfo{cover}, Preview: thumb}))
+	contains(t, html, `src="https://img.example.com/thumb?src=https://cdn.example.com/a.png"`, `href="https://cdn.example.com/a.png"`)
+}
+
 // 用户移除了文件：表单值中没有它，即使 Files 中有也不显示；验证错误显示在字段下方。
 func TestFileFieldRemovedAndInvalid(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", strings.NewReader(url.Values{"cover_id": {""}}.Encode()))

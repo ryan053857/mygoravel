@@ -148,7 +148,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 ```text
 功能        apitoken  authz  notification  activity  feature  operation  webhook  search  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  command
-基础设施    database  queue  schedule  lock  ratelimit  broadcast  filesystem  mail  pdf  outbound  sheet  document
+基础设施    database  queue  schedule  lock  ratelimit  broadcast  filesystem  imgproxy  mail  pdf  outbound  sheet  document
 基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt
 ```
 
@@ -202,6 +202,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端，`broadcast/broadcasttest` 是测试用的内存后端与后端的契约测试 | [广播](broadcasting.md) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |
 | `filesystem/local`、`filesystem/s3` | 本地与 S3 磁盘 | [文件存储与上传](filesystem.md#disks) |
+| `imgproxy` | 生成签名的 imgproxy 地址，按需缩放图片，不保存缩略图 | [图片缩略图](filesystem.md#thumbnails) |
 | `sheet` | 读写 CSV 和 Excel（XLSX）表格，按结构体解码并验证导入的每一行 | [导入与导出](import-export.md) |
 
 <a id="entry"></a>

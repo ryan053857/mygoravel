@@ -49,6 +49,7 @@ var rules = map[string]rule{
 
 	"lock":       {layerInfrastructure, nil},
 	"outbound":   {layerInfrastructure, nil},
+	"imgproxy":   {layerInfrastructure, nil},
 	"database":   {layerInfrastructure, []string{"errorx"}},
 	"ratelimit":  {layerInfrastructure, []string{"errorx"}},
 	"document":   {layerInfrastructure, []string{"errorx"}},
