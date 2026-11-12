@@ -5,15 +5,6 @@ import (
 	"time"
 
 	"github.com/adhocore/gronx"
-	"github.com/cockroachdb/errors"
-)
-
-var (
-	// ErrUnknownTask 表示调度器中没有这个名称的任务。
-	ErrUnknownTask = errors.New("schedule: unknown task")
-	// ErrNotTracked 表示无法跨实例判断任务是否正在执行：使用 EveryInstance 或 AllowOverlap 的任务
-	// 不在锁存储中登记执行状态。
-	ErrNotTracked = errors.New("schedule: task running state is not tracked")
 )
 
 // Describe 为任务添加一句说明，供 Tasks 列出，例如在后台页面和命令中展示。
@@ -58,25 +49,27 @@ func (s *Scheduler) Tasks() []Task {
 	return out
 }
 
-// Running 报告任务此刻是否正在执行，在任何一个实例上都算。它查询锁存储中任务执行期间持有的锁，
+// Running 报告各任务此刻是否正在执行，在任何一个实例上都算。它查询锁存储中任务执行期间持有的锁，
 // 所以可以在没有运行调度器的进程中调用，结果的范围取决于锁存储：多实例部署需要共用数据库或 Redis 存储。
-// 任务不存在时返回 ErrUnknownTask；使用 EveryInstance 或 AllowOverlap 的任务返回 ErrNotTracked。
-func (s *Scheduler) Running(ctx context.Context, name string) (bool, error) {
+// 使用 EveryInstance 或 AllowOverlap 的任务不在锁存储中登记执行状态，不出现在结果中。
+func (s *Scheduler) Running(ctx context.Context) (map[string]bool, error) {
 	s.mu.Lock()
-	var found *task
+	var names []string
 	for _, t := range s.tasks {
-		if t.name == name {
-			found = t
+		if !t.everyInstance && !t.allowOverlap {
+			names = append(names, t.name)
 		}
 	}
 	s.mu.Unlock()
-	switch {
-	case found == nil:
-		return false, errors.Wrapf(ErrUnknownTask, "%q", name)
-	case found.everyInstance || found.allowOverlap:
-		return false, errors.Wrapf(ErrNotTracked, "%q", name)
+	running := make(map[string]bool, len(names))
+	for _, name := range names {
+		held, err := s.locker.Held(ctx, runningKey(name))
+		if err != nil {
+			return nil, err
+		}
+		running[name] = held
 	}
-	return s.locker.Held(ctx, runningKey(name))
+	return running, nil
 }
 
 // runningKey 是任务执行期间持有的锁。

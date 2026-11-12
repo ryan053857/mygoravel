@@ -46,6 +46,8 @@ type Event struct {
 	Kind   EventKind
 	Driver string
 	Job    Job
+	// Started 是任务交给处理函数的时间。
+	Started time.Time
 	// Duration 是从交给处理函数到结束的时间；JobStarted 为 0。
 	Duration time.Duration
 	// Err 是 JobRetrying 和 JobFailed 的原因。

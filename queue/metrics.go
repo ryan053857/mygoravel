@@ -51,21 +51,20 @@ func (m jobMetrics) record(ctx context.Context, e Event) {
 // statsMaxAge 是 ObserveJobs 复用上一次读取结果的时间：多个采集器或频繁的采集不会反复扫描队列。
 var statsMaxAge = 5 * time.Second
 
-// ObserveJobs 把队列中的任务数注册为 OpenTelemetry 指标，在采集时读取 d.Stats 和 failed.Count，
+// ObserveJobs 把队列中的任务数注册为 OpenTelemetry 指标，在采集时读取 Stats，
 // 属性 messaging.system（驱动名）和 messaging.destination.name（topic）：
 //
-//   - queue.jobs（gauge）：各状态的任务数，属性 queue.job.state 是 State 的取值。驱动给不出的状态不报告；
-//     failed 为 nil 时不报告 failed。
+//   - queue.jobs（gauge）：各状态的任务数，属性 queue.job.state 是 State 的取值。驱动给不出的状态不报告。
 //   - queue.job.oldest_ready_age（gauge，秒）：积压最久的任务已经等了多久，没有积压时为 0。
 //     worker 跟不上时它会持续变大，适合作为告警条件。驱动给不出时不报告。
 //
 // 每次读取都统计整个队列（数据库驱动按 topic 分组统计 queue_jobs 表），每个实例读到的也都是同一份全局数据：
 // 只在实例最少的一种进程中注册，例如调度器；汇总多个实例时取最大值而不是求和。
 // 出现过的 topic 在任务清空后报告 0，而不是消失。5 秒内的多次采集复用同一次读取。
-// 在关闭 d 用到的连接之前调用返回值的 Unregister，之后的采集不再读取。mp 或 d 为 nil 时 panic。
+// 在关闭 d 用到的连接之前调用返回值的 Unregister，之后的采集不再读取。mp、d 或 failed 为 nil 时 panic。
 func ObserveJobs(mp metric.MeterProvider, d Driver, failed *FailedJobs) metric.Registration {
-	if mp == nil || d == nil {
-		panic("queue: nil meter provider or driver")
+	if mp == nil || d == nil || failed == nil {
+		panic("queue: nil meter provider, driver or failed jobs")
 	}
 	meter := mp.Meter(scopeName)
 	jobs, err := meter.Int64ObservableGauge("queue.jobs", metric.WithUnit("{job}"),
@@ -127,43 +126,22 @@ func (s *jobsSnapshot) observe(ctx context.Context, o metric.Observer, jobs metr
 	return nil
 }
 
-// read 读取驱动和失败任务表，结果并入 s.stats 和 s.seen。
+// read 读取 Stats，结果并入 s.stats 和 s.seen。
 func (s *jobsSnapshot) read(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	stats, err := s.driver.Stats(ctx)
+	stats, err := Stats(ctx, s.driver, s.failed)
 	if err != nil {
 		return err
 	}
 	byTopic := make(map[string]TopicStats, len(stats))
 	for _, st := range stats {
 		byTopic[st.Topic] = st
-	}
-	if s.failed != nil {
-		counts, err := s.failed.Count(ctx)
-		if err != nil {
-			return err
-		}
-		for topic, n := range counts {
-			st := byTopic[topic]
-			jobs := make(map[State]int, len(st.Jobs)+1)
-			for k, v := range st.Jobs {
-				jobs[k] = v
-			}
-			jobs[StateFailed] = n
-			st.Topic, st.Jobs = topic, jobs
-			byTopic[topic] = st
-		}
-	}
-	for topic, st := range byTopic {
-		if s.seen[topic] == nil {
-			s.seen[topic] = map[State]bool{}
-			if s.failed != nil { // 失败任务清空后 Count 不再返回这个 topic，仍要报告 0
-				s.seen[topic][StateFailed] = true
-			}
+		if s.seen[st.Topic] == nil {
+			s.seen[st.Topic] = map[State]bool{}
 		}
 		for state := range st.Jobs {
-			s.seen[topic][state] = true
+			s.seen[st.Topic][state] = true
 		}
 	}
 	s.stats, s.readAt = byTopic, time.Now()

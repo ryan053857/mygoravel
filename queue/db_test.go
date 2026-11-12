@@ -233,9 +233,10 @@ func TestFailedJobsQueries(t *testing.T) {
 		if err != nil || len(mail) != 1 || mail[0].ID != ids[0] {
 			t.Fatalf("mail page %+v err %v", mail, err)
 		}
-		counts, err := failed.Count(ctx)
-		if err != nil || counts["mail"] != 2 || counts["report"] != 1 || len(counts) != 2 {
-			t.Fatalf("counts %v err %v", counts, err)
+		stats, err := queue.Stats(ctx, queue.Database(db), failed)
+		if err != nil || len(stats) != 2 || stats[0].Topic != "mail" || stats[0].Jobs[queue.StateFailed] != 2 ||
+			stats[0].Jobs[queue.StateReady] != 0 || stats[1].Topic != "report" || stats[1].Jobs[queue.StateFailed] != 1 {
+			t.Fatalf("stats %+v err %v", stats, err)
 		}
 
 		if j, err := failed.Get(ctx, ids[1]); err != nil || j.ID != ids[1] || j.Topic != "mail" {
@@ -305,9 +306,11 @@ func TestFailedJobsBulk(t *testing.T) {
 		if len(queued) != 3 || queued[0].Topic != "mail" || queued[0].Attempts != 0 {
 			t.Fatalf("queued %+v", queued)
 		}
-		counts, err := failed.Count(ctx)
-		if err != nil || counts["mail"] != 2 || counts["report"] != 1 {
-			t.Fatalf("counts %v err %v", counts, err)
+		// 只统计数据库驱动转入的失败任务：redis 的那条不计入。
+		stats, err := queue.Stats(ctx, queue.Database(db), failed)
+		if err != nil || len(stats) != 2 || stats[0].Topic != "mail" || stats[0].Jobs[queue.StateFailed] != 1 ||
+			stats[0].Jobs[queue.StateReady] != 3 || stats[1].Topic != "report" || stats[1].Jobs[queue.StateFailed] != 1 {
+			t.Fatalf("stats %+v err %v", stats, err)
 		}
 
 		// 全部 topic：删除 before 之前的，before 之后失败的保留。

@@ -229,8 +229,8 @@ func (w *Worker) process(c Claim, l *loop) {
 	j := c.Job()
 	ctx, cancel := context.WithCancelCause(w.jobContext(j, l.maxAttempts))
 	defer cancel(nil)
-	w.observe(ctx, Event{Kind: JobStarted, Job: j})
 	started := time.Now()
+	w.observe(ctx, Event{Kind: JobStarted, Job: j, Started: started})
 	result := make(chan error, 1)
 	go func() { result <- call(ctx, l.fn, j.Payload) }()
 
@@ -257,14 +257,14 @@ func (w *Worker) process(c Claim, l *loop) {
 			case errors.Is(err, ErrLeaseLost):
 				held = false
 				w.logger.WarnContext(ctx, "job lease lost", "topic", j.Topic)
-				w.observe(ctx, Event{Kind: JobLeaseLost, Job: j, Duration: time.Since(started)})
+				w.observe(ctx, Event{Kind: JobLeaseLost, Job: j, Started: started, Duration: time.Since(started)})
 				cancel(ErrLeaseLost)
 			case err != nil:
 				w.logger.ErrorContext(ctx, "extend lease failed", "topic", j.Topic, "error", err)
 			}
 		case <-l.abandon:
 			if held && w.release(c) {
-				w.observe(ctx, Event{Kind: JobReleased, Job: j, Duration: time.Since(started)})
+				w.observe(ctx, Event{Kind: JobReleased, Job: j, Started: started, Duration: time.Since(started)})
 			}
 			cancel(ErrShuttingDown)
 			return
@@ -305,10 +305,10 @@ func (w *Worker) ack(ctx context.Context, c Claim, started time.Time) {
 	err := withTimeout(c.Ack)
 	switch {
 	case err == nil:
-		w.observe(ctx, Event{Kind: JobSucceeded, Job: c.Job(), Duration: time.Since(started)})
+		w.observe(ctx, Event{Kind: JobSucceeded, Job: c.Job(), Started: started, Duration: time.Since(started)})
 	case errors.Is(err, ErrLeaseLost):
 		w.logger.WarnContext(ctx, "job lease lost before acknowledgement", "topic", c.Job().Topic)
-		w.observe(ctx, Event{Kind: JobLeaseLost, Job: c.Job(), Duration: time.Since(started)})
+		w.observe(ctx, Event{Kind: JobLeaseLost, Job: c.Job(), Started: started, Duration: time.Since(started)})
 	default:
 		w.logger.ErrorContext(ctx, "acknowledge finished job failed", "topic", c.Job().Topic, "error", err)
 	}
@@ -325,7 +325,7 @@ func (w *Worker) nack(ctx context.Context, c Claim, cause error, maxAttempts int
 			return
 		}
 		w.logger.WarnContext(ctx, "job failed, will retry", "topic", j.Topic, "retry_in", delay, "error", cause)
-		w.observe(ctx, Event{Kind: JobRetrying, Job: j, Duration: time.Since(started), Err: cause, RetryAt: at})
+		w.observe(ctx, Event{Kind: JobRetrying, Job: j, Started: started, Duration: time.Since(started), Err: cause, RetryAt: at})
 		return
 	}
 	if err := withTimeout(func(ctx context.Context) error { return w.fail(ctx, c, cause) }); err != nil {
@@ -333,7 +333,7 @@ func (w *Worker) nack(ctx context.Context, c Claim, cause error, maxAttempts int
 		return
 	}
 	w.logger.ErrorContext(ctx, "job failed", "topic", j.Topic, "error", cause)
-	w.observe(ctx, Event{Kind: JobFailed, Job: j, Duration: time.Since(started), Err: cause})
+	w.observe(ctx, Event{Kind: JobFailed, Job: j, Started: started, Duration: time.Since(started), Err: cause})
 }
 
 // failer 由能在一个事务中删除任务并写入失败记录的领取实现（数据库驱动）。

@@ -67,7 +67,7 @@ sched.Add("reports:daily", "0 3 * * *", reports.Generate, schedule.In(shanghai))
 <a id="running-the-scheduler"></a>
 ## 运行调度器
 
-调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[数据库锁](locks.md#database-store)。注册任务单独写在 `tasks` 中，调度器运行它，[查看任务](#listing-tasks)的命令和后台页面也用它，任务只定义一次：
+调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[数据库锁](locks.md#database-store)。注册任务单独写在 `tasks` 中，调度器运行它，[查看任务](#listing-tasks)的命令和后台页面也用它，任务只定义一次。指标和链路的选项也在这里设置，查看任务时不执行任务，它们不起作用：
 
 ```go
 package bootstrap
@@ -80,28 +80,27 @@ import (
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/lock"
-    "github.com/ryan053857/mygoravel/queue"
     "github.com/ryan053857/mygoravel/schedule"
     "github.com/ryan053857/mygoravel/session"
 )
 
 // tasks 创建调度器并注册全部定时任务。
-func (a *App) tasks(opts ...schedule.SchedulerOption) *schedule.Scheduler {
-    sched := schedule.New(a.locker, a.cfg.Schedule, nil, opts...)
+func (a *App) tasks() *schedule.Scheduler {
+    sched := schedule.New(a.locker, a.cfg.Schedule, nil, schedule.WithTelemetry(a.meters, a.tracers))
     sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(a.db).Handle,
         schedule.Describe("发布到了预定时间的文章"))
     sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000),
         schedule.Describe("删除过期的会话"))
     sched.Add("locks:cleanup", "@hourly", schedule.Cleanup(lock.NewDatabase(a.db).Cleanup, 1000),
         schedule.Describe("删除过期的锁"))
-    sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(queue.NewFailedJobs(a.db).Cleanup(30*24*time.Hour), 1000),
+    sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(a.failed.Cleanup(30*24*time.Hour), 1000),
         schedule.Describe("删除 30 天前的失败任务"))
     return sched
 }
 
 // Scheduler 装配调度器，返回的函数按时执行定时任务，直到 ctx 被取消。
 func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
-    return a.tasks(schedule.WithTelemetry(a.meters, a.tracers)).Run, nil
+    return a.tasks().Run, nil
 }
 
 // Schedule 只运行调度器，schedule 命令调用它。
@@ -155,7 +154,7 @@ sched.Add("reports:daily", "0 3 * * *", reports.Generate, schedule.Timeout(30*ti
 
 ```go
 sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
-    return report.Generate.Publish(ctx, queue.Database(a.db), time.Now().AddDate(0, 0, -1)) // queue.Topic[time.Time]
+    return report.Generate.Publish(ctx, a.queue, time.Now().AddDate(0, 0, -1)) // queue.Topic[time.Time]
 })
 ```
 
@@ -192,81 +191,47 @@ for _, t := range a.tasks().Tasks() {
 
 `Next` 和 `Prev` 按表达式计算，结果与调度器实际触发的时刻一致；`@every` 按 Unix 时间对齐，与调度器何时启动无关。
 
-`Running` 报告任务此刻是否正在执行，在任何一个实例上都算。它查询任务执行期间持有的锁 `schedule:<任务名>:running`，所以同样不需要运行调度器，但要和调度器共用锁存储：
+`Running` 报告每个任务此刻是否正在执行，在任何一个实例上都算。它查询任务执行期间持有的锁 `schedule:<任务名>:running`，所以同样不需要运行调度器，但要和调度器共用锁存储：
 
 ```go
-running, err := sched.Running(ctx, "reports:daily")
+running, err := sched.Running(ctx) // 任务名 → 是否正在执行
+running["reports:daily"]
 ```
 
-使用 `EveryInstance` 或 `AllowOverlap` 的任务不在锁存储中登记执行状态，`Running` 返回 `schedule.ErrNotTracked`。
+使用 `EveryInstance` 或 `AllowOverlap` 的任务不在锁存储中登记执行状态，不出现在结果中。
 
 <a id="schedules-command"></a>
 ### 列出任务的命令
 
-下面是博客应用的 `internal/bootstrap/schedules.go`，它在 [bootstrap.Commands](actions.md#as-commands) 中声明，执行 `./bin/api schedules`：
+`schedulecmd.New` 返回 `schedules` 命令，列出全部任务。它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明，传入的是注册任务的方法 `a.tasks`：声明命令时 `App` 还没有装配，执行时才调用它：
 
 ```go
-package bootstrap
-
-import (
-    "errors"
-    "fmt"
-    "text/tabwriter"
-    "time"
-
-    "github.com/spf13/cobra"
-
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/schedule"
-)
-
-// schedulesCmd 列出定时任务、下一次执行的时间和是否正在执行。
-func schedulesCmd(a *App) *cobra.Command {
-    return &cobra.Command{
-        Use:   "schedules",
-        Short: "列出定时任务",
-        Args:  command.NoArgs,
-        RunE: func(cmd *cobra.Command, _ []string) error {
-            sched, now := a.tasks(), time.Now()
-            w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-            fmt.Fprintln(w, "TASK\tEXPRESSION\tNEXT RUN\tIN\tRUNNING\tDESCRIPTION")
-            for _, t := range sched.Tasks() {
-                running, err := sched.Running(cmd.Context(), t.Name)
-                state := "no"
-                switch {
-                case errors.Is(err, schedule.ErrNotTracked):
-                    state = "-"
-                case err != nil:
-                    return err
-                case running:
-                    state = "yes"
-                }
-                next := t.Next(now)
-                fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", t.Name, t.Expr, next.Format("2006-01-02 15:04:05"),
-                    next.Sub(now).Round(time.Second), state, t.Description)
-            }
-            return w.Flush()
-        },
-    }
-}
+schedulecmd.New(a.tasks),
 ```
+
+执行 `./bin/api schedules`：
 
 ```text
-TASK                        EXPRESSION    NEXT RUN             IN      RUNNING  DESCRIPTION
-articles:publish-scheduled  * * * * *     2026-11-11 17:01:00  42s     no       发布到了预定时间的文章
-sessions:cleanup            */10 * * * *  2026-11-11 17:10:00  9m42s   no       删除过期的会话
-locks:cleanup               @hourly       2026-11-11 18:00:00  59m42s  no       删除过期的锁
-queue:prune-failed          @daily        2026-11-12 00:00:00  6h59m   no       删除 30 天前的失败任务
+TASK                        EXPRESSION    NEXT RUN             IN        RUNNING  DESCRIPTION
+articles:publish-scheduled  * * * * *     2026-11-11 17:01:00  42s       no       发布到了预定时间的文章
+sessions:cleanup            */10 * * * *  2026-11-11 17:10:00  9m42s     no       删除过期的会话
+locks:cleanup               @hourly       2026-11-11 18:00:00  59m42s    yes      删除过期的锁
+queue:prune-failed          @daily        2026-11-12 00:00:00  6h59m42s  no       删除 30 天前的失败任务
 ```
+
+`RUNNING` 是任务此刻是否在任何一个实例上执行；使用 `EveryInstance` 或 `AllowOverlap` 的任务不登记执行状态，显示为 `-`。
 
 <a id="run-history"></a>
 ### 执行记录
 
-上一次什么时候执行、结果如何，是运行时的数据：部署多个实例时，每次触发在哪个实例上执行并不确定。`schedule.WithObserver` 在每次执行时通知你，把它写进数据库，所有进程就都能看到：
+上一次什么时候执行、结果如何，是运行时的数据：部署多个实例时，每次触发在哪个实例上执行并不确定。`schedule.WithObserver` 在每次执行时通知你，把它写进数据库，所有进程就都能看到。它和 `WithTelemetry` 一样加在 `tasks` 中，只有运行调度器时才会发出事件：
 
 ```go
-func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
-    return a.tasks(schedule.WithTelemetry(a.meters, a.tracers), schedule.WithObserver(a.recordRun)).Run, nil
+func (a *App) tasks() *schedule.Scheduler {
+    sched := schedule.New(a.locker, a.cfg.Schedule, nil,
+        schedule.WithTelemetry(a.meters, a.tracers), schedule.WithObserver(a.recordRun))
+    // ... 注册任务
+    return sched
 }
 
 func (a *App) recordRun(ctx context.Context, e schedule.Event) {
@@ -300,7 +265,10 @@ func (a *App) recordRun(ctx context.Context, e schedule.Event) {
 后台页面由 HTTP 进程提供，它同样调用 `a.tasks()` 拿到任务的定义，再查询执行记录：
 
 ```go
-for _, t := range a.tasks().Tasks() {
+sched := a.tasks()
+running, err := sched.Running(ctx)
+// ...
+for _, t := range sched.Tasks() {
     var last ScheduleRun
     err := a.db.NewSelect().Model(&last).Where("task = ?", t.Name).OrderExpr("tick DESC").Limit(1).Scan(ctx)
     // ... 没有记录时 err 是 sql.ErrNoRows
@@ -308,8 +276,7 @@ for _, t := range a.tasks().Tasks() {
     // 应当执行的时间过去了一分钟，却没有这次的记录，也没有正在执行：这次触发丢了，
     // 例如调度器停止或部署期间。
     prev := t.Prev(time.Now())
-    running, _ := sched.Running(ctx, t.Name)
-    missed := prev.After(last.Tick) && time.Since(prev) > time.Minute && !running
+    missed := prev.After(last.Tick) && time.Since(prev) > time.Minute && !running[t.Name]
 }
 ```
 
@@ -325,7 +292,7 @@ for _, t := range a.tasks().Tasks() {
 var PublishScheduledJob = queue.Topic[struct{}]("articles.publish-scheduled")
 
 // 后台页面：
-err := article.PublishScheduledJob.Publish(ctx, queue.Database(a.db), struct{}{})
+err := article.PublishScheduledJob.Publish(ctx, a.queue, struct{}{})
 
 // Worker 中：
 article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) error {

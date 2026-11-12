@@ -17,6 +17,9 @@ import (
 // 执行其中一个命令时，Bind 加载配置，调用 open 装配依赖，用装配好的 *D 再调用一次 declare，
 // 然后执行同一路径上命令的 RunE。命令返回后，open 登记到 stack 的资源按相反顺序关闭。
 //
+// 选项解析在第一次声明的命令上，RunE 收到的 cmd 就是它，所以 RunE 用 cmd.Flags().GetString 这类方法读取选项，
+// 不要用 StringVar 绑定的变量：重新声明时绑定的是另一组变量，它们不会被解析。
+//
 // 只有设置了 RunE 的命令会被替换，--help 等不执行 RunE 的调用不会装配依赖。
 func Bind[C, D any](open func(ctx context.Context, cfg C, stack *cleanup.Stack) (*D, error), declare func(*D) []*cobra.Command) []*cobra.Command {
 	cmds := declare(new(D))

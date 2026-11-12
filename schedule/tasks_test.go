@@ -108,37 +108,32 @@ func TestRunning(t *testing.T) {
 	runningAtFinish := make(chan bool, 1)
 	runner := schedule.New(locker, schedule.DefaultConfig(), quiet, schedule.WithObserver(func(ctx context.Context, e schedule.Event) {
 		if e.Task == "slow" && e.Kind == schedule.TaskSucceeded {
-			running, _ := viewer.Running(ctx, "slow")
-			runningAtFinish <- running
+			running, _ := viewer.Running(ctx)
+			runningAtFinish <- running["slow"]
 		}
 	}))
 	register(runner)
 	register(viewer)
 
-	if running, err := viewer.Running(ctx, "slow"); err != nil || running {
+	// 使用 EveryInstance 的任务不出现在结果中。
+	if running, err := viewer.Running(ctx); err != nil || len(running) != 1 || running["slow"] {
 		t.Fatalf("before: running=%v err=%v", running, err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- runner.RunDue(ctx, base) }()
 	<-started
-	if running, err := viewer.Running(ctx, "slow"); err != nil || !running {
+	if running, err := viewer.Running(ctx); err != nil || !running["slow"] {
 		t.Fatalf("during: running=%v err=%v", running, err)
 	}
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if running, err := viewer.Running(ctx, "slow"); err != nil || running {
+	if running, err := viewer.Running(ctx); err != nil || running["slow"] {
 		t.Fatalf("after: running=%v err=%v", running, err)
 	}
 	if <-runningAtFinish {
 		t.Fatal("still running when the finished event was observed")
-	}
-	if _, err := viewer.Running(ctx, "local"); !errors.Is(err, schedule.ErrNotTracked) {
-		t.Fatalf("every instance: %v", err)
-	}
-	if _, err := viewer.Running(ctx, "nope"); !errors.Is(err, schedule.ErrUnknownTask) {
-		t.Fatalf("unknown: %v", err)
 	}
 }
 

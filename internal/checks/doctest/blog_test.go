@@ -28,7 +28,6 @@ var blogFiles = []docFile{
 	{"internal/mailjob/mailjob.go", "queue.md"},
 	{"internal/bootstrap/worker.go", "queue.md"},
 	{"internal/bootstrap/scheduler.go", "scheduling.md"},
-	{"internal/bootstrap/schedules.go", "scheduling.md"},
 	{"internal/auth/social/social.go", "social-login.md"},
 	{"internal/auth/authweb/social.go", "social-login.md"},
 	{"internal/auth/authhttp/social.go", "social-login.md"},
@@ -52,20 +51,6 @@ var blogFiles = []docFile{
 var blogFragments = []struct {
 	path, doc, prefix, header string
 }{
-	{"internal/bootstrap/queue.go", "queue.md", "func queueCmd(", `package bootstrap
-
-import (
-	"fmt"
-	"text/tabwriter"
-	"time"
-
-	"github.com/spf13/cobra"
-	"github.com/uptrace/bun"
-
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/queue"
-)
-`},
 	{"internal/article/publish_command.go", "actions.md", "// Command 处理 article publish", `package article
 
 import (

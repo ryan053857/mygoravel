@@ -750,6 +750,10 @@ func stats(t *testing.T, s *setup) {
 	if jobs.Topic != "jobs" || other.Topic != "other" {
 		t.Fatalf("stats %+v", got)
 	}
+	merged, err := queue.Stats(ctx, s.driver, s.failed)
+	if err != nil || len(merged) != 2 || merged[0].Jobs[queue.StateFailed] != 0 || len(merged[0].Jobs) != len(jobs.Jobs)+1 {
+		t.Fatalf("queue.Stats %+v err %v", merged, err)
+	}
 	if s.opts.PartialStats {
 		if len(jobs.Jobs) != 2 || jobs.Jobs[queue.StateRunning] < 1 || len(other.Jobs) != 2 || other.Jobs[queue.StateRunning] != 0 {
 			t.Fatalf("stats %+v", got)

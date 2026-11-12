@@ -71,6 +71,7 @@ import (
     "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/lock"
     "github.com/ryan053857/mygoravel/logging"
+    "github.com/ryan053857/mygoravel/queue"
     "github.com/ryan053857/mygoravel/telemetry"
     "github.com/uptrace/bun"
     "go.opentelemetry.io/otel/metric"
@@ -82,6 +83,8 @@ type App struct {
     cfg     settings.Config
     db      *bun.DB
     locker  *lock.Locker
+    queue   queue.Driver
+    failed  *queue.FailedJobs
     meters  metric.MeterProvider
     tracers trace.TracerProvider
 }
@@ -107,6 +110,8 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
         cfg:     cfg,
         db:      db,
         locker:  lock.New(lock.NewDatabase(db)),
+        queue:   queue.Database(db),
+        failed:  queue.NewFailedJobs(db),
         meters:  tel.Meters,
         tracers: tel.Tracers,
     }, nil
@@ -149,7 +154,7 @@ func Start(ctx context.Context, cfg settings.Config) error {
 }
 ```
 
-`telemetry.Open` 把日志、指标和链路推送到配置的接收端，没有配置时什么也不做，见[可观测性](telemetry.md#setup)。它最先登记，最后关闭，其他资源关闭时记录的日志也能推送出去。`locker` 是[原子锁](locks.md)，[调度器](scheduling.md#multiple-instances)用它在多个实例之间去重。`Worker` 和 `Scheduler` 两个运行部分分别在[队列](queue.md#running-workers)和[定时任务](scheduling.md#running-the-scheduler)两章中介绍。
+`telemetry.Open` 把日志、指标和链路推送到配置的接收端，没有配置时什么也不做，见[可观测性](telemetry.md#setup)。它最先登记，最后关闭，其他资源关闭时记录的日志也能推送出去。`locker` 是[原子锁](locks.md)，[调度器](scheduling.md#multiple-instances)用它在多个实例之间去重。`queue` 是任务所在的[队列](queue.md)，`failed` 是[失败任务](queue.md#failed-jobs)表，worker、定时任务和[查看队列的命令](queue.md#stats-command)都用它们；换成 Redis 或 NATS 队列时只改这一处。`Worker` 和 `Scheduler` 两个运行部分分别在[队列](queue.md#running-workers)和[定时任务](scheduling.md#running-the-scheduler)两章中介绍。
 
 HTTP 服务在 `internal/bootstrap/http.go` 中：
 

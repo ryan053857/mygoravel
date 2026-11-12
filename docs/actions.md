@@ -271,6 +271,8 @@ import (
 
     "example.com/blog/internal/article"
     "github.com/ryan053857/mygoravel/command"
+    "github.com/ryan053857/mygoravel/queue/queuecmd"
+    "github.com/ryan053857/mygoravel/schedule/schedulecmd"
     "github.com/ryan053857/mygoravel/search/searchcmd"
 )
 
@@ -279,8 +281,8 @@ func Commands() []*cobra.Command {
     return command.Bind(open, func(a *App) []*cobra.Command {
         return []*cobra.Command{
             article.Commands(a.db),
-            queueCmd(a.db),
-            schedulesCmd(a),
+            queuecmd.New(a.failed, a.queue),
+            schedulecmd.New(a.tasks),
             searchcmd.New(a.db, article.SearchIndex),
             seed(a.db),
         }
@@ -294,7 +296,7 @@ func Commands() []*cobra.Command {
 ./bin/api article publish 0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10
 ```
 
-声明时传入的 `App` 字段都是零值，所以 `Commands` 和 action 的构造函数只能保存依赖、不能使用它们，这与[生成 OpenAPI 文档](routing.md#exporting-openapi)时的约定相同。`--help` 和参数个数错误不会执行 `RunE`，也就不会打开数据库。
+声明时传入的 `App` 字段都是零值，所以 `Commands` 和 action 的构造函数只能保存依赖、不能使用它们，这与[生成 OpenAPI 文档](routing.md#exporting-openapi)时的约定相同。需要在执行时才能创建的对象，例如注册了任务的调度器，传入创建它的方法 `a.tasks`，而不是调用它的结果。同样的原因，`RunE` 用 `cmd.Flags().GetString` 这类方法读取选项，不要用 `StringVar` 绑定的变量：执行的是重新声明的命令的 `RunE`，选项只解析在第一次声明的命令上。`--help` 和参数个数错误不会执行 `RunE`，也就不会打开数据库。
 
 <a id="direct-calls"></a>
 ### 页面、其他 action 和脚本

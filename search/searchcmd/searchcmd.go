@@ -38,7 +38,6 @@ var pollInterval = time.Second
 // 显示进度时按 Ctrl-C 只停止查看，重建在 worker 中继续。重建失败时命令以非 0 状态退出。
 // 和其他需要数据库的命令一样，在 command.Bind 中声明，db 在执行时装配。
 func New(db *bun.DB, indexes ...Index) *cobra.Command {
-	var detach bool
 	reindex := &cobra.Command{
 		Use:   "reindex <index>",
 		Short: "重建搜索索引",
@@ -53,10 +52,12 @@ func New(db *bun.DB, indexes ...Index) *cobra.Command {
 				return command.AsExitError(command.ExitUsage,
 					errors.Newf("search: no index %q, available: %s", args[0], strings.Join(names, ", ")))
 			}
+			// 从 cmd 读取选项：command.Bind 用重新声明的命令的 RunE 执行，选项只解析在 cmd 上。
+			detach, _ := cmd.Flags().GetBool("detach")
 			return run(cmd, db, indexes[i], detach)
 		},
 	}
-	reindex.Flags().BoolVar(&detach, "detach", false, "发起重建后立即返回，不等待完成")
+	reindex.Flags().Bool("detach", false, "发起重建后立即返回，不等待完成")
 	root := &cobra.Command{Use: "search", Short: "搜索索引"}
 	root.AddCommand(reindex)
 	return root

@@ -237,14 +237,14 @@ func (f *FailedJobs) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// Count 返回每个 topic 的失败任务数。
-func (f *FailedJobs) Count(ctx context.Context) (map[string]int, error) {
+// count 返回驱动 driver 每个 topic 的失败任务数。
+func (f *FailedJobs) count(ctx context.Context, driver string) (map[string]int, error) {
 	var rows []struct {
 		Topic string `bun:"topic"`
 		N     int    `bun:"n"`
 	}
 	err := f.db.NewSelect().Model((*failedJob)(nil)).Column("f.topic").ColumnExpr("COUNT(*) AS n").
-		Group("f.topic").Scan(ctx, &rows)
+		Where("f.driver = ?", driver).Group("f.topic").Scan(ctx, &rows)
 	if err != nil {
 		return nil, errors.Wrap(err, "queue: count failed jobs")
 	}

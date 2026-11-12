@@ -94,7 +94,7 @@ router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 ### 队列
 
 ```go
-w := queue.NewWorker(queue.Database(a.db), a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
+w := queue.NewWorker(a.queue, a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
 ```
 
 worker 报告每个任务的等待时长 `queue.job.wait` 和处理耗时 `queue.job.duration`；`queue.ObserveJobs` 报告队列中各状态的任务数 `queue.jobs` 和积压时长 `queue.job.oldest_ready_age`。各指标的含义和注册位置见[队列的指标](queue.md#metrics)。

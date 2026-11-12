@@ -17,7 +17,7 @@
     - [指标](#metrics)
     - [任务事件](#job-events)
     - [队列状态](#queue-stats)
-    - [一个现成的命令](#stats-command)
+    - [查看队列的命令](#stats-command)
 - [测试](#testing)
 - [使用 Redis](#redis-driver)
 - [使用 NATS](#nats-driver)
@@ -198,7 +198,7 @@ func (a *App) Worker(*command.Daemon) (func(context.Context) error, error) {
         return nil, err
     }
 
-    w := queue.NewWorker(queue.Database(a.db), a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
+    w := queue.NewWorker(a.queue, a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
     mailjob.Send.Handle(w, mailer.Send)
     return w.Run, nil
 }
@@ -307,7 +307,6 @@ failed := queue.NewFailedJobs(db)
 
 jobs, err := failed.List(ctx, queue.FailedQuery{Topic: "mail.send", Limit: 50}) // 从新到旧
 job, err := failed.Get(ctx, id)      // job.Error 是最后一次的错误信息，包括堆栈
-counts, err := failed.Count(ctx)     // 每个 topic 的失败任务数
 err = failed.Delete(ctx, id)         // 不再需要的任务直接删除
 ```
 
@@ -370,8 +369,8 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 
 ```go
 func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
-    reg := queue.ObserveJobs(a.meters, queue.Database(a.db), queue.NewFailedJobs(a.db))
-    sched := a.tasks(schedule.WithTelemetry(a.meters, a.tracers))
+    reg := queue.ObserveJobs(a.meters, a.queue, a.failed)
+    sched := a.tasks()
     return func(ctx context.Context) error {
         defer reg.Unregister()
         return sched.Run(ctx)
@@ -388,7 +387,7 @@ func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
 
 所有指标都带有 `messaging.system`（驱动名）和 `messaging.destination.name`（topic）属性，与队列的 span 相同。`queue.job.outcome` 是 `succeeded`、`retrying`、`failed`、`released`、`lease_lost`，与[任务事件](#job-events)对应。导出到 Prometheus 后，点换成下划线，单位成为后缀，例如 `queue_job_wait_seconds`。
 
-前两个由 worker 在处理任务时记录。后两个在采集时读取[队列状态](#queue-stats)和失败任务数，5 秒内的多次采集复用同一次读取；出现过的 topic 在任务清空后报告 0，而不是消失。调度器部署了多个实例时，每个实例读到的都是同一份全局数据，所以汇总时取最大值，不要求和。例如积压超过 5 分钟时告警：
+前两个由 worker 在处理任务时记录。后两个在采集时读取[队列状态](#queue-stats)，5 秒内的多次采集复用同一次读取；出现过的 topic 在任务清空后报告 0，而不是消失。调度器部署了多个实例时，每个实例读到的都是同一份全局数据，所以汇总时取最大值，不要求和。例如积压超过 5 分钟时告警：
 
 ```promql
 max by (messaging_destination_name) (queue_job_oldest_ready_age_seconds) > 300
@@ -404,7 +403,7 @@ HTTP 请求和定时任务的指标见[可观测性](telemetry.md)。
 `queue.WithObserver` 让 worker 在每次状态变化时通知你。成功的任务会从队列中删除，执行历史、耗时这类数据只能从事件中得到：
 
 ```go
-w := queue.NewWorker(queue.Database(a.db), a.cfg.Queue, nil,
+w := queue.NewWorker(a.queue, a.cfg.Queue, nil,
     queue.WithObserver(func(ctx context.Context, e queue.Event) {
         if e.Kind == queue.JobStarted {
             return
@@ -430,17 +429,17 @@ w := queue.NewWorker(queue.Database(a.db), a.cfg.Queue, nil,
 | `JobReleased` | 停止等待超时，还回队列 |
 | `JobLeaseLost` | 租约过期，任务可能已被其他实例领取 |
 
-除 `JobStarted` 外，事件都在结果写回队列之后报告，`Duration` 是处理耗时，`Err` 是失败原因。`e.Job.AvailableAt` 是任务本次可以执行的时间，驱动给不出时为零值。Observer 在处理任务的 goroutine 中同步调用，耗时会占用并发名额：上面的写库很快没有问题，更重的工作请缓冲后批量处理。
+除 `JobStarted` 外，事件都在结果写回队列之后报告，`Started` 是交给处理函数的时间，`Duration` 是处理耗时，`Err` 是失败原因。`e.Job.AvailableAt` 是任务本次可以执行的时间，驱动给不出时为零值。Observer 在处理任务的 goroutine 中同步调用，耗时会占用并发名额：上面的写库很快没有问题，更重的工作请缓冲后批量处理。
 
 <a id="queue-stats"></a>
 ### 队列状态
 
-驱动的 `Stats` 返回每个还有任务的 topic 中各状态的任务数：
+`queue.Stats` 返回驱动中每个 topic 当前的任务数，包括由这个驱动转入失败任务表的任务，按 topic 排序：
 
 ```go
-stats, err := queue.Database(db).Stats(ctx)
+stats, err := queue.Stats(ctx, a.queue, a.failed)
 for _, s := range stats {
-    // s.Jobs[queue.StateReady]、s.OldestReadyAt
+    // s.Topic、s.Jobs[queue.StateReady]、s.OldestReadyAt
 }
 ```
 
@@ -450,52 +449,46 @@ for _, s := range stats {
 | `StateDelayed` | 还没到执行时间、从未执行过 |
 | `StateRetrying` | 失败后等待重试 |
 | `StateRunning` | 正在处理 |
+| `StateFailed` | 在失败任务表中 |
 
-`OldestReadyAt` 是 `StateReady` 中最早到期的时间，`time.Since(s.OldestReadyAt)` 就是积压最久的任务已经等了多久。失败任务数由 `FailedJobs.Count` 给出，对应状态 `StateFailed`。
+`OldestReadyAt` 是 `StateReady` 中最早到期的时间，`time.Since(s.OldestReadyAt)` 就是积压最久的任务已经等了多久。
 
-驱动给不出的状态不出现在 `s.Jobs` 中，给得出的状态即使为 0 也会出现。[NATS 驱动](#nats-driver)只给出 `StateReady` 和 `StateRunning`（包括等待重试的任务），也给不出 `OldestReadyAt`。统计会扫描队列中的任务，适合命令、后台页面和按分钟级频率采集的指标。
+前四个状态由驱动统计，失败任务在数据库的失败任务表中，所以每个 topic 都有 `StateFailed`。驱动给不出的状态不出现在 `s.Jobs` 中，给得出的即使为 0 也会出现。[NATS 驱动](#nats-driver)只给出 `StateReady` 和 `StateRunning`（包括等待重试的任务），也给不出 `OldestReadyAt`。统计会扫描队列中的任务，适合命令、后台页面和按分钟级频率采集的指标。
 
 <a id="stats-command"></a>
-### 一个现成的命令
+### 查看队列的命令
 
-下面的命令列出每个 topic 的任务数和失败数。它和 `seed` 一样在 [bootstrap.Commands](actions.md#as-commands) 中声明，`db` 在命令执行时装配，之后执行 `./bin/api queue stats`：
+`queuecmd.New` 返回 `queue` 命令，它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明。声明时 `App` 的字段都是零值，命令只保存它们，执行时才使用：
 
 ```go
-func queueCmd(db *bun.DB) *cobra.Command {
-    stats := &cobra.Command{
-        Use:   "stats",
-        Short: "查看队列中的任务数",
-        Args:  command.NoArgs,
-        RunE: func(cmd *cobra.Command, _ []string) error {
-            stats, err := queue.Database(db).Stats(cmd.Context())
-            if err != nil {
-                return err
-            }
-            failed, err := queue.NewFailedJobs(db).Count(cmd.Context())
-            if err != nil {
-                return err
-            }
-            w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-            fmt.Fprintln(w, "TOPIC\tREADY\tDELAYED\tRETRYING\tRUNNING\tFAILED\tWAITING")
-            for _, s := range stats {
-                waiting := "-"
-                if !s.OldestReadyAt.IsZero() {
-                    waiting = time.Since(s.OldestReadyAt).Round(time.Second).String()
-                }
-                fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%s\n", s.Topic,
-                    s.Jobs[queue.StateReady], s.Jobs[queue.StateDelayed], s.Jobs[queue.StateRetrying],
-                    s.Jobs[queue.StateRunning], failed[s.Topic], waiting)
-            }
-            return w.Flush()
-        },
-    }
-    root := &cobra.Command{Use: "queue", Short: "队列"}
-    root.AddCommand(stats)
-    return root
-}
+queuecmd.New(a.failed, a.queue),
 ```
 
-查看和重试失败任务的命令写法相同，调用 `FailedJobs` 的 `List` 和 `Retry` 即可。
+`queue stats` 列出每个 topic 的任务数，`WAITING` 是积压最久的任务已经等了多久，驱动给不出的数显示为 `-`：
+
+```bash
+./bin/api queue stats
+```
+
+```text
+TOPIC                READY  DELAYED  RETRYING  RUNNING  FAILED  WAITING
+articles.import      0      0        0         1        0       0s
+mail.send            12     3        2         4        1       1m24s
+webhook.deliver      0      0        5         0        2       0s
+```
+
+`queue failed` 从新到旧列出失败任务，错误信息只显示第一行，完整的错误和堆栈用 `FailedJobs.Get` 查看：
+
+```bash
+./bin/api queue failed --topic mail.send --limit 10
+```
+
+```text
+ID                                    TOPIC      ATTEMPTS  FAILED AT            ERROR
+0193e7b1-2c4f-7d8e-9a1b-5f6c7d8e9f01  mail.send  5         2026-11-12 09:41:07  send mail: dial tcp 10.0.0.12:587: connection refused
+```
+
+应用同时使用多个队列时，例如任务在 Redis 中而 [webhook 投递](webhooks.md#delivering)总在数据库队列中，把它们都装配为 `App` 的字段，一起传给 `queuecmd.New`，输出多一列驱动名。
 
 <a id="testing"></a>
 ## 测试

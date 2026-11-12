@@ -2,6 +2,9 @@ package queue
 
 import (
 	"context"
+	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -20,19 +23,53 @@ const (
 	StateRetrying State = "retrying"
 	// StateRunning 是正在处理、租约未过期的任务。
 	StateRunning State = "running"
-	// StateFailed 是失败任务表中的任务。驱动的 Stats 不报告它，失败任务数由 FailedJobs.Count 给出。
+	// StateFailed 是失败任务表中的任务。驱动的 Stats 不报告它，由 Stats 从失败任务表中读取。
 	StateFailed State = "failed"
 )
+
+// driverStates 是驱动报告的状态。
+var driverStates = []State{StateReady, StateDelayed, StateRetrying, StateRunning}
 
 // TopicStats 是一个 topic 当前的任务数。
 type TopicStats struct {
 	Topic string
-	// Jobs 是各状态的任务数。驱动能给出的状态总会出现，即使为 0；给不出的状态不出现。
+	// Jobs 是各状态的任务数。能给出的状态总会出现，即使为 0；驱动给不出的状态不出现。
 	Jobs map[State]int
 	// OldestReadyAt 是 StateReady 中最早到期的时间，没有到期的任务时为零值。
 	// 当前时间减去它就是积压最久的任务已经等了多久：worker 跟不上时它会持续变大。
 	// 有到期的任务而它为零值，表示驱动给不出。
 	OldestReadyAt time.Time
+}
+
+// Stats 返回 d 中每个 topic 当前的任务数，包括 failed 中由 d 转入的失败任务数，按 topic 排序。
+// 每个 topic 都有 StateFailed；只有失败任务的 topic，队列中没有它的任务，驱动报告的状态都是 0。
+// 统计会扫描队列和失败任务表，适合命令、后台页面和分钟级频率的采集。d 或 failed 为 nil 时 panic。
+func Stats(ctx context.Context, d Driver, failed *FailedJobs) ([]TopicStats, error) {
+	if d == nil || failed == nil {
+		panic("queue: nil driver or failed jobs")
+	}
+	stats, err := d.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := failed.count(ctx, d.Name())
+	if err != nil {
+		return nil, err
+	}
+	for i := range stats {
+		stats[i].Jobs = maps.Clone(stats[i].Jobs)
+		stats[i].Jobs[StateFailed] = counts[stats[i].Topic]
+		delete(counts, stats[i].Topic)
+	}
+	for topic, n := range counts {
+		jobs := map[State]int{StateFailed: n}
+		for _, state := range driverStates {
+			jobs[state] = 0
+		}
+		stats = append(stats, TopicStats{Topic: topic, Jobs: jobs})
+	}
+	slices.SortFunc(stats, func(a, b TopicStats) int { return strings.Compare(a.Topic, b.Topic) })
+	return stats, nil
 }
 
 // Stats 实现 Driver。
