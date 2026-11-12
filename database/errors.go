@@ -24,6 +24,9 @@ func IsForeignKeyViolation(err error) bool { return hasCode(err, "23503") }
 // IsCheckViolation 报告是否为检查约束冲突（SQLSTATE 23514）。
 func IsCheckViolation(err error) bool { return hasCode(err, "23514") }
 
+// IsReadOnly 报告是否因为在只读事务中写入而失败（SQLSTATE 25006），例如通过 ReadOnly 的连接池写入只读副本。
+func IsReadOnly(err error) bool { return hasCode(err, "25006") }
+
 func hasCode(err error, code string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == code

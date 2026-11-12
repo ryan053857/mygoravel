@@ -176,7 +176,7 @@ func Start(ctx context.Context, cfg settings.Config) error {
 - 一个部分运行时出错退出，其余部分随之停止，进程以非 0 状态退出。
 - 一个部分在收到停止信号之前就正常返回，同样视为异常，错误中包含 `command.ErrStoppedEarly`，交给 systemd、Kubernetes 等重启。
 
-各部分共用 `open` 中创建的数据库连接池，HTTP 请求和 worker 的并发任务都会占用连接，设置 [`max_open_conns`](database.md#configuration) 时要按两者之和估算。
+各部分共用 `open` 中创建的数据库连接池，HTTP 请求和 worker 的并发任务都会占用连接，设置 [`max_conns`](database.md#configuration) 时要按两者之和估算。
 
 <a id="openapi-command"></a>
 ### openapi 命令

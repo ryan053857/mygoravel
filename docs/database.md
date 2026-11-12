@@ -2,6 +2,7 @@
 
 - [简介](#introduction)
 - [配置](#configuration)
+    - [连接用满时](#pool-exhaustion)
 - [连接数据库](#connecting)
     - [慢查询](#slow-queries)
 - [定义模型](#defining-models)
@@ -25,7 +26,7 @@
 - [Bun](https://bun.uptrace.dev)：SQL 优先的 Go ORM，负责查询构建和模型映射；
 - [goose](https://github.com/pressly/goose)：数据库迁移，见[迁移](migrations.md)。
 
-`database` 包负责打开一个配置好的连接池，返回原生的 `*bun.DB`。之后的查询、事务等操作都直接使用 Bun 的 API，你可以随时参考 [Bun 官方文档](https://bun.uptrace.dev/guide/)。
+`database` 包负责打开一个配置好的连接池（[pgxpool](https://pkg.go.dev/github.com/jackc/pgx/v5/pgxpool)），返回原生的 `*bun.DB`。之后的查询、事务等操作都直接使用 Bun 的 API，你可以随时参考 [Bun 官方文档](https://bun.uptrace.dev/guide/)。
 
 <a id="configuration"></a>
 ## 配置
@@ -35,20 +36,20 @@
 ```yaml
 database:
   dsn: ${DATABASE_URL}
-  max_open_conns: 20
-  max_idle_conns: 10
-  conn_max_lifetime: 1h
-  conn_max_idle_time: 30m
+  max_conns: 20
+  min_conns: 0
+  max_conn_lifetime: 1h
+  max_conn_idle_time: 30m
   slow_query: 1s
 ```
 
 | 字段 | 说明 | `DefaultConfig` 中的默认值 |
 | --- | --- | --- |
 | `dsn` | PostgreSQL 连接串，例如 `postgres://user:pass@localhost:5432/app?sslmode=disable` | 无，必填 |
-| `max_open_conns` | 最大连接数；`0` 表示不限制 | 4 × `GOMAXPROCS` |
-| `max_idle_conns` | 最大空闲连接数；`0` 表示不保留空闲连接 | 4 × `GOMAXPROCS` |
-| `conn_max_lifetime` | 连接的最长存活时间 | `1h` |
-| `conn_max_idle_time` | 空闲连接的最长保留时间 | `30m` |
+| `max_conns` | 最大连接数 | 4 × `GOMAXPROCS` |
+| `min_conns` | 空闲时也保持的连接数 | `0` |
+| `max_conn_lifetime` | 连接的最长存活时间，到期后在空闲时关闭 | `1h` |
+| `max_conn_idle_time` | 超过 `min_conns` 的空闲连接的最长保留时间 | `30m` |
 | `slow_query` | 执行时间达到它的语句记为[慢查询](#slow-queries)；`0` 表示不记录 | `1s` |
 
 这些字段对应 `database.Config` 结构体。把它放进应用的根配置结构体，`config.Load` 会自动填充上表中的默认值：
@@ -67,7 +68,18 @@ if err != nil {
 `database.Config` 实现了 `Validate` 方法，`config.Load` 会自动检查 DSN 是否为空、连接池参数是否合法；DSN 的格式在打开连接时检查。
 
 > [!TIP]
-> 设置 `max_open_conns` 时，请考虑应用的部署副本数：所有副本的连接数之和不应超过数据库的最大连接数。
+> 设置 `max_conns` 时，请考虑应用的部署副本数：所有副本的连接数之和不应超过数据库的最大连接数。
+
+<a id="pool-exhaustion"></a>
+### 连接用满时
+
+连接都在使用中时，新的语句排队等待空闲连接。HTTP 请求不应该无限排队：过载时排队只会让所有请求一起变慢、一起超时。`database.WithAcquireTimeout` 给取连接这一步设一个时限，超过时返回 `database.ErrBusy`，响应为 `503` 并带 `Retry-After`，客户端稍后重试：
+
+```go
+ctx = database.WithAcquireTimeout(ctx, time.Second)
+```
+
+时限只作用于取连接，不影响语句本身的执行时间。队列任务和命令不设置它，排队等待连接是它们的正常情况。连接池的使用情况和超时次数见[指标](telemetry.md#database)。
 
 <a id="connecting"></a>
 ## 连接数据库

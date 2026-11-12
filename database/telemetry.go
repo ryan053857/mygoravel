@@ -32,6 +32,8 @@ const (
 	attrQueryText  = attribute.Key("db.query.text")
 	attrErrorType  = attribute.Key("error.type")
 	attrAddress    = attribute.Key("server.address")
+	attrPoolName   = attribute.Key("db.client.connection.pool.name")
+	attrConnState  = attribute.Key("db.client.connection.state")
 	attrPort       = attribute.Key("server.port")
 )
 
@@ -39,9 +41,26 @@ const (
 type Option func(*options)
 
 type options struct {
-	meters  metric.MeterProvider
-	tracers trace.TracerProvider
-	logger  *slog.Logger
+	meters   metric.MeterProvider
+	tracers  trace.TracerProvider
+	logger   *slog.Logger
+	name     string // 连接池的名字，见 Name
+	readOnly bool
+}
+
+// Name 设置连接池的名字，作为连接池指标的 db.client.connection.pool.name 属性，区分同一个应用的多个连接池，
+// 例如主库、只读副本和其他模块的数据库。不设置时为 primary。
+func Name(name string) Option {
+	if name == "" {
+		panic("database: empty pool name")
+	}
+	return func(o *options) { o.name = name }
+}
+
+// ReadOnly 让连接池的会话默认只读（default_transaction_read_only=on），用于只读副本：
+// 误写时立即得到 PostgreSQL 的错误（SQLSTATE 25006），而不是在副本上才失败或悄悄写进主库。
+func ReadOnly() Option {
+	return func(o *options) { o.readOnly = true }
 }
 
 // WithTelemetry 让连接池报告每条语句的 OpenTelemetry 指标和链路。
@@ -55,6 +74,10 @@ type options struct {
 // ctx 中有 span 时，每条语句是它之下的一个 client span，名称是操作和表，例如 SELECT articles：
 // 请求、队列任务中的查询出现在它们的链路中；后台轮询这类没有上级 span 的查询只计入指标。span 的 db.query.text 是把字面量换成 ? 之后的 SQL，
 // 参数的值不会发往链路平台。
+//
+// 连接池报告 db.client.connection.count（属性 db.client.connection.state 为 idle 或 used）、db.client.connection.max、
+// db.client.connection.wait_time（直方图，秒）和 db.client.connection.timeouts（WithAcquireTimeout 超时的次数），
+// 都带有 db.client.connection.pool.name，见 Name。
 //
 // mp 或 tp 为 nil 时 panic；只需要其中一种时，另一个传 noop 实现。
 func WithTelemetry(mp metric.MeterProvider, tp trace.TracerProvider) Option {

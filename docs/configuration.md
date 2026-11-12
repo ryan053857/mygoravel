@@ -32,7 +32,7 @@ logs:
 
 database:
   dsn: ${DATABASE_URL}
-  max_open_conns: 20
+  max_conns: 20
 ```
 
 <a id="loading-configuration"></a>
@@ -109,7 +109,7 @@ storage:
 logs:
   level: warn
 database:
-  max_open_conns: 50
+  max_conns: 50
 ```
 
 ```bash

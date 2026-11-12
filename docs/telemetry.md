@@ -102,8 +102,12 @@ db, err := database.Open(ctx, cfg.Database, database.WithTelemetry(tel.Meters, t
 | 指标 | 类型 | 属性 |
 | --- | --- | --- |
 | `db.client.operation.duration` | 直方图，秒 | `db.system.name`（`postgresql`）、`db.namespace`（数据库名）、`db.operation.name`（`SELECT`、`INSERT`、`BEGIN` 等）、`db.collection.name`（表）、`server.address`、`server.port`；出错时还有 `error.type` 和 `db.response.status_code` |
+| `db.client.connection.count` | 仪表 | `db.client.connection.state`（`idle`、`used`） |
+| `db.client.connection.max` | 仪表 | |
+| `db.client.connection.wait_time` | 直方图，秒 | 每次取连接的等待时长 |
+| `db.client.connection.timeouts` | 计数 | 超过 [`WithAcquireTimeout`](database.md#pool-exhaustion) 的时限、返回 `ErrBusy` 的次数 |
 
-属性遵循 OpenTelemetry 的[数据库语义约定](https://opentelemetry.io/docs/specs/semconv/database/database-metrics/)。`db.collection.name` 是 Bun 查询的表，`NewRaw` 写的原始 SQL 没有这个属性。出错时 `error.type` 是 PostgreSQL 的 SQLSTATE，例如唯一约束冲突是 `23505`、死锁是 `40P01`；超时和取消分别是 `timeout`、`canceled`。没有查到行（`sql.ErrNoRows`）不算出错。
+属性遵循 OpenTelemetry 的[数据库语义约定](https://opentelemetry.io/docs/specs/semconv/database/database-metrics/)。连接池的指标都带有 `db.client.connection.pool.name`，用 `database.Name` 设置，默认是 `primary`，区分同一个应用的主库、只读副本和其他数据库。`used` 长时间等于 `max`、`wait_time` 变长时，连接池已经成为瓶颈。`db.collection.name` 是 Bun 查询的表，`NewRaw` 写的原始 SQL 没有这个属性。出错时 `error.type` 是 PostgreSQL 的 SQLSTATE，例如唯一约束冲突是 `23505`、死锁是 `40P01`；超时和取消分别是 `timeout`、`canceled`。没有查到行（`sql.ErrNoRows`）不算出错。
 
 `ctx` 中有 span 时，每条语句是它之下的一个 span，名称是操作和表，例如 `SELECT articles`：一个慢请求的链路里能看到它执行了哪些语句、各用了多久，事务的 `BEGIN`、`COMMIT` 也在其中。队列转发任务、调度器加锁这类后台查询不属于任何请求，只计入指标，不产生链路。
 

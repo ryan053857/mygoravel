@@ -34,6 +34,20 @@ func spanAttrs(s sdktrace.ReadOnlySpan) map[attribute.Key]attribute.Value {
 	return m
 }
 
+// findMetric 返回名为 name 的指标，没有时使测试失败。
+func findMetric(t *testing.T, rm metricdata.ResourceMetrics, name string) metricdata.Metrics {
+	t.Helper()
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == name {
+				return m
+			}
+		}
+	}
+	t.Fatalf("no metric %s", name)
+	return metricdata.Metrics{}
+}
+
 func TestTelemetry(t *testing.T) {
 	ctx := context.Background()
 	reader := sdkmetric.NewManualReader()
@@ -96,8 +110,8 @@ func TestTelemetry(t *testing.T) {
 	if err := reader.Collect(ctx, &rm); err != nil {
 		t.Fatal(err)
 	}
-	m := rm.ScopeMetrics[0].Metrics[0]
-	if m.Name != "db.client.operation.duration" || m.Unit != "s" {
+	m := findMetric(t, rm, "db.client.operation.duration")
+	if m.Unit != "s" {
 		t.Fatalf("metric %s %s", m.Name, m.Unit)
 	}
 	var selects, errs uint64

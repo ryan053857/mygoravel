@@ -88,6 +88,27 @@ func Open(t testing.TB, migrations fs.FS) *bun.DB {
 	return db
 }
 
+// Replica 返回连接 db 所在测试数据库的只读连接池，代替测试中的只读副本：它和 db 看到同样的数据，没有复制延迟，
+// 通过它写入时立即失败（database.ReadOnly），测试能发现误把写操作交给副本的代码。测试结束时关闭。
+func Replica(t testing.TB, db *bun.DB) *bun.DB {
+	t.Helper()
+	ctx := context.Background()
+	var name string
+	if err := db.NewRaw("SELECT current_database()").Scan(ctx, &name); err != nil {
+		t.Fatal(err)
+	}
+	replica, err := database.Open(ctx, database.Config{DSN: withDatabase(URL(t), name)}, database.Name("replica"), database.ReadOnly())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := replica.Close(); err != nil {
+			t.Errorf("dbtest: close replica: %v", err)
+		}
+	})
+	return replica
+}
+
 // dropSlots 删除数据库 name 的逻辑复制槽：数据库有槽时 DROP DATABASE 失败，WITH (FORCE) 也不会删除它们。
 // 正在使用槽的连接先被结束，它们释放槽之后才能删除，所以重试到全部删除或 ctx 结束。
 func dropSlots(ctx context.Context, db *bun.DB, name string) error {

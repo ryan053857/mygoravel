@@ -73,10 +73,20 @@ func TestPublishedMigrationsIncludeNestedFiles(t *testing.T) {
 }
 
 func TestOpenRunsConfigurationChecks(t *testing.T) {
+	valid := database.DefaultConfig()
+	valid.DSN = "postgres://localhost/db"
+	with := func(change func(*database.Config)) database.Config {
+		c := valid
+		change(&c)
+		return c
+	}
 	for _, cfg := range []database.Config{
 		{},
-		{DSN: "postgres://localhost/db", MaxOpenConns: -1},
-		{DSN: "postgres://localhost/db", ConnMaxLifetime: -1},
+		with(func(c *database.Config) { c.MaxConns = -1 }),
+		with(func(c *database.Config) { c.MinConns = c.MaxConns + 1 }),
+		with(func(c *database.Config) { c.MinConns = -1 }),
+		with(func(c *database.Config) { c.MaxConnLifetime = -1 }),
+		with(func(c *database.Config) { c.SlowQuery = -1 }),
 	} {
 		validation := cfg.Validate()
 		db, err := database.Open(context.Background(), cfg)
