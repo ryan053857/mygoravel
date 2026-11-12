@@ -27,6 +27,7 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 	"github.com/ryan053857/mygoravel/sheet"
 	"github.com/ryan053857/mygoravel/sheet/exports"
 )
@@ -244,10 +245,9 @@ func TestFinalAttemptFailsExport(t *testing.T) {
 	exp := e.start(t, sheet.XLSX)
 	rec := &recorder{}
 	topic := queue.Topic[uuid.UUID]("exports.test")
-	cfg := queue.DefaultConfig()
-	cfg.PollInterval = 20 * time.Millisecond
+	cfg := queuetest.Config(t)
 	cfg.MaxAttempts = 1
-	w := queue.NewWorker(queue.Database(e.db), cfg, slog.New(slog.DiscardHandler))
+	w := queue.NewWorker(e.db, cfg, slog.New(slog.DiscardHandler))
 	topic.Handle(w, func(ctx context.Context, id uuid.UUID) error {
 		return e.exports.Process(ctx, id, func(context.Context, *exports.Export, *exports.Writer) error {
 			return errors.New("always down")
@@ -260,7 +260,7 @@ func TestFinalAttemptFailsExport(t *testing.T) {
 		cancel()
 		<-stopped
 	})
-	if err := topic.Publish(context.Background(), queue.Database(e.db), exp.ID); err != nil {
+	if err := topic.Publish(context.Background(), e.db, exp.ID); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(10 * time.Second)

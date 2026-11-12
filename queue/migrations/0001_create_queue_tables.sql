@@ -1,25 +1,18 @@
 -- +goose Up
-CREATE TABLE queue_jobs (
-    id uuid PRIMARY KEY,
+CREATE TABLE queue_outbox (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     topic text NOT NULL,
-    payload bytea NOT NULL,
-    metadata jsonb NOT NULL DEFAULT '{}',
-    attempts integer NOT NULL DEFAULT 0,
+    body bytea NOT NULL,
     available_at timestamptz NOT NULL,
-    reserved_at timestamptz,
-    unique_key text,
     created_at timestamptz NOT NULL
 );
-CREATE INDEX queue_jobs_topic_available_at ON queue_jobs (topic, available_at);
-CREATE UNIQUE INDEX queue_jobs_topic_unique_key ON queue_jobs (topic, unique_key);
-COMMENT ON TABLE queue_jobs IS '待处理和处理中的队列任务；处理成功后删除';
-COMMENT ON COLUMN queue_jobs.available_at IS '可执行时间；被领取后是租约到期时间，到期未完成的任务可被重新领取';
-COMMENT ON COLUMN queue_jobs.reserved_at IS '最近一次被领取的时间；等待执行或重试时为空';
-COMMENT ON COLUMN queue_jobs.unique_key IS '发布时指定的合并键；同一 topic 中还没被领取过的任务不重复，第一次被领取时清空';
+CREATE INDEX queue_outbox_available_at ON queue_outbox (available_at);
+COMMENT ON TABLE queue_outbox IS '已发布、还没转发到 NSQ 的任务；与业务数据在同一个事务中写入，由 queue.Worker 转发后删除';
+COMMENT ON COLUMN queue_outbox.body IS '发给 NSQ 的消息：任务 ID、payload、元数据和已经执行的次数（JSON）';
+COMMENT ON COLUMN queue_outbox.available_at IS '可以执行的时间；离现在不超过 max_defer 时转发为 NSQ 的延迟消息';
 
 CREATE TABLE queue_failed_jobs (
     id uuid PRIMARY KEY,
-    driver text NOT NULL,
     topic text NOT NULL,
     payload bytea NOT NULL,
     metadata jsonb NOT NULL DEFAULT '{}',
@@ -28,9 +21,8 @@ CREATE TABLE queue_failed_jobs (
     failed_at timestamptz NOT NULL
 );
 CREATE INDEX queue_failed_jobs_failed_at ON queue_failed_jobs (failed_at);
-COMMENT ON TABLE queue_failed_jobs IS '重试次数用完或永久失败的任务，与队列驱动无关；由 queue.FailedJobs 重新入队或清理';
-COMMENT ON COLUMN queue_failed_jobs.driver IS '任务所在的队列驱动，重新入队时放回原驱动';
+COMMENT ON TABLE queue_failed_jobs IS '重试次数用完或永久失败的任务；由 queue.FailedJobs 重新发布或清理';
 
 -- +goose Down
 DROP TABLE queue_failed_jobs;
-DROP TABLE queue_jobs;
+DROP TABLE queue_outbox;

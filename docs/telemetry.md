@@ -94,10 +94,10 @@ router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 ### 队列
 
 ```go
-w := queue.NewWorker(a.queue, a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
+w := queue.NewWorker(a.db, a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
 ```
 
-worker 报告每个任务的等待时长 `queue.job.wait` 和处理耗时 `queue.job.duration`；`queue.ObserveJobs` 报告队列中各状态的任务数 `queue.jobs` 和积压时长 `queue.job.oldest_ready_age`。各指标的含义和注册位置见[队列的指标](queue.md#metrics)。
+worker 报告每个任务的等待时长 `queue.job.wait` 和处理耗时 `queue.job.duration`，各指标的含义见[队列的指标](queue.md#metrics)。积压的任务数由 nsqd 统计，见[队列状态](queue.md#stats-command)。
 
 发布任务时把 `ctx` 中的链路写入任务的元数据（`traceparent`），不需要任何设置。worker 为每次执行创建一个 `process <topic>` span，接在发布任务的 span 之后：发布文章的请求和随后发送通知邮件的任务出现在同一条链路中，中间隔了多久、邮件为什么失败都能看到。每次重试是一个新的 span，失败、重试和租约丢失时标记为错误。
 
@@ -158,9 +158,6 @@ attempts := ratelimit.Observe(a.meters, "login", redislimit.New(a.rdb, "blog:log
 # 5 分钟内 5xx 的比例超过 1%
 sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
   / sum(rate(http_server_request_duration_seconds_count[5m])) > 0.01
-
-# 队列积压超过 5 分钟
-max by (messaging_destination_name) (queue_job_oldest_ready_age_seconds) > 300
 
 # 限流器的存储出错：使用它的请求都在返回 503
 sum by (ratelimit_name) (rate(ratelimit_requests_total{ratelimit_result="error"}[5m])) > 0

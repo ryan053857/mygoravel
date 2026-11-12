@@ -412,7 +412,7 @@ func (a *QueueImport) Handle(ctx context.Context, subject identity.Subject, file
         if imp, err = a.importer.Start(ctx, tx, subject, "articles.import", fileID); err != nil {
             return err
         }
-        return ImportJob.Publish(ctx, queue.Database(tx), imp.ID)
+        return ImportJob.Publish(ctx, tx, imp.ID)
     })
     return imp, err
 }
@@ -678,7 +678,7 @@ func (a *QueueExport) Handle(ctx context.Context, subject identity.Subject, form
         if exp, err = a.exporter.Start(ctx, tx, subject, "articles.export", format); err != nil {
             return err
         }
-        return ExportJob.Publish(ctx, queue.Database(tx), ExportRequest{ID: exp.ID, Subject: subject, Columns: columns})
+        return ExportJob.Publish(ctx, tx, ExportRequest{ID: exp.ID, Subject: subject, Columns: columns})
     })
     return exp, err
 }

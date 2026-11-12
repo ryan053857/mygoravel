@@ -97,13 +97,11 @@ func enqueue(ctx context.Context, db bun.IDB, deliveries []Delivery) error {
 	if _, err := db.NewInsert().Model(&deliveries).Exec(ctx); err != nil {
 		return errors.Wrap(err, "webhook: insert deliveries")
 	}
-	jobs := queue.Database(db)
-	for _, d := range deliveries {
-		if err := Deliver.Publish(ctx, jobs, d.ID); err != nil {
-			return errors.Wrap(err, "webhook: publish delivery")
-		}
+	ids := make([]uuid.UUID, len(deliveries))
+	for i, d := range deliveries {
+		ids[i] = d.ID
 	}
-	return nil
+	return errors.Wrap(Deliver.PublishAll(ctx, db, ids), "webhook: publish deliveries")
 }
 
 func checkType(t string) error {

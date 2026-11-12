@@ -46,14 +46,14 @@ jobs:
       POSTGRES_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
       REDIS_TEST_URL: redis://127.0.0.1:6379/0
       MEMCACHED_TEST_ADDR: 127.0.0.1:11211
-      NATS_TEST_URL: nats://127.0.0.1:4222
+      NSQD_TEST_ADDR: 127.0.0.1:4150
       GOTENBERG_TEST_URL: http://127.0.0.1:3000
     steps:
       - uses: actions/checkout@v4
 
-      # 服务容器不能传启动参数，队列驱动需要开启 JetStream（-js），因此 NATS 在这里启动。
-      - name: Start NATS
-        run: docker run -d --name nats -p 4222:4222 nats:2-alpine -js
+      # 服务容器不能传启动参数，nsqd 在这里启动。
+      - name: Start nsqd
+        run: docker run -d --name nsqd -p 4150:4150 -p 4151:4151 nsqio/nsq:v1.3.0 /nsqd --mem-queue-size=0
 
       - uses: actions/setup-go@v5
         with:

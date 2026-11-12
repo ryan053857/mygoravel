@@ -19,7 +19,7 @@ func (w *Worker) startSpan(ctx context.Context, j Job) context.Context {
 		return ctx
 	}
 	ctx, _ = w.tracer.Start(ctx, "process "+j.Topic, trace.WithSpanKind(trace.SpanKindConsumer), trace.WithAttributes(
-		attrSystem.String(w.driver.Name()),
+		attrSystem.String(system),
 		attribute.String("messaging.operation.type", "process"),
 		attrDestination.String(j.Topic),
 		attribute.String("messaging.message.id", j.ID.String()),
@@ -39,8 +39,6 @@ func (w *Worker) endSpan(ctx context.Context, e Event) {
 	case JobRetrying, JobFailed:
 		span.RecordError(e.Err)
 		span.SetStatus(codes.Error, e.Err.Error())
-	case JobLeaseLost:
-		span.SetStatus(codes.Error, "lease lost")
 	}
 	span.End()
 }

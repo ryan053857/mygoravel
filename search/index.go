@@ -97,27 +97,19 @@ func (ix *Index[D]) Name() string { return ix.name }
 // 同一个 key 的同步依次执行，因此它只应读取数据，耗时的处理（转换文件、调用模型）放在之前的任务中完成。
 type LoadFunc[D any] func(ctx context.Context, tx bun.IDB, key string) ([]D, error)
 
-// Sync 通过 queue.Database(db) 发布 keys 的同步任务。db 通常是修改数据的事务：事务提交后才同步，回滚时一起取消。
+// Sync 发布 keys 的同步任务。db 通常是修改数据的事务：事务提交后才同步，回滚时一起取消。
 //
-// 任务只带 key，处理时用 LoadFunc 重新读取当前的数据，所以重复、乱序执行的结果都一样；
-// 同一个 key 还没开始处理的任务用 queue.Unique 合并，连续修改只同步一次。
-// key 不能为空，最长 191 字节。
+// 任务只带 key，处理时用 LoadFunc 重新读取当前的数据，所以重复、乱序执行的结果都一样。key 不能为空。
 func (ix *Index[D]) Sync(ctx context.Context, db bun.IDB, keys ...string) error {
 	for _, key := range keys {
 		if err := checkKey(key); err != nil {
 			return err
 		}
 	}
-	jobs := queue.Database(db)
-	for _, key := range keys {
-		if err := ix.sync.Publish(ctx, jobs, key, queue.Unique(key)); err != nil {
-			return errors.Wrapf(err, "search: publish %s sync", ix.name)
-		}
-	}
-	return nil
+	return errors.Wrapf(ix.sync.PublishAll(ctx, db, keys), "search: publish %s sync", ix.name)
 }
 
-// Handle 把同步任务和重建任务（见 Reindex）的处理函数注册到 w。w 必须使用 Sync 发布任务的数据库队列，
+// Handle 把同步任务和重建任务（见 Reindex）的处理函数注册到 w，
 // db 是索引所在的数据库，load 读取一个 key 的文档，scan 在重建时列出所有的 key。opts 调整同步任务的处理。
 // 文档无法建索引（例如过滤字段的值太长）时同步任务不再重试，直接转入失败任务表。
 func (ix *Index[D]) Handle(w *queue.Worker, db *bun.DB, load LoadFunc[D], scan ScanFunc, opts ...queue.HandleOption) {

@@ -188,14 +188,6 @@ webhook.NewDeliverer(a.db, webhook.Options{}).Handle(w)
 
 `webhook.Options` 的零值即可：每次请求 10 秒超时，不跟随重定向，每次投递最多请求 16 次，最后一次重试约在 2 天后。重试次数只作用于投递任务，不受 `queue` 段 `max_attempts` 的影响，需要时用 `Options.MaxAttempts` 修改。
 
-投递任务总是在数据库队列中。应用的其他任务使用 NATS 时，再创建一个数据库队列的 worker，和原来的一起运行：
-
-```go
-hooks := queue.NewWorker(queue.Database(a.db), a.cfg.Queue, nil)
-webhook.NewDeliverer(a.db, webhook.Options{}).Handle(hooks)
-return func(ctx context.Context) error { return command.Concurrently(ctx, w.Run, hooks.Run) }, nil
-```
-
 <a id="retries"></a>
 ### 重试
 
@@ -251,7 +243,7 @@ func (h *Handlers) ResendWebhook(w http.ResponseWriter, r *http.Request) {
         return
     }
     in := Inbound{ID: r.Header.Get(webhook.HeaderID), Body: body}
-    if err := EmailEvent.Publish(r.Context(), queue.Database(h.db), in); err != nil {
+    if err := EmailEvent.Publish(r.Context(), h.db, in); err != nil {
         http.Error(w, "try again", http.StatusServiceUnavailable) // 对方会重发
         return
     }

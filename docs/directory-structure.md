@@ -196,8 +196,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `mail/smtp`、`mail/resend`、`mail/ses` | 通过 SMTP 服务器、Resend API 或 Amazon SES 发送 | [SMTP](mail.md#smtp)、[Resend](mail.md#resend)、[SES](mail.md#ses) |
 | `mail/logmail`、`mail/mailtest` | 开发时写进日志、测试时记录在内存中的发送器 | [邮件](mail.md#assembling-mailer)、[测试](mail.md#testing) |
 | `queue` | 持久化的异步任务队列，数据库驱动、重试、失败任务与指标 | [队列](queue.md) |
-| `queue/natsqueue` | NATS JetStream 队列驱动 | [NATS 驱动](queue.md#nats-driver) |
-| `queue/queuetest` | 队列驱动的契约测试 | [实现自己的驱动](queue.md#custom-drivers) |
+| `queue/queuetest` | 测试中运行连接测试 nsqd 的 worker | [测试](queue.md#testing) |
 | `schedule` | 按 cron 表达式定时执行任务，多个实例之间去重 | [定时任务](scheduling.md) |
 | `cachex` | 在 Memcached 之上的 cache-aside 读取：合并并发加载、过期时间抖动、缓存空结果，缓存出错时直接加载 | [为文章详情加缓存](cache.md#caching-articles) |
 | `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast` 是 Redis 后端，`broadcast/broadcasttest` 是测试用的内存后端与后端的契约测试 | [广播](broadcasting.md) |
@@ -225,7 +224,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `command/devcmd` | `dev` 命令：开发页面时监听文件变化、重启应用、刷新浏览器 | [dev 命令](commands.md#dev-command) |
 | `command/httpcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
 | `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
-| `queue/queuecmd` | `queue stats`、`queue failed` 命令：查看队列中的任务数、最近的处理情况和失败任务 | [查看队列的命令](queue.md#stats-command) |
+| `queue/queuecmd` | `queue failed` 命令：列出失败任务 | [队列状态](queue.md#stats-command) |
 | `schedule/schedulecmd` | `schedules` 命令：列出定时任务、下一次执行的时间、是否正在执行和上一次的结果 | [列出任务的命令](scheduling.md#schedules-command) |
 
 <a id="features"></a>

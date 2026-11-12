@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"encoding/json"
 	"math"
 	"math/rand/v2"
 	"time"
@@ -9,25 +10,44 @@ import (
 	"github.com/uptrace/bun"
 )
 
-type job struct {
-	bun.BaseModel `bun:"table:queue_jobs,alias:j"`
+// Job 是一个任务，处理函数之外通过 Event 和失败任务看到它。
+type Job struct {
+	ID       uuid.UUID
+	Topic    string
+	Payload  []byte
+	Metadata map[string]string
+	// AvailableAt 是任务这次可以开始执行的时间：首次执行是发布时指定的时间，经由 outbox 的重试是退避后的时间；
+	// NSQ 重新投递的任务给不出，为零值。
+	AvailableAt time.Time
+	// Attempt 是本次是第几次执行，从 1 开始。
+	Attempt int
+}
 
-	ID          uuid.UUID         `bun:"id,pk,type:uuid"`
-	Topic       string            `bun:"topic,notnull"`
-	Payload     []byte            `bun:"payload,notnull"`
-	Metadata    map[string]string `bun:"metadata,type:jsonb,notnull"`
-	Attempts    int               `bun:"attempts,notnull"`
-	AvailableAt time.Time         `bun:"available_at,notnull"`
-	ReservedAt  time.Time         `bun:"reserved_at,nullzero"`
-	UniqueKey   string            `bun:"unique_key,nullzero"`
-	CreatedAt   time.Time         `bun:"created_at,notnull"`
+// envelope 是发给 NSQ 的消息体。
+type envelope struct {
+	ID          uuid.UUID         `json:"id"`
+	Payload     json.RawMessage   `json:"payload"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	AvailableAt time.Time         `json:"available_at"`
+	// Attempts 是这条消息之前已经执行的次数：经由 outbox 重试的任务从这里接着计数。
+	Attempts int `json:"attempts,omitempty"`
+}
+
+// outboxRow 是 queue_outbox 中的一行。
+type outboxRow struct {
+	bun.BaseModel `bun:"table:queue_outbox,alias:o"`
+
+	ID          int64     `bun:"id,pk,autoincrement"`
+	Topic       string    `bun:"topic,notnull"`
+	Body        []byte    `bun:"body,notnull"`
+	AvailableAt time.Time `bun:"available_at,notnull"`
+	CreatedAt   time.Time `bun:"created_at,notnull"`
 }
 
 type failedJob struct {
 	bun.BaseModel `bun:"table:queue_failed_jobs,alias:f"`
 
 	ID       uuid.UUID         `bun:"id,pk,type:uuid"`
-	Driver   string            `bun:"driver,notnull"`
 	Topic    string            `bun:"topic,notnull"`
 	Payload  []byte            `bun:"payload,notnull"`
 	Metadata map[string]string `bun:"metadata,type:jsonb,notnull"`

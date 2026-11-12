@@ -36,16 +36,15 @@ const insertBatch = 1000
 // Fanout 把 items 加入操作 id：每一项是一个单位，发布为 topic 的一个任务，由 HandleUnit 包装的函数处理，各个任务并行执行。
 // 操作的 Total 增加 len(items)，状态变为 running；全部单位都成功或失败之后，操作变为 completed。
 //
-// tx 是 operations 表所在的数据库，通常是登记操作的事务；d 是发布任务的驱动，用 queue.Database(tx) 时
-// 单位和任务一起提交：
+// tx 是 operations 表所在的数据库，通常是登记操作的事务，单位和任务一起提交：
 //
 //	op, err := ops.Start(ctx, tx, subject, "articles.summarize")
-//	err = operation.Fanout(ctx, tx, queue.Database(tx), op.ID, SummarizeJob, ids...)
+//	err = operation.Fanout(ctx, tx, op.ID, SummarizeJob, ids...)
 //
 // 可以调用多次，例如发布不同 topic 的单位，或者在单位的处理函数中继续加入单位。在别处分批加入时要注意，
 // 已经加入的单位可能在下一批加入之前全部结束，操作随之结束。items 为空、操作不存在或者已经结束时返回错误。
 // 用 Fanout 执行的操作不要再交给 Service.Run。
-func Fanout[T any](ctx context.Context, tx bun.IDB, d queue.Driver, id uuid.UUID, topic queue.Topic[Unit[T]], items ...T) error {
+func Fanout[T any](ctx context.Context, tx bun.IDB, id uuid.UUID, topic queue.Topic[Unit[T]], items ...T) error {
 	if len(items) == 0 {
 		return errors.New("operation: fanout without items")
 	}
@@ -69,12 +68,11 @@ func Fanout[T any](ctx context.Context, tx bun.IDB, d queue.Driver, id uuid.UUID
 			return errors.Wrap(err, "operation: fanout")
 		}
 	}
+	payloads := make([]Unit[T], len(items))
 	for i, item := range items {
-		if err := topic.Publish(ctx, d, Unit[T]{Operation: id, ID: units[i].ID, Data: item}); err != nil {
-			return err
-		}
+		payloads[i] = Unit[T]{Operation: id, ID: units[i].ID, Data: item}
 	}
-	return nil
+	return topic.PublishAll(ctx, tx, payloads)
 }
 
 // HandleUnit 把 fn 包装为 Fanout 发布的单位的处理函数，交给 topic.Handle：

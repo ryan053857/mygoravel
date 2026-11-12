@@ -150,7 +150,7 @@ sched.Add("reports:daily", "0 3 * * *", reports.Generate, schedule.Timeout(30*ti
 
 ```go
 sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
-    return report.Generate.Publish(ctx, a.queue, time.Now().AddDate(0, 0, -1)) // queue.Topic[time.Time]
+    return report.Generate.Publish(ctx, a.db, time.Now().AddDate(0, 0, -1)) // queue.Topic[time.Time]
 })
 ```
 
@@ -262,7 +262,7 @@ for _, t := range sched.Tasks() {
 var PublishScheduledJob = queue.Topic[struct{}]("articles.publish-scheduled")
 
 // 后台页面：
-err := article.PublishScheduledJob.Publish(ctx, a.queue, struct{}{})
+err := article.PublishScheduledJob.Publish(ctx, a.db, struct{}{})
 
 // Worker 中：
 article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) error {

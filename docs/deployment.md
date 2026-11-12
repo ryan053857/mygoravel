@@ -302,7 +302,28 @@ services:
 
 容器中不使用 `reload`：镜像不可变，升级就是换一个新容器。需要不中断服务时，让部署平台先启动新容器，等 `/readyz` 返回成功再停止旧容器，例如 [Kamal](https://kamal-deploy.org)、Docker Swarm 的 `update_config.order: start-first`、Kubernetes 的 `maxUnavailable: 0`。新旧容器同时运行时，同样要满足[上一节](#upgrade-overlap)的条件。
 
-应用用到的其他服务也加进同一个 compose 文件，例如[生成 PDF](pdf.md#deployment) 用的 Gotenberg。
+应用用到的其他服务也加进同一个 compose 文件。框架的固定依赖是 PostgreSQL、[Redis](redis.md)（锁、限流、广播，配置 `noeviction`）、[Memcached](cache.md)（缓存）和 [nsqd](queue.md#preparing)（任务队列），按需再加[生成 PDF](pdf.md#deployment) 用的 Gotenberg 等：
+
+```yaml
+  redis:
+    image: redis:8
+    command: [redis-server, --maxmemory-policy, noeviction, --appendonly, "yes"]
+    volumes: [redis:/data]
+  memcached:
+    image: memcached:1.6-alpine
+    command: [memcached, -m, "512"]
+  nsqd:
+    image: nsqio/nsq:v1.3.0
+    command: [/nsqd, --data-path=/data, --mem-queue-size=0]
+    volumes: [nsqd:/data]
+  nsqadmin:
+    image: nsqio/nsq:v1.3.0
+    command: [/nsqadmin, --nsqd-http-address=nsqd:4151]
+    ports: ["127.0.0.1:4171:4171"]
+# 以及顶层的 volumes: {redis: {}, nsqd: {}}
+```
+
+nsqadmin 只监听本机，通过 SSH 隧道或内网访问。
 
 <a id="health-checks"></a>
 ## 健康检查
@@ -467,7 +488,7 @@ mygoravel 不提供备份命令。只有数据库自己的备份机制能持续�
 
 数据库回到了过去，但已经发出去的邮件、已经调用过的外部接口不会跟着撤回。恢复后要注意：
 
-- **任务会再执行一次。** 做备份时还在 `queue_jobs` 中的任务，恢复后会再执行一遍，其中有些在恢复前已经执行过：邮件可能再发一封，webhook 会用相同的 `webhook-id` 再投递一次。处理函数本来就需要能安全地重复执行，见[队列](queue.md)。
+- **任务会再执行一次。** 做备份时还在 `queue_outbox` 中的任务，恢复后会再执行一遍，其中有些在恢复前已经执行过：邮件可能再发一封，webhook 会用相同的 `webhook-id` 再投递一次。处理函数本来就需要能安全地重复执行，见[队列](queue.md)。
 - **撤销过的凭据又能用了。** 备份之后撤销的 [API token](api-tokens.md#revoking-tokens) 和[会话](session.md)，恢复后会重新生效。如果这段时间里有用户被封禁或改过密码，恢复后对这些用户再调用一次 `RevokeSubject`。无法逐个确认时，清空 `sessions` 表并删除 `api_tokens` 中 `kind = 'login'` 的行，让所有人重新登录；这段时间里撤销过的个人访问令牌需要再撤销一次。
 
 <a id="restore-drills"></a>

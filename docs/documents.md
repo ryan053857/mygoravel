@@ -147,12 +147,12 @@ for _, s := range doc.SectionsIn(chunk.Start, chunk.End) {
 <a id="processing-uploads"></a>
 ## 在后台处理上传的文档
 
-博客允许作者给文章上传附件，AI 助手回答读者问题时可以引用附件的内容。附件通过[文件存储](filesystem.md)上传，确认时发布一个队列任务，用 [queue.Unique](queue.md#unique-jobs) 合并重复的触发，见[确认后异步处理](filesystem.md#processing-files)：
+博客允许作者给文章上传附件，AI 助手回答读者问题时可以引用附件的内容。附件通过[文件存储](filesystem.md)上传，确认时发布一个队列任务，见[确认后异步处理](filesystem.md#processing-files)：
 
 ```go
 var IndexAttachment = queue.Topic[uuid.UUID]("attachments.index")
 
-err := IndexAttachment.Publish(ctx, queue.Database(tx), file.ID, queue.Unique(file.ID.String()))
+err := IndexAttachment.Publish(ctx, tx, file.ID)
 ```
 
 任务读取文件，转换、切分、计算向量，在一个事务中替换这个附件原有的分段：

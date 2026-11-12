@@ -22,6 +22,7 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 )
 
 var (
@@ -370,10 +371,9 @@ func TestSaveDetectsAnotherRun(t *testing.T) {
 func runQueue(t *testing.T, e env, fn func(ctx context.Context, id uuid.UUID) error) {
 	t.Helper()
 	topic := queue.Topic[uuid.UUID]("operation.test")
-	cfg := queue.DefaultConfig()
-	cfg.PollInterval = 20 * time.Millisecond
+	cfg := queuetest.Config(t)
 	cfg.MaxAttempts = 2
-	w := queue.NewWorker(queue.Database(e.db), cfg, slog.New(slog.DiscardHandler))
+	w := queue.NewWorker(e.db, cfg, slog.New(slog.DiscardHandler))
 	topic.Handle(w, fn)
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan error, 1)
@@ -383,7 +383,7 @@ func runQueue(t *testing.T, e env, fn func(ctx context.Context, id uuid.UUID) er
 		<-stopped
 	})
 	op := e.start(t, alice, "articles.import")
-	if err := topic.Publish(context.Background(), queue.Database(e.db), op.ID); err != nil {
+	if err := topic.Publish(context.Background(), e.db, op.ID); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(10 * time.Second)

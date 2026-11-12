@@ -44,7 +44,7 @@ func (ix *Index[D]) Reindex(ctx context.Context, tx bun.IDB, ops *operation.Serv
 	if _, err := startBuild(ctx, tx, ix.name, op.ID); err != nil {
 		return nil, err
 	}
-	if err := ix.reindex.Publish(ctx, queue.Database(tx), op.ID); err != nil {
+	if err := ix.reindex.Publish(ctx, tx, op.ID); err != nil {
 		return nil, errors.Wrapf(err, "search: publish %s reindex", ix.name)
 	}
 	return op, nil

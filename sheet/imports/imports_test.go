@@ -29,6 +29,7 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 	"github.com/ryan053857/mygoravel/sheet"
 	"github.com/ryan053857/mygoravel/sheet/imports"
 )
@@ -334,10 +335,9 @@ func TestFinalAttemptFailsImport(t *testing.T) {
 	rec.fail = func(int) error { return errors.New("always down") }
 	topic := queue.Topic[uuid.UUID]("imports.test")
 
-	cfg := queue.DefaultConfig()
-	cfg.PollInterval = 20 * time.Millisecond
+	cfg := queuetest.Config(t)
 	cfg.MaxAttempts = 1
-	w := queue.NewWorker(queue.Database(e.db), cfg, slog.New(slog.DiscardHandler))
+	w := queue.NewWorker(e.db, cfg, slog.New(slog.DiscardHandler))
 	topic.Handle(w, func(ctx context.Context, id uuid.UUID) error {
 		return imports.Process(ctx, e.imports, id, rec.row, rec.saved)
 	})
@@ -348,7 +348,7 @@ func TestFinalAttemptFailsImport(t *testing.T) {
 		cancel()
 		<-stopped
 	})
-	if err := topic.Publish(context.Background(), queue.Database(e.db), imp.ID); err != nil {
+	if err := topic.Publish(context.Background(), e.db, imp.ID); err != nil {
 		t.Fatal(err)
 	}
 

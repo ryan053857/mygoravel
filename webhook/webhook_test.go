@@ -24,6 +24,7 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/outbound"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 	"github.com/ryan053857/mygoravel/webhook"
 )
 
@@ -77,7 +78,7 @@ func deliveries(t *testing.T, db bun.IDB, q webhook.DeliveryQuery) []webhook.Del
 
 func jobCount(t *testing.T, db bun.IDB) int {
 	t.Helper()
-	n, err := db.NewSelect().Table("queue_jobs").Count(context.Background())
+	n, err := db.NewSelect().Table("queue_outbox").Count(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,9 +313,8 @@ func startWorker(t *testing.T, db *bun.DB, maxAttempts int) {
 // runWorker 用 opts 运行处理投递任务的 worker。
 func runWorker(t *testing.T, db *bun.DB, opts webhook.Options) {
 	t.Helper()
-	cfg := queue.DefaultConfig()
-	cfg.PollInterval = 20 * time.Millisecond
-	w := queue.NewWorker(queue.Database(db), cfg, slog.New(slog.DiscardHandler))
+	cfg := queuetest.Config(t)
+	w := queue.NewWorker(db, cfg, slog.New(slog.DiscardHandler))
 	webhook.NewDeliverer(db, opts).Handle(w)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

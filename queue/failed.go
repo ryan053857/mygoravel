@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -13,29 +14,21 @@ import (
 // ErrFailedJobNotFound 表示失败任务表中没有这个 ID。
 var ErrFailedJobNotFound = errors.New("queue: failed job not found")
 
-// FailedJobs 管理 queue_failed_jobs 中的失败任务，与队列驱动无关：
-// 任何驱动的任务失败后都写到这里，记录来自哪个驱动。失败任务一直保留，直到被重新入队或清理。
+// FailedJobs 管理 queue_failed_jobs 中的失败任务。失败任务一直保留，直到被重新发布或清理。
 type FailedJobs struct {
-	db      bun.IDB
-	drivers map[string]Driver
+	db bun.IDB
 }
 
 // NewFailedJobs 创建失败任务管理器。db 必须已执行 Migrations 中的迁移。
-// drivers 是 Retry 可以放回的其他驱动；数据库驱动总是可用，放回 db 本身的 queue_jobs。
-func NewFailedJobs(db bun.IDB, drivers ...Driver) *FailedJobs {
+func NewFailedJobs(db bun.IDB) *FailedJobs {
 	if db == nil {
 		panic("queue: nil database")
 	}
-	f := &FailedJobs{db: db, drivers: map[string]Driver{}}
-	for _, d := range drivers {
-		f.drivers[d.Name()] = d
-	}
-	return f
+	return &FailedJobs{db: db}
 }
 
-// Retry 把失败任务放回原来的驱动和 topic，立即可被处理，执行次数从 0 开始计算。
-// 任务不存在时返回 ErrFailedJobNotFound；原来的驱动不在 NewFailedJobs 的 drivers 中时返回错误。
-// 放回数据库驱动与删除失败记录在同一个事务中；放回其他驱动在删除提交之前完成，提交失败时任务可能被执行两次。
+// Retry 重新发布失败任务，立即可被处理，执行次数从 0 开始计算。任务不存在时返回 ErrFailedJobNotFound。
+// 重新发布与删除失败记录在同一个事务中。
 func (f *FailedJobs) Retry(ctx context.Context, id uuid.UUID) error {
 	err := f.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		row := new(failedJob)
@@ -54,14 +47,7 @@ func (f *FailedJobs) Retry(ctx context.Context, id uuid.UUID) error {
 		if n, err := res.RowsAffected(); err != nil || n == 0 {
 			return errors.Join(err, ErrFailedJobNotFound)
 		}
-		d, ok := f.drivers[row.Driver]
-		switch {
-		case row.Driver == driverDatabase:
-			d = Database(tx)
-		case !ok:
-			return errors.Newf("queue: driver %q is not registered", row.Driver)
-		}
-		return d.Enqueue(ctx, Job{ID: row.ID, Topic: row.Topic, Payload: row.Payload, Metadata: row.Metadata})
+		return republish(ctx, tx, []failedJob{*row})
 	})
 	if errors.Is(err, ErrFailedJobNotFound) {
 		return err
@@ -69,46 +55,33 @@ func (f *FailedJobs) Retry(ctx context.Context, id uuid.UUID) error {
 	return errors.Wrapf(err, "queue: retry failed job %s", id)
 }
 
-// RetryAll 把最多 limit 条 topic 中、before 之前失败的任务放回原来的驱动，返回放回的条数。
+// RetryAll 重新发布最多 limit 条 topic 中、before 之前失败的任务，返回重新发布的条数。
 // topic 为空时包括全部 topic。只处理 before 之前失败的任务，重试后马上又失败的任务不会在同一轮中被反复放回：
 // 后台页面上的「全部重试」传入点击时的时间，反复调用直到返回的条数小于 limit。
 //
-// 原来的驱动不在 NewFailedJobs 的 drivers 中的任务被跳过，留在失败任务表中。
-// 每一批在一个事务中删除失败记录并入队，与 Retry 的保证相同。
+// 每一批在一个事务中删除失败记录并重新发布，与 Retry 的保证相同。
 func (f *FailedJobs) RetryAll(ctx context.Context, topic string, before time.Time, limit int) (int, error) {
 	if err := checkBulk(before, limit); err != nil {
 		return 0, err
-	}
-	drivers := []string{driverDatabase}
-	for name := range f.drivers {
-		drivers = append(drivers, name)
 	}
 	var n int
 	err := f.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var rows []failedJob
 		sel := f.matching(tx.NewSelect().Model(&rows), topic, before).
-			Where("f.driver IN (?)", bun.List(drivers)).Limit(int64(limit)).
+			Limit(int64(limit)).
 			For("UPDATE SKIP LOCKED") // 两个管理员同时点「全部重试」时互不重复
 		if err := sel.Scan(ctx); err != nil || len(rows) == 0 {
 			return err
 		}
 		ids := make([]uuid.UUID, len(rows))
-		byDriver := map[string][]Job{}
 		for i, r := range rows {
 			ids[i] = r.ID
-			byDriver[r.Driver] = append(byDriver[r.Driver], Job{ID: r.ID, Topic: r.Topic, Payload: r.Payload, Metadata: r.Metadata})
 		}
 		if _, err := tx.NewDelete().Model((*failedJob)(nil)).Where("id IN (?)", bun.List(ids)).Exec(ctx); err != nil {
 			return err
 		}
-		for name, jobs := range byDriver {
-			d := f.drivers[name]
-			if name == driverDatabase {
-				d = Database(tx)
-			}
-			if err := d.Enqueue(ctx, jobs...); err != nil {
-				return err
-			}
+		if err := republish(ctx, tx, rows); err != nil {
+			return err
 		}
 		n = len(rows)
 		return nil
@@ -164,7 +137,6 @@ func (f *FailedJobs) delete(ctx context.Context, topic string, before time.Time,
 // FailedJob 是一条失败任务记录。
 type FailedJob struct {
 	ID       uuid.UUID
-	Driver   string
 	Topic    string
 	Payload  []byte
 	Metadata map[string]string
@@ -176,7 +148,7 @@ type FailedJob struct {
 }
 
 func (r *failedJob) export() FailedJob {
-	return FailedJob{ID: r.ID, Driver: r.Driver, Topic: r.Topic, Payload: r.Payload, Metadata: r.Metadata,
+	return FailedJob{ID: r.ID, Topic: r.Topic, Payload: r.Payload, Metadata: r.Metadata,
 		Attempts: r.Attempts, Error: r.Error, FailedAt: r.FailedAt}
 }
 
@@ -234,24 +206,6 @@ func (f *FailedJobs) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// count 返回驱动 driver 每个 topic 的失败任务数。
-func (f *FailedJobs) count(ctx context.Context, driver string) (map[string]int, error) {
-	var rows []struct {
-		Topic string `bun:"topic"`
-		N     int    `bun:"n"`
-	}
-	err := f.db.NewSelect().Model((*failedJob)(nil)).Column("f.topic").ColumnExpr("COUNT(*) AS n").
-		Where("f.driver = ?", driver).Group("f.topic").Scan(ctx, &rows)
-	if err != nil {
-		return nil, errors.Wrap(err, "queue: count failed jobs")
-	}
-	counts := make(map[string]int, len(rows))
-	for _, r := range rows {
-		counts[r.Topic] = r.N
-	}
-	return counts, nil
-}
-
 // Cleanup 返回删除 keep 以前失败的任务的清理函数，每次调用最多删除 limit 条，返回删除的条数，交给 schedule.Cleanup：
 //
 //	sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(failed.Cleanup(30*24*time.Hour), 1000))
@@ -288,4 +242,18 @@ func recordFailed(ctx context.Context, tx bun.Tx, row failedJob) error {
 	}
 	_, err := tx.NewInsert().Model(&row).Exec(ctx)
 	return err
+}
+
+// republish 在 tx 中把失败任务写回 outbox，任务 ID、payload 和元数据不变，执行次数从 0 开始。
+func republish(ctx context.Context, tx bun.IDB, rows []failedJob) error {
+	now := time.Now().UTC()
+	out := make([]outboxRow, len(rows))
+	for i, r := range rows {
+		body, err := json.Marshal(envelope{ID: r.ID, Payload: r.Payload, Metadata: r.Metadata, AvailableAt: now})
+		if err != nil {
+			return err
+		}
+		out[i] = outboxRow{Topic: r.Topic, Body: body, AvailableAt: now, CreatedAt: now}
+	}
+	return insertOutbox(ctx, tx, out)
 }

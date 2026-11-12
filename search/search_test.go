@@ -19,6 +19,7 @@ import (
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/page"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 	"github.com/ryan053857/mygoravel/search"
 )
 
@@ -371,9 +372,8 @@ func TestInvalidDocuments(t *testing.T) {
 // runWorker 在后台运行一个处理 db 中任务的 worker，测试结束时停止它。register 注册处理函数。
 func runWorker(t *testing.T, db *bun.DB, register func(w *queue.Worker)) {
 	t.Helper()
-	cfg := queue.DefaultConfig()
-	cfg.PollInterval = 20 * time.Millisecond
-	w := queue.NewWorker(queue.Database(db), cfg, slog.New(slog.DiscardHandler))
+	cfg := queuetest.Config(t)
+	w := queue.NewWorker(db, cfg, slog.New(slog.DiscardHandler))
 	register(w)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -397,8 +397,8 @@ func TestSyncThroughQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	var jobs int
-	if err := db.NewRaw("SELECT COUNT(*) FROM queue_jobs").Scan(ctx, &jobs); err != nil || jobs != 1 {
-		t.Fatalf("queued jobs = %d, %v; want the duplicates merged", jobs, err)
+	if err := db.NewRaw("SELECT COUNT(*) FROM queue_outbox").Scan(ctx, &jobs); err != nil || jobs != 3 {
+		t.Fatalf("queued jobs = %d, %v", jobs, err)
 	}
 	rollback := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
 		if err := articles.Sync(ctx, tx, "2"); err != nil {

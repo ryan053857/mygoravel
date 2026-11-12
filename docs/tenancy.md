@@ -196,10 +196,8 @@ func (a *Publish) Job(ctx context.Context, job PublishJob) error {
 发布任务时，租户同样取自主体：
 
 ```go
-err := PublishAt.Publish(ctx, queue.Database(tx), PublishJob{Tenant: subject.Tenant, ID: item.ID}, queue.At(publishAt))
+err := PublishAt.Publish(ctx, tx, PublishJob{Tenant: subject.Tenant, ID: item.ID}, queue.At(publishAt))
 ```
-
-用 [queue.Unique](queue.md#unique-jobs) 合并任务时，键只在 topic 内唯一，ID 不是全局唯一的话，键中要带上租户。
 
 系统主体的权限只在 `job.Tenant` 中生效，即使 payload 中的文章 ID 属于其他租户，`find` 也找不到它。[操作日志](activity.md)按主体的租户记录，队列中的操作因此也落在正确的租户里。命令行入口同理，用 `--tenant` 参数构造 `system(tenant)`。
 
@@ -221,7 +219,7 @@ func (a *ScheduleDigests) Handle(ctx context.Context) error {
             return err
         }
         for _, id := range ids {
-            if err := SendDigest.Publish(ctx, queue.Database(tx), id); err != nil {
+            if err := SendDigest.Publish(ctx, tx, id); err != nil {
                 return err
             }
         }

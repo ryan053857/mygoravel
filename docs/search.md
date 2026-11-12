@@ -172,7 +172,7 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 article.SearchIndex.Handle(w, a.db, article.LoadSearchDocs, article.ScanSearchKeys)
 ```
 
-处理任务时，`LoadSearchDocs` 在同步事务中读取文章当前的状态，替换索引中这个 key 原有的文档；返回空时从索引中删除。因为任务只带 key、每次都重新读取，重复或乱序执行的结果都一样；同一篇文章连续修改多次，还没开始处理的任务会用 [queue.Unique](queue.md#unique-jobs) 合并为一次。
+处理任务时，`LoadSearchDocs` 在同步事务中读取文章当前的状态，替换索引中这个 key 原有的文档；返回空时从索引中删除。因为任务只带 key、每次都重新读取，重复或乱序执行的结果都一样。
 
 - 同一个 key 的同步依次执行，后执行的一定读到更新的数据。`LoadFunc` 执行期间持有这个 key 的锁，所以它只应读取数据。
 - 删除文章同样调用 `Sync`，`LoadSearchDocs` 读不到文章，索引中的文档随之删除。

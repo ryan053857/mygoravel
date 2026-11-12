@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 )
 
 var unitTopic = queue.Topic[operation.Unit[string]]("operation.unit")
@@ -23,10 +23,9 @@ var unitTopic = queue.Topic[operation.Unit[string]]("operation.unit")
 // worker 用数据库队列处理 unitTopic，最多执行 maxAttempts 次，失败后立即重试。
 func worker(t *testing.T, e env, maxAttempts int, handle func(ctx context.Context, u operation.Unit[string]) error) {
 	t.Helper()
-	cfg := queue.DefaultConfig()
-	cfg.PollInterval = 20 * time.Millisecond
+	cfg := queuetest.Config(t)
 	cfg.MaxAttempts = maxAttempts
-	w := queue.NewWorker(queue.Database(e.db), cfg, slog.New(slog.DiscardHandler))
+	w := queue.NewWorker(e.db, cfg, slog.New(slog.DiscardHandler))
 	unitTopic.Handle(w, handle)
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan error, 1)
@@ -46,7 +45,7 @@ func (e env) fanout(t *testing.T, items ...string) *operation.Operation {
 		if op, err = e.ops.Start(ctx, tx, alice, "articles.summarize"); err != nil {
 			return err
 		}
-		return operation.Fanout(ctx, tx, queue.Database(tx), op.ID, unitTopic, items...)
+		return operation.Fanout(ctx, tx, op.ID, unitTopic, items...)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -136,10 +135,10 @@ func TestHandleUnitSkipsSettledUnits(t *testing.T) {
 		t.Fatalf("completed: %+v", got)
 	}
 	// 已经结束的操作不能再加入单位。
-	if err := operation.Fanout(ctx, e.db, queue.Database(e.db), op.ID, unitTopic, "late"); err == nil {
+	if err := operation.Fanout(ctx, e.db, op.ID, unitTopic, "late"); err == nil {
 		t.Fatal("fanout to finished operation")
 	}
-	if err := operation.Fanout(ctx, e.db, queue.Database(e.db), op.ID, unitTopic); err == nil {
+	if err := operation.Fanout(ctx, e.db, op.ID, unitTopic); err == nil {
 		t.Fatal("fanout without items")
 	}
 	// 操作被删除后，剩下的任务什么也不做。
@@ -153,27 +152,28 @@ func TestHandleUnitSkipsSettledUnits(t *testing.T) {
 	}
 }
 
-// claimAll 领取 unitTopic 中全部到期的任务，解码到 units。
+// claimAll 取出 outbox 中 unitTopic 的全部任务，解码到 units，不经过 NSQ。
 func (e env) claimAll(t *testing.T, units *[]operation.Unit[string]) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	claims, err := queue.Database(e.db).Claim(ctx, queue.ClaimRequest{Topic: string(unitTopic), Max: 100, Lease: time.Minute, PollInterval: 10 * time.Millisecond})
+	ctx := context.Background()
+	var bodies [][]byte
+	err := e.db.NewSelect().Table("queue_outbox").Column("body").Where("topic = ?", string(unitTopic)).Order("id").Scan(ctx, &bodies)
 	if err != nil {
 		t.Fatal(err)
 	}
 	*units = (*units)[:0]
-	for _, c := range claims {
-		var u operation.Unit[string]
-		if err := json.Unmarshal(c.Job().Payload, &u); err != nil {
+	for _, body := range bodies {
+		var msg struct {
+			Payload operation.Unit[string] `json:"payload"`
+		}
+		if err := json.Unmarshal(body, &msg); err != nil {
 			t.Fatal(err)
 		}
-		*units = append(*units, u)
-		if err := c.Ack(ctx); err != nil {
-			t.Fatal(err)
-		}
+		*units = append(*units, msg.Payload)
 	}
-	slices.SortFunc(*units, func(a, b operation.Unit[string]) int { return strings.Compare(a.Data, b.Data) })
+	if _, err := e.db.NewDelete().Table("queue_outbox").Where("topic = ?", string(unitTopic)).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRetryFailedUnit(t *testing.T) {

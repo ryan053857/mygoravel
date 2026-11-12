@@ -286,7 +286,7 @@ err := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) 
 })
 ```
 
-参数与 Bun 的 `db.RunInTx` 相同，只是数据库作为第二个参数传入；第三个参数是 `*sql.TxOptions`，`nil` 表示默认选项。`database.Tx` 嵌入了 `bun.Tx`，查询的写法完全一样，也可以传给接收 `bun.IDB` 的函数，例如 `activity.Record` 和 `queue.Database`。它比 `bun.Tx` 多了一个 [AfterCommit](#after-commit)。
+参数与 Bun 的 `db.RunInTx` 相同，只是数据库作为第二个参数传入；第三个参数是 `*sql.TxOptions`，`nil` 表示默认选项。`database.Tx` 嵌入了 `bun.Tx`，查询的写法完全一样，也可以传给接收 `bun.IDB` 的函数，例如 `activity.Record` 和队列的 `Topic.Publish`。它比 `bun.Tx` 多了一个 [AfterCommit](#after-commit)。
 
 > [!WARNING]
 > 在回调内部，所有操作都必须使用传入的 `tx`，而不是外层的 `db`。使用 `db` 的操作不属于这个事务，回滚时也不会被撤销。
@@ -314,7 +314,7 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 - **失败只记录日志。** 回调返回错误或 panic 时记录一条 Error 日志，其余回调继续执行，`RunInTx` 仍然返回 `nil`：数据已经提交，调用方不应以为操作失败。返回错误前用 `errors.Wrap` 写明是哪个操作，日志中才看得出来。
 
 > [!WARNING]
-> 回调只保存在内存中，事务提交之后、回调执行之前进程退出，回调就不会执行。它适合尽力而为的操作；必须完成的工作，例如发送通知邮件，请在事务中用 `queue.Database(tx)` 发布任务，任务与业务数据一起提交，见[队列](queue.md#publishing-jobs)。
+> 回调只保存在内存中，事务提交之后、回调执行之前进程退出，回调就不会执行。它适合尽力而为的操作；必须完成的工作，例如发送通知邮件，请在事务中发布任务，任务与业务数据一起提交，见[队列](queue.md#publishing-jobs)。
 
 回调是同步执行的，会推迟响应，耗时的操作交给队列。
 

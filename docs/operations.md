@@ -95,7 +95,7 @@ func (a *BulkPublish) Handle(ctx context.Context, subject identity.Subject, ids 
         if op, err = a.ops.Start(ctx, tx, subject, "articles.bulk_publish"); err != nil {
             return err
         }
-        return BulkPublishJob.Publish(ctx, queue.Database(tx), BulkPublishRequest{Operation: op.ID, Subject: subject, IDs: ids})
+        return BulkPublishJob.Publish(ctx, tx, BulkPublishRequest{Operation: op.ID, Subject: subject, IDs: ids})
     })
     return op, err
 }
@@ -267,7 +267,7 @@ var SummarizeJob = queue.Topic[operation.Unit[SummarizeUnit]]("articles.summariz
 if op, err = a.ops.Start(ctx, tx, subject, "articles.summarize"); err != nil {
     return err
 }
-return operation.Fanout(ctx, tx, queue.Database(tx), op.ID, SummarizeJob, units...)
+return operation.Fanout(ctx, tx, op.ID, SummarizeJob, units...)
 ```
 
 处理函数只处理一个单位，`operation.HandleUnit` 把它包装为任务的处理函数，记下每个单位的结果：

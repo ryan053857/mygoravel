@@ -36,14 +36,16 @@ services:
       interval: 1s
       retries: 30
 
-  nats:
-    image: nats:2-alpine
-    # 队列驱动需要 JetStream；-m 开启监控端口供健康检查使用。
-    command: ["-js", "-m", "8222"]
+  nsqd:
+    image: nsqio/nsq:v1.3.0
+    command: ["/nsqd", "--mem-queue-size=0", "--data-path=/data"]
     ports:
-      - 127.0.0.1:54222:4222
+      - 127.0.0.1:54150:4150
+      - 127.0.0.1:54151:4151
+    tmpfs:
+      - /data
     healthcheck:
-      test: wget -qO- http://127.0.0.1:8222/healthz
+      test: wget -qO- http://127.0.0.1:4151/ping
       interval: 1s
       retries: 30
 

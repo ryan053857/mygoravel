@@ -152,7 +152,7 @@ if err != nil {
     return err
 }
 msg.To = []mail.Address{{Name: authorUser.Name, Address: authorUser.Email}}
-return mailjob.Send.Publish(ctx, queue.Database(tx), msg)
+return mailjob.Send.Publish(ctx, tx, msg)
 ```
 
 `authorUser` 是事务中查出的作者。用户是否接收邮件这类偏好保存在应用自己的表中，由 action 判断。
@@ -212,7 +212,7 @@ type Message struct {
 ```go
 if link != nil { // link 是事务中查出的作者的绑定
     lctx := i18n.WithLocale(ctx, a.languages, i18n.Match(a.languages, link.Language))
-    err = telegram.SendTopic.Publish(ctx, queue.Database(tx), telegram.Message{
+    err = telegram.SendTopic.Publish(ctx, tx, telegram.Message{
         ChatID: link.ChatID,
         Text:   i18n.T(lctx, n.Event, n.Data),
     })

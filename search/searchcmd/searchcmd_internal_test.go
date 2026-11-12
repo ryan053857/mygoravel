@@ -18,6 +18,7 @@ import (
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 	"github.com/ryan053857/mygoravel/search"
 )
 
@@ -90,9 +91,8 @@ func TestReindexUnknownIndex(t *testing.T) {
 func TestReindexWaits(t *testing.T) {
 	pollInterval = 10 * time.Millisecond
 	db := open(t)
-	cfg := queue.DefaultConfig()
-	cfg.PollInterval = 10 * time.Millisecond
-	w := queue.NewWorker(queue.Database(db), cfg, slog.New(slog.DiscardHandler))
+	cfg := queuetest.Config(t)
+	w := queue.NewWorker(db, cfg, slog.New(slog.DiscardHandler))
 	articles.Handle(w, db, load, scan)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

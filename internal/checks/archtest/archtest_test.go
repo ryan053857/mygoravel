@@ -453,21 +453,6 @@ func TestCoreDoesNotLinkRedis(t *testing.T) {
 	}
 }
 
-// TestCoreDoesNotLinkNATS 确保不用 NATS 的应用不会链接 nats.go，NATS 实现在 queue/natsqueue 中。
-func TestCoreDoesNotLinkNATS(t *testing.T) {
-	for _, pkg := range []string{module + "/broadcast", module + "/broadcast/redisbroadcast", module + "/queue"} {
-		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
-		if err != nil {
-			t.Fatalf("go list: %v\n%s", err, out)
-		}
-		for _, dep := range strings.Fields(string(out)) {
-			if under(dep, "github.com/nats-io") {
-				t.Errorf("%s depends on %s", pkg, dep)
-			}
-		}
-	}
-}
-
 // TestCommandCoreIsLight 确保只用 command 核心包的应用（例如常驻 worker）
 // 不会链接 HTTP API 和数据库组件；它们分别在 command/httpcmd 和 command/migratecmd 中。
 func TestCommandCoreIsLight(t *testing.T) {

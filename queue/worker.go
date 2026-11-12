@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -9,38 +10,40 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
+	"github.com/nsqio/go-nsq"
+	"github.com/uptrace/bun"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/logging"
 )
 
-var (
-	// ErrLeaseLost 表示任务的租约已过期，任务可能已被其他实例领取。
-	// 它也是处理函数 context 的取消原因：收到它时应停止处理。
-	ErrLeaseLost = errors.New("queue: lease lost")
-	// ErrShuttingDown 是处理函数 context 的取消原因：停止等待超时，任务已释放给其他实例。
-	ErrShuttingDown = errors.New("queue: shutting down")
-)
+// ErrShuttingDown 是处理函数 context 的取消原因：停止等待超时，任务已放回 NSQ。
+var ErrShuttingDown = errors.New("queue: shutting down")
 
-// dbTimeout 是领取之后确认、重试、续租和释放任务时单次操作的超时。这些操作不使用 Run 的 context，
+// dbTimeout 是写入失败任务、经由 outbox 安排重试时单次数据库操作的超时。这些操作不使用 Run 的 context，
 // 停止过程中仍能写回处理结果。
 const dbTimeout = 30 * time.Second
 
-// Worker 从驱动领取已注册 topic 的到期任务，交给处理函数，并把结果写回驱动。多个实例竞争领取。
+// Worker 转发已发布的任务，并处理已注册 topic 的任务。
 //
-// 每个 topic 一个领取循环，同时处理的任务不超过它的并发数。处理函数返回 nil 时确认任务；
-// 返回错误时按退避时间重试，次数用完或错误被 Permanent 标记时转入失败任务表。
-// 处理期间每 Lease/3 续租一次，租约丢失时取消处理函数的 context，原因是 ErrLeaseLost。
+// 转发：Topic.Publish 把任务写入 queue_outbox，Worker 把它们发布到 NSQ 后删除。发布任务的事务提交时
+// PostgreSQL 通知 Worker 立即转发，另外每 Config.PollInterval 检查一次。执行时间离现在超过 Config.MaxDefer 的
+// 任务留在 outbox 中，到时间再转发。多个 Worker 同时转发时互不重复。
 //
-// Run 的 ctx 取消后，先停止领取，再等待处理中的任务完成并写回结果，最多等待 Config.ShutdownTimeout；
-// 超时仍未完成的任务立即释放给其他实例，处理函数的 context 以 ErrShuttingDown 取消。Run 在这一切完成后返回，
-// 之后可以关闭数据库等连接。
+// 处理：每个 topic 一个 NSQ 消费者，同时处理的任务不超过它的并发数，同一个应用的 Worker 使用同一个 channel，
+// 每个任务只交给其中一个。处理函数返回 nil 时确认任务；返回错误时按退避时间重试，次数用完或错误被 Permanent
+// 标记时转入失败任务表。处理期间每 Lease/3 延长一次租约。
 //
-//	w := queue.NewWorker(queue.Database(db), cfg, logger)
+// Run 的 ctx 取消后，先停止接收新任务和转发，再等待处理中的任务完成，最多等待 Config.ShutdownTimeout；
+// 超时仍未完成的任务立即放回 NSQ，处理函数的 context 以 ErrShuttingDown 取消。Run 在这一切完成后返回，
+// 之后可以关闭数据库。
+//
+//	w := queue.NewWorker(db, cfg, logger)
 //	SendMail.Handle(w, mailer.Send)
 //	err := w.Run(ctx)
 type Worker struct {
-	driver    Driver
+	db        *bun.DB
 	failed    *FailedJobs
 	cfg       Config
 	logger    *slog.Logger
@@ -50,6 +53,12 @@ type Worker struct {
 	mu       sync.Mutex
 	handlers []*handler
 	started  bool
+
+	// stopping 在停止时置位，之后收到的任务不再开始，直接放回。lifecycle 保护它和 inflight 的计数。
+	lifecycle sync.RWMutex
+	stopping  bool
+	inflight  sync.WaitGroup
+	abandon   chan struct{} // 停止等待超时，放回处理中的任务
 }
 
 // handler 是一个 topic 的处理函数和它的设置。
@@ -63,42 +72,33 @@ type handler struct {
 // WorkerOption 调整 NewWorker 创建的 Worker。
 type WorkerOption func(*Worker)
 
-// WithFailedJobs 指定失败任务写到哪里。数据库驱动默认写入自己的数据库，并且与删除任务在同一个事务中完成；
-// 其他驱动必须指定，失败任务先写入 failed，再从驱动中确认删除。
-func WithFailedJobs(failed *FailedJobs) WorkerOption {
-	return func(w *Worker) { w.failed = failed }
-}
-
-// NewWorker 创建从驱动 d 领取任务的 Worker，cfg 是各 topic 的默认设置。logger 记录任务失败和驱动错误，
-// nil 时使用 slog.Default()。d 为 nil、cfg 不合法，或者非数据库驱动没有使用 WithFailedJobs 时 panic。
-func NewWorker(d Driver, cfg Config, logger *slog.Logger, opts ...WorkerOption) *Worker {
-	if d == nil {
-		panic("queue: nil driver")
+// NewWorker 创建 Worker。db 是 queue_outbox 和 queue_failed_jobs 所在的数据库，必须已执行 Migrations 中的迁移；
+// cfg 是 NSQ 的地址和各 topic 的默认设置；logger 记录任务失败和 NSQ 的错误，nil 时使用 slog.Default()。
+// db 为 nil 或 cfg 不合法时 panic。
+func NewWorker(db *bun.DB, cfg Config, logger *slog.Logger, opts ...WorkerOption) *Worker {
+	if db == nil {
+		panic("queue: nil database")
 	}
 	if err := cfg.Validate(); err != nil {
 		panic(errors.Wrap(err, "queue"))
 	}
 	w := &Worker{
-		driver: d,
-		cfg:    cfg,
-		logger: logging.Or(logger).With(logging.AttrComponent, "queue"),
+		db:      db,
+		failed:  NewFailedJobs(db),
+		cfg:     cfg,
+		logger:  logging.Or(logger).With(logging.AttrComponent, "queue"),
+		abandon: make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(w)
-	}
-	if db, ok := d.(*dbDriver); ok && w.failed == nil {
-		w.failed = NewFailedJobs(db.db)
-	}
-	if w.failed == nil {
-		panic(fmt.Sprintf("queue: driver %q needs WithFailedJobs", d.Name()))
 	}
 	return w
 }
 
 // handle 注册 topic 的处理函数，见 Topic.Handle。
 func (w *Worker) handle(topic string, fn func(context.Context, []byte) error, opts []HandleOption) {
-	if topic == "" {
-		panic("queue: empty topic")
+	if !validName(w.cfg.Prefix + topic) {
+		panic(fmt.Sprintf("queue: topic %q must be letters, digits, '.', '_' or '-', at most 64 with the prefix", topic))
 	}
 	h := &handler{topic: topic, fn: fn, concurrency: w.cfg.Concurrency, maxAttempts: w.cfg.MaxAttempts}
 	for _, opt := range opts {
@@ -117,47 +117,92 @@ func (w *Worker) handle(topic string, fn func(context.Context, []byte) error, op
 	w.handlers = append(w.handlers, h)
 }
 
-// Run 领取并处理已注册 topic 的任务，直到 ctx 被取消，然后按 Worker 的说明停止，返回 nil。
-// 没有注册任何处理函数，或者第二次调用时返回错误。
+// Run 转发任务、处理已注册 topic 的任务，直到 ctx 被取消，然后按 Worker 的说明停止，返回 nil。
+// 连不上 nsqd 时返回错误。没有注册处理函数时只转发。第二次调用时返回错误。
 func (w *Worker) Run(ctx context.Context) error {
 	w.mu.Lock()
 	handlers, started := w.handlers, w.started
 	w.started = true
 	w.mu.Unlock()
-	switch {
-	case started:
+	if started {
 		return errors.New("queue: Run called twice")
-	case len(handlers) == 0:
-		return errors.New("queue: no handlers")
 	}
-	var wg sync.WaitGroup
+
+	producer, err := nsq.NewProducer(w.cfg.NSQD, nsq.NewConfig())
+	if err != nil {
+		return errors.Wrap(err, "queue: nsq producer")
+	}
+	producer.SetLogger(nsqLogger{w.logger}, nsq.LogLevelWarning)
+	defer producer.Stop()
+	if err := producer.Ping(); err != nil {
+		return errors.Wrapf(err, "queue: connect to nsqd %s", w.cfg.NSQD)
+	}
+
+	var consumers []*nsq.Consumer
+	defer func() {
+		for _, c := range consumers {
+			c.Stop()
+			<-c.StopChan
+		}
+	}()
 	for _, h := range handlers {
-		wg.Go(func() { w.consume(ctx, h) })
+		c, err := w.consume(h)
+		if err != nil {
+			return err
+		}
+		consumers = append(consumers, c)
 	}
-	wg.Wait()
+
+	relayed := make(chan struct{})
+	go func() {
+		defer close(relayed)
+		w.relay(ctx, producer)
+	}()
+	<-ctx.Done()
+
+	w.lifecycle.Lock()
+	w.stopping = true
+	w.lifecycle.Unlock()
+	for _, c := range consumers {
+		c.Stop() // 发送 CLS：nsqd 不再投递新的任务
+	}
+	w.drain()
+	<-relayed
 	return nil
 }
 
-// loop 是一个 topic 的领取循环正在处理的任务。
-type loop struct {
-	*handler
-	slots    chan struct{}  // 空位数即还能领取的任务数
-	inflight sync.WaitGroup // 已开始处理、还没写回结果的任务
-	abandon  chan struct{}  // 停止等待超时，释放处理中的任务
+// consume 为 h 创建并连接 NSQ 消费者。
+func (w *Worker) consume(h *handler) (*nsq.Consumer, error) {
+	cfg := nsq.NewConfig()
+	cfg.MaxInFlight = h.concurrency
+	cfg.MsgTimeout = w.cfg.Lease
+	cfg.MaxAttempts = 0 // 次数由 Worker 判断
+	c, err := nsq.NewConsumer(w.cfg.Prefix+h.topic, w.cfg.Channel, cfg)
+	if err != nil {
+		return nil, errors.Wrapf(err, "queue: nsq consumer for %q", h.topic)
+	}
+	c.SetLogger(nsqLogger{w.logger}, nsq.LogLevelWarning)
+	c.AddConcurrentHandlers(nsq.HandlerFunc(func(m *nsq.Message) error {
+		w.process(h, m)
+		return nil
+	}), h.concurrency)
+	if len(w.cfg.Lookupd) > 0 {
+		err = c.ConnectToNSQLookupds(w.cfg.Lookupd)
+	} else {
+		err = c.ConnectToNSQD(w.cfg.NSQD)
+	}
+	if err != nil {
+		c.Stop()
+		return nil, errors.Wrapf(err, "queue: consume %q", h.topic)
+	}
+	return c, nil
 }
 
-// consume 领取 h 的任务直到 ctx 取消，然后等待处理中的任务写回结果。
-func (w *Worker) consume(ctx context.Context, h *handler) {
-	l := &loop{handler: h, slots: make(chan struct{}, h.concurrency), abandon: make(chan struct{})}
-	w.claimLoop(ctx, l)
-	w.drain(l)
-}
-
-// drain 等待处理中的任务写回结果，最多等待 ShutdownTimeout，超时后释放它们。
-func (w *Worker) drain(l *loop) {
+// drain 等待处理中的任务写回结果，最多等待 ShutdownTimeout，超时后放回它们。
+func (w *Worker) drain() {
 	idle := make(chan struct{})
 	go func() {
-		l.inflight.Wait()
+		w.inflight.Wait()
 		close(idle)
 	}()
 	t := time.NewTimer(w.cfg.ShutdownTimeout)
@@ -165,111 +210,116 @@ func (w *Worker) drain(l *loop) {
 	select {
 	case <-idle:
 	case <-t.C:
-		close(l.abandon)
+		close(w.abandon)
 		<-idle
 	}
 }
 
-func (w *Worker) claimLoop(ctx context.Context, l *loop) {
-	for {
-		// 至少等到一个空位，再把其余空位一起用于这次领取。
-		select {
-		case l.slots <- struct{}{}:
-		case <-ctx.Done():
-			return
-		}
-		n := 1
-	fill:
-		for n < l.concurrency {
-			select {
-			case l.slots <- struct{}{}:
-				n++
-			default:
-				break fill
-			}
-		}
-
-		claims, err := w.driver.Claim(ctx, ClaimRequest{Topic: l.topic, Max: n, Lease: w.cfg.Lease, PollInterval: w.cfg.PollInterval})
-		for range n - len(claims) {
-			<-l.slots
-		}
-		if err != nil && ctx.Err() == nil {
-			w.logger.Error("claim jobs failed", "topic", l.topic, "error", err)
-			wait(ctx, w.cfg.PollInterval)
-		}
-		if ctx.Err() != nil {
-			// 停止时刚领取的任务不再开始，直接还回队列。
-			for _, c := range claims {
-				w.release(c)
-				<-l.slots
-			}
-			return
-		}
-		for _, c := range claims {
-			l.inflight.Add(1)
-			go w.process(c, l)
-		}
+// begin 登记一个开始处理的任务；停止之后返回 false，任务不再开始。
+func (w *Worker) begin() bool {
+	w.lifecycle.RLock()
+	defer w.lifecycle.RUnlock()
+	if w.stopping {
+		return false
 	}
+	w.inflight.Add(1)
+	return true
 }
 
-func wait(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-t.C:
-	case <-ctx.Done():
+// process 执行一个任务并写回结果，期间按 Lease/3 延长租约。
+func (w *Worker) process(h *handler, m *nsq.Message) {
+	m.DisableAutoResponse()
+	if !w.begin() {
+		m.RequeueWithoutBackoff(0) // 停止时刚收到的任务不再开始，直接放回
+		return
 	}
-}
+	defer w.inflight.Done()
 
-// process 执行一个任务并写回结果，期间按 Lease/3 续租。
-func (w *Worker) process(c Claim, l *loop) {
-	defer l.inflight.Done()
-	defer func() { <-l.slots }()
-
-	j := c.Job()
-	ctx, cancel := context.WithCancelCause(w.jobContext(j, l.maxAttempts))
+	var env envelope
+	if err := json.Unmarshal(m.Body, &env); err != nil {
+		w.logger.Error("drop undecodable message", "topic", h.topic, "error", err)
+		_ = withTimeout(func(ctx context.Context) error {
+			return w.failed.record(ctx, failedJob{ID: uuid.Must(uuid.NewV7()), Topic: h.topic, Payload: m.Body,
+				Attempts: int(m.Attempts), Error: fmt.Sprintf("%+v", errors.Wrap(err, "queue: decode message")), FailedAt: time.Now().UTC()})
+		})
+		m.Finish()
+		return
+	}
+	j := Job{ID: env.ID, Topic: h.topic, Payload: env.Payload, Metadata: env.Metadata, Attempt: env.Attempts + int(m.Attempts)}
+	if m.Attempts == 1 {
+		j.AvailableAt = env.AvailableAt
+	}
+	ctx, cancel := context.WithCancelCause(w.jobContext(j, h.maxAttempts))
 	defer cancel(nil)
 	started := time.Now()
 	w.observe(ctx, Event{Kind: JobStarted, Job: j, Started: started})
 	result := make(chan error, 1)
-	go func() { result <- call(ctx, l.fn, j.Payload) }()
+	go func() { result <- call(ctx, h.fn, j.Payload) }()
 
-	ticker := time.NewTicker(max(w.cfg.Lease/3, time.Millisecond))
+	ticker := time.NewTicker(w.cfg.Lease / 3)
 	defer ticker.Stop()
-	held := true
 	for {
 		select {
 		case err := <-result:
-			switch {
-			case !held:
-			case err == nil:
-				w.ack(ctx, c, started)
-			default:
-				w.nack(ctx, c, err, l.maxAttempts, started)
+			if err == nil {
+				m.Finish()
+				w.observe(ctx, Event{Kind: JobSucceeded, Job: j, Started: started, Duration: time.Since(started)})
+				return
 			}
+			w.nack(ctx, m, j, env, err, h.maxAttempts, started)
 			return
 		case <-ticker.C:
-			if !held {
-				continue
-			}
-			err := withTimeout(func(ctx context.Context) error { return c.Extend(ctx, w.cfg.Lease) })
-			switch {
-			case errors.Is(err, ErrLeaseLost):
-				held = false
-				w.logger.WarnContext(ctx, "job lease lost", "topic", j.Topic)
-				w.observe(ctx, Event{Kind: JobLeaseLost, Job: j, Started: started, Duration: time.Since(started)})
-				cancel(ErrLeaseLost)
-			case err != nil:
-				w.logger.ErrorContext(ctx, "extend lease failed", "topic", j.Topic, "error", err)
-			}
-		case <-l.abandon:
-			if held && w.release(c) {
-				w.observe(ctx, Event{Kind: JobReleased, Job: j, Started: started, Duration: time.Since(started)})
-			}
+			m.Touch()
+		case <-w.abandon:
+			m.RequeueWithoutBackoff(0)
+			w.observe(ctx, Event{Kind: JobReleased, Job: j, Started: started, Duration: time.Since(started)})
 			cancel(ErrShuttingDown)
 			return
 		}
 	}
+}
+
+// nack 安排重试，或者把任务转入失败任务表。不超过 MaxDefer 的重试由 NSQ 延迟投递，更晚的写回 outbox。
+func (w *Worker) nack(ctx context.Context, m *nsq.Message, j Job, env envelope, cause error, maxAttempts int, started time.Time) {
+	if !IsPermanent(cause) && j.Attempt < maxAttempts {
+		delay := retryDelay(cause, j.Attempt)
+		at := time.Now().Add(delay)
+		if delay > w.cfg.MaxDefer {
+			later := env
+			later.AvailableAt, later.Attempts = at.UTC(), j.Attempt
+			if err := withTimeout(func(ctx context.Context) error { return w.postpone(ctx, j.Topic, later) }); err != nil {
+				w.logger.ErrorContext(ctx, "schedule retry failed", "topic", j.Topic, "error", err)
+				m.RequeueWithoutBackoff(w.cfg.MaxDefer)
+				return
+			}
+			m.Finish()
+		} else {
+			m.RequeueWithoutBackoff(delay)
+		}
+		w.logger.WarnContext(ctx, "job failed, will retry", "topic", j.Topic, "retry_in", delay, "error", cause)
+		w.observe(ctx, Event{Kind: JobRetrying, Job: j, Started: started, Duration: time.Since(started), Err: cause, RetryAt: at})
+		return
+	}
+	record := failedJob{ID: j.ID, Topic: j.Topic, Payload: j.Payload, Metadata: j.Metadata,
+		Attempts: j.Attempt, Error: fmt.Sprintf("%+v", cause), FailedAt: time.Now().UTC()}
+	if err := withTimeout(func(ctx context.Context) error { return w.failed.record(ctx, record) }); err != nil {
+		// 失败任务写不进去时不确认：稍后重新投递，再次失败时再写。
+		w.logger.ErrorContext(ctx, "move job to failed jobs failed", "topic", j.Topic, "error", err)
+		m.RequeueWithoutBackoff(min(w.cfg.MaxDefer, time.Minute))
+		return
+	}
+	m.Finish()
+	w.logger.ErrorContext(ctx, "job failed", "topic", j.Topic, "error", cause)
+	w.observe(ctx, Event{Kind: JobFailed, Job: j, Started: started, Duration: time.Since(started), Err: cause})
+}
+
+// postpone 把 env 写回 outbox，到 env.AvailableAt 再转发。
+func (w *Worker) postpone(ctx context.Context, topic string, env envelope) error {
+	body, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return insertOutbox(ctx, w.db, []outboxRow{{Topic: topic, Body: body, AvailableAt: env.AvailableAt, CreatedAt: time.Now().UTC()}})
 }
 
 // jobContext 返回处理函数的 context：还原发布方的链路和 request_id，附上任务 ID、执行次数。
@@ -301,68 +351,12 @@ func withTimeout(fn func(ctx context.Context) error) error {
 	return fn(ctx)
 }
 
-func (w *Worker) ack(ctx context.Context, c Claim, started time.Time) {
-	err := withTimeout(c.Ack)
-	switch {
-	case err == nil:
-		w.observe(ctx, Event{Kind: JobSucceeded, Job: c.Job(), Started: started, Duration: time.Since(started)})
-	case errors.Is(err, ErrLeaseLost):
-		w.logger.WarnContext(ctx, "job lease lost before acknowledgement", "topic", c.Job().Topic)
-		w.observe(ctx, Event{Kind: JobLeaseLost, Job: c.Job(), Started: started, Duration: time.Since(started)})
-	default:
-		w.logger.ErrorContext(ctx, "acknowledge finished job failed", "topic", c.Job().Topic, "error", err)
+// wait 等待 d 或 ctx 结束。
+func wait(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
 	}
-}
-
-func (w *Worker) nack(ctx context.Context, c Claim, cause error, maxAttempts int, started time.Time) {
-	j := c.Job()
-	if !IsPermanent(cause) && j.Attempt < maxAttempts {
-		delay := retryDelay(cause, j.Attempt)
-		at := time.Now().Add(delay)
-		err := withTimeout(func(ctx context.Context) error { return c.Retry(ctx, at) })
-		if err != nil {
-			w.logger.ErrorContext(ctx, "schedule retry failed", "topic", j.Topic, "error", err)
-			return
-		}
-		w.logger.WarnContext(ctx, "job failed, will retry", "topic", j.Topic, "retry_in", delay, "error", cause)
-		w.observe(ctx, Event{Kind: JobRetrying, Job: j, Started: started, Duration: time.Since(started), Err: cause, RetryAt: at})
-		return
-	}
-	if err := withTimeout(func(ctx context.Context) error { return w.fail(ctx, c, cause) }); err != nil {
-		w.logger.ErrorContext(ctx, "move job to failed jobs failed", "topic", j.Topic, "error", err)
-		return
-	}
-	w.logger.ErrorContext(ctx, "job failed", "topic", j.Topic, "error", cause)
-	w.observe(ctx, Event{Kind: JobFailed, Job: j, Started: started, Duration: time.Since(started), Err: cause})
-}
-
-// failer 由能在一个事务中删除任务并写入失败记录的领取实现（数据库驱动）。
-type failer interface {
-	fail(ctx context.Context, record failedJob) error
-}
-
-// fail 把任务转入失败任务表。数据库驱动在一个事务中完成；其他驱动先写失败记录再确认任务，
-// 两步之间进程崩溃时任务会被重新执行，再次失败时替换这条记录。
-func (w *Worker) fail(ctx context.Context, c Claim, cause error) error {
-	j := c.Job()
-	record := failedJob{
-		ID: j.ID, Driver: w.driver.Name(), Topic: j.Topic, Payload: j.Payload, Metadata: j.Metadata,
-		Attempts: j.Attempt, Error: fmt.Sprintf("%+v", cause), FailedAt: time.Now().UTC(),
-	}
-	if f, ok := c.(failer); ok {
-		return f.fail(ctx, record)
-	}
-	if err := w.failed.record(ctx, record); err != nil {
-		return err
-	}
-	return c.Ack(ctx)
-}
-
-// release 把领取的任务还回队列，立即可被领取，本次领取不计入处理次数。返回是否还回成功。
-func (w *Worker) release(c Claim) bool {
-	err := withTimeout(c.Release)
-	if err != nil && !errors.Is(err, ErrLeaseLost) {
-		w.logger.Error("release job failed", "topic", c.Job().Topic, logging.AttrMessageID, c.Job().ID.String(), "error", err)
-	}
-	return err == nil
 }
