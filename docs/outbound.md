@@ -7,6 +7,7 @@
 - [处理被拒绝的请求](#handling-refusals)
 - [代理](#proxies)
 - [在其他组件中使用](#using-with-other-components)
+- [测试](#testing)
 
 <a id="introduction"></a>
 ## 简介
@@ -110,3 +111,56 @@ if errors.Is(err, outbound.ErrForbidden) {
 
   `openai` 是 trpc-agent-go 的 `model/openai`，`option` 是 openai-go 的 `option` 包，`aiopenai` 是框架的 `ai/openai`。
 - 其他需要 `*http.Client` 的库，例如 SDK 的 `WithHTTPClient` 选项，同样可以传入它。
+
+<a id="testing"></a>
+## 测试
+
+`outbound/outboundtest` 提供不连接网络的 `http.RoundTripper`：按方法和地址登记响应，记录发出的每个请求。把它的 `Client()` 交给 action，就可以测试链接预览，不需要真的去请求 `example.com`：
+
+```go
+func TestPreview(t *testing.T) {
+    fake := outboundtest.New(t)
+    fake.On("GET https://example.com/post").Reply(
+        outboundtest.Text(200, `<title>Hello</title><meta property="og:image" content="/cover.png">`).
+            Header("Content-Type", "text/html"),
+    )
+    preview := &Preview{client: fake.Client()}
+
+    got, err := preview.fetch(t.Context(), "https://example.com/post")
+    require.NoError(t, err)
+    assert.Equal(t, "Hello", got.Title)
+    assert.Len(t, fake.Sent("GET https://example.com/post"), 1)
+}
+```
+
+`On` 的参数是可选的方法加地址，省略方法时匹配任何方法。地址中的 `*` 匹配任意字符，例如 `https://api.github.com/users/*`；省略协议时 http 和 https 都匹配；不写 `?` 时忽略查询参数。同一个请求匹配多个登记时，后登记的优先，测试可以覆盖公共辅助函数中登记的响应。
+
+`Reply` 接收一个或多个响应：第 n 个请求得到第 n 个响应，用完之后一直返回最后一个。
+
+| 响应 | 作用 |
+| --- | --- |
+| `JSON(status, v)` | JSON 响应 |
+| `Text(status, body)` | 纯文本响应 |
+| `Status(status)` | 没有响应体的响应，没有调用 `Reply` 时是 `Status(200)` |
+| `Fail(err)` | 请求返回 `err`，模拟连接失败、超时（`context.DeadlineExceeded`） |
+| `Handler(h)`、`HandlerFunc(f)` | 用 `http.Handler` 生成响应，可以检查请求，或者等待 `r.Context()` 结束模拟慢响应 |
+| `.Header(key, value)` | 设置响应头，例如 `Status(429).Header("Retry-After", "1")` |
+
+它替换的是传输层，`outbound` 的地址检查不会执行。测试被拒绝的链接时，让请求返回 `ErrForbidden`：
+
+```go
+fake.On("https://internal.example.com/*").Reply(outboundtest.Fail(outbound.ErrForbidden))
+
+_, err := preview.fetch(t.Context(), "https://internal.example.com/admin")
+assert.ErrorIs(t, err, ErrInvalidLink)
+```
+
+`Sent(pattern)` 返回匹配的请求，`Requests()` 返回全部请求。记录的请求带有完整的请求体，用 `JSON(&v)` 或 `Form()` 解析。没有登记的请求返回错误，并且在测试结束时让测试失败，代码不会在测试中悄悄访问外网。
+
+第三方 SDK 通常有传入 `*http.Client` 的选项，同样可以用它测试，不需要 SDK 支持修改服务地址：
+
+```go
+fake.On("POST https://api.resend.com/emails").Reply(outboundtest.JSON(200, map[string]string{"id": "em_1"}))
+client := resendsdk.NewCustomClient(fake.Client(), "re_test") // github.com/resend/resend-go/v3
+mailer, err := resend.NewWithClient(client, from)
+```
