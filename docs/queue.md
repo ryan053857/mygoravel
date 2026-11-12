@@ -15,6 +15,7 @@
 - [日志](#logging)
 - [观测](#observability)
     - [指标](#metrics)
+    - [运行统计](#monitoring)
     - [任务事件](#job-events)
     - [队列状态](#queue-stats)
     - [查看队列的命令](#stats-command)
@@ -198,7 +199,8 @@ func (a *App) Worker(*command.Daemon) (func(context.Context) error, error) {
         return nil, err
     }
 
-    w := queue.NewWorker(a.queue, a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
+    w := queue.NewWorker(a.queue, a.cfg.Queue, nil,
+        queue.WithTelemetry(a.meters, a.tracers), queue.WithMonitor(a.recorder))
     mailjob.Send.Handle(w, mailer.Send)
     return w.Run, nil
 }
@@ -358,7 +360,11 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 <a id="observability"></a>
 ## 观测
 
-观测分两层：接入监控系统用[指标](#metrics)，所有驱动报告同一套指标；写命令、做后台页面、保存执行历史用原始数据：[任务事件](#job-events)、[队列状态](#queue-stats)和[失败任务](#failed-jobs)。两层的状态名称相同。
+观测分三层，所有驱动报告的数据都相同：
+
+- 接入监控系统、告警用[指标](#metrics)；
+- 在命令和后台页面查看最近的处理情况用[运行统计](#monitoring)，它保存在应用数据库中；
+- 自己保存执行历史、做更细的页面用原始数据：[任务事件](#job-events)、[队列状态](#queue-stats)和[失败任务](#failed-jobs)。
 
 <a id="metrics"></a>
 ### 指标
@@ -397,10 +403,25 @@ HTTP 请求和定时任务的指标见[可观测性](telemetry.md)。
 
 [NATS 驱动](#nats-driver)给不出的数据不报告：`queue.jobs` 只有 `ready`、`running` 和 `failed`，没有 `queue.job.oldest_ready_age`，`queue.job.wait` 只记录首次执行。
 
+<a id="monitoring"></a>
+### 运行统计
+
+`queue.WithMonitor` 把每个 topic 的处理次数、耗时和等待时长记录为[运行统计](monitor.md)，上面的 `Worker` 已经加上了它。`queue.Activity` 查询一段时间内的汇总，[查看队列的命令](#stats-command)和后台页面都用它：
+
+```go
+now := time.Now()
+topics, err := queue.Activity(ctx, a.stats, now.Add(-time.Hour), now)
+mail := topics["mail.send"]
+// mail.Succeeded、Retried、Failed：处理成功、失败后等待重试、转入失败任务表的执行次数
+// mail.MeanDuration、MaxDuration：处理耗时；MeanWait、MaxWait：从可以执行到开始处理的等待时长
+```
+
+画趋势图时用 `Store.Series` 查询 `queue.MetricSucceeded` 等 metric，label 是 topic。统计记录的是发生过的事，与驱动无关；队列中现在有多少任务要问驱动，见[队列状态](#queue-stats)。
+
 <a id="job-events"></a>
 ### 任务事件
 
-`queue.WithObserver` 让 worker 在每次状态变化时通知你。成功的任务会从队列中删除，执行历史、耗时这类数据只能从事件中得到：
+`queue.WithObserver` 让 worker 在每次状态变化时通知你，`WithTelemetry` 和 `WithMonitor` 都建立在它之上。需要每个任务的执行历史时，把事件写进自己的表：成功的任务会从队列中删除，这类数据只能从事件中得到：
 
 ```go
 w := queue.NewWorker(a.queue, a.cfg.Queue, nil,
@@ -461,13 +482,13 @@ for _, s := range stats {
 `queuecmd.New` 返回 `queue` 命令，它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明。声明时 `App` 的字段都是零值，命令只保存它们，执行时才使用：
 
 ```go
-queuecmd.New(a.failed, a.queue),
+queuecmd.New(a.failed, a.stats, a.queue),
 ```
 
-`queue stats` 列出每个 topic 的任务数，`WAITING` 是积压最久的任务已经等了多久，驱动给不出的数显示为 `-`：
+`queue stats` 先列出每个 topic 现在的任务数，`WAITING` 是积压最久的任务已经等了多久，驱动给不出的数显示为 `-`；再列出最近一段时间的[运行统计](#monitoring)，`--since` 指定时长，默认一小时：
 
 ```bash
-./bin/api queue stats
+./bin/api queue stats --since 24h
 ```
 
 ```text
@@ -475,7 +496,15 @@ TOPIC                READY  DELAYED  RETRYING  RUNNING  FAILED  WAITING
 articles.import      0      0        0         1        0       0s
 mail.send            12     3        2         4        1       1m24s
 webhook.deliver      0      0        5         0        2       0s
+
+最近 24h
+TOPIC            SUCCEEDED  RETRIED  FAILED  AVG TIME  MAX TIME  AVG WAIT  MAX WAIT
+articles.import  3          0        0       41.2s     1m12.5s   812ms     1.4s
+mail.send        4182       37       1       240ms     3.214s    1.1s      2m3s
+webhook.deliver  926        58       2       312ms     10.001s   95ms      1.2s
 ```
+
+`a.stats` 在执行时为 `nil` 时只列出现在的任务数。
 
 `queue failed` 从新到旧列出失败任务，错误信息只显示第一行，完整的错误和堆栈用 `FailedJobs.Get` 查看：
 
@@ -488,7 +517,7 @@ ID                                    TOPIC      ATTEMPTS  FAILED AT            
 0193e7b1-2c4f-7d8e-9a1b-5f6c7d8e9f01  mail.send  5         2026-11-12 09:41:07  send mail: dial tcp 10.0.0.12:587: connection refused
 ```
 
-应用同时使用多个队列时，例如任务在 Redis 中而 [webhook 投递](webhooks.md#delivering)总在数据库队列中，把它们都装配为 `App` 的字段，一起传给 `queuecmd.New`，输出多一列驱动名。
+应用同时使用多个队列时，例如任务在 Redis 中而 [webhook 投递](webhooks.md#delivering)总在数据库队列中，把它们都装配为 `App` 的字段，一起传给 `queuecmd.New`，现在的任务数多一列驱动名；运行统计与驱动无关，仍按 topic 汇总。
 
 <a id="testing"></a>
 ## 测试

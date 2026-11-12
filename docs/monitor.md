@@ -2,6 +2,7 @@
 
 - [简介](#introduction)
 - [装配](#assembling)
+- [队列、定时任务和缓存](#components)
 - [记录](#recording)
     - [按分钟汇总](#aggregates)
     - [最新值](#latest-values)
@@ -27,17 +28,30 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 ))
 ```
 
-然后在[入口](dependencies.md#assembling-the-application)的 `open` 中，打开数据库之后创建 `Store` 和 `Recorder`，保存在 `App` 中：
+然后在[入口](dependencies.md#assembling-the-application)的 `open` 中，打开数据库之后创建 `Store` 和 `Recorder`，保存为 `App` 的 `stats` 和 `recorder` 字段：
 
 ```go
 stats := monitor.NewStore(db)
-rec := monitor.NewRecorder(stats, nil)
-stack.MustAdd("monitor", rec.Close)
+recorder := monitor.NewRecorder(stats, nil)
+stack.MustAdd("monitor", recorder.Close)
 ```
 
 `Store` 读写统计表；`Recorder` 在内存中累加记录，每 10 秒批量写入一次。`Close` 写入剩余的记录，它登记在数据库之后，所以会在关闭数据库之前执行。
 
 写入失败时，这一批记录被丢弃，并记录一条 `error` 日志（`component=monitor`）：统计只用于查看，不值得为它阻塞业务或无限积压。
+
+<a id="components"></a>
+## 队列、定时任务和缓存
+
+框架的组件把自己的运行统计记录到同一个 `Recorder`，各自提供查询函数和命令，与队列驱动、缓存后端无关：
+
+| 组件 | 记录 | 查询 | 命令 |
+| --- | --- | --- | --- |
+| [队列](queue.md#monitoring) | `queue.WithMonitor(a.recorder)`：每个 topic 的处理次数、耗时、等待时长 | `queue.Activity` | `queue stats` |
+| [定时任务](scheduling.md#run-history) | `schedule.WithMonitor(a.recorder)`：每个任务的执行次数、耗时、上一次的结果 | `schedule.Activity`、`schedule.LastRuns` | `schedules` |
+| [缓存](cache.md#hit-rate) | `cachemon.Wrap(name, c, a.recorder)`：命中、未命中、出错次数 | `cachemon.Activity` | `cache stats` |
+
+它们使用的 metric 以 `queue.`、`schedule.`、`cache.` 开头，常量在各自的包中，例如 `queue.MetricSucceeded`，画趋势图时传给 `Store.Series`。应用自己的记录用自己模块的名字开头，不会与它们冲突。
 
 <a id="recording"></a>
 ## 记录
@@ -53,9 +67,9 @@ stack.MustAdd("monitor", rec.Close)
 started := time.Now()
 err := a.mailer.Send(ctx, msg)
 if err == nil {
-    a.rec.Record("mail.sent", msg.Kind, time.Since(started).Seconds())
+    a.recorder.Record("mail.sent", msg.Kind, time.Since(started).Seconds())
 } else {
-    a.rec.Record("mail.failed", msg.Kind, 1)
+    a.recorder.Record("mail.failed", msg.Kind, 1)
 }
 ```
 
@@ -72,7 +86,7 @@ type syncResult struct {
     Error string `json:"error,omitempty"`
 }
 
-a.rec.Set("rates.sync", "usd", syncResult{Rates: len(rates)})
+a.recorder.Set("rates.sync", "usd", syncResult{Rates: len(rates)})
 ```
 
 多个实例先后记录同一个 label 时，以记录时间最晚的为准，与写入数据库的先后无关。
@@ -115,7 +129,7 @@ for _, v := range values {
 <a id="cleanup"></a>
 ## 清理
 
-按分钟汇总的记录每分钟每个 label 一行，要定期清理。`Cleanup` 返回清理函数，交给[定时任务](scheduling.md#framework-cleanups)：
+按分钟汇总的记录每分钟每个 label 一行，要定期清理。`Cleanup` 返回清理函数，交给[定时任务](scheduling.md#running-the-scheduler)：
 
 ```go
 sched.Add("monitor:cleanup", "@hourly", schedule.Cleanup(a.stats.Cleanup(7*24*time.Hour), 1000),

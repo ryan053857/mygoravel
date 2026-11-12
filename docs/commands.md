@@ -106,8 +106,9 @@ func main() {
 | `httpcmd.Routes(router)` | `routes` | 否 |
 | `devcmd.New(opts, addr)` | `dev`，开发页面时监听文件变化并刷新浏览器，见 [dev 命令](#dev-command) | 是 |
 | `command.Bind(open, declare)` | 应用声明的命令，例如 `article publish`，见[从命令行运行 action](actions.md#as-commands) | 是 |
-| `queuecmd.New(failed, drivers...)` | `queue stats`、`queue failed`，在 `command.Bind` 中声明，见[查看队列的命令](queue.md#stats-command) | 是 |
-| `schedulecmd.New(tasks)` | `schedules`，在 `command.Bind` 中声明，见[列出任务的命令](scheduling.md#schedules-command) | 是 |
+| `queuecmd.New(failed, stats, drivers...)` | `queue stats`、`queue failed`，在 `command.Bind` 中声明，见[查看队列的命令](queue.md#stats-command) | 是 |
+| `schedulecmd.New(tasks, stats)` | `schedules`，在 `command.Bind` 中声明，见[列出任务的命令](scheduling.md#schedules-command) | 是 |
+| `cachecmd.New(stats)` | `cache stats`，在 `command.Bind` 中声明，见[命中率](cache.md#hit-rate) | 是 |
 
 迁移命令、HTTP 命令和 dev 命令分别放在 `command/migratecmd`、`command/httpcmd`、`command/devcmd` 三个子包中。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
 
