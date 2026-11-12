@@ -18,6 +18,7 @@ require (
 	github.com/axadrn/shadcn-templ/v2 v2.0.0
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c
 	github.com/centrifugal/centrifuge v0.40.1
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cloudflare/tableflip v1.2.4-0.20240920015315-64983fb2d863
 	github.com/cockroachdb/errors v1.14.0
 	github.com/coder/websocket v1.8.15
@@ -111,7 +112,6 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/centrifugal/fdelta v0.0.3 // indirect
 	github.com/centrifugal/protocol v0.23.1 // indirect
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cli/browser v1.3.0 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
 	github.com/cockroachdb/redact v1.1.5 // indirect
