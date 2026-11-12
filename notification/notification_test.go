@@ -11,16 +11,15 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/notification"
 )
 
 var (
-	alice = notification.Recipient{Tenant: "acme", Type: identity.SubjectUser, ID: "u1"}
-	bob   = notification.Recipient{Tenant: "acme", Type: identity.SubjectUser, ID: "u2"}
+	alice = notification.Recipient{Tenant: "acme", Type: "user", ID: "u1"}
+	bob   = notification.Recipient{Tenant: "acme", Type: "user", ID: "u2"}
 	// 同一个用户在另一个租户中是另一个收件人。
-	aliceGlobex = notification.Recipient{Tenant: "globex", Type: identity.SubjectUser, ID: "u1"}
+	aliceGlobex = notification.Recipient{Tenant: "globex", Type: "user", ID: "u1"}
 )
 
 func send(t *testing.T, db bun.IDB, event string, to ...notification.Recipient) []notification.Notification {
@@ -136,10 +135,10 @@ func TestSendRejectsInvalid(t *testing.T) {
 	}{
 		"empty event":        {notification.Notification{}, alice},
 		"long event":         {notification.Notification{Event: long}, alice},
-		"no recipient id":    {notification.Notification{Event: "e"}, notification.Recipient{Type: identity.SubjectUser}},
+		"no recipient id":    {notification.Notification{Event: "e"}, notification.Recipient{Type: "user"}},
 		"no recipient type":  {notification.Notification{Event: "e"}, notification.Recipient{ID: "u1"}},
-		"long recipient id":  {notification.Notification{Event: "e"}, notification.Recipient{Type: identity.SubjectUser, ID: long}},
-		"long tenant":        {notification.Notification{Event: "e"}, notification.Recipient{Tenant: long, Type: identity.SubjectUser, ID: "u1"}},
+		"long recipient id":  {notification.Notification{Event: "e"}, notification.Recipient{Type: "user", ID: long}},
+		"long tenant":        {notification.Notification{Event: "e"}, notification.Recipient{Tenant: long, Type: "user", ID: "u1"}},
 		"unencodable values": {notification.Notification{Event: "e", Data: map[string]any{"f": func() {}}}, alice},
 	} {
 		if _, err := notification.Send(context.Background(), db, c.n, c.to); err == nil {
@@ -169,7 +168,7 @@ func TestListFiltersAndPages(t *testing.T) {
 			"limit":    {notification.Query{Recipient: alice, Limit: 2}, "e4,e3"},
 			"other":    {notification.Query{Recipient: bob}, "e1"},
 			"tenant":   {notification.Query{Recipient: aliceGlobex}, "e3"},
-			"platform": {notification.Query{Recipient: notification.Recipient{Type: identity.SubjectUser, ID: "u1"}}, ""},
+			"platform": {notification.Query{Recipient: notification.Recipient{Type: "user", ID: "u1"}}, ""},
 		} {
 			if got := events(list(t, db, c.q)); got != c.want {
 				t.Errorf("%s: got %s want %s", name, got, c.want)

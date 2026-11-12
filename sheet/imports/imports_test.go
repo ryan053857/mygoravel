@@ -34,8 +34,8 @@ import (
 )
 
 var (
-	alice = identity.Subject{ID: "u1", Type: identity.SubjectUser, Tenant: "acme"}
-	bob   = identity.Subject{ID: "u2", Type: identity.SubjectUser, Tenant: "acme"}
+	alice = identity.Subject{ID: "u1", Type: "user", Tenant: "acme"}
+	bob   = identity.Subject{ID: "u2", Type: "user", Tenant: "acme"}
 )
 
 var errTaken = errorx.Define(errorx.Conflict, "test.taken")
@@ -142,7 +142,7 @@ func (r *recorder) row(_ context.Context, imp *imports.Import, rec *sheet.Record
 		}
 	}
 	r.seen[rec.Line]++
-	if o := imp.Owner(); o.ID != "u1" || o.Type != identity.SubjectUser || o.Tenant != "acme" {
+	if o := imp.Owner(); o.ID != "u1" || o.Type != "user" || o.Tenant != "acme" {
 		return errors.New("wrong owner")
 	}
 	switch rec.Data.Slug {

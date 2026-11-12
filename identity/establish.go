@@ -69,7 +69,7 @@ func Establish(ctx context.Context, authenticate Authenticator, resolve Resolver
 // 主体不再是租户成员或失去权限时返回 4xx 类错误，连接应当结束；Failed 报告为 true 的错误表示暂时无法判断，连接保持。
 func Reestablish(ctx context.Context, was Subject, authenticate Authenticator, resolve Resolver, permissions ...string) error {
 	sub, err := Establish(ctx, authenticate, resolve, permissions...)
-	if err == nil && (sub.ID != was.ID || sub.Impersonator != was.Impersonator) {
+	if err == nil && (sub.Ref() != was.Ref() || sub.Impersonator != was.Impersonator) {
 		return ErrUnauthenticated.New()
 	}
 	return err

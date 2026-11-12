@@ -57,7 +57,7 @@ func shell(t *testing.T, permissions ...string) *webtest.Client {
 		routes.Get(p, page)
 	}
 	c := webtest.New(t, r)
-	c.Login(pages, identity.Subject{ID: "alice", Type: identity.SubjectUser, Permissions: permissions})
+	c.Login(pages, identity.Subject{ID: "alice", Type: "user", Permissions: permissions})
 	return c
 }
 

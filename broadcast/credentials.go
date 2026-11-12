@@ -53,13 +53,13 @@ func (c *Credentials) RecheckCredential(ctx context.Context, id string) error {
 	return c.hub.Publish(ctx, credTopic(credentialTopic, id), nil)
 }
 
-// RecheckSubject 让主体 id 的全部长连接立即复查。用于退出其他设备、修改密码、停用账号、
-// 移出租户或修改这个用户的角色之后。
-func (c *Credentials) RecheckSubject(ctx context.Context, id string) error {
-	if id == "" {
-		return errors.New("broadcast: empty subject id")
+// RecheckSubject 让主体 ref 的全部长连接立即复查。用于退出其他设备、修改密码、停用账号、
+// 移出租户或修改这个主体的角色之后。
+func (c *Credentials) RecheckSubject(ctx context.Context, ref identity.Ref) error {
+	if err := ref.Validate(); err != nil {
+		return errors.Wrap(err, "broadcast")
 	}
-	return c.hub.Publish(ctx, credTopic(subjectTopic, id), nil)
+	return c.hub.Publish(ctx, credTopic(subjectTopic, ref.String()), nil)
 }
 
 // RecheckTenant 让请求所在租户为 tenant 的全部长连接立即复查，"" 是平台本身。
@@ -68,14 +68,14 @@ func (c *Credentials) RecheckTenant(ctx context.Context, tenant string) error {
 	return c.hub.Publish(ctx, credTopic(tenantTopic, tenant), nil)
 }
 
-// Watch 实现 httpx.CredentialWatcher：关注 sub.Credential、sub.ID 和 identity.TenantFromContext(ctx)，
+// Watch 实现 httpx.CredentialWatcher：关注 sub.Credential、sub.Ref() 和 identity.TenantFromContext(ctx)，
 // 收到对应的 Recheck 时向返回的通道发送信号，多个信号在读取前合并为一个。
 // 订阅因为跟不上或 Backend 可能丢了消息而结束时，先发一个信号（期间的提醒可能丢了），再重新订阅。
 // ctx 结束或 Hub 关闭后停止关注。
 func (c *Credentials) Watch(ctx context.Context, sub identity.Subject) <-chan struct{} {
 	topics := []string{credTopic(tenantTopic, identity.TenantFromContext(ctx))}
 	if sub.ID != "" {
-		topics = append(topics, credTopic(subjectTopic, sub.ID))
+		topics = append(topics, credTopic(subjectTopic, sub.Ref().String()))
 	}
 	if sub.Credential != "" {
 		topics = append(topics, credTopic(credentialTopic, sub.Credential))

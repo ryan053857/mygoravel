@@ -20,7 +20,7 @@ import (
 func TestRequireBearerInstallsCredentialCheck(t *testing.T) {
 	var (
 		mu      sync.Mutex
-		subject = identity.Subject{ID: "alice", Type: identity.SubjectUser, Permissions: []string{"events"}}
+		subject = identity.Subject{ID: "alice", Type: "user", Permissions: []string{"events"}}
 		valid   = true
 		down    bool
 	)

@@ -213,7 +213,7 @@ type HistoryOutput struct {
 // POST /assistant/chat：发送消息或审批结果，响应是这次回答的消息流。
 func (h *Handlers) Chat(ctx context.Context, in *ChatInput) (*huma.StreamResponse, error) {
     sub, _ := identity.FromContext(ctx)
-    run, err := h.runs.Submit(ctx, sub.ID, in.Body)
+    run, err := h.runs.Submit(ctx, sub.Ref().String(), in.Body)
     if err != nil {
         return nil, err
     }
@@ -223,7 +223,7 @@ func (h *Handlers) Chat(ctx context.Context, in *ChatInput) (*huma.StreamRespons
 // GET /assistant/chat/{id}/stream：断线后接上进行中的回答。
 func (h *Handlers) Resume(ctx context.Context, in *ConversationInput) (*huma.StreamResponse, error) {
     sub, _ := identity.FromContext(ctx)
-    run, err := h.runs.Get(ctx, sub.ID, in.ID)
+    run, err := h.runs.Get(ctx, sub.Ref().String(), in.ID)
     if err != nil {
         return nil, err
     }
@@ -233,13 +233,13 @@ func (h *Handlers) Resume(ctx context.Context, in *ConversationInput) (*huma.Str
 // POST /assistant/chat/{id}/steer：回答进行中插话。
 func (h *Handlers) Steer(ctx context.Context, in *SteerInput) (*struct{}, error) {
     sub, _ := identity.FromContext(ctx)
-    return nil, h.runs.Steer(ctx, sub.ID, in.ID, model.NewUserMessage(in.Body.Text))
+    return nil, h.runs.Steer(ctx, sub.Ref().String(), in.ID, model.NewUserMessage(in.Body.Text))
 }
 
 // POST /assistant/chat/{id}/stop：停止进行中的回答。
 func (h *Handlers) Stop(ctx context.Context, in *ConversationInput) (*struct{}, error) {
     sub, _ := identity.FromContext(ctx)
-    run, err := h.runs.Get(ctx, sub.ID, in.ID)
+    run, err := h.runs.Get(ctx, sub.Ref().String(), in.ID)
     if err != nil || run == nil {
         return nil, err // 没有进行中的回答时什么也不做
     }
@@ -250,10 +250,12 @@ func (h *Handlers) Stop(ctx context.Context, in *ConversationInput) (*struct{}, 
 // GET /assistant/chat/{id}/messages：打开页面时加载对话历史。
 func (h *Handlers) History(ctx context.Context, in *ConversationInput) (*HistoryOutput, error) {
     sub, _ := identity.FromContext(ctx)
-    messages, err := h.runs.UIMessages(ctx, sub.ID, in.ID)
+    messages, err := h.runs.UIMessages(ctx, sub.Ref().String(), in.ID)
     return &HistoryOutput{messages}, err
 }
 ```
+
+`Runs` 的 `userID` 传 `sub.Ref().String()`，例如 `user:42`：只传 `sub.ID` 时，不同账号体系中 ID 相同的两个人会共用对话。
 
 两个流式接口用 `rest.RegisterSSE` 注册，`chat.UIEvents` 描述消息流，用于生成 OpenAPI 文档：
 

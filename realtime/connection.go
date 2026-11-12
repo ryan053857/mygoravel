@@ -39,7 +39,7 @@ func (rt *Realtime) connecting(ctx context.Context, e centrifuge.ConnectEvent) (
 	}
 	return centrifuge.ConnectReply{
 		Context:     context.WithValue(ctx, connectionKey{}, conn),
-		Credentials: &centrifuge.Credentials{UserID: conn.sub.ID},
+		Credentials: &centrifuge.Credentials{UserID: conn.sub.Ref().String()},
 	}, nil
 }
 

@@ -208,7 +208,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
     if f.Valid() {
         u, err := h.authenticate.Handle(r.Context(), f.Data.Email, f.Data.Password)
         if err == nil {
-            sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}
+            sub := identity.Subject{Type: user.Type, ID: u.ID, Permissions: u.Permissions}
             if err := h.pages.Login(r, sub); err != nil {
                 return err
             }
@@ -248,7 +248,7 @@ pages := web.New(web.Options{
         if u.Disabled {
             return identity.Subject{}, user.ErrDisabled.New()
         }
-        return identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}, nil
+        return identity.Subject{Type: user.Type, ID: u.ID, Permissions: u.Permissions}, nil
     },
     // ErrorPage 等其余字段同上
 })

@@ -17,7 +17,7 @@ import (
 	"github.com/ryan053857/mygoravel/logging"
 )
 
-var alice = identity.Subject{ID: "u1", Type: identity.SubjectUser, Tenant: "acme", Permissions: []string{"*"}}
+var alice = identity.Subject{ID: "u1", Type: "user", Tenant: "acme", Permissions: []string{"*"}}
 
 func record(t *testing.T, db bun.IDB, actor identity.Subject, a activity.Activity) {
 	t.Helper()
@@ -56,7 +56,7 @@ func TestRecordFillsActorTenantAndRequestID(t *testing.T) {
 			t.Fatalf("list=%+v", list)
 		}
 		a := list[0]
-		if a.ID.Version() != 7 || a.Tenant != "acme" || a.ActorType != identity.SubjectUser || a.ActorID != "u1" || a.ImpersonatorID != "" ||
+		if a.ID.Version() != 7 || a.Tenant != "acme" || a.ActorType != "user" || a.ActorID != "u1" || a.ImpersonatorID != "" ||
 			a.Event != "article.published" || a.TargetType != "article" || a.TargetID != "a1" || a.RequestID != "req-1" {
 			t.Fatalf("activity=%+v", a)
 		}
@@ -69,18 +69,19 @@ func TestRecordFillsActorTenantAndRequestID(t *testing.T) {
 	})
 }
 
-// 代为登录时，操作人是被代为登录的用户，ImpersonatorID 记下实际操作的人。
+// 代为登录时，操作人是被代为登录的用户，Impersonator 记下实际操作的人。
 func TestRecordImpersonation(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := dbtesting.Open(t, driver, activity.Migrations())
 		asAlice := alice
-		asAlice.Impersonator = "staff"
+		staff := identity.Ref{Type: "staff", ID: "s1"}
+		asAlice.Impersonator = staff
 		record(t, db, asAlice, activity.Activity{Event: "article.published"})
 		list, err := activity.List(context.Background(), db, activity.Query{Tenant: "acme"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(list) != 1 || list[0].ActorID != "u1" || list[0].ImpersonatorID != "staff" {
+		if len(list) != 1 || list[0].Actor() != alice.Ref() || list[0].Impersonator() != staff {
 			t.Fatalf("list=%+v", list)
 		}
 	})
@@ -143,7 +144,7 @@ func TestRecordRejectsInvalid(t *testing.T) {
 func TestListFiltersAndPages(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		db := dbtesting.Open(t, driver, activity.Migrations())
-		bob := identity.Subject{ID: "u2", Type: identity.SubjectUser, Tenant: "acme"}
+		bob := identity.Subject{ID: "u2", Type: "user", Tenant: "acme"}
 		record(t, db, alice, activity.Activity{Event: "article.created", TargetType: "article", TargetID: "a1"})
 		record(t, db, bob, activity.Activity{Event: "article.updated", TargetType: "article", TargetID: "a1"})
 		record(t, db, alice, activity.Activity{Event: "article.created", TargetType: "article", TargetID: "a2"})
@@ -160,7 +161,7 @@ func TestListFiltersAndPages(t *testing.T) {
 			"platform": {activity.Query{}, "tenant.suspended"},
 			"target":   {activity.Query{Tenant: "acme", TargetType: "article", TargetID: "a1"}, "article.updated,article.created"},
 			"type":     {activity.Query{Tenant: "acme", TargetType: "article"}, "article.created,article.updated,article.created"},
-			"actor":    {activity.Query{Tenant: "acme", ActorID: "u1"}, "member.invited,article.created,article.created"},
+			"actor":    {activity.Query{Tenant: "acme", Actor: alice.Ref()}, "member.invited,article.created,article.created"},
 			"event":    {activity.Query{Tenant: "acme", Event: "article.created"}, "article.created,article.created"},
 			"limit":    {activity.Query{Tenant: "acme", Limit: 2}, "member.invited,article.created"},
 		} {
@@ -192,6 +193,14 @@ func TestListFiltersAndPages(t *testing.T) {
 
 		if _, err := activity.List(ctx, db, activity.Query{TargetID: "a1"}); err == nil {
 			t.Fatal("expected error for target id without type")
+		}
+
+		// 操作人按类型和 ID 一起区分：另一套账号体系中的 u1 是另一个人。
+		record(t, db, identity.Subject{ID: "u1", Type: "user", Tenant: "initech"}, activity.Activity{Event: "by.user"})
+		record(t, db, identity.Subject{ID: "u1", Type: "staff", Tenant: "initech"}, activity.Activity{Event: "by.staff"})
+		list, err := activity.List(ctx, db, activity.Query{Tenant: "initech", Actor: identity.Ref{Type: "staff", ID: "u1"}})
+		if err != nil || events(list) != "by.staff" {
+			t.Fatalf("staff actor: %s err=%v", events(list), err)
 		}
 	})
 }

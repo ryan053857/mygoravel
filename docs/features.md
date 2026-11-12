@@ -109,7 +109,7 @@ return web.Render(w, r, http.StatusOK, views.Edit(item, views.EditOptions{
 <a id="background-jobs"></a>
 ### 后台任务
 
-[队列任务](tenancy.md#tenant-jobs)使用 `system(tenant)` 这样的服务主体。服务主体没有用户 ID，所以租户的设置和按租户放量对它有效，用户的设置和按用户放量不适用。
+[队列任务](tenancy.md#tenant-jobs)使用 `system(tenant)` 这样类型为 `identity.System` 的主体。它不是某个用户，所以租户的设置和按租户放量对它有效，用户的设置和按用户放量不适用。
 
 <a id="changing-settings"></a>
 ## 修改设置
@@ -122,7 +122,7 @@ store.Set(ctx, article.NewEditor, feature.Tenant("acme"), feature.On)
 store.Set(ctx, article.NewEditor, feature.Tenant("globex"), feature.On)
 
 // 2. 某个用户反馈问题，单独给他关闭
-store.Set(ctx, article.NewEditor, feature.User("u_42"), feature.Off)
+store.Set(ctx, article.NewEditor, feature.Subject(identity.Ref{Type: user.Type, ID: "u_42"}), feature.Off)
 
 // 3. 按比例放量
 store.Set(ctx, article.NewEditor, feature.Everyone, feature.Percent(10))
@@ -180,7 +180,7 @@ for _, flag := range store.Catalog() {
         return err
     }
     for _, s := range settings {
-        // s.Scope.Tenant()、s.Scope.User() 都为空时是全员；
+        // s.Scope.Tenant() 为空、s.Scope.Subject() 为零值时是全员；
         // s.State.Mode 为 on、off 或 percent，比例在 s.State.Percent 中
     }
 }

@@ -37,7 +37,7 @@ func TestCredentialsWatch(t *testing.T) {
 	creds := broadcast.NewCredentials(hub)
 	ctx, cancel := context.WithCancel(identity.WithTenant(context.Background(), "acme"))
 	defer cancel()
-	ch := creds.Watch(ctx, identity.Subject{ID: "alice", Credential: "token:1"})
+	ch := creds.Watch(ctx, identity.Subject{Type: "user", ID: "alice", Credential: "token:1"})
 	// Watch 在后台订阅；等订阅生效再发提醒。
 	time.Sleep(20 * time.Millisecond)
 
@@ -49,8 +49,9 @@ func TestCredentialsWatch(t *testing.T) {
 	}{
 		{"same credential", func() error { return creds.RecheckCredential(bg, "token:1") }, true},
 		{"other credential", func() error { return creds.RecheckCredential(bg, "token:2") }, false},
-		{"same subject", func() error { return creds.RecheckSubject(bg, "alice") }, true},
-		{"other subject", func() error { return creds.RecheckSubject(bg, "bob") }, false},
+		{"same subject", func() error { return creds.RecheckSubject(bg, identity.Ref{Type: "user", ID: "alice"}) }, true},
+		{"other subject", func() error { return creds.RecheckSubject(bg, identity.Ref{Type: "user", ID: "bob"}) }, false},
+		{"same ID in another account system", func() error { return creds.RecheckSubject(bg, identity.Ref{Type: "staff", ID: "alice"}) }, false},
 		{"request tenant", func() error { return creds.RecheckTenant(bg, "acme") }, true},
 		{"other tenant", func() error { return creds.RecheckTenant(bg, "globex") }, false},
 		{"platform", func() error { return creds.RecheckTenant(bg, "") }, false},
@@ -63,7 +64,7 @@ func TestCredentialsWatch(t *testing.T) {
 
 	// 读取前的多个提醒合并为一个信号。
 	for range 3 {
-		if err := creds.RecheckSubject(bg, "alice"); err != nil {
+		if err := creds.RecheckSubject(bg, identity.Ref{Type: "user", ID: "alice"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -72,14 +73,14 @@ func TestCredentialsWatch(t *testing.T) {
 	signaled(t, ch, false, "merged")
 
 	// ID 不能为空。
-	if creds.RecheckCredential(bg, "") == nil || creds.RecheckSubject(bg, "") == nil {
+	if creds.RecheckCredential(bg, "") == nil || creds.RecheckSubject(bg, identity.Ref{}) == nil {
 		t.Fatal("empty id accepted")
 	}
 
 	// ctx 结束后停止关注。
 	cancel()
 	time.Sleep(20 * time.Millisecond)
-	if err := creds.RecheckSubject(bg, "alice"); err != nil {
+	if err := creds.RecheckSubject(bg, identity.Ref{Type: "user", ID: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	signaled(t, ch, false, "after ctx ended")
@@ -123,13 +124,13 @@ func TestCredentialsWatchResubscribesAfterLoss(t *testing.T) {
 	creds := broadcast.NewCredentials(hub)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ch := creds.Watch(ctx, identity.Subject{ID: "alice"})
+	ch := creds.Watch(ctx, identity.Subject{Type: "user", ID: "alice"})
 	time.Sleep(20 * time.Millisecond)
 
 	backend.Lose()
 	signaled(t, ch, true, "after loss")
 	time.Sleep(20 * time.Millisecond)
-	if err := creds.RecheckSubject(context.Background(), "alice"); err != nil {
+	if err := creds.RecheckSubject(context.Background(), identity.Ref{Type: "user", ID: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	signaled(t, ch, true, "after resubscribe")
@@ -139,7 +140,7 @@ func TestCredentialsWatchResubscribesAfterLoss(t *testing.T) {
 func TestCredentialsWatchStopsWhenHubCloses(t *testing.T) {
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	creds := broadcast.NewCredentials(hub)
-	ch := creds.Watch(context.Background(), identity.Subject{ID: "alice"})
+	ch := creds.Watch(context.Background(), identity.Subject{Type: "user", ID: "alice"})
 	time.Sleep(20 * time.Millisecond)
 	if err := hub.Close(); err != nil {
 		t.Fatal(err)

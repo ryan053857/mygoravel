@@ -32,8 +32,8 @@ import (
 )
 
 var (
-	alice = identity.Subject{ID: "u1", Type: identity.SubjectUser, Tenant: "acme"}
-	bob   = identity.Subject{ID: "u2", Type: identity.SubjectUser, Tenant: "acme"}
+	alice = identity.Subject{ID: "u1", Type: "user", Tenant: "acme"}
+	bob   = identity.Subject{ID: "u2", Type: "user", Tenant: "acme"}
 )
 
 type env struct {

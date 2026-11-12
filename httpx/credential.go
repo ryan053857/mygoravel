@@ -26,7 +26,7 @@ func WithCredentialCheck(ctx context.Context, check CredentialCheck) context.Con
 // CredentialWatcher 在凭据可能已经变化时通知长连接立即重新校验，不必等下一次定期校验。
 // broadcast.Credentials 是基于广播的实现，多个实例之间也能互相通知。
 type CredentialWatcher interface {
-	// Watch 返回一个通道：sub 所用的凭据（sub.Credential）、sub 本身（sub.ID），
+	// Watch 返回一个通道：sub 所用的凭据（sub.Credential）、sub 本身（sub.Ref()），
 	// 或请求所在的租户（identity.TenantFromContext）被要求复查时，通道收到信号。ctx 结束时停止关注。
 	Watch(ctx context.Context, sub identity.Subject) <-chan struct{}
 }

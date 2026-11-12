@@ -100,7 +100,7 @@ func issueToken(authenticate *user.Authenticate, tokens *apitoken.Store) func(co
         if err != nil {
             return nil, err
         }
-        sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser}
+        sub := identity.Subject{Type: user.Type, ID: u.ID}
         plain, err := tokens.Login(ctx, sub, apitoken.Device{
             Remember:  in.Body.Remember,
             IP:        in.ip,
@@ -192,7 +192,7 @@ for _, t := range list {
 }
 ```
 
-`Current` 根据 `sub.Credential` 判断，所以在 API 中传入 `identity.FromContext` 读到的主体即可。`Impersonator` 不为空的 token 是客服等人[代为登录](authentication.md#impersonation)时签发的，在设备列表中标出来，用户可以看到并撤销它。
+`Current` 根据 `sub.Credential` 判断，所以在 API 中传入 `identity.FromContext` 读到的主体即可。`Impersonator` 不为零值的 token 是客服等人[代为登录](authentication.md#impersonation)时签发的，在设备列表中标出来，用户可以看到并撤销它。
 
 <a id="revoking-tokens"></a>
 ## 撤销令牌
@@ -201,18 +201,18 @@ for _, t := range list {
 | --- | --- | --- |
 | `Revoke(ctx, sub, id)` | `sub` 的一个 token；`id` 为 `sub.Credential` 时即登出 | 登出、在列表中移除某台设备或某个令牌 |
 | `RevokeOthers(ctx, sub)` | `sub` 除本次请求所用 token 以外的全部**登录 token** | “退出其他设备” |
-| `RevokeSubject(ctx, userID)` | 该用户的全部 token，包括个人访问令牌 | 封禁账号、修改密码 |
+| `RevokeSubject(ctx, ref)` | 主体 `ref`（`identity.Ref`）的全部 token，包括个人访问令牌 | 封禁账号、修改密码 |
 
 撤销立即生效，被撤销的 token 在下一次请求时返回 `401`；用它建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)。撤销后调用 `RecheckCredential` 或 `RecheckSubject`，连接会立即结束，见[立即断开](sse.md#immediate-revocation)。
 
 同一个用户可能还在浏览器中通过[会话](session.md)登录了页面。让用户在所有地方下线时，两边都要撤销。下面是用户模块的 `SignOutEverywhere` action 的 `Handle`，会话存储和 token 存储由构造函数传入：
 
 ```go
-func (a *SignOutEverywhere) Handle(ctx context.Context, userID string) error {
-    if _, err := a.sessions.RevokeSubject(ctx, userID); err != nil {
+func (a *SignOutEverywhere) Handle(ctx context.Context, target identity.Ref) error {
+    if _, err := a.sessions.RevokeSubject(ctx, target); err != nil {
         return err
     }
-    _, err := a.tokens.RevokeSubject(ctx, userID)
+    _, err := a.tokens.RevokeSubject(ctx, target)
     return err
 }
 ```

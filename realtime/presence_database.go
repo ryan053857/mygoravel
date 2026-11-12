@@ -6,6 +6,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
+
+	"github.com/ryan053857/mygoravel/identity"
 )
 
 var _ PresenceStore = (*DatabasePresence)(nil)
@@ -22,11 +24,12 @@ type DatabasePresence struct {
 type presenceRow struct {
 	bun.BaseModel `bun:"table:realtime_presence,alias:rp"`
 
-	Channel   string    `bun:"channel,pk"`
-	ClientID  string    `bun:"client_id,pk"`
-	SubjectID string    `bun:"subject_id,notnull"`
-	Info      []byte    `bun:"info,notnull"`
-	ExpiresAt time.Time `bun:"expires_at,notnull"`
+	Channel     string    `bun:"channel,pk"`
+	ClientID    string    `bun:"client_id,pk"`
+	SubjectType string    `bun:"subject_type,notnull"`
+	SubjectID   string    `bun:"subject_id,notnull"`
+	Info        []byte    `bun:"info,notnull"`
+	ExpiresAt   time.Time `bun:"expires_at,notnull"`
 }
 
 // NewDatabasePresence 创建基于数据库的 PresenceStore。db 必须已执行 realtime 的迁移，为 nil 时 panic。
@@ -45,7 +48,7 @@ func (s *DatabasePresence) Add(ctx context.Context, e PresenceEntry, ttl time.Du
 	}
 	expires := time.Now().UTC().Add(ttl)
 	res, err := s.db.NewUpdate().Model((*presenceRow)(nil)).
-		Set("subject_id = ?", e.Subject).Set("info = ?", info).Set("expires_at = ?", expires).
+		Set("subject_type = ?", e.Subject.Type).Set("subject_id = ?", e.Subject.ID).Set("info = ?", info).Set("expires_at = ?", expires).
 		Where("channel = ?", e.Channel).Where("client_id = ?", e.Client).Exec(ctx)
 	if err != nil {
 		return errors.Wrap(err, "realtime: update presence")
@@ -55,7 +58,8 @@ func (s *DatabasePresence) Add(ctx context.Context, e PresenceEntry, ttl time.Du
 	}
 	// 并发的两次 Add 都可能走到这里，Ignore 让后到的一次不报主键冲突。
 	_, err = s.db.NewInsert().Model(&presenceRow{
-		Channel: e.Channel, ClientID: e.Client, SubjectID: e.Subject, Info: info, ExpiresAt: expires,
+		Channel: e.Channel, ClientID: e.Client, SubjectType: string(e.Subject.Type), SubjectID: e.Subject.ID,
+		Info: info, ExpiresAt: expires,
 	}).Ignore().Exec(ctx)
 	return errors.Wrap(err, "realtime: insert presence")
 }
@@ -77,7 +81,10 @@ func (s *DatabasePresence) List(ctx context.Context, channel string) ([]Presence
 	}
 	out := make([]PresenceEntry, len(rows))
 	for i, r := range rows {
-		out[i] = PresenceEntry{Channel: r.Channel, Client: r.ClientID, Subject: r.SubjectID, Info: r.Info}
+		out[i] = PresenceEntry{
+			Channel: r.Channel, Client: r.ClientID,
+			Subject: identity.Ref{Type: identity.SubjectType(r.SubjectType), ID: r.SubjectID}, Info: r.Info,
+		}
 		if len(r.Info) == 0 {
 			out[i].Info = nil
 		}

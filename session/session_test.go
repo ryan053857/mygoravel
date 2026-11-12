@@ -83,7 +83,7 @@ func newApp(t *testing.T, store scs.Store) *httptest.Server {
 	router.Post("/login", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ User string }
 		_ = json.NewDecoder(r.Body).Decode(&in)
-		sub := identity.Subject{ID: in.User, Type: identity.SubjectUser}
+		sub := identity.Subject{ID: in.User, Type: "user"}
 		if in.User == "root" {
 			sub.Permissions = []string{"admin"}
 		}

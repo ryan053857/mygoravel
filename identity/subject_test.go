@@ -8,7 +8,7 @@ import (
 )
 
 func TestSubjectContext(t *testing.T) {
-	sub := identity.Subject{ID: "u1", Type: identity.SubjectUser}
+	sub := identity.Subject{ID: "u1", Type: "user"}
 	got, ok := identity.FromContext(identity.WithSubject(context.Background(), sub))
 	if !ok || got.ID != "u1" {
 		t.Fatalf("%+v ok=%v", got, ok)

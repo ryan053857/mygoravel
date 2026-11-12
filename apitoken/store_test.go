@@ -36,8 +36,8 @@ var testConfig = apitoken.Config{Lifetime: 10 * time.Hour, IdleTimeout: time.Hou
 var read = []string{"articles:read"}
 
 var (
-	alice = identity.Subject{ID: "alice", Type: identity.SubjectUser}
-	bob   = identity.Subject{ID: "bob", Type: identity.SubjectUser}
+	alice = identity.Subject{ID: "alice", Type: "user"}
+	bob   = identity.Subject{ID: "bob", Type: "user"}
 )
 
 func newStore(t *testing.T, driver database.Driver) (*apitoken.Store, *clock) {
@@ -118,7 +118,7 @@ func TestLoginAndValidate(t *testing.T) {
 
 		sub, ok := valid(t, s, plain)
 		// 登录 token 不限制权限，也不携带权限。
-		if !ok || sub.ID != "alice" || sub.Type != identity.SubjectUser || sub.Method != "bearer" ||
+		if !ok || sub.ID != "alice" || sub.Type != "user" || sub.Method != "bearer" ||
 			sub.Scopes != nil || sub.Permissions != nil || sub.Tenant != "" || sub.Credential == "" {
 			t.Fatalf("subject=%+v ok=%v", sub, ok)
 		}
@@ -297,11 +297,11 @@ func TestRevoke(t *testing.T) {
 
 		laptop = login(t, s, alice, apitoken.Device{})
 		ci = create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
-		if n, err := s.RevokeSubject(ctx, "alice"); n != 2 || err != nil {
+		if n, err := s.RevokeSubject(ctx, alice.Ref()); n != 2 || err != nil {
 			t.Fatalf("revoke subject n=%d err=%v", n, err)
 		}
 		state(map[string]bool{"bob": true})
-		if _, err := s.RevokeSubject(ctx, ""); err == nil {
+		if _, err := s.RevokeSubject(ctx, identity.Ref{}); err == nil {
 			t.Fatal("expected error for empty subject")
 		}
 		if _, err := s.RevokeOthers(ctx, identity.Subject{}); err == nil {
@@ -342,7 +342,7 @@ func TestTenantBinding(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		s, _ := newStore(t, driver)
-		customer := identity.Subject{ID: "carol", Type: identity.SubjectUser, Tenant: "acme"}
+		customer := identity.Subject{ID: "carol", Type: "user", Tenant: "acme"}
 		loginToken := login(t, s, customer, apitoken.Device{})
 		personal := create(t, s, alice, apitoken.Personal{Name: "acme 报表", Scopes: read, Tenant: "globex"})
 		if sub, ok := valid(t, s, loginToken); !ok || sub.Tenant != "acme" {
@@ -358,19 +358,49 @@ func TestTenantBinding(t *testing.T) {
 	})
 }
 
+// 不同账号体系中 ID 相同的主体互不影响：列表、撤销都按类型和 ID 一起区分。
+func TestAccountSystems(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		ctx := context.Background()
+		s, _ := newStore(t, driver)
+		staffAlice := identity.Subject{ID: "alice", Type: "staff"}
+		userToken := login(t, s, alice, apitoken.Device{})
+		staffToken := login(t, s, staffAlice, apitoken.Device{})
+		if sub, ok := valid(t, s, staffToken); !ok || sub.Ref() != staffAlice.Ref() {
+			t.Fatalf("staff token sub=%+v ok=%v", sub, ok)
+		}
+		if list, err := s.List(ctx, staffAlice); err != nil || len(list) != 1 {
+			t.Fatalf("staff list=%+v err=%v", list, err)
+		}
+		if n, err := s.RevokeOthers(ctx, staffAlice); n != 1 || err != nil {
+			t.Fatalf("revoke others n=%d err=%v", n, err)
+		}
+		if _, ok := valid(t, s, userToken); !ok {
+			t.Fatal("user token revoked by staff RevokeOthers")
+		}
+		if n, err := s.RevokeSubject(ctx, alice.Ref()); n != 1 || err != nil {
+			t.Fatalf("revoke subject n=%d err=%v", n, err)
+		}
+		if _, err := s.Login(ctx, identity.Subject{ID: "alice", Type: "Bad Type"}, apitoken.Device{}); err == nil {
+			t.Fatal("expected error for invalid subject type")
+		}
+	})
+}
+
 func TestImpersonation(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
 		s, _ := newStore(t, driver)
-		asAlice := identity.Subject{ID: "alice", Type: identity.SubjectUser, Impersonator: "staff"}
+		staff := identity.Ref{Type: "staff", ID: "s1"}
+		asAlice := identity.Subject{ID: "alice", Type: "user", Impersonator: staff}
 		own := login(t, s, alice, apitoken.Device{})
 		impersonating := login(t, s, asAlice, apitoken.Device{})
 		personal := create(t, s, asAlice, apitoken.Personal{Name: "排查", Scopes: read})
-		if sub, ok := valid(t, s, own); !ok || sub.Impersonator != "" {
-			t.Fatalf("own token impersonator=%q ok=%v", sub.Impersonator, ok)
+		if sub, ok := valid(t, s, own); !ok || !sub.Impersonator.IsZero() {
+			t.Fatalf("own token impersonator=%v ok=%v", sub.Impersonator, ok)
 		}
 		for _, token := range []string{impersonating, personal} {
-			if sub, ok := valid(t, s, token); !ok || sub.ID != "alice" || sub.Impersonator != "staff" {
+			if sub, ok := valid(t, s, token); !ok || sub.ID != "alice" || sub.Impersonator != staff {
 				t.Fatalf("impersonation token sub=%+v ok=%v", sub, ok)
 			}
 		}
@@ -378,11 +408,11 @@ func TestImpersonation(t *testing.T) {
 		if err != nil || len(list) != 3 {
 			t.Fatalf("list=%+v err=%v", list, err)
 		}
-		impersonators := map[string]int{}
+		impersonators := map[identity.Ref]int{}
 		for _, tok := range list {
 			impersonators[tok.Impersonator]++
 		}
-		if impersonators[""] != 1 || impersonators["staff"] != 2 {
+		if impersonators[identity.Ref{}] != 1 || impersonators[staff] != 2 {
 			t.Fatalf("impersonators=%v", impersonators)
 		}
 	})

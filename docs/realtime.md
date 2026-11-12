@@ -74,7 +74,7 @@ rt.Channel("article:{id}", realtime.Private(func(ctx context.Context, sub identi
 
 没有登录的连接不能订阅私有频道。授权函数返回 5xx 类错误时，SDK 会稍后重新订阅。
 
-授权只在订阅时进行。主体之后失去访问权限时，调用 `rt.Unsubscribe(subjectID, channel)` 取消他在所有实例上的订阅。
+授权只在订阅时进行。主体之后失去访问权限时，调用 `rt.Unsubscribe(sub.Ref(), channel)` 取消他在所有实例上的订阅。
 
 多租户应用的频道名要带上租户，并在授权函数中与主体的租户比较，见[缓存、广播与其他资源](tenancy.md#other-resources)：
 
@@ -179,7 +179,7 @@ rt.Channel("editing:{article}", realtime.Presence(func(ctx context.Context, sub 
 const editing = centrifuge.newSubscription(`editing:${articleId}`);
 editing.on('subscribed', async () => {
     const { clients } = await editing.presence();
-    render(Object.values(clients)); // 每个连接一项：{ client, user, chanInfo: { name } }
+    render(Object.values(clients)); // 每个连接一项：{ client, user, chanInfo: { name } }，user 是主体的 Ref，例如 user:42
 });
 editing.on('join', (ctx) => add(ctx.info));
 editing.on('leave', (ctx) => remove(ctx.info));
@@ -197,7 +197,7 @@ editing.subscribe();
 
 ```go
 members, err := rt.Members(ctx, "editing:"+id.String())
-// members[i].ID、members[i].Info、members[i].Connections
+// members[i].Subject（identity.Ref）、members[i].Info、members[i].Connections
 ```
 
 <a id="presence-stores"></a>

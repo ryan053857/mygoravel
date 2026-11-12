@@ -22,17 +22,26 @@ const DefaultLimit = 50
 type Activity struct {
 	bun.BaseModel `bun:"table:activity_log,alias:al"`
 
-	ID             uuid.UUID            `bun:"id,pk,type:uuid"` // UUIDv7，按时间递增
-	Tenant         string               `bun:"tenant,notnull"`  // 操作所在的租户，"" 为平台本身
-	ActorType      identity.SubjectType `bun:"actor_type,notnull"`
-	ActorID        string               `bun:"actor_id,notnull"`        // 操作人，可以为空
-	ImpersonatorID string               `bun:"impersonator_id,notnull"` // 代为登录时实际操作的人，见 identity.Subject.Impersonator；可以为空
-	Event          string               `bun:"event,notnull"`           // 发生了什么，例如 article.published
-	TargetType     string               `bun:"target_type,notnull"`
-	TargetID       string               `bun:"target_id,notnull"`  // 被操作的对象，例如 article 和文章 ID；可以为空
-	Properties     map[string]any       `bun:"properties,notnull"` // 展示这条记录需要的其他数据，保存为 JSON
-	RequestID      string               `bun:"request_id,notnull"` // 产生这条记录的请求，队列任务中是发布任务的请求
-	CreatedAt      time.Time            `bun:"created_at,notnull"`
+	ID               uuid.UUID            `bun:"id,pk,type:uuid"` // UUIDv7，按时间递增
+	Tenant           string               `bun:"tenant,notnull"`  // 操作所在的租户，"" 为平台本身
+	ActorType        identity.SubjectType `bun:"actor_type,notnull"`
+	ActorID          string               `bun:"actor_id,notnull"` // 操作人，见 Actor；可以为空
+	ImpersonatorType identity.SubjectType `bun:"impersonator_type,notnull"`
+	ImpersonatorID   string               `bun:"impersonator_id,notnull"` // 代为登录时实际操作的人，见 Impersonator；可以为空
+	Event            string               `bun:"event,notnull"`           // 发生了什么，例如 article.published
+	TargetType       string               `bun:"target_type,notnull"`
+	TargetID         string               `bun:"target_id,notnull"`  // 被操作的对象，例如 article 和文章 ID；可以为空
+	Properties       map[string]any       `bun:"properties,notnull"` // 展示这条记录需要的其他数据，保存为 JSON
+	RequestID        string               `bun:"request_id,notnull"` // 产生这条记录的请求，队列任务中是发布任务的请求
+	CreatedAt        time.Time            `bun:"created_at,notnull"`
+}
+
+// Actor 返回操作人。
+func (a Activity) Actor() identity.Ref { return identity.Ref{Type: a.ActorType, ID: a.ActorID} }
+
+// Impersonator 返回代为登录时实际操作的人，见 identity.Subject.Impersonator；零值表示操作人本人。
+func (a Activity) Impersonator() identity.Ref {
+	return identity.Ref{Type: a.ImpersonatorType, ID: a.ImpersonatorID}
 }
 
 // Record 在 db 中写入一条操作记录。db 通常是业务修改所在的事务，记录与修改一起提交或回滚。
@@ -46,7 +55,8 @@ func Record(ctx context.Context, db bun.IDB, actor identity.Subject, a Activity)
 		return errors.Wrap(err, "activity: new id")
 	}
 	a.ID, a.CreatedAt = id, time.Now().UTC()
-	a.Tenant, a.ActorType, a.ActorID, a.ImpersonatorID = actor.Tenant, actor.Type, actor.ID, actor.Impersonator
+	a.Tenant, a.ActorType, a.ActorID = actor.Tenant, actor.Type, actor.ID
+	a.ImpersonatorType, a.ImpersonatorID = actor.Impersonator.Type, actor.Impersonator.ID
 	a.RequestID = requestID(ctx)
 	if a.Properties == nil {
 		a.Properties = map[string]any{}
@@ -67,7 +77,7 @@ func check(a Activity) error {
 	}
 	for field, v := range map[string]string{
 		"tenant": a.Tenant, "actor type": string(a.ActorType), "actor id": a.ActorID,
-		"impersonator id": a.ImpersonatorID, "event": a.Event,
+		"impersonator type": string(a.ImpersonatorType), "impersonator id": a.ImpersonatorID, "event": a.Event,
 		"target type": a.TargetType, "target id": a.TargetID, "request id": a.RequestID,
 	} {
 		if len(v) > maxKey {
@@ -90,8 +100,8 @@ func requestID(ctx context.Context) string {
 type Query struct {
 	Tenant     string // 只查询这个租户中的记录，"" 为平台本身
 	TargetType string
-	TargetID   string // 需要同时设置 TargetType
-	ActorID    string
+	TargetID   string       // 需要同时设置 TargetType
+	Actor      identity.Ref // 操作人，零值不限制
 	Event      string
 	Before     uuid.UUID // 只返回 ID 小于它的记录：翻页时传入上一页最后一条的 ID，零值从最新的开始
 	Limit      int       // 不大于 0 时为 DefaultLimit
@@ -108,11 +118,14 @@ func List(ctx context.Context, db bun.IDB, q Query) ([]Activity, error) {
 	}
 	sel := db.NewSelect().Model((*Activity)(nil)).Where("tenant = ?", q.Tenant)
 	for _, f := range [...]struct{ column, value string }{
-		{"target_type", q.TargetType}, {"target_id", q.TargetID}, {"actor_id", q.ActorID}, {"event", q.Event},
+		{"target_type", q.TargetType}, {"target_id", q.TargetID}, {"event", q.Event},
 	} {
 		if f.value != "" {
 			sel = sel.Where("? = ?", bun.Ident(f.column), f.value)
 		}
+	}
+	if !q.Actor.IsZero() {
+		sel = sel.Where("actor_type = ? AND actor_id = ?", q.Actor.Type, q.Actor.ID)
 	}
 	if q.Before != uuid.Nil {
 		sel = sel.Where("id < ?", q.Before)

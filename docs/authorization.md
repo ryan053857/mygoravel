@@ -123,7 +123,7 @@ editor, err := roles.CreateRole(ctx, authz.Role{
     Permissions: []string{"articles:*", auth.CommentsDelete},
 })
 
-err = roles.Assign(ctx, userID, "", editor.ID)
+err = roles.Assign(ctx, identity.Ref{Type: user.Type, ID: userID}, "", editor.ID)
 ```
 
 `Assign` 的第三个参数是**域**：`""` 表示应用本身，多租户应用中是租户 ID，见[多租户](tenancy.md)。一个用户可以有多个角色，权限是它们的合集。

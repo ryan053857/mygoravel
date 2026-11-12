@@ -95,7 +95,7 @@ func (s *Service) Prepare(ctx context.Context, owner identity.Subject, in FileIn
 	expires := now.Add(s.cfg.TempTTL)
 	r := File{
 		ID: id, Disk: in.Disk, Key: objectKey(id, now, name), Filename: name, ContentType: contentType, Size: in.Size,
-		OwnerType: string(owner.Type), OwnerID: owner.ID, Status: StatusTemporary, ExpiresAt: &expires,
+		OwnerType: owner.Type, OwnerID: owner.ID, Status: StatusTemporary, ExpiresAt: &expires,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := s.db.NewInsert().Model(&r).Exec(ctx); err != nil {
@@ -270,7 +270,7 @@ func (s *Service) owned(ctx context.Context, owner identity.Subject, id uuid.UUI
 	if err != nil {
 		return File{}, err
 	}
-	if r.OwnerID != owner.ID || r.OwnerType != string(owner.Type) ||
+	if r.OwnerID != owner.ID || r.OwnerType != owner.Type ||
 		(r.Status == StatusTemporary && (r.ExpiresAt == nil || !r.ExpiresAt.After(time.Now()))) {
 		return File{}, ErrNotFound
 	}

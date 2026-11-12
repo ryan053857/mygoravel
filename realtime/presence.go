@@ -1,10 +1,10 @@
 package realtime
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -46,7 +46,7 @@ func Presence(authorize PresenceAuthorizer) Rule {
 type PresenceEntry struct {
 	Channel string
 	Client  string // 连接的 ID
-	Subject string // 主体的 ID
+	Subject identity.Ref
 	Info    []byte // 成员资料的 JSON，可以为空
 }
 
@@ -63,12 +63,12 @@ type PresenceStore interface {
 
 // Member 是 presence 频道中的一个在线成员。
 type Member struct {
-	ID          string          // 主体的 ID
+	Subject     identity.Ref
 	Info        json.RawMessage // 加入时频道规则给出的资料，没有时为 nil
 	Connections int             // 这个主体在频道中的连接数
 }
 
-// Members 返回 presence 频道 channel 当前的在线成员，同一个主体的多个连接合并为一个，按 ID 排序。
+// Members 返回 presence 频道 channel 当前的在线成员，同一个主体的多个连接合并为一个，按主体的类型和 ID 排序。
 // 多个连接的资料不同时取其中任意一个。
 func (rt *Realtime) Members(ctx context.Context, channel string) ([]Member, error) {
 	entries, err := rt.presence.List(ctx, channel)
@@ -76,15 +76,15 @@ func (rt *Realtime) Members(ctx context.Context, channel string) ([]Member, erro
 		return nil, errors.Wrap(err, "realtime: list presence")
 	}
 	slices.SortFunc(entries, func(a, b PresenceEntry) int {
-		return strings.Compare(a.Subject, b.Subject)
+		return cmp.Or(cmp.Compare(a.Subject.Type, b.Subject.Type), cmp.Compare(a.Subject.ID, b.Subject.ID))
 	})
 	var members []Member
 	for _, e := range entries {
-		if n := len(members); n > 0 && members[n-1].ID == e.Subject {
+		if n := len(members); n > 0 && members[n-1].Subject == e.Subject {
 			members[n-1].Connections++
 			continue
 		}
-		m := Member{ID: e.Subject, Connections: 1}
+		m := Member{Subject: e.Subject, Connections: 1}
 		if len(e.Info) > 0 {
 			m.Info = json.RawMessage(e.Info)
 		}
@@ -103,7 +103,11 @@ func (m presenceManager) AddPresence(ch, clientID string, info *centrifuge.Clien
 	ctx, cancel := context.WithTimeout(context.Background(), presenceTimeout)
 	defer cancel()
 	m.members.refreshed(ch, clientID)
-	return m.store.Add(ctx, PresenceEntry{Channel: ch, Client: clientID, Subject: info.UserID, Info: info.ChanInfo}, presenceTTL)
+	ref, err := identity.ParseRef(info.UserID)
+	if err != nil {
+		return errors.Wrap(err, "realtime: presence")
+	}
+	return m.store.Add(ctx, PresenceEntry{Channel: ch, Client: clientID, Subject: ref, Info: info.ChanInfo}, presenceTTL)
 }
 
 func (m presenceManager) RemovePresence(ch, clientID, _ string) error {
@@ -119,7 +123,7 @@ func (m presenceManager) Presence(ch string) (map[string]*centrifuge.ClientInfo,
 	}
 	out := make(map[string]*centrifuge.ClientInfo, len(entries))
 	for _, e := range entries {
-		out[e.Client] = &centrifuge.ClientInfo{ClientID: e.Client, UserID: e.Subject, ChanInfo: e.Info}
+		out[e.Client] = &centrifuge.ClientInfo{ClientID: e.Client, UserID: e.Subject.String(), ChanInfo: e.Info}
 	}
 	return out, nil
 }

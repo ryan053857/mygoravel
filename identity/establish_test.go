@@ -10,6 +10,8 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 )
 
+var support = identity.Ref{Type: "staff", ID: "support"}
+
 var (
 	errDown      = errorx.Define(errorx.Unavailable, "test.down")
 	errDisabled  = errorx.Define(errorx.Unauthenticated, "test.disabled")
@@ -17,7 +19,7 @@ var (
 )
 
 func TestEstablish(t *testing.T) {
-	cred := identity.Subject{ID: "alice", Method: "bearer", Credential: "tok1", Scopes: []string{"articles:*"}, Impersonator: "support"}
+	cred := identity.Subject{ID: "alice", Method: "bearer", Credential: "tok1", Scopes: []string{"articles:*"}, Impersonator: support}
 	as := func(sub identity.Subject, err error) identity.Authenticator {
 		return func(context.Context) (identity.Subject, error) { return sub, err }
 	}
@@ -82,16 +84,16 @@ func TestEstablish(t *testing.T) {
 
 // Resolver 加载权限和租户；认证方式、凭据、凭据的限制和代为登录者总是取自凭据。
 func TestEstablishKeepsCredentialFields(t *testing.T) {
-	cred := identity.Subject{ID: "alice", Type: identity.SubjectUser, Method: "bearer", Credential: "tok1", Scopes: []string{"articles:read"}, Impersonator: "support"}
+	cred := identity.Subject{ID: "alice", Type: "user", Method: "bearer", Credential: "tok1", Scopes: []string{"articles:read"}, Impersonator: support}
 	rebuilt := func(context.Context, identity.Subject) (identity.Subject, error) {
-		return identity.Subject{ID: "alice", Tenant: "acme", Permissions: []string{"*"}, Method: "forged", Credential: "other", Impersonator: "nobody"}, nil
+		return identity.Subject{ID: "alice", Tenant: "acme", Permissions: []string{"*"}, Method: "forged", Credential: "other", Impersonator: identity.Ref{Type: "staff", ID: "nobody"}}, nil
 	}
 	auth := func(context.Context) (identity.Subject, error) { return cred, nil }
 	sub, err := identity.Establish(context.Background(), auth, rebuilt, "articles:read")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := identity.Subject{ID: "alice", Tenant: "acme", Permissions: []string{"*"}, Method: "bearer", Credential: "tok1", Scopes: []string{"articles:read"}, Impersonator: "support"}
+	want := identity.Subject{ID: "alice", Tenant: "acme", Permissions: []string{"*"}, Method: "bearer", Credential: "tok1", Scopes: []string{"articles:read"}, Impersonator: support}
 	if !reflect.DeepEqual(sub, want) {
 		t.Fatalf("%+v", sub)
 	}
@@ -102,7 +104,7 @@ func TestEstablishKeepsCredentialFields(t *testing.T) {
 }
 
 func TestReestablish(t *testing.T) {
-	was := identity.Subject{ID: "alice", Impersonator: "support"}
+	was := identity.Subject{Type: "user", ID: "alice", Impersonator: support}
 	now := was
 	var authErr, resolveErr error
 	perms := []string{"events"}
@@ -135,11 +137,15 @@ func TestReestablish(t *testing.T) {
 	}
 	perms = []string{"events"}
 	// 凭据换了主体，或不再是代为登录。
-	now = identity.Subject{ID: "bob", Impersonator: "support"}
+	now = identity.Subject{Type: "user", ID: "bob", Impersonator: support}
 	if err := check(); !errors.Is(err, identity.ErrUnauthenticated) {
 		t.Fatalf("another subject: %v", err)
 	}
-	now = identity.Subject{ID: "alice"}
+	now = identity.Subject{Type: "staff", ID: "alice", Impersonator: support}
+	if err := check(); !errors.Is(err, identity.ErrUnauthenticated) {
+		t.Fatalf("same ID in another account system: %v", err)
+	}
+	now = identity.Subject{Type: "user", ID: "alice"}
 	if err := check(); !errors.Is(err, identity.ErrUnauthenticated) {
 		t.Fatalf("another impersonator: %v", err)
 	}

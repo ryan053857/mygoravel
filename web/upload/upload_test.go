@@ -34,7 +34,7 @@ import (
 	"github.com/ryan053857/mygoravel/web/webtest"
 )
 
-var alice = identity.Subject{ID: "alice", Type: identity.SubjectUser}
+var alice = identity.Subject{ID: "alice", Type: "user"}
 
 // setup 返回文件服务（local 与 s3 两个磁盘，max_upload_size 1MiB）和注册了 /uploads、/uploads/s3 的页面。
 func setup(t *testing.T) (*filesystem.Service, http.Handler, *web.Pages) {
@@ -143,7 +143,7 @@ func TestServerUpload(t *testing.T) {
 		t.Fatalf("confirm: %+v %v", f, err)
 	}
 	// 只有上传者能确认。
-	if _, err := files.Confirm(context.Background(), identity.Subject{ID: "bob", Type: identity.SubjectUser}, id, filesystem.Accept{}); err == nil {
+	if _, err := files.Confirm(context.Background(), identity.Subject{ID: "bob", Type: "user"}, id, filesystem.Accept{}); err == nil {
 		t.Fatal("bob confirmed alice's file")
 	}
 }

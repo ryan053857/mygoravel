@@ -30,7 +30,7 @@ func TestRequireRechecksOnSignal(t *testing.T) {
 	pages := web.New(o)
 	router := chi.NewRouter()
 	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		return pages.Login(r, identity.Subject{ID: "alice", Type: identity.SubjectUser})
+		return pages.Login(r, identity.Subject{ID: "alice", Type: "user"})
 	})
 	pages.Routes(router, web.Require()).Get("/events", func(w http.ResponseWriter, r *http.Request) error {
 		return web.SSE(w, r, func(s *web.Stream) error {
@@ -60,7 +60,7 @@ func TestRequireRechecksOnSignal(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // 等 SSE 开始关注
 
 	// 提醒触发复查，但会话仍然有效，连接保持。
-	if err := creds.RecheckSubject(context.Background(), "alice"); err != nil {
+	if err := creds.RecheckSubject(context.Background(), identity.Ref{Type: "user", ID: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -73,7 +73,7 @@ func TestRequireRechecksOnSignal(t *testing.T) {
 	if err := store.Delete(jar.Cookies(mustURL(t, srv.URL))[0].Value); err != nil {
 		t.Fatal(err)
 	}
-	if err := creds.RecheckSubject(context.Background(), "alice"); err != nil {
+	if err := creds.RecheckSubject(context.Background(), identity.Ref{Type: "user", ID: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	select {

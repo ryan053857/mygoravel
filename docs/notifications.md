@@ -49,7 +49,7 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
         Event: "article.published_by_admin",
         Data:  map[string]any{"article_id": item.ID, "title": item.Title, "admin_id": subject.ID},
     }
-    author := notification.Recipient{Tenant: subject.Tenant, Type: identity.SubjectUser, ID: item.AuthorID}
+    author := notification.Recipient{Tenant: subject.Tenant, Type: user.Type, ID: item.AuthorID}
     _, err = notification.Send(ctx, tx, n, author)
     return err
 })
@@ -60,7 +60,7 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 <a id="recipients"></a>
 ### 收件人
 
-`notification.Recipient` 由租户、主体类型和 ID 组成，与 `identity.Subject` 中的同名字段对应。同一个用户在两个租户中是两个收件人，各自有各自的通知，见[多租户](tenancy.md)。
+`notification.Recipient` 由租户和主体（`identity.Ref`，即主体的类型和 ID）组成，与 `identity.Subject` 中的同名字段对应。同一个用户在两个租户中是两个收件人，各自有各自的通知，见[多租户](tenancy.md)。
 
 读取当前登录用户的通知时，用 `notification.RecipientOf(subject)` 从主体得到收件人。
 
@@ -289,9 +289,9 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 ```
 
 ```go
-// inboxTopic 是一个收件人的广播主题，例如 inbox:acme:u1。
+// inboxTopic 是一个收件人的广播主题，例如 inbox:acme:user:u1。
 func inboxTopic(r notification.Recipient) string {
-    return "inbox:" + r.Tenant + ":" + r.ID
+    return "inbox:" + r.Tenant + ":" + r.Ref.String()
 }
 ```
 

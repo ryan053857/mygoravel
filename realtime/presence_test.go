@@ -31,11 +31,11 @@ func TestDatabasePresenceCleanup(t *testing.T) {
 		ctx := context.Background()
 		s := realtime.NewDatabasePresence(dbtesting.Open(t, driver, realtime.Migrations()))
 		for _, client := range []string{"a", "b", "c"} {
-			if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: client, Subject: "u"}, -time.Second); err != nil {
+			if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: client, Subject: identity.Ref{Type: "user", ID: "u"}}, -time.Second); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: "live", Subject: "u"}, time.Minute); err != nil {
+		if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: "live", Subject: identity.Ref{Type: "user", ID: "u"}}, time.Minute); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.Cleanup(ctx, 0); err == nil {
@@ -70,7 +70,7 @@ func TestPresenceChannel(t *testing.T) {
 
 	alice := mustConnect(t, n.url, "alice", nil)
 	alice.mustSubscribe("editing:7")
-	if kind, m := alice.membership(); kind != "join" || m.User != "alice" || string(m.ChanInfo) != `{"article":"7","name":"user alice"}` {
+	if kind, m := alice.membership(); kind != "join" || m.User != "user:alice" || string(m.ChanInfo) != `{"article":"7","name":"user alice"}` {
 		t.Fatalf("own join = %s %+v", kind, m)
 	}
 
@@ -79,22 +79,22 @@ func TestPresenceChannel(t *testing.T) {
 	tab.mustSubscribe("editing:7")
 	bob := mustConnect(t, n.url, "bob", nil)
 	bob.mustSubscribe("editing:7")
-	if kind, m := alice.membership(); kind != "join" || m.User != "bob" {
+	if kind, m := alice.membership(); kind != "join" || m.User != "user:bob" {
 		t.Fatalf("join = %s %+v, want bob", kind, m)
 	}
 	tab.noMembership(0) // 第二个连接没有收到自己的 join
 
-	if users, err := bob.presence("editing:7"); err != nil || len(users) != 2 || users["alice"] != 2 || users["bob"] != 1 {
+	if users, err := bob.presence("editing:7"); err != nil || len(users) != 2 || users["user:alice"] != 2 || users["user:bob"] != 1 {
 		t.Fatalf("presence = %v, %+v", users, err)
 	}
 	members, err := n.rt.Members(ctx, "editing:7")
 	if err != nil || len(members) != 2 {
 		t.Fatalf("members = %+v, %v", members, err)
 	}
-	if m := members[0]; m.ID != "alice" || m.Connections != 2 || string(m.Info) != `{"article":"7","name":"user alice"}` {
+	if m := members[0]; m.Subject.ID != "alice" || m.Connections != 2 || string(m.Info) != `{"article":"7","name":"user alice"}` {
 		t.Fatalf("first member = %+v", m)
 	}
-	if m := members[1]; m.ID != "bob" || m.Connections != 1 {
+	if m := members[1]; m.Subject.ID != "bob" || m.Connections != 1 {
 		t.Fatalf("second member = %+v", m)
 	}
 	if members, err := n.rt.Members(ctx, "editing:8"); err != nil || len(members) != 0 {
@@ -102,7 +102,7 @@ func TestPresenceChannel(t *testing.T) {
 	}
 
 	// 一个标签页关闭时主体仍然在线，没有事件；最后一个连接断开后发出 leave。
-	if kind, m := bob.membership(); kind != "join" || m.User != "bob" {
+	if kind, m := bob.membership(); kind != "join" || m.User != "user:bob" {
 		t.Fatalf("bob's own join = %s %+v", kind, m)
 	}
 	tab.close()
@@ -111,10 +111,10 @@ func TestPresenceChannel(t *testing.T) {
 		t.Fatalf("members after closing one tab = %+v, %v", members, err)
 	}
 	alice.close()
-	if kind, m := bob.membership(); kind != "leave" || m.User != "alice" {
+	if kind, m := bob.membership(); kind != "leave" || m.User != "user:alice" {
 		t.Fatalf("leave = %s %+v", kind, m)
 	}
-	if members, err := n.rt.Members(ctx, "editing:7"); err != nil || len(members) != 1 || members[0].ID != "bob" {
+	if members, err := n.rt.Members(ctx, "editing:7"); err != nil || len(members) != 1 || members[0].Subject.ID != "bob" {
 		t.Fatalf("members after alice left = %+v, %v", members, err)
 	}
 
@@ -158,7 +158,7 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 		// 否则这条稍早的 join 可能在 bob 订阅之后才到达 b。
 		broadcasttest.Ready(t, a.hub, b.hub)
 		bob.mustSubscribe("editing:7")
-		if kind, m := alice.membership(); kind != "join" || m.User != "bob" {
+		if kind, m := alice.membership(); kind != "join" || m.User != "user:bob" {
 			t.Fatalf("join from the other instance = %s %+v", kind, m)
 		}
 		if users, err := alice.presence("editing:7"); err != nil || len(users) != 2 {
@@ -171,7 +171,7 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 		// alice 换到另一个实例：先在 b 上订阅，再关闭 a 上的连接。bob 看不到加入（a 上还有她的记录），
 		// 也看不到离开（a 的宽限期满时 b 上有她的记录），alice 也收不到自己的 join。
 		// 先建新连接再关旧连接，结果不依赖重连有多快；如果先断开再重连，重连慢于宽限期时离开事件是正确的。
-		if kind, m := bob.membership(); kind != "join" || m.User != "bob" {
+		if kind, m := bob.membership(); kind != "join" || m.User != "user:bob" {
 			t.Fatalf("bob's own join = %s %+v", kind, m)
 		}
 		old := alice
@@ -180,18 +180,18 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 		old.close()
 		bob.noMembership(600 * time.Millisecond)
 
-		if err := a.rt.Unsubscribe("bob", "editing:7"); err != nil {
+		if err := a.rt.Unsubscribe(identity.Ref{Type: "user", ID: "bob"}, "editing:7"); err != nil {
 			t.Fatal(err)
 		}
 		if ch := bob.unsubscribed(); ch != "editing:7" {
 			t.Fatalf("unsubscribed from %q", ch)
 		}
-		if kind, m := alice.membership(); kind != "leave" || m.User != "bob" {
+		if kind, m := alice.membership(); kind != "leave" || m.User != "user:bob" {
 			t.Fatalf("leave from the other instance = %s %+v", kind, m)
 		}
 		// 连接所在的实例宽限期满时不再重复发出 leave。
 		alice.noMembership(700 * time.Millisecond)
-		if members, err := b.rt.Members(context.Background(), "editing:7"); err != nil || len(members) != 1 || members[0].ID != "alice" {
+		if members, err := b.rt.Members(context.Background(), "editing:7"); err != nil || len(members) != 1 || members[0].Subject.ID != "alice" {
 			t.Fatalf("members after unsubscribe = %+v, %v", members, err)
 		}
 	})
@@ -218,7 +218,7 @@ func TestPresenceGrace(t *testing.T) {
 	bob.membership() // 自己的 join
 	alice := mustConnect(t, n.url, "alice", nil)
 	alice.mustSubscribe("editing:7")
-	if kind, m := bob.membership(); kind != "join" || m.User != "alice" {
+	if kind, m := bob.membership(); kind != "join" || m.User != "user:alice" {
 		t.Fatalf("join = %s %+v", kind, m)
 	}
 
@@ -231,7 +231,7 @@ func TestPresenceGrace(t *testing.T) {
 	alice = mustConnect(t, n.url, "alice", nil)
 	alice.mustSubscribe("editing:7")
 	bob.noMembership(2 * grace)
-	if m := members(); len(m) != 2 || m[0].ID != "alice" || m[0].Connections != 1 {
+	if m := members(); len(m) != 2 || m[0].Subject.ID != "alice" || m[0].Connections != 1 {
 		t.Fatalf("members after rejoining = %+v", m)
 	}
 
@@ -247,20 +247,20 @@ func TestPresenceGrace(t *testing.T) {
 	left := time.Now()
 	alice.close()
 	bob.noMembership(grace / 2)
-	if kind, m := bob.membership(); kind != "leave" || m.User != "alice" {
+	if kind, m := bob.membership(); kind != "leave" || m.User != "user:alice" {
 		t.Fatalf("leave = %s %+v", kind, m)
 	}
 	if waited := time.Since(left); waited < grace {
 		t.Fatalf("leave arrived after %v, before the grace period of %v", waited, grace)
 	}
-	if m := members(); len(m) != 1 || m[0].ID != "bob" {
+	if m := members(); len(m) != 1 || m[0].Subject.ID != "bob" {
 		t.Fatalf("members after the grace period = %+v", m)
 	}
 
 	// 宽限期满之后再加入，是一次新的 join。
 	alice = mustConnect(t, n.url, "alice", nil)
 	alice.mustSubscribe("editing:7")
-	if kind, m := bob.membership(); kind != "join" || m.User != "alice" {
+	if kind, m := bob.membership(); kind != "join" || m.User != "user:alice" {
 		t.Fatalf("join after the grace period = %s %+v", kind, m)
 	}
 }
@@ -281,7 +281,7 @@ func TestShutdownDoesNotAnnounceLeaves(t *testing.T) {
 	bob.membership() // 自己的 join
 	alice := mustConnect(t, stopping.url, "alice", nil)
 	alice.mustSubscribe("editing:7")
-	if kind, m := bob.membership(); kind != "join" || m.User != "alice" {
+	if kind, m := bob.membership(); kind != "join" || m.User != "user:alice" {
 		t.Fatalf("join = %s %+v", kind, m)
 	}
 
@@ -314,27 +314,27 @@ func TestUnsubscribeAnnouncesLeaveImmediately(t *testing.T) {
 	alice, tab := mustConnect(t, n.url, "alice", nil), mustConnect(t, n.url, "alice", nil)
 	alice.mustSubscribe("editing:7")
 	tab.mustSubscribe("editing:7")
-	if kind, m := bob.membership(); kind != "join" || m.User != "alice" {
+	if kind, m := bob.membership(); kind != "join" || m.User != "user:alice" {
 		t.Fatalf("join = %s %+v", kind, m)
 	}
 
 	removed := time.Now()
-	if err := n.rt.Unsubscribe("alice", "editing:7"); err != nil {
+	if err := n.rt.Unsubscribe(identity.Ref{Type: "user", ID: "alice"}, "editing:7"); err != nil {
 		t.Fatal(err)
 	}
-	if kind, m := bob.membership(); kind != "leave" || m.User != "alice" || string(m.ChanInfo) != `{"article":"7","name":"user alice"}` {
+	if kind, m := bob.membership(); kind != "leave" || m.User != "user:alice" || string(m.ChanInfo) != `{"article":"7","name":"user alice"}` {
 		t.Fatalf("leave = %s %+v", kind, m)
 	}
 	if waited := time.Since(removed); waited > grace/2 {
 		t.Fatalf("leave arrived after %v, the grace period is %v", waited, grace)
 	}
-	if m, err := n.rt.Members(context.Background(), "editing:7"); err != nil || len(m) != 1 || m[0].ID != "bob" {
+	if m, err := n.rt.Members(context.Background(), "editing:7"); err != nil || len(m) != 1 || m[0].Subject.ID != "bob" {
 		t.Fatalf("members right after unsubscribe = %+v, %v", m, err)
 	}
 	bob.noMembership(grace + 500*time.Millisecond) // 宽限期满时没有第二个 leave
 
 	// 没有在线记录的主体和频道：什么也不发生。
-	if err := n.rt.Unsubscribe("nobody", "editing:7"); err != nil {
+	if err := n.rt.Unsubscribe(identity.Ref{Type: "user", ID: "nobody"}, "editing:7"); err != nil {
 		t.Fatal(err)
 	}
 	bob.noMembership(100 * time.Millisecond)

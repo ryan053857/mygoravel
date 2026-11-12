@@ -154,6 +154,7 @@ import (
 
     "example.com/blog/internal/article"
     "example.com/blog/internal/article/articleweb"
+    "example.com/blog/internal/user"
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/database/dbtest"
     "github.com/ryan053857/mygoravel/database/postgres"
@@ -166,7 +167,7 @@ import (
 
 func TestUpdate(t *testing.T) {
     db := dbtest.Open(t, postgres.Driver, migrations.FS)
-    alice := identity.Subject{ID: "alice", Type: identity.SubjectUser, Permissions: []string{"articles"}}
+    alice := identity.Subject{Type: user.Type, ID: "alice", Permissions: []string{"articles"}}
     item, err := article.NewCreate(db).Handle(context.Background(), alice, article.Changes{Title: "Hello", Slug: "hello"})
     if err != nil {
         t.Fatal(err)
@@ -231,6 +232,7 @@ import (
     "testing"
 
     "example.com/blog/internal/article"
+    "example.com/blog/internal/user"
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/database/dbtest"
     "github.com/ryan053857/mygoravel/database/postgres"
@@ -241,8 +243,8 @@ func TestDraftVisibilityAndPublishing(t *testing.T) {
     ctx := context.Background()
     db := dbtest.Open(t, postgres.Driver, migrations.FS)
     create, get, publish := article.NewCreate(db), article.NewGet(db), article.NewPublish(db)
-    alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
-    bob := identity.Subject{ID: "bob", Type: identity.SubjectUser}
+    alice := identity.Subject{Type: user.Type, ID: "alice"}
+    bob := identity.Subject{Type: user.Type, ID: "bob"}
 
     item, err := create.Handle(ctx, alice, article.Changes{Title: "Hello World", Slug: "hello-world"})
     if err != nil {
@@ -293,6 +295,7 @@ import (
     "testing"
 
     "example.com/blog/internal/article"
+    "example.com/blog/internal/user"
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/database/dbtest"
@@ -303,7 +306,7 @@ import (
 func TestPublishCommand(t *testing.T) {
     ctx := context.Background()
     db := dbtest.Open(t, postgres.Driver, migrations.FS)
-    alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
+    alice := identity.Subject{Type: user.Type, ID: "alice"}
     item, err := article.NewCreate(db).Handle(ctx, alice, article.Changes{Title: "Hello World", Slug: "hello-world"})
     if err != nil {
         t.Fatal(err)

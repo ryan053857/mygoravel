@@ -44,7 +44,10 @@ func mustRole(t *testing.T, s *authz.Store, r authz.Role) authz.Role {
 	return role
 }
 
-func mustAssign(t *testing.T, s *authz.Store, subject, tenant, roleID string) {
+// user 返回测试中 user 账号体系的主体。
+func user(id string) identity.Ref { return identity.Ref{Type: "user", ID: id} }
+
+func mustAssign(t *testing.T, s *authz.Store, subject identity.Ref, tenant, roleID string) {
 	t.Helper()
 	if err := s.Assign(context.Background(), subject, tenant, roleID); err != nil {
 		t.Fatal(err)
@@ -156,82 +159,93 @@ func TestAssignAndResolve(t *testing.T) {
 		support := mustRole(t, s, authz.Role{Name: "support", Permissions: []string{"articles:read"}})
 		platform := mustRole(t, s, authz.Role{Name: "platform-admin", Permissions: []string{"platform:tenants"}})
 
-		mustAssign(t, s, "alice", "acme", owner.ID)
-		mustAssign(t, s, "bob", "acme", member.ID)
-		mustAssign(t, s, "bob", "acme", moderator.ID)
-		mustAssign(t, s, "bob", "acme", moderator.ID) // 重复分配什么也不做
-		mustAssign(t, s, "bob", "globex", member.ID)
-		mustAssign(t, s, "guest", "acme", empty.ID)
-		mustAssign(t, s, "staff", authz.AllTenants, support.ID)
-		mustAssign(t, s, "staff", "", platform.ID)
+		// staff 与 alice 的 ID 相同，属于另一套账号体系，角色互不相通。
+		alice, bob, guest, staff := user("alice"), user("bob"), user("guest"), identity.Ref{Type: "staff", ID: "alice"}
+		mustAssign(t, s, alice, "acme", owner.ID)
+		mustAssign(t, s, bob, "acme", member.ID)
+		mustAssign(t, s, bob, "acme", moderator.ID)
+		mustAssign(t, s, bob, "acme", moderator.ID) // 重复分配什么也不做
+		mustAssign(t, s, bob, "globex", member.ID)
+		mustAssign(t, s, guest, "acme", empty.ID)
+		mustAssign(t, s, staff, authz.AllTenants, support.ID)
+		mustAssign(t, s, staff, "", platform.ID)
 
 		for name, call := range map[string]func() error{
-			"custom role in other tenant": func() error { return s.Assign(ctx, "bob", "globex", moderator.ID) },
-			"custom role in all tenants":  func() error { return s.Assign(ctx, "bob", authz.AllTenants, moderator.ID) },
-			"custom role on platform":     func() error { return s.Assign(ctx, "bob", "", moderator.ID) },
-			"empty subject":               func() error { return s.Assign(ctx, "", "acme", member.ID) },
+			"custom role in other tenant": func() error { return s.Assign(ctx, bob, "globex", moderator.ID) },
+			"custom role in all tenants":  func() error { return s.Assign(ctx, bob, authz.AllTenants, moderator.ID) },
+			"custom role on platform":     func() error { return s.Assign(ctx, bob, "", moderator.ID) },
+			"empty subject":               func() error { return s.Assign(ctx, identity.Ref{}, "acme", member.ID) },
+			"subject without type":        func() error { return s.Assign(ctx, identity.Ref{ID: "bob"}, "acme", member.ID) },
 		} {
 			if err := call(); !errors.Is(err, authz.ErrInvalid) {
 				t.Errorf("%s: err=%v", name, err)
 			}
 		}
-		if err := s.Assign(ctx, "bob", "acme", "00000000-0000-0000-0000-000000000000"); !errors.Is(err, authz.ErrRoleNotFound) {
+		if err := s.Assign(ctx, bob, "acme", "00000000-0000-0000-0000-000000000000"); !errors.Is(err, authz.ErrRoleNotFound) {
 			t.Fatalf("missing role: %v", err)
 		}
 
-		resolve := func(subject, tenant string) (identity.Subject, error) {
-			return s.Resolve(identity.WithTenant(ctx, tenant), identity.Subject{ID: subject, Method: "bearer"})
+		resolve := func(ref identity.Ref, tenant string) (identity.Subject, error) {
+			return s.Resolve(identity.WithTenant(ctx, tenant), identity.Subject{Type: ref.Type, ID: ref.ID, Method: "bearer"})
 		}
 		for _, tc := range []struct {
-			subject, tenant, perms string
+			subject       identity.Ref
+			tenant, perms string
 		}{
-			{"alice", "acme", "*"},
-			{"bob", "acme", "articles:read,comments:delete"}, // 两个角色合并去重
-			{"bob", "globex", "articles:read"},
-			{"guest", "acme", ""},              // 有角色但没有权限，仍然是成员
-			{"staff", "acme", "articles:read"}, // 来自所有租户的分配
-			{"staff", "", "platform:tenants"},  // 平台权限只来自平台的分配
-			{"bob", "", ""},                    // 平台中没有角色也可以访问，权限为空
+			{alice, "acme", "*"},
+			{bob, "acme", "articles:read,comments:delete"}, // 两个角色合并去重
+			{bob, "globex", "articles:read"},
+			{guest, "acme", ""},              // 有角色但没有权限，仍然是成员
+			{staff, "acme", "articles:read"}, // 来自所有租户的分配，没有同 ID 的 alice 的 owner
+			{staff, "", "platform:tenants"},  // 平台权限只来自平台的分配
+			{bob, "", ""},                    // 平台中没有角色也可以访问，权限为空
+			{alice, "", ""},                  // 没有同 ID 的 staff 的平台权限
 		} {
 			sub, err := resolve(tc.subject, tc.tenant)
 			if err != nil || sub.Tenant != tc.tenant || strings.Join(sub.Permissions, ",") != tc.perms || sub.Method != "bearer" {
-				t.Errorf("%s@%q: sub=%+v err=%v", tc.subject, tc.tenant, sub, err)
+				t.Errorf("%v@%q: sub=%+v err=%v", tc.subject, tc.tenant, sub, err)
 			}
 		}
-		if sub, _ := resolve("alice", "acme"); !sub.Can("members:manage") {
+		if sub, _ := resolve(alice, "acme"); !sub.Can("members:manage") {
 			t.Error("owner cannot manage members")
 		}
-		for _, tc := range [][2]string{{"carol", "acme"}, {"alice", "globex"}} {
-			if _, err := resolve(tc[0], tc[1]); !errors.Is(err, authz.ErrNotMember) {
-				t.Errorf("%s@%s: err=%v", tc[0], tc[1], err)
+		for _, tc := range []struct {
+			subject identity.Ref
+			tenant  string
+		}{{user("carol"), "acme"}, {alice, "globex"}} {
+			if _, err := resolve(tc.subject, tc.tenant); !errors.Is(err, authz.ErrNotMember) {
+				t.Errorf("%v@%s: err=%v", tc.subject, tc.tenant, err)
 			}
 		}
 
-		if tenants, err := s.Tenants(ctx, "bob"); err != nil || strings.Join(tenants, ",") != "acme,globex" {
+		if tenants, err := s.Tenants(ctx, bob); err != nil || strings.Join(tenants, ",") != "acme,globex" {
 			t.Fatalf("tenants=%v err=%v", tenants, err)
 		}
-		if tenants, _ := s.Tenants(ctx, "staff"); len(tenants) != 0 {
+		if tenants, _ := s.Tenants(ctx, staff); len(tenants) != 0 {
 			t.Fatalf("staff tenants=%v", tenants)
 		}
 		members, err := s.Members(ctx, "acme")
-		if err != nil || len(members) != 3 || members[0].SubjectID != "alice" || members[1].SubjectID != "bob" ||
+		if err != nil || len(members) != 3 || members[0].Subject != alice || members[1].Subject != bob ||
 			names(members[1].Roles) != "/member,acme/moderator" {
 			t.Fatalf("members=%+v err=%v", members, err)
 		}
-		if roles, err := s.RolesOf(ctx, "bob", "acme"); err != nil || names(roles) != "/member,acme/moderator" {
+		if roles, err := s.RolesOf(ctx, bob, "acme"); err != nil || names(roles) != "/member,acme/moderator" {
 			t.Fatalf("roles of bob=%s err=%v", names(roles), err)
 		}
+		if roles, err := s.RolesOf(ctx, staff, ""); err != nil || names(roles) != "/platform-admin" {
+			t.Fatalf("roles of staff=%s err=%v", names(roles), err)
+		}
 
-		if err := s.Unassign(ctx, "bob", "acme", moderator.ID); err != nil {
+		if err := s.Unassign(ctx, bob, "acme", moderator.ID); err != nil {
 			t.Fatal(err)
 		}
-		if sub, _ := resolve("bob", "acme"); slices.Contains(sub.Permissions, "comments:delete") {
+		if sub, _ := resolve(bob, "acme"); slices.Contains(sub.Permissions, "comments:delete") {
 			t.Fatalf("unassigned role still grants: %v", sub.Permissions)
 		}
-		if n, err := s.RemoveMember(ctx, "bob", "acme"); n != 1 || err != nil {
+		if n, err := s.RemoveMember(ctx, bob, "acme"); n != 1 || err != nil {
 			t.Fatalf("remove member n=%d err=%v", n, err)
 		}
-		if _, err := resolve("bob", "acme"); !errors.Is(err, authz.ErrNotMember) {
+		if _, err := resolve(bob, "acme"); !errors.Is(err, authz.ErrNotMember) {
 			t.Fatalf("removed member: %v", err)
 		}
 
@@ -239,7 +253,7 @@ func TestAssignAndResolve(t *testing.T) {
 		if err := s.DeleteRole(ctx, owner.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := resolve("alice", "acme"); !errors.Is(err, authz.ErrNotMember) {
+		if _, err := resolve(alice, "acme"); !errors.Is(err, authz.ErrNotMember) {
 			t.Fatalf("deleted role still assigned: %v", err)
 		}
 		if err := s.DeleteRole(ctx, owner.ID); !errors.Is(err, authz.ErrRoleNotFound) {

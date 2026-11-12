@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/centrifugal/centrifuge"
+
+	"github.com/ryan053857/mygoravel/identity"
 )
 
 // DefaultPresenceGrace 是 Options.PresenceGrace 为零时的宽限期。
@@ -110,7 +112,7 @@ func (m *membership) expire(key leaveKey, p *pendingLeave) {
 		switch {
 		case e.Client == key.client:
 			listed = true
-		case info != nil && e.Subject == info.UserID:
+		case info != nil && e.Subject.String() == info.UserID:
 			others = true
 		}
 	}
@@ -131,7 +133,7 @@ func (m *membership) expire(key leaveKey, p *pendingLeave) {
 // expel 立即删除主体在 channel 中的全部在线记录并发出离开事件，不经过宽限期。
 // 用于 Realtime.Unsubscribe：主体被移出频道，不会再回来。连接所在的实例稍后宽限期满时，
 // 发现记录已经不在，不再重复发出离开事件。
-func (m *membership) expel(channel, subject string) error {
+func (m *membership) expel(channel string, subject identity.Ref) error {
 	entries, err := m.list(channel)
 	if err != nil {
 		return err
@@ -145,7 +147,7 @@ func (m *membership) expel(channel, subject string) error {
 			return err
 		}
 		if info == nil {
-			info = &centrifuge.ClientInfo{ClientID: e.Client, UserID: e.Subject, ChanInfo: e.Info}
+			info = &centrifuge.ClientInfo{ClientID: e.Client, UserID: e.Subject.String(), ChanInfo: e.Info}
 		}
 	}
 	if info == nil {
@@ -198,7 +200,7 @@ func (m *membership) present(channel string, info *centrifuge.ClientInfo) bool {
 		return false
 	}
 	for _, e := range entries {
-		if e.Subject == info.UserID && e.Client != info.ClientID {
+		if e.Subject.String() == info.UserID && e.Client != info.ClientID {
 			return true
 		}
 	}

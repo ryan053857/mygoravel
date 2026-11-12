@@ -2,6 +2,7 @@
 CREATE TABLE realtime_presence (
     channel text NOT NULL,
     client_id text NOT NULL,
+    subject_type text NOT NULL,
     subject_id text NOT NULL,
     info bytea NOT NULL,
     expires_at timestamptz NOT NULL,

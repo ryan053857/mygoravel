@@ -24,9 +24,21 @@ var (
 // data 按 scs 默认编码生成会话数据；subjectID 非空时包含登录主体。
 func data(t *testing.T, subjectID, note string) []byte {
 	t.Helper()
+	if subjectID == "" {
+		return refData(t, identity.Ref{}, note)
+	}
+	return refData(t, user(subjectID), note)
+}
+
+// user 返回测试中 user 账号体系的主体。
+func user(id string) identity.Ref { return identity.Ref{Type: "user", ID: id} }
+
+// refData 编码主体为 ref 的会话数据；ref 为零值时是未登录的会话。
+func refData(t *testing.T, ref identity.Ref, note string) []byte {
+	t.Helper()
 	values := map[string]any{"note": note}
-	if subjectID != "" {
-		values["mygoravel.subject"] = identity.Subject{ID: subjectID}
+	if !ref.IsZero() {
+		values["mygoravel.subject"] = identity.Subject{Type: ref.Type, ID: ref.ID}
 	}
 	b, err := scs.GobCodec{}.Encode(time.Now().Add(time.Hour), values)
 	if err != nil {
@@ -127,6 +139,10 @@ func TestStoreRevokeSubject(t *testing.T) {
 		if err := store.CommitCtx(ctx, "a-old", data(t, "alice", "old"), time.Now().Add(-time.Second)); err != nil {
 			t.Fatal(err)
 		}
+		// 另一套账号体系中 ID 同为 alice 的主体，不受撤销影响。
+		if err := store.CommitCtx(ctx, "s1", refData(t, identity.Ref{Type: "staff", ID: "alice"}, "s1"), live); err != nil {
+			t.Fatal(err)
+		}
 		var rows []struct {
 			Token     string  `bun:"token"`
 			SubjectID *string `bun:"subject_id"`
@@ -140,14 +156,14 @@ func TestStoreRevokeSubject(t *testing.T) {
 			}
 		}
 
-		if _, err := store.RevokeSubject(ctx, ""); err == nil {
+		if _, err := store.RevokeSubject(ctx, identity.Ref{}); err == nil {
 			t.Fatal("expected error for empty subject")
 		}
 		// 已过期的 a-old 不计入。
-		if n, err := store.RevokeSubject(ctx, "alice"); n != 2 || err != nil {
+		if n, err := store.RevokeSubject(ctx, user("alice")); n != 2 || err != nil {
 			t.Fatalf("revoke alice n=%d err=%v", n, err)
 		}
-		if n, err := store.RevokeSubject(ctx, "alice"); n != 0 || err != nil {
+		if n, err := store.RevokeSubject(ctx, user("alice")); n != 0 || err != nil {
 			t.Fatalf("revoke alice again n=%d err=%v", n, err)
 		}
 		// 撤销前已在处理中的请求再次提交，会话也不会复活。
@@ -155,7 +171,7 @@ func TestStoreRevokeSubject(t *testing.T) {
 			t.Fatal(err)
 		}
 		all, err := store.AllCtx(ctx)
-		if err != nil || len(all) != 2 || all["b1"] == nil || all["anon"] == nil {
+		if err != nil || len(all) != 3 || all["b1"] == nil || all["anon"] == nil || all["s1"] == nil {
 			t.Fatalf("all=%d err=%v", len(all), err)
 		}
 	})
@@ -188,7 +204,7 @@ func TestStoreRevokeOthers(t *testing.T) {
 			t.Fatal("expected error without subject")
 		}
 		// 在 API 中调用时 Credential 是令牌 ID，撤销全部会话。
-		n, err := store.RevokeOthers(context.Background(), identity.Subject{ID: "alice", Credential: "0193a8e0-0000-7000-8000-000000000000"})
+		n, err := store.RevokeOthers(context.Background(), identity.Subject{Type: "user", ID: "alice", Credential: "0193a8e0-0000-7000-8000-000000000000"})
 		if err != nil || n != 1 {
 			t.Fatalf("revoke from api: n=%d err=%v", n, err)
 		}

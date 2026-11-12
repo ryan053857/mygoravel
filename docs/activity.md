@@ -62,8 +62,8 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
 | --- | --- |
 | `ID` | 新的 UUIDv7，按时间递增 |
 | `Tenant` | 主体的 `Tenant`，`""` 为平台本身，见[多租户](tenancy.md) |
-| `ActorType`、`ActorID` | 主体的 `Type` 和 `ID` |
-| `ImpersonatorID` | 主体的 `Impersonator`：[代为登录](authentication.md#impersonation)时实际操作的人，例如客服；平时为空 |
+| `ActorType`、`ActorID` | 主体的 `Type` 和 `ID`，`a.Actor()` 返回两者组成的 `identity.Ref` |
+| `ImpersonatorType`、`ImpersonatorID` | 主体的 `Impersonator`：[代为登录](authentication.md#impersonation)时实际操作的人，例如客服；平时为空，`a.Impersonator()` 返回它 |
 | `RequestID` | 本次请求的[请求 ID](middleware.md#request-id)，可以用它在日志中找到这次请求的全部日志 |
 | `CreatedAt` | 当前时间 |
 
@@ -109,7 +109,7 @@ list, err := activity.List(ctx, a.db, activity.Query{
 | 条件 | 含义 |
 | --- | --- |
 | `TargetType`、`TargetID` | 某类对象或某个对象的历史；`TargetID` 需要同时设置 `TargetType` |
-| `ActorID` | 某个主体做过的操作 |
+| `Actor` | 某个主体（`identity.Ref`）做过的操作 |
 | `Event` | 某种事件 |
 | `Limit` | 返回的条数，默认 50 |
 | `Before` | 翻页：传入上一页最后一条记录的 `ID`，返回比它更早的记录 |
@@ -141,7 +141,7 @@ article.published: "发布了文章《{{.title}}》"
 text := i18n.T(ctx, a.Event, a.Properties)
 ```
 
-这样修改文案、增加语言都不需要修改已有的记录。操作人的名字同样在显示时按 `ActorID` 查询，用户改名后历史中显示的是新名字。
+这样修改文案、增加语言都不需要修改已有的记录。操作人的名字同样在显示时按 `a.Actor()` 查询，用户改名后历史中显示的是新名字。
 
 <a id="retention"></a>
 ## 保留期限

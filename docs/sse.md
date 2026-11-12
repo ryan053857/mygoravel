@@ -237,7 +237,7 @@ pages := web.New(web.Options{Resolve: roles.Resolve, Credentials: creds /* 其�
 | 方法 | 立即校验的连接 | 常见用途 |
 | --- | --- | --- |
 | `RecheckCredential(ctx, id)` | 使用这个凭据的连接，`id` 是主体的 `Credential`：会话 ID 或 token 的 ID | 退出某一台设备 |
-| `RecheckSubject(ctx, userID)` | 这个用户的全部连接 | 退出其他设备、修改密码、停用账号、调整角色、移出租户 |
+| `RecheckSubject(ctx, ref)` | 主体 `ref`（`identity.Ref`）的全部连接 | 退出其他设备、修改密码、停用账号、调整角色、移出租户 |
 | `RecheckTenant(ctx, tenant)` | 请求所在租户为 `tenant` 的全部连接 | 修改角色的权限 |
 
 例如设备列表中的“退出这台设备”，`a.creds` 由 action 的构造函数传入：

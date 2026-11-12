@@ -11,6 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/realtime"
 )
 
@@ -45,7 +46,7 @@ func (s *Store) keys(channel string) (exp, data string) {
 
 // Add 实现 realtime.PresenceStore。
 func (s *Store) Add(ctx context.Context, e realtime.PresenceEntry, ttl time.Duration) error {
-	value, err := json.Marshal(stored{Subject: e.Subject, Info: e.Info})
+	value, err := json.Marshal(stored{Subject: e.Subject.String(), Info: e.Info})
 	if err != nil {
 		return errors.Wrap(err, "redispresence: encode")
 	}
@@ -103,7 +104,11 @@ func (s *Store) List(ctx context.Context, channel string) ([]realtime.PresenceEn
 		if json.Unmarshal([]byte(pairs[i+1]), &st) != nil {
 			continue
 		}
-		out = append(out, realtime.PresenceEntry{Channel: channel, Client: pairs[i], Subject: st.Subject, Info: st.Info})
+		ref, err := identity.ParseRef(st.Subject)
+		if err != nil {
+			continue
+		}
+		out = append(out, realtime.PresenceEntry{Channel: channel, Client: pairs[i], Subject: ref, Info: st.Info})
 	}
 	return out, nil
 }

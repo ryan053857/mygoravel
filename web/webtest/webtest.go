@@ -2,7 +2,7 @@
 // 不走登录表单就能以某个主体登录，并读取 htmx 的响应头（跳转、提示、事件）。
 //
 //	c := webtest.New(t, router)
-//	c.Login(pages, identity.Subject{ID: "alice", Permissions: []string{"articles"}})
+//	c.Login(pages, identity.Subject{Type: "user", ID: "alice", Permissions: []string{"articles"}})
 //	res := c.Put("/admin/articles/"+id, url.Values{"title": {""}}, webtest.HTMX)
 //	if res.Code != http.StatusUnprocessableEntity { … }
 package webtest

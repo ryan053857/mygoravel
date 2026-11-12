@@ -98,7 +98,7 @@ func app() (http.Handler, *web.Pages, *web.Pages) {
 	return r, ops, tenant
 }
 
-var editor = identity.Subject{ID: "alice", Type: identity.SubjectUser, Permissions: []string{"articles"}}
+var editor = identity.Subject{ID: "alice", Type: "user", Permissions: []string{"articles"}}
 
 func TestLogin(t *testing.T) {
 	h, ops, tenant := app()
@@ -120,14 +120,14 @@ func TestLogin(t *testing.T) {
 	if res := c.Get("/app/"); res.Code != http.StatusSeeOther {
 		t.Fatalf("other area: %d", res.Code)
 	}
-	c.Login(tenant, identity.Subject{ID: "bob"})
+	c.Login(tenant, identity.Subject{Type: "user", ID: "bob"})
 	if res := c.Get("/app/"); res.Text() != "home of bob" {
 		t.Fatalf("tenant: %q", res.Text())
 	}
 
 	// 权限不足的主体得到 403。
 	guest := webtest.New(t, h)
-	guest.Login(ops, identity.Subject{ID: "carol"})
+	guest.Login(ops, identity.Subject{Type: "user", ID: "carol"})
 	if res := guest.Get("/ops/articles"); res.Code != http.StatusForbidden {
 		t.Fatalf("missing permission: %d", res.Code)
 	}

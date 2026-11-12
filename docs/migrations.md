@@ -222,6 +222,7 @@ import (
     "github.com/uptrace/bun"
 
     "example.com/blog/internal/article"
+    "example.com/blog/internal/user"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/identity"
 )
@@ -233,7 +234,7 @@ func seed(db *bun.DB) *cobra.Command {
         Args:  command.NoArgs,
         RunE: func(cmd *cobra.Command, _ []string) error {
             create, publish := article.NewCreate(db), article.NewPublish(db)
-            alice := identity.Subject{ID: "alice", Type: identity.SubjectUser}
+            alice := identity.Subject{Type: user.Type, ID: "alice"}
             for _, c := range []article.Changes{
                 {Title: "Hello World", Slug: "hello-world", Content: "……"},
                 {Title: "Second Post", Slug: "second-post", Content: "……"},

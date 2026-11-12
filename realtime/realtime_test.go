@@ -125,7 +125,7 @@ func (s *tokens) validate(_ context.Context, token string) (identity.Subject, er
 	case s.revoked[token]:
 		return identity.Subject{}, errRevoked.New()
 	}
-	return identity.Subject{ID: token, Credential: "cred-" + token}, nil
+	return identity.Subject{Type: "user", ID: token, Credential: "cred-" + token}, nil
 }
 
 func (s *tokens) revoke(token string) {
@@ -225,7 +225,7 @@ func TestUnsubscribeAcrossInstances(t *testing.T) {
 	}
 
 	// 在 a 上取消 alice 对 chat:1 的订阅，连接在另一个实例上。
-	if err := a.rt.Unsubscribe("alice", "chat:1"); err != nil {
+	if err := a.rt.Unsubscribe(identity.Ref{Type: "user", ID: "alice"}, "chat:1"); err != nil {
 		t.Fatal(err)
 	}
 	if ch := alice.unsubscribed(); ch != "chat:1" {
@@ -239,7 +239,7 @@ func TestUnsubscribeAcrossInstances(t *testing.T) {
 	if p := bob.push(); p.Channel != "chat:1" {
 		t.Fatalf("bob received a push on %s first", p.Channel)
 	}
-	if err := a.rt.Unsubscribe("", "chat:1"); err == nil {
+	if err := a.rt.Unsubscribe(identity.Ref{}, "chat:1"); err == nil {
 		t.Fatal("empty subject id accepted")
 	}
 }
@@ -335,7 +335,7 @@ func TestTokenAuthentication(t *testing.T) {
 func TestTokenBoundToAnotherTenantIsRejected(t *testing.T) {
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{
 		Authenticate: func(context.Context, string) (identity.Subject, error) {
-			return identity.Subject{ID: "alice", Tenant: "acme"}, nil
+			return identity.Subject{Type: "user", ID: "alice", Tenant: "acme"}, nil
 		},
 	}, func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +368,7 @@ func TestResolveTokenSubject(t *testing.T) {
 				return identity.Subject{}, errorx.Define(errorx.NotFound, "test.not_member").New()
 			}
 			// 重新构造主体：凭据字段不由 Resolve 决定。
-			return identity.Subject{ID: sub.ID, Permissions: []string{"articles:read"}}, nil
+			return identity.Subject{Type: sub.Type, ID: sub.ID, Permissions: []string{"articles:read"}}, nil
 		},
 	}, nil)
 	seen := make(chan identity.Subject, 1)
@@ -433,7 +433,7 @@ func TestTenantOption(t *testing.T) {
 			if bound == token {
 				bound = "" // 没有绑定租户的 token
 			}
-			return identity.Subject{ID: "alice", Tenant: bound}, nil
+			return identity.Subject{Type: "user", ID: "alice", Tenant: bound}, nil
 		},
 		Resolve: func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
 			sub.Tenant, sub.Permissions = identity.TenantFromContext(ctx), []string{"articles"}
@@ -467,7 +467,7 @@ func TestRevokedTokenDisconnects(t *testing.T) {
 
 	// 后端故障时的复查不会断开连接。
 	store.setDown(true)
-	if err := creds.RecheckSubject(context.Background(), "alice"); err != nil {
+	if err := creds.RecheckSubject(context.Background(), identity.Ref{Type: "user", ID: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -512,7 +512,7 @@ func TestBehindMiddleware(t *testing.T) {
 	auth := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := identity.WithTenant(r.Context(), "acme")
-			ctx = identity.WithSubject(ctx, identity.Subject{ID: "alice", Tenant: "acme", Method: "session"})
+			ctx = identity.WithSubject(ctx, identity.Subject{Type: "user", ID: "alice", Tenant: "acme", Method: "session"})
 			ctx = httpx.WithCredentialCheck(ctx, func(context.Context) error {
 				mu.Lock()
 				defer mu.Unlock()

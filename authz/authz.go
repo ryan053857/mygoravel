@@ -55,8 +55,8 @@ type Role struct {
 
 // Member 是一个主体和它在某个域中的角色。
 type Member struct {
-	SubjectID string
-	Roles     []Role
+	Subject identity.Ref
+	Roles   []Role
 }
 
 // Store 是基于 Bun 的角色与分配存储，查询兼容 PostgreSQL、MySQL 与 SQLite，
@@ -91,10 +91,11 @@ type permissionRow struct {
 type assignmentRow struct {
 	bun.BaseModel `bun:"table:authz_assignments,alias:a"`
 
-	SubjectID string    `bun:"subject_id,pk"`
-	Tenant    string    `bun:"tenant,pk"`
-	RoleID    uuid.UUID `bun:"role_id,pk,type:uuid"`
-	CreatedAt time.Time `bun:"created_at,notnull"`
+	SubjectType string    `bun:"subject_type,pk"`
+	SubjectID   string    `bun:"subject_id,pk"`
+	Tenant      string    `bun:"tenant,pk"`
+	RoleID      uuid.UUID `bun:"role_id,pk,type:uuid"`
+	CreatedAt   time.Time `bun:"created_at,notnull"`
 }
 
 // NewStore 创建存储。db 必须已执行 authz 迁移。catalog 是应用的权限目录，为空时 panic。
@@ -121,7 +122,7 @@ func (s *Store) Catalog() Catalog { return slices.Clone(s.catalog) }
 // sub 在租户中没有任何角色时返回 ErrNotMember（404）；在平台中没有角色是正常的，权限为空。
 func (s *Store) Resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
 	tenant := identity.TenantFromContext(ctx)
-	perms, member, err := s.Permissions(ctx, sub.ID, tenant)
+	perms, member, err := s.Permissions(ctx, sub.Ref(), tenant)
 	if err != nil {
 		return identity.Subject{}, err
 	}
@@ -132,8 +133,8 @@ func (s *Store) Resolve(ctx context.Context, sub identity.Subject) (identity.Sub
 	return sub, nil
 }
 
-// Permissions 返回 subjectID 在 tenant 中的全部权限（去重、排序），以及它在其中是否有任何角色。
-func (s *Store) Permissions(ctx context.Context, subjectID, tenant string) ([]string, bool, error) {
+// Permissions 返回主体 ref 在 tenant 中的全部权限（去重、排序），以及它在其中是否有任何角色。
+func (s *Store) Permissions(ctx context.Context, ref identity.Ref, tenant string) ([]string, bool, error) {
 	var rows []struct {
 		RoleID     uuid.UUID      `bun:"role_id"`
 		Permission sql.NullString `bun:"permission"`
@@ -141,7 +142,7 @@ func (s *Store) Permissions(ctx context.Context, subjectID, tenant string) ([]st
 	err := s.db.NewSelect().TableExpr("authz_assignments AS a").
 		Join("LEFT JOIN authz_role_permissions AS p ON p.role_id = a.role_id").
 		ColumnExpr("a.role_id, p.permission").
-		Where("a.subject_id = ?", subjectID).Where("a.tenant IN (?)", bun.List(domains(tenant))).
+		Where("a.subject_type = ? AND a.subject_id = ?", ref.Type, ref.ID).Where("a.tenant IN (?)", bun.List(domains(tenant))).
 		Scan(ctx, &rows)
 	if err != nil {
 		return nil, false, errors.Wrap(err, "authz: permissions")
@@ -312,12 +313,12 @@ func (s *Store) loadRoles(ctx context.Context, q *bun.SelectQuery) ([]Role, erro
 	return roles, nil
 }
 
-// Assign 在 tenant 中把角色分配给 subjectID；已经分配时什么也不做。
+// Assign 在 tenant 中把角色分配给主体 ref；已经分配时什么也不做。
 // tenant 为 "" 表示平台，AllTenants 表示所有租户。租户自定义的角色只能在该租户中分配，
 // AllTenants 中只能分配全局角色，否则返回 ErrInvalid；角色不存在时返回 ErrRoleNotFound。
-func (s *Store) Assign(ctx context.Context, subjectID, tenant, roleID string) error {
-	if err := checkName(subjectID, "subject ID"); err != nil {
-		return err
+func (s *Store) Assign(ctx context.Context, ref identity.Ref, tenant, roleID string) error {
+	if ref.Validate() != nil {
+		return ErrInvalid.New(errorx.Public("field", "subject"))
 	}
 	if len(tenant) > maxKey {
 		return ErrInvalid.New(errorx.Public("field", "tenant"))
@@ -337,34 +338,34 @@ func (s *Store) Assign(ctx context.Context, subjectID, tenant, roleID string) er
 			return ErrInvalid.New(errorx.Public("field", "tenant"))
 		}
 		exists, err := tx.NewSelect().Model((*assignmentRow)(nil)).
-			Where("subject_id = ?", subjectID).Where("tenant = ?", tenant).Where("role_id = ?", rid).Exists(ctx)
+			Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Where("tenant = ?", tenant).Where("role_id = ?", rid).Exists(ctx)
 		if err != nil {
 			return errors.Wrap(err, "authz: assign")
 		}
 		if exists {
 			return nil
 		}
-		row := &assignmentRow{SubjectID: subjectID, Tenant: tenant, RoleID: rid, CreatedAt: s.now().UTC()}
+		row := &assignmentRow{SubjectType: string(ref.Type), SubjectID: ref.ID, Tenant: tenant, RoleID: rid, CreatedAt: s.now().UTC()}
 		_, err = tx.NewInsert().Model(row).Exec(ctx)
 		return errors.Wrap(err, "authz: assign")
 	})
 }
 
-// Unassign 撤销 subjectID 在 tenant 中的角色；没有分配时什么也不做。
-func (s *Store) Unassign(ctx context.Context, subjectID, tenant, roleID string) error {
+// Unassign 撤销主体 ref 在 tenant 中的角色；没有分配时什么也不做。
+func (s *Store) Unassign(ctx context.Context, ref identity.Ref, tenant, roleID string) error {
 	rid, err := uuid.Parse(roleID)
 	if err != nil {
 		return nil
 	}
 	_, err = s.db.NewDelete().Model((*assignmentRow)(nil)).
-		Where("subject_id = ?", subjectID).Where("tenant = ?", tenant).Where("role_id = ?", rid).Exec(ctx)
+		Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Where("tenant = ?", tenant).Where("role_id = ?", rid).Exec(ctx)
 	return errors.Wrap(err, "authz: unassign")
 }
 
-// RemoveMember 撤销 subjectID 在 tenant 中的全部角色，返回撤销的个数，例如把成员移出租户。
-func (s *Store) RemoveMember(ctx context.Context, subjectID, tenant string) (int, error) {
+// RemoveMember 撤销主体 ref 在 tenant 中的全部角色，返回撤销的个数，例如把成员移出租户。
+func (s *Store) RemoveMember(ctx context.Context, ref identity.Ref, tenant string) (int, error) {
 	res, err := s.db.NewDelete().Model((*assignmentRow)(nil)).
-		Where("subject_id = ?", subjectID).Where("tenant = ?", tenant).Exec(ctx)
+		Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Where("tenant = ?", tenant).Exec(ctx)
 	if err != nil {
 		return 0, errors.Wrap(err, "authz: remove member")
 	}
@@ -372,25 +373,28 @@ func (s *Store) RemoveMember(ctx context.Context, subjectID, tenant string) (int
 	return int(n), errors.Wrap(err, "authz: remove member")
 }
 
-// RolesOf 返回 subjectID 在 tenant 这个域中直接分配的角色，不包括 AllTenants 中的角色。
-func (s *Store) RolesOf(ctx context.Context, subjectID, tenant string) ([]Role, error) {
-	members, err := s.members(ctx, tenant, subjectID)
+// RolesOf 返回主体 ref 在 tenant 这个域中直接分配的角色，不包括 AllTenants 中的角色。
+func (s *Store) RolesOf(ctx context.Context, ref identity.Ref, tenant string) ([]Role, error) {
+	if ref.IsZero() {
+		return nil, nil
+	}
+	members, err := s.members(ctx, tenant, ref)
 	if err != nil || len(members) == 0 {
 		return nil, err
 	}
 	return members[0].Roles, nil
 }
 
-// Members 返回在 tenant 这个域中有角色的全部主体及其角色，按主体 ID 排序，供成员管理界面使用。
+// Members 返回在 tenant 这个域中有角色的全部主体及其角色，按主体的类型和 ID 排序，供成员管理界面使用。
 func (s *Store) Members(ctx context.Context, tenant string) ([]Member, error) {
-	return s.members(ctx, tenant, "")
+	return s.members(ctx, tenant, identity.Ref{})
 }
 
-// members 返回 tenant 中的成员；subjectID 不为空时只返回这个主体。
-func (s *Store) members(ctx context.Context, tenant, subjectID string) ([]Member, error) {
-	q := s.db.NewSelect().Model((*assignmentRow)(nil)).Column("subject_id", "role_id").Where("tenant = ?", tenant)
-	if subjectID != "" {
-		q = q.Where("subject_id = ?", subjectID)
+// members 返回 tenant 中的成员；ref 不为零值时只返回这个主体。
+func (s *Store) members(ctx context.Context, tenant string, ref identity.Ref) ([]Member, error) {
+	q := s.db.NewSelect().Model((*assignmentRow)(nil)).Column("subject_type", "subject_id", "role_id").Where("tenant = ?", tenant)
+	if !ref.IsZero() {
+		q = q.Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID)
 	}
 	var rows []assignmentRow
 	if err := q.Scan(ctx, &rows); err != nil {
@@ -411,24 +415,27 @@ func (s *Store) members(ctx context.Context, tenant, subjectID string) ([]Member
 	for _, r := range roles {
 		byID[r.ID] = r
 	}
-	bySubject := map[string][]Role{}
+	bySubject := map[identity.Ref][]Role{}
 	for _, r := range rows {
-		bySubject[r.SubjectID] = append(bySubject[r.SubjectID], byID[r.RoleID.String()])
+		ref := identity.Ref{Type: identity.SubjectType(r.SubjectType), ID: r.SubjectID}
+		bySubject[ref] = append(bySubject[ref], byID[r.RoleID.String()])
 	}
 	members := make([]Member, 0, len(bySubject))
-	for id, roles := range bySubject {
+	for ref, roles := range bySubject {
 		slices.SortFunc(roles, func(a, b Role) int { return cmp.Or(cmp.Compare(a.Tenant, b.Tenant), cmp.Compare(a.Name, b.Name)) })
-		members = append(members, Member{SubjectID: id, Roles: roles})
+		members = append(members, Member{Subject: ref, Roles: roles})
 	}
-	slices.SortFunc(members, func(a, b Member) int { return cmp.Compare(a.SubjectID, b.SubjectID) })
+	slices.SortFunc(members, func(a, b Member) int {
+		return cmp.Or(cmp.Compare(a.Subject.Type, b.Subject.Type), cmp.Compare(a.Subject.ID, b.Subject.ID))
+	})
 	return members, nil
 }
 
-// Tenants 返回 subjectID 有角色的全部租户，按 ID 排序，不包括平台和 AllTenants，供租户切换界面使用。
-func (s *Store) Tenants(ctx context.Context, subjectID string) ([]string, error) {
+// Tenants 返回主体 ref 有角色的全部租户，按 ID 排序，不包括平台和 AllTenants，供租户切换界面使用。
+func (s *Store) Tenants(ctx context.Context, ref identity.Ref) ([]string, error) {
 	var tenants []string
 	err := s.db.NewSelect().Model((*assignmentRow)(nil)).Distinct().Column("tenant").
-		Where("subject_id = ?", subjectID).Where("tenant NOT IN (?)", bun.List([]string{"", AllTenants})).
+		Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Where("tenant NOT IN (?)", bun.List([]string{"", AllTenants})).
 		OrderExpr("tenant").Scan(ctx, &tenants)
 	return tenants, errors.Wrap(err, "authz: tenants")
 }

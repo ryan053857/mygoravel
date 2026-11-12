@@ -79,8 +79,8 @@ func New(cfg Config, store scs.Store) *scs.SessionManager {
 // 每次登录得到一个新的会话 ID，保存为主体的 Credential（Method 为 session），
 // 与 API 令牌的 ID 一样用于设备列表中标出当前设备、退出其他设备，见 Store.List。
 func Login(ctx context.Context, sm *scs.SessionManager, sub identity.Subject, d Device) error {
-	if sub.ID == "" {
-		return errors.New("session: subject ID is required")
+	if err := sub.Ref().Validate(); err != nil {
+		return errors.Wrap(err, "session")
 	}
 	id, err := uuid.NewV7()
 	if err != nil {

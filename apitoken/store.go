@@ -50,10 +50,10 @@ type Device struct {
 type Token struct {
 	ID           string
 	Kind         Kind
-	Name         string   // 个人访问令牌的名称；登录 token 为空
-	Scopes       []string // 个人访问令牌的权限限制；登录 token 为空
-	Tenant       string   // token 绑定的租户；"" 表示不绑定
-	Impersonator string   // 代为登录时签发 token 的实际操作者，见 identity.Subject.Impersonator；"" 表示用户本人
+	Name         string       // 个人访问令牌的名称；登录 token 为空
+	Scopes       []string     // 个人访问令牌的权限限制；登录 token 为空
+	Tenant       string       // token 绑定的租户；"" 表示不绑定
+	Impersonator identity.Ref // 代为登录时签发 token 的实际操作者，见 identity.Subject.Impersonator；零值表示用户本人
 	IP           string
 	UserAgent    string
 	CreatedAt    time.Time
@@ -84,21 +84,22 @@ type Store struct {
 type row struct {
 	bun.BaseModel `bun:"table:api_tokens,alias:t"`
 
-	ID           uuid.UUID `bun:"id,pk,type:uuid"`
-	TokenHash    string    `bun:"token_hash,notnull"`
-	SubjectID    string    `bun:"subject_id,notnull"`
-	SubjectType  string    `bun:"subject_type,notnull"`
-	Tenant       string    `bun:"tenant,notnull"`
-	Impersonator string    `bun:"impersonator,notnull"`
-	Kind         Kind      `bun:"kind,notnull"`
-	Name         string    `bun:"name,notnull"`
-	Scopes       string    `bun:"scopes,notnull"`
-	Remember     bool      `bun:"remember,notnull"`
-	IP           string    `bun:"ip,notnull"`
-	UserAgent    string    `bun:"user_agent,notnull"`
-	CreatedAt    time.Time `bun:"created_at,notnull"`
-	LastUsedAt   time.Time `bun:"last_used_at,notnull"`
-	ExpiresAt    time.Time `bun:"expires_at,nullzero"`
+	ID               uuid.UUID `bun:"id,pk,type:uuid"`
+	TokenHash        string    `bun:"token_hash,notnull"`
+	SubjectType      string    `bun:"subject_type,notnull"`
+	SubjectID        string    `bun:"subject_id,notnull"`
+	Tenant           string    `bun:"tenant,notnull"`
+	ImpersonatorType string    `bun:"impersonator_type,notnull"`
+	ImpersonatorID   string    `bun:"impersonator_id,notnull"`
+	Kind             Kind      `bun:"kind,notnull"`
+	Name             string    `bun:"name,notnull"`
+	Scopes           string    `bun:"scopes,notnull"`
+	Remember         bool      `bun:"remember,notnull"`
+	IP               string    `bun:"ip,notnull"`
+	UserAgent        string    `bun:"user_agent,notnull"`
+	CreatedAt        time.Time `bun:"created_at,notnull"`
+	LastUsedAt       time.Time `bun:"last_used_at,notnull"`
+	ExpiresAt        time.Time `bun:"expires_at,nullzero"`
 }
 
 // NewStore 创建 token 存储。db 必须已执行 api_tokens 迁移。cfg 不合法或 db 为 nil 时 panic。
@@ -116,7 +117,7 @@ func NewStore(db bun.IDB, cfg Config) *Store {
 //
 // 登录 token 代表用户本人，不限制权限：校验得到的主体 Scopes 为 nil，权限由 Resolve 按用户当前的角色加载。
 // sub.Tenant 不为空时，token 只能在这个租户中使用，例如只属于某个租户的终端客户账号。
-// sub.Impersonator 不为空时签发的是代为登录的 token，校验得到的主体带有同样的 Impersonator。
+// sub.Impersonator 不为零值时签发的是代为登录的 token，校验得到的主体带有同样的 Impersonator。
 func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (string, error) {
 	now := s.now().UTC()
 	r := &row{
@@ -144,7 +145,7 @@ type Personal struct {
 }
 
 // Create 为 sub 创建个人访问令牌，返回 token 明文，明文只在这里返回一次。
-// 代为登录期间（sub.Impersonator 不为空）创建的令牌记录 Impersonator，之后每次使用都归于这个操作者。
+// 代为登录期间（sub.Impersonator 不为零值）创建的令牌记录 Impersonator，之后每次使用都归于这个操作者。
 func (s *Store) Create(ctx context.Context, sub identity.Subject, p Personal) (string, error) {
 	now := s.now().UTC()
 	name := strings.TrimSpace(p.Name)
@@ -166,8 +167,8 @@ func (s *Store) Create(ctx context.Context, sub identity.Subject, p Personal) (s
 }
 
 func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now time.Time) (string, error) {
-	if sub.ID == "" {
-		return "", errors.New("apitoken: subject ID is required")
+	if err := sub.Ref().Validate(); err != nil {
+		return "", errors.Wrap(err, "apitoken")
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -179,7 +180,8 @@ func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now tim
 	}
 	plain := base64.RawURLEncoding.EncodeToString(b)
 	r.ID, r.TokenHash = id, hash(plain)
-	r.SubjectID, r.SubjectType, r.Impersonator = sub.ID, string(sub.Type), sub.Impersonator
+	r.SubjectType, r.SubjectID = string(sub.Type), sub.ID
+	r.ImpersonatorType, r.ImpersonatorID = string(sub.Impersonator.Type), sub.Impersonator.ID
 	r.CreatedAt, r.LastUsedAt = now, now
 	if _, err := s.db.NewInsert().Model(r).Exec(ctx); err != nil {
 		return "", errors.Wrap(err, "apitoken: insert")
@@ -211,12 +213,12 @@ func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, e
 		}
 	}
 	sub := identity.Subject{
-		ID:           r.SubjectID,
 		Type:         identity.SubjectType(r.SubjectType),
+		ID:           r.SubjectID,
 		Method:       "bearer",
 		Credential:   r.ID.String(),
 		Tenant:       r.Tenant,
-		Impersonator: r.Impersonator,
+		Impersonator: r.impersonator(),
 	}
 	if r.Kind == KindPersonal {
 		sub.Scopes = strings.Fields(r.Scopes)
@@ -239,7 +241,7 @@ func (s *Store) touch(ctx context.Context, r *row, now time.Time) error {
 func (s *Store) List(ctx context.Context, sub identity.Subject) ([]Token, error) {
 	var rows []row
 	err := s.live(s.db.NewSelect().Model(&rows), s.now().UTC()).
-		Where("subject_id = ?", sub.ID).OrderExpr("last_used_at DESC").Scan(ctx)
+		Where("subject_type = ? AND subject_id = ?", sub.Type, sub.ID).OrderExpr("last_used_at DESC").Scan(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "apitoken: list")
 	}
@@ -251,7 +253,7 @@ func (s *Store) List(ctx context.Context, sub identity.Subject) ([]Token, error)
 			Name:         r.Name,
 			Scopes:       strings.Fields(r.Scopes),
 			Tenant:       r.Tenant,
-			Impersonator: r.Impersonator,
+			Impersonator: r.impersonator(),
 			IP:           r.IP,
 			UserAgent:    r.UserAgent,
 			CreatedAt:    r.CreatedAt,
@@ -271,7 +273,7 @@ func (s *Store) Revoke(ctx context.Context, sub identity.Subject, id string) err
 		return ErrNotFound.New()
 	}
 	n, err := affected(s.db.NewDelete().Model((*row)(nil)).
-		Where("id = ?", tid).Where("subject_id = ?", sub.ID).Exec(ctx))
+		Where("id = ?", tid).Where("subject_type = ? AND subject_id = ?", sub.Type, sub.ID).Exec(ctx))
 	if err != nil {
 		return err
 	}
@@ -287,19 +289,21 @@ func (s *Store) RevokeOthers(ctx context.Context, sub identity.Subject) (int, er
 	if sub.ID == "" {
 		return 0, errors.New("apitoken: subject ID is required")
 	}
-	q := s.db.NewDelete().Model((*row)(nil)).Where("subject_id = ?", sub.ID).Where("kind = ?", KindLogin)
+	q := s.db.NewDelete().Model((*row)(nil)).
+		Where("subject_type = ? AND subject_id = ?", sub.Type, sub.ID).Where("kind = ?", KindLogin)
 	if current, err := uuid.Parse(sub.Credential); err == nil {
 		q = q.Where("id <> ?", current)
 	}
 	return affected(q.Exec(ctx))
 }
 
-// RevokeSubject 撤销 subjectID 的全部 token，包括个人访问令牌，返回撤销的个数。用于封禁账号、修改密码等。
-func (s *Store) RevokeSubject(ctx context.Context, subjectID string) (int, error) {
-	if subjectID == "" {
-		return 0, errors.New("apitoken: subject ID is required")
+// RevokeSubject 撤销主体 ref 的全部 token，包括个人访问令牌，返回撤销的个数。用于封禁账号、修改密码等。
+func (s *Store) RevokeSubject(ctx context.Context, ref identity.Ref) (int, error) {
+	if err := ref.Validate(); err != nil {
+		return 0, errors.Wrap(err, "apitoken")
 	}
-	return affected(s.db.NewDelete().Model((*row)(nil)).Where("subject_id = ?", subjectID).Exec(ctx))
+	return affected(s.db.NewDelete().Model((*row)(nil)).
+		Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Exec(ctx))
 }
 
 // Cleanup 删除最多 limit 个已过期的 token，返回删除的个数。由应用定时调用。
@@ -312,6 +316,10 @@ func (s *Store) Cleanup(ctx context.Context, limit int) (int, error) {
 		Where("expires_at <= ?", s.now().UTC()).OrderExpr("expires_at").Limit(int64(limit))
 	return affected(s.db.NewDelete().Model((*row)(nil)).
 		Where("id IN (SELECT id FROM (?) AS expired)", expired).Exec(ctx))
+}
+
+func (r *row) impersonator() identity.Ref {
+	return identity.Ref{Type: identity.SubjectType(r.ImpersonatorType), ID: r.ImpersonatorID}
 }
 
 // live 把查询限定在未过期的 token。

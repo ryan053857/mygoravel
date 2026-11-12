@@ -5,6 +5,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+
+	"github.com/ryan053857/mygoravel/identity"
 )
 
 const (
@@ -17,19 +19,19 @@ const (
 // URL 不入库，服务返回记录时按磁盘公开基址填写。
 type File struct {
 	bun.BaseModel `bun:"table:files,alias:f"`
-	ID            uuid.UUID  `bun:"id,pk,type:uuid"      json:"id"`
-	Disk          string     `bun:"disk,notnull"         json:"disk"`
-	Key           string     `bun:"key,notnull"          json:"key"`
-	Filename      string     `bun:"filename,notnull"     json:"filename"`
-	ContentType   string     `bun:"content_type,notnull" json:"content_type"`
-	Size          int64      `bun:"size,notnull"         json:"size"`
-	OwnerType     string     `bun:"owner_type,notnull"   json:"-"`
-	OwnerID       string     `bun:"owner_id,notnull"     json:"-"`
-	Status        string     `bun:"status,notnull"       json:"status"`
-	ExpiresAt     *time.Time `bun:"expires_at"           json:"expires_at,omitempty"`
-	CreatedAt     time.Time  `bun:"created_at,notnull"   json:"created_at"`
-	UpdatedAt     time.Time  `bun:"updated_at,notnull"   json:"updated_at"`
-	URL           string     `bun:"-"                    json:"url"`
+	ID            uuid.UUID            `bun:"id,pk,type:uuid"      json:"id"`
+	Disk          string               `bun:"disk,notnull"         json:"disk"`
+	Key           string               `bun:"key,notnull"          json:"key"`
+	Filename      string               `bun:"filename,notnull"     json:"filename"`
+	ContentType   string               `bun:"content_type,notnull" json:"content_type"`
+	Size          int64                `bun:"size,notnull"         json:"size"`
+	OwnerType     identity.SubjectType `bun:"owner_type,notnull"   json:"-"`
+	OwnerID       string               `bun:"owner_id,notnull"     json:"-"`
+	Status        string               `bun:"status,notnull"       json:"status"`
+	ExpiresAt     *time.Time           `bun:"expires_at"           json:"expires_at,omitempty"`
+	CreatedAt     time.Time            `bun:"created_at,notnull"   json:"created_at"`
+	UpdatedAt     time.Time            `bun:"updated_at,notnull"   json:"updated_at"`
+	URL           string               `bun:"-"                    json:"url"`
 }
 
 // FileInput 描述一个待上传文件。Disk 为空时使用默认磁盘；Size 是声明大小，上传时严格核对。

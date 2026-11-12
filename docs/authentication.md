@@ -30,9 +30,9 @@ mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API K
 
 ```go
 type Subject struct {
-    ID           string
     Type         SubjectType
-    Impersonator string
+    ID           string
+    Impersonator Ref
     Method       string
     Credential   string
     Tenant       string
@@ -43,14 +43,22 @@ type Subject struct {
 
 | 字段 | 说明 |
 | --- | --- |
-| `ID` | 调用者的唯一标识，是一个不透明的字符串，例如用户 ID |
-| `Type` | 调用者类别：`identity.SubjectUser`（用户）或 `identity.SubjectService`（服务） |
-| `Impersonator` | 代为登录时实际操作的人，例如客服的 ID；为空表示调用者本人，见[代为登录](#impersonation) |
+| `Type` | 调用者所属的账号体系，例如 `user`、`staff`、`customer`，由应用声明；队列任务等系统自己的操作使用 `identity.System` |
+| `ID` | 调用者在这套账号体系中的标识，是一个不透明的字符串，例如用户表的主键 |
+| `Impersonator` | 代为登录时实际操作的人，例如客服；零值表示调用者本人，见[代为登录](#impersonation) |
 | `Method` | 认证方式，例如 `bearer` 或 `session` |
 | `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)或[会话](session.md#listing-sessions)的 ID；用于在设备列表中标出当前设备、退出其他设备，可以为空 |
 | `Tenant` | 本次请求所在的租户，`""` 表示平台本身；由凭据设置时，凭据只能在这个租户中使用，见[多租户](#tenants) |
 | `Permissions` | 调用者拥有的权限，例如 `articles:write` |
 | `Scopes` | 本次请求所用凭据被限制在内的权限，例如只读令牌的 `articles:read`；`nil` 表示不限制 |
+
+`Type` 和 `ID` 合起来是 `identity.Ref`，用 `sub.Ref()` 取得。框架保存主体的地方——会话、令牌、角色、操作日志、通知等——都同时记录两者，所以 `ID` 只需在同一种 `Type` 中唯一：员工表和客户表可以各自使用自增 ID，互不混淆。博客应用只有一套账号，在用户模块 `internal/user/user.go` 中声明它的类型：
+
+```go
+const Type identity.SubjectType = "user"
+```
+
+`Type` 以小写字母开头，只包含小写字母、数字和下划线。
 
 `Permissions` 回答“这个人能做什么”，`Scopes` 回答“这把钥匙被允许做什么”。`sub.Can(perm)` 在两者都允许时返回 `true`，路由检查、业务服务和页面都用它判断。权限名以冒号分隔，授予时可以用 `*` 作为最后一段：`articles:*` 包含 `articles:read` 和 `articles:write`，单独的 `*` 包含全部权限。
 
@@ -72,6 +80,7 @@ import (
     "context"
     "errors"
 
+    "example.com/blog/internal/user"
     "github.com/ryan053857/mygoravel/errorx"
     "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/identity"
@@ -116,8 +125,8 @@ func Validator(cfg Config) rest.TokenValidator {
             return identity.Subject{}, ErrUnauthenticated.New()
         }
         return identity.Subject{
+            Type:        user.Type,
             ID:          cred.SubjectID,
-            Type:        identity.SubjectUser,
             Method:      "bearer",
             Permissions: cred.Permissions,
         }, nil
@@ -262,7 +271,7 @@ api := rest.New(rest.Options{
 ```go
 func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
     tenant := identity.TenantFromContext(ctx)
-    perms, err := members.Permissions(ctx, tenant, sub.ID)
+    perms, err := members.Permissions(ctx, tenant, sub.Ref())
     if err != nil {
         return identity.Subject{}, err // 不是成员时返回 errorx.NotFound 类错误，得到 404
     }
@@ -285,10 +294,10 @@ func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error
 ```go
 func (h *Handlers) Impersonate(w http.ResponseWriter, r *http.Request) error {
     staff, _ := identity.FromContext(r.Context())
-    if staff.Impersonator != "" {
+    if !staff.Impersonator.IsZero() {
         return web.ErrForbidden.New() // 先回到自己的账号，不能层层代为登录
     }
-    target := identity.Subject{ID: chi.URLParam(r, "id"), Type: identity.SubjectUser, Impersonator: staff.ID}
+    target := identity.Subject{Type: user.Type, ID: chi.URLParam(r, "id"), Impersonator: staff.Ref()}
     if err := h.pages.Login(r, target); err != nil {
         return err
     }
@@ -298,8 +307,8 @@ func (h *Handlers) Impersonate(w http.ResponseWriter, r *http.Request) error {
 
 func (h *Handlers) StopImpersonating(w http.ResponseWriter, r *http.Request) error {
     sub, _ := identity.FromContext(r.Context())
-    if sub.Impersonator != "" {
-        if err := h.pages.Login(r, identity.Subject{ID: sub.Impersonator, Type: identity.SubjectUser}); err != nil {
+    if !sub.Impersonator.IsZero() {
+        if err := h.pages.Login(r, identity.Subject{Type: sub.Impersonator.Type, ID: sub.Impersonator.ID}); err != nil {
             return err
         }
     }
@@ -308,12 +317,12 @@ func (h *Handlers) StopImpersonating(w http.ResponseWriter, r *http.Request) err
 }
 ```
 
-`StopImpersonating` 注册为只要求登录的路由，页面顶部在 `sub.Impersonator` 不为空时显示“正在代 {用户} 操作”和退出按钮。`pages.Login` 每次都更换会话 token，代为登录期间的会话在退出后不能继续使用。
+`StopImpersonating` 注册为只要求登录的路由，页面顶部在 `sub.Impersonator` 不为零值时显示“正在代 {用户} 操作”和退出按钮。`pages.Login` 每次都更换会话 token，代为登录期间的会话在退出后不能继续使用。
 
 单页应用用[登录令牌](api-tokens.md#login-and-logout)完成同样的事：后台接口为目标用户签发一个带 `Impersonator` 的令牌，前端保留客服自己的令牌，退出时[撤销](api-tokens.md#revoking-tokens)代为登录的令牌，换回自己的：
 
 ```go
-plain, err := tokens.Login(ctx, identity.Subject{ID: userID, Type: identity.SubjectUser, Impersonator: staff.ID}, device)
+plain, err := tokens.Login(ctx, identity.Subject{Type: user.Type, ID: userID, Impersonator: staff.Ref()}, device)
 ```
 
 几件需要应用自己决定的事：
@@ -321,7 +330,7 @@ plain, err := tokens.Login(ctx, identity.Subject{ID: userID, Type: identity.Subj
 - **操作者仍然有效**：在 `Resolve` 中检查 `Impersonator` 仍然拥有代为登录的权限。客服离职或被收回权限后，他代为登录的会话和令牌在下一个请求就失效：
 
   ```go
-  if sub.Impersonator != "" {
+  if !sub.Impersonator.IsZero() {
       perms, _, err := roles.Permissions(ctx, sub.Impersonator, "")
       if err != nil {
           return identity.Subject{}, err
@@ -333,9 +342,9 @@ plain, err := tokens.Login(ctx, identity.Subject{ID: userID, Type: identity.Subj
   return roles.Resolve(ctx, sub)
   ```
 
-- **谁可以被代为登录**：通常不允许代为登录其他运营人员，在 `Impersonate` 中用 `roles.Permissions(ctx, target, "")` 确认目标在平台中没有角色；
-- **哪些操作不允许代为执行**：修改密码和邮箱、管理设备和令牌、付款等，在对应的 action 中拒绝 `subject.Impersonator != ""` 的主体。代为登录期间创建的[个人访问令牌](api-tokens.md#personal-access-tokens)会记录 `Impersonator`，令牌的每次使用都归于这个操作者；
-- **审计**：[操作日志](activity.md)自动记下 `Impersonator`；自己写日志时同样同时写下两者，例如 `slog.InfoContext(ctx, "article published", "subject", subject.ID, "impersonator", subject.Impersonator)`。
+- **谁可以被代为登录**：通常不允许代为登录其他运营人员，在 `Impersonate` 中用 `roles.Permissions(ctx, target.Ref(), "")` 确认目标在平台中没有角色；
+- **哪些操作不允许代为执行**：修改密码和邮箱、管理设备和令牌、付款等，在对应的 action 中拒绝 `!subject.Impersonator.IsZero()` 的主体。代为登录期间创建的[个人访问令牌](api-tokens.md#personal-access-tokens)会记录 `Impersonator`，令牌的每次使用都归于这个操作者；
+- **审计**：[操作日志](activity.md)自动记下 `Impersonator`；自己写日志时同样同时写下两者，例如 `slog.InfoContext(ctx, "article published", "subject", subject.Ref().String(), "impersonator", subject.Impersonator.String())`。
 
 <a id="retrieving-the-subject"></a>
 ## 获取已认证的主体

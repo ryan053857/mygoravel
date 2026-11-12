@@ -25,13 +25,12 @@ var ErrNotFound = errorx.Define(errorx.NotFound, "notification.not_found")
 // Recipient 是通知的收件人：某个租户中的一个主体。
 type Recipient struct {
 	Tenant string // 收件人所在的租户，"" 为平台本身
-	Type   identity.SubjectType
-	ID     string
+	identity.Ref
 }
 
 // RecipientOf 返回主体在它当前租户中的收件人，用于读取当前登录用户的通知。
 func RecipientOf(s identity.Subject) Recipient {
-	return Recipient{Tenant: s.Tenant, Type: s.Type, ID: s.ID}
+	return Recipient{Tenant: s.Tenant, Ref: s.Ref()}
 }
 
 // Notification 是发给一个收件人的一条通知，也是 notifications 表的 Bun 模型，
@@ -101,13 +100,11 @@ func Send(ctx context.Context, db bun.IDB, n Notification, to ...Recipient) ([]N
 }
 
 func check(r Recipient) error {
-	if r.ID == "" || r.Type == "" {
-		return errors.Newf("notification: recipient %+v without type or id", r)
+	if err := r.Validate(); err != nil {
+		return errors.Wrap(err, "notification: recipient")
 	}
-	for field, v := range map[string]string{"tenant": r.Tenant, "recipient type": string(r.Type), "recipient id": r.ID} {
-		if len(v) > maxKey {
-			return errors.Newf("notification: %s longer than %d bytes", field, maxKey)
-		}
+	if len(r.Tenant) > maxKey {
+		return errors.Newf("notification: tenant longer than %d bytes", maxKey)
 	}
 	return nil
 }

@@ -32,7 +32,7 @@ func TestLookup(t *testing.T) {
 				t.Fatalf("%q: ok=%v err=%v", token, ok, err)
 			}
 		}
-		if _, err := store.RevokeSubject(ctx, "alice"); err != nil {
+		if _, err := store.RevokeSubject(ctx, user("alice")); err != nil {
 			t.Fatal(err)
 		}
 		if _, ok, err := session.Lookup(ctx, sm, "a1"); ok || err != nil {

@@ -95,7 +95,7 @@ func (a *Create) Handle(ctx context.Context, subject identity.Subject, name stri
     if err != nil {
         return nil, err
     }
-    return t, a.roles.Assign(ctx, subject.ID, t.ID, a.ownerRoleID)
+    return t, a.roles.Assign(ctx, subject.Ref(), t.ID, a.ownerRoleID)
 }
 ```
 
@@ -109,7 +109,7 @@ func (a *Create) Handle(ctx context.Context, subject identity.Subject, name stri
 | 列出成员和他们的角色 | `roles.Members(ctx, sub.Tenant)` |
 | 可以分配的角色 | `roles.Roles(ctx, sub.Tenant)`：全局角色加本租户的角色 |
 | 邀请成员、调整角色 | `roles.Assign`、`roles.Unassign` |
-| 移出成员 | `roles.RemoveMember(ctx, userID, sub.Tenant)` |
+| 移出成员 | `roles.RemoveMember(ctx, member, sub.Tenant)`，`member` 是成员的 `identity.Ref` |
 | 自定义角色 | `roles.CreateRole(ctx, authz.Role{Tenant: sub.Tenant, ...})` |
 | 读取、修改某个角色 | 先用 `roles.Role(ctx, id, sub.Tenant)` 确认它属于本租户或是全局角色 |
 
@@ -122,7 +122,7 @@ func (a *Create) Handle(ctx context.Context, subject identity.Subject, name stri
 <a id="switching-tenants"></a>
 ### 切换租户
 
-`roles.Tenants(ctx, userID)` 返回用户所属的全部租户，用于登录后的租户选择页或顶部的切换菜单。切换只是跳转到另一个租户的地址，例如从 `/t/acme` 到 `/t/globex`，会话和令牌都不需要改变。
+`roles.Tenants(ctx, sub.Ref())` 返回用户所属的全部租户，用于登录后的租户选择页或顶部的切换菜单。切换只是跳转到另一个租户的地址，例如从 `/t/acme` 到 `/t/globex`，会话和令牌都不需要改变。
 
 <a id="data-isolation"></a>
 ## 租户数据隔离
@@ -187,7 +187,7 @@ var PublishAt = queue.Topic[PublishJob]("articles.publish")
 
 // system 是队列任务在 tenant 中的调用者，CanEdit 允许它发布这个租户的任何文章。
 func system(tenant string) identity.Subject {
-    return identity.Subject{ID: "system", Type: identity.SubjectService, Tenant: tenant, Permissions: []string{"articles:admin"}}
+    return identity.Subject{Type: identity.System, ID: "system", Tenant: tenant, Permissions: []string{"articles:admin"}}
 }
 
 func (a *Publish) Job(ctx context.Context, job PublishJob) error {
@@ -257,7 +257,7 @@ func (a *ScheduleDigests) Handle(ctx context.Context) error {
 
 ```go
 platformAdmin, err := roles.CreateRole(ctx, authz.Role{Name: "platform-admin", Permissions: []string{"platform:*"}})
-err = roles.Assign(ctx, staffID, "", platformAdmin.ID)
+err = roles.Assign(ctx, staff, "", platformAdmin.ID) // staff 是运营人员的 identity.Ref
 ```
 
 平台和租户的权限互不相通：在平台中的角色不会带来任何租户中的权限，反之亦然。
@@ -266,7 +266,7 @@ err = roles.Assign(ctx, staffID, "", platformAdmin.ID)
 
 ```go
 support, err := roles.CreateRole(ctx, authz.Role{Name: "support", Permissions: []string{auth.ArticlesRead, auth.ArticlesReadDrafts}})
-err = roles.Assign(ctx, staffID, authz.AllTenants, support.ID)
+err = roles.Assign(ctx, staff, authz.AllTenants, support.ID)
 ```
 
 `AllTenants` 中只能分配全局角色。它的权限很大，应当只授予只读权限，并记录访问日志。
@@ -279,10 +279,10 @@ err = roles.Assign(ctx, staffID, authz.AllTenants, support.ID)
 租户的终端客户也是主体，在租户中分配一个只有客户权限的角色即可，例如 `customer`。客户账号有两种设计：
 
 - **平台统一账号**：客户注册一次，可以成为多个租户的客户，和租户成员的处理完全相同；
-- **租户内账号**：每个租户的客户是独立的账号，同一个邮箱在两个租户中各注册一次。登录时把租户写进主体，凭据就只能在这个租户中使用：
+- **租户内账号**：每个租户的客户是独立的账号，同一个邮箱在两个租户中各注册一次。它们通常是单独的一张表、单独的一套账号体系，例如 `customer.Type`。登录时把租户写进主体，凭据就只能在这个租户中使用：
 
 ```go
-sub := identity.Subject{ID: customer.ID, Type: identity.SubjectUser, Tenant: identity.TenantFromContext(ctx)}
+sub := identity.Subject{Type: customer.Type, ID: c.ID, Tenant: identity.TenantFromContext(ctx)}
 err := pages.Login(r, sub)                   // 页面
 plain, err := tokens.Login(ctx, sub, device) // 单页应用或 App
 ```

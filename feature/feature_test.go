@@ -31,8 +31,10 @@ var (
 )
 
 func user(id, tenant string) identity.Subject {
-	return identity.Subject{ID: id, Type: identity.SubjectUser, Tenant: tenant}
+	return identity.Subject{ID: id, Type: "user", Tenant: tenant}
 }
+
+func userRef(id string) identity.Ref { return identity.Ref{Type: "user", ID: id} }
 
 func newStore(t *testing.T, driver database.Driver) *feature.Store {
 	t.Helper()
@@ -67,7 +69,7 @@ func TestPrecedence(t *testing.T) {
 		check(t, s, alice, editor, true, "tenant on")
 		check(t, s, user("carol", "globex"), editor, false, "other tenant")
 
-		set(t, s, editor, feature.User("alice"), feature.Off)
+		set(t, s, editor, feature.Subject(userRef("alice")), feature.Off)
 		check(t, s, alice, editor, false, "user beats tenant")
 		check(t, s, user("dave", "acme"), editor, true, "tenant still on for others")
 
@@ -94,9 +96,9 @@ func TestPrecedence(t *testing.T) {
 func TestServiceSubject(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		s := newStore(t, driver)
-		system := identity.Subject{ID: "system", Type: identity.SubjectService, Tenant: "acme"}
-		set(t, s, search, feature.User("system"), feature.On)
-		check(t, s, system, search, false, "user settings do not apply to service subjects")
+		system := identity.Subject{ID: "system", Type: identity.System, Tenant: "acme"}
+		set(t, s, search, feature.Subject(identity.Ref{Type: identity.System, ID: "system"}), feature.On)
+		check(t, s, system, search, false, "subject settings do not apply to identity.System")
 		set(t, s, search, feature.Tenant("acme"), feature.On)
 		check(t, s, system, search, true, "tenant settings apply")
 
@@ -104,6 +106,17 @@ func TestServiceSubject(t *testing.T) {
 		require.NoError(t, s.Clear(context.Background(), search, feature.Tenant("acme")))
 		check(t, s, system, search, false, "no user ID, not in a user rollout below 100")
 		check(t, s, system, editor, false, "default without staff permission")
+	})
+}
+
+// 主体的设置按类型和 ID 一起区分：另一套账号体系中的 alice 是另一个人。
+func TestAccountSystems(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		s := newStore(t, driver)
+		staffAlice := identity.Subject{ID: "alice", Type: "staff"}
+		set(t, s, search, feature.Subject(staffAlice.Ref()), feature.On)
+		check(t, s, staffAlice, search, true, "staff alice on")
+		check(t, s, user("alice", ""), search, false, "user alice unaffected")
 	})
 }
 
@@ -197,7 +210,7 @@ func TestWithDB(t *testing.T) {
 func TestForReadsOnce(t *testing.T) {
 	s := newStore(t, sqlite.Driver)
 	set(t, s, editor, feature.Tenant("acme"), feature.On)
-	set(t, s, search, feature.User("alice"), feature.On)
+	set(t, s, search, feature.Subject(userRef("alice")), feature.On)
 	set(t, s, search, feature.Tenant("globex"), feature.On)
 	flags := s.For(context.Background(), user("alice", "acme"))
 	assert.True(t, flags.Active(editor))
@@ -225,10 +238,11 @@ func TestSetValidation(t *testing.T) {
 	}{
 		"unknown flag":      {feature.Flag{Name: "nope"}, feature.Everyone, feature.On},
 		"empty tenant":      {search, feature.Tenant(""), feature.On},
-		"empty user":        {search, feature.User(""), feature.On},
+		"empty subject":     {search, feature.Subject(identity.Ref{}), feature.On},
+		"subject no type":   {search, feature.Subject(identity.Ref{ID: "alice"}), feature.On},
 		"long tenant":       {search, feature.Tenant(string(make([]byte, 192))), feature.On},
 		"tenant percent":    {search, feature.Tenant("acme"), feature.Percent(10)},
-		"user percent":      {search, feature.User("alice"), feature.Percent(10)},
+		"user percent":      {search, feature.Subject(userRef("alice")), feature.Percent(10)},
 		"negative percent":  {search, feature.Everyone, feature.Percent(-1)},
 		"percent above 100": {search, feature.Everyone, feature.Percent(101)},
 		"zero state":        {search, feature.Everyone, feature.State{}},
@@ -247,13 +261,13 @@ func TestSettings(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		s := newStore(t, driver)
 		ctx := context.Background()
-		set(t, s, search, feature.User("bob"), feature.On)
+		set(t, s, search, feature.Subject(userRef("bob")), feature.On)
 		set(t, s, search, feature.Tenant("globex"), feature.Off)
 		set(t, s, search, feature.Everyone, feature.Percent(20))
-		set(t, s, search, feature.User("alice"), feature.Off)
+		set(t, s, search, feature.Subject(userRef("alice")), feature.Off)
 		set(t, s, search, feature.Tenant("acme"), feature.On)
-		set(t, s, search, feature.Everyone, feature.Percent(30)) // 覆盖
-		set(t, s, search, feature.User("alice"), feature.On)     // 覆盖
+		set(t, s, search, feature.Everyone, feature.Percent(30))         // 覆盖
+		set(t, s, search, feature.Subject(userRef("alice")), feature.On) // 覆盖
 		set(t, s, editor, feature.Tenant("acme"), feature.On)
 
 		settings, err := s.Settings(ctx, search)
@@ -261,7 +275,7 @@ func TestSettings(t *testing.T) {
 		var got []string
 		for _, st := range settings {
 			assert.False(t, st.UpdatedAt.IsZero())
-			got = append(got, fmt.Sprintf("%s/%s=%s:%d", st.Scope.Tenant(), st.Scope.User(), st.State.Mode, st.State.Percent))
+			got = append(got, fmt.Sprintf("%s/%s=%s:%d", st.Scope.Tenant(), st.Scope.Subject().ID, st.State.Mode, st.State.Percent))
 		}
 		assert.Equal(t, []string{
 			"/=percent:30",
@@ -272,10 +286,10 @@ func TestSettings(t *testing.T) {
 		}, got)
 		assert.Equal(t, feature.Everyone, settings[0].Scope)
 		assert.Equal(t, feature.Tenant("acme"), settings[1].Scope)
-		assert.Equal(t, feature.User("alice"), settings[3].Scope)
+		assert.Equal(t, feature.Subject(userRef("alice")), settings[3].Scope)
 
-		require.NoError(t, s.Clear(ctx, search, feature.User("bob")))
-		require.NoError(t, s.Clear(ctx, search, feature.User("nobody")))
+		require.NoError(t, s.Clear(ctx, search, feature.Subject(userRef("bob"))))
+		require.NoError(t, s.Clear(ctx, search, feature.Subject(userRef("nobody"))))
 		settings, err = s.Settings(ctx, search)
 		require.NoError(t, err)
 		assert.Len(t, settings, 4)

@@ -173,17 +173,17 @@ func (rt *Realtime) match(channel string) (Rule, Params, bool) {
 	return Rule{}, nil, false
 }
 
-// Unsubscribe 取消主体 subjectID 在所有实例上对 channel 的订阅，用于主体失去访问权限之后，
+// Unsubscribe 取消主体 ref 在所有实例上对 channel 的订阅，用于主体失去访问权限之后，
 // 例如被移出会话。客户端收到通知后不会自动重新订阅。presence 频道中，其他成员立即收到离开事件，
 // 不经过 Options.PresenceGrace。它不参与数据库事务，在业务数据提交之后调用。
-func (rt *Realtime) Unsubscribe(subjectID, channel string) error {
-	if subjectID == "" {
-		return errors.New("realtime: empty subject id")
+func (rt *Realtime) Unsubscribe(ref identity.Ref, channel string) error {
+	if err := ref.Validate(); err != nil {
+		return errors.Wrap(err, "realtime")
 	}
-	if err := rt.node.Unsubscribe(subjectID, channel); err != nil {
+	if err := rt.node.Unsubscribe(ref.String(), channel); err != nil {
 		return errors.Wrap(err, "realtime: unsubscribe")
 	}
-	return errors.Wrap(rt.members.expel(channel, subjectID), "realtime: remove presence")
+	return errors.Wrap(rt.members.expel(channel, ref), "realtime: remove presence")
 }
 
 // Handler 返回接受 WebSocket 连接的处理器，客户端 SDK 连接到它所在的地址。

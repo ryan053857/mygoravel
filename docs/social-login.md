@@ -326,7 +326,7 @@ func (h *socialHandlers) callback(w http.ResponseWriter, r *http.Request) error 
     if err != nil {
         return err
     }
-    if err := h.pages.Login(r, identity.Subject{ID: u.ID, Type: identity.SubjectUser, Permissions: u.Permissions}); err != nil {
+    if err := h.pages.Login(r, identity.Subject{Type: user.Type, ID: u.ID, Permissions: u.Permissions}); err != nil {
         return err
     }
     web.Redirect(w, r, next)
@@ -437,7 +437,7 @@ func RegisterSocial(api *rest.API, providers map[string]*social.Provider, cfg so
         if err != nil {
             return nil, err
         }
-        sub := identity.Subject{ID: u.ID, Type: identity.SubjectUser}
+        sub := identity.Subject{Type: user.Type, ID: u.ID}
         plain, err := tokens.Login(ctx, sub, apitoken.Device{IP: in.ip, UserAgent: in.UserAgent})
         if err != nil {
             return nil, err

@@ -29,7 +29,7 @@ func TestRequireBearerRechecksOnSignal(t *testing.T) {
 		if token != "t" || revoked.Load() {
 			return identity.Subject{}, errorx.Define(errorx.Unauthenticated, "tokens.revoked").New()
 		}
-		return identity.Subject{ID: "alice", Type: identity.SubjectUser, Credential: "token-1"}, nil
+		return identity.Subject{ID: "alice", Type: "user", Credential: "token-1"}, nil
 	}
 	api := rest.New(rest.Options{Credentials: creds})
 	op := huma.Operation{OperationID: "events", Method: http.MethodGet, Path: "/events"}

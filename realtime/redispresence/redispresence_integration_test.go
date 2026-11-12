@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/realtime"
 	"github.com/ryan053857/mygoravel/realtime/realtimetest"
 	"github.com/ryan053857/mygoravel/realtime/redispresence"
@@ -45,11 +46,11 @@ func TestStoreLeavesNoKeysBehind(t *testing.T) {
 	prefix := "test:presence:" + rand.Text() + ":"
 	s := redispresence.New(rdb, prefix)
 	for _, client := range []string{"gone", "kept"} {
-		if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: client, Subject: "u"}, 100*time.Millisecond); err != nil {
+		if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: client, Subject: identity.Ref{Type: "user", ID: "u"}}, 100*time.Millisecond); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: "kept", Subject: "u"}, 400*time.Millisecond); err != nil {
+	if err := s.Add(ctx, realtime.PresenceEntry{Channel: "room:1", Client: "kept", Subject: identity.Ref{Type: "user", ID: "u"}}, 400*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(200 * time.Millisecond)

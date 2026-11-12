@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	acme = identity.Subject{ID: "u1", Type: identity.SubjectUser, Tenant: "acme"}
+	acme = identity.Subject{ID: "u1", Type: "user", Tenant: "acme"}
 )
 
 // migrations 合并队列和 webhook 的迁移，队列的版本号在前。

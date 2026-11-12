@@ -20,10 +20,10 @@ import (
 	"github.com/ryan053857/mygoravel/identity"
 )
 
-// ErrInvalid 表示设置不合法，例如开关不在目录中、给租户或用户设置比例、比例不在 0 到 100 之间。
+// ErrInvalid 表示设置不合法，例如开关不在目录中、给租户或主体设置比例、比例不在 0 到 100 之间。
 var ErrInvalid = errorx.Define(errorx.InvalidArgument, "feature.invalid")
 
-// maxKey 是开关名、租户和用户 ID 的最大长度，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
+// maxKey 是开关名和租户的最大长度，与 MySQL 迁移中 VARCHAR(191) 的列宽一致。
 const maxKey = 191
 
 //go:embed migrations
@@ -45,7 +45,7 @@ type Flag struct {
 	Name string
 	// Description 在后台页面中显示。
 	Description string
-	// ByTenant 为 true 时按租户放量，同一租户的人结果一致；否则按用户放量。
+	// ByTenant 为 true 时按租户放量，同一租户的人结果一致；否则按主体放量。
 	ByTenant bool
 	// Default 在没有任何设置命中时决定结果，nil 表示关闭。它可能在每次检查时调用，应当足够快。
 	Default func(ctx context.Context, sub identity.Subject) bool
@@ -54,10 +54,11 @@ type Flag struct {
 // Catalog 是应用声明的全部开关。Set 只接受目录中的开关，Prune 删除不在目录中的开关的设置。
 type Catalog []Flag
 
-// Scope 是一条设置的范围：全员（Everyone）、某个租户（Tenant）或某个用户（User）。
+// Scope 是一条设置的范围：全员（Everyone）、某个租户（Tenant）或某个主体（Subject）。
 type Scope struct {
-	kind scopeKind
-	id   string
+	kind   scopeKind
+	tenant string
+	ref    identity.Ref
 }
 
 type scopeKind uint8
@@ -65,33 +66,24 @@ type scopeKind uint8
 const (
 	everyone scopeKind = iota
 	tenantScope
-	userScope
+	subjectScope
 )
 
 // Everyone 是全员的设置。
 var Everyone = Scope{}
 
 // Tenant 是租户 id 的设置。id 为空时 Set 和 Clear 返回 ErrInvalid，不会当作全员。
-func Tenant(id string) Scope { return Scope{kind: tenantScope, id: id} }
+func Tenant(id string) Scope { return Scope{kind: tenantScope, tenant: id} }
 
-// User 是用户 id 的设置，在用户所属的每个租户中都生效。id 为空时 Set 和 Clear 返回 ErrInvalid。
-func User(id string) Scope { return Scope{kind: userScope, id: id} }
+// Subject 是主体 ref 的设置，在主体所属的每个租户中都生效。ref 不合法（见 identity.Ref.Validate）时
+// Set 和 Clear 返回 ErrInvalid。identity.System 主体不适用主体的设置。
+func Subject(ref identity.Ref) Scope { return Scope{kind: subjectScope, ref: ref} }
 
 // Tenant 返回租户的 ID；不是租户的设置时返回 ""。
-func (s Scope) Tenant() string {
-	if s.kind == tenantScope {
-		return s.id
-	}
-	return ""
-}
+func (s Scope) Tenant() string { return s.tenant }
 
-// User 返回用户的 ID；不是用户的设置时返回 ""。
-func (s Scope) User() string {
-	if s.kind == userScope {
-		return s.id
-	}
-	return ""
-}
+// Subject 返回主体；不是主体的设置时返回零值。
+func (s Scope) Subject() identity.Ref { return s.ref }
 
 // Mode 是设置的类型。
 type Mode string
@@ -109,14 +101,14 @@ type State struct {
 }
 
 var (
-	// On 开启。设给全员时忽略租户和用户的单独设置。
+	// On 开启。设给全员时忽略租户和主体的单独设置。
 	On = State{Mode: ModeOn}
-	// Off 关闭。设给全员时忽略租户和用户的单独设置，用作紧急关闭。
+	// Off 关闭。设给全员时忽略租户和主体的单独设置，用作紧急关闭。
 	Off = State{Mode: ModeOff}
 )
 
-// Percent 让 n% 的用户或租户开启，只能设给全员。租户和用户的单独设置优先于它。
-// Percent(100) 包括没有用户或租户 ID 的主体，例如未登录的访客；小于 100 时它们不在比例内。
+// Percent 让 n% 的主体或租户开启，只能设给全员。租户和主体的单独设置优先于它。
+// Percent(100) 包括没有主体或租户的请求，例如未登录的访客，以及 identity.System；小于 100 时它们不在比例内。
 func Percent(n int) State { return State{Mode: ModePercent, Percent: n} }
 
 // Setting 是一条设置。
@@ -129,12 +121,13 @@ type Setting struct {
 type row struct {
 	bun.BaseModel `bun:"table:feature_settings,alias:fs"`
 
-	Name      string    `bun:"name,pk"`
-	Tenant    string    `bun:"tenant,pk"`
-	SubjectID string    `bun:"subject_id,pk"`
-	Mode      Mode      `bun:"mode,notnull"`
-	Percent   int       `bun:"percent,notnull"`
-	UpdatedAt time.Time `bun:"updated_at,notnull"`
+	Name        string    `bun:"name,pk"`
+	Tenant      string    `bun:"tenant,pk"`
+	SubjectType string    `bun:"subject_type,pk"`
+	SubjectID   string    `bun:"subject_id,pk"`
+	Mode        Mode      `bun:"mode,notnull"`
+	Percent     int       `bun:"percent,notnull"`
+	UpdatedAt   time.Time `bun:"updated_at,notnull"`
 }
 
 // Store 是基于 Bun 的开关设置存储，查询兼容 PostgreSQL、MySQL 与 SQLite，可以并发使用。
@@ -216,24 +209,24 @@ func (s *Store) load(ctx context.Context, sub identity.Subject, name string) ([]
 		if sub.Tenant != "" {
 			q = q.WhereOr("tenant = ? AND subject_id = ''", sub.Tenant)
 		}
-		if user := userID(sub); user != "" {
-			q = q.WhereOr("tenant = '' AND subject_id = ?", user)
+		if ref := subjectOf(sub); !ref.IsZero() {
+			q = q.WhereOr("tenant = '' AND subject_type = ? AND subject_id = ?", ref.Type, ref.ID)
 		}
 		return q
 	})
 	return rows, errors.Wrap(q.Scan(ctx), "feature: load settings")
 }
 
-// userID 返回用于用户设置和按用户放量的 ID：服务主体（例如后台任务的 system）没有用户 ID。
-func userID(sub identity.Subject) string {
-	if sub.Type == identity.SubjectService {
-		return ""
+// subjectOf 返回用于主体设置和按主体放量的主体：identity.System（例如后台任务）不适用，返回零值。
+func subjectOf(sub identity.Subject) identity.Ref {
+	if sub.Type == identity.System {
+		return identity.Ref{}
 	}
-	return sub.ID
+	return sub.Ref()
 }
 
 func evaluate(ctx context.Context, sub identity.Subject, f Flag, rows []row) bool {
-	var everyone, tenant, user *row
+	var everyone, tenant, subject *row
 	for i := range rows {
 		r := &rows[i]
 		switch {
@@ -242,18 +235,18 @@ func evaluate(ctx context.Context, sub identity.Subject, f Flag, rows []row) boo
 		case r.SubjectID == "":
 			tenant = r
 		default:
-			user = r
+			subject = r
 		}
 	}
 	switch {
 	case everyone != nil && everyone.Mode != ModePercent:
 		return everyone.Mode == ModeOn
-	case user != nil:
-		return user.Mode == ModeOn
+	case subject != nil:
+		return subject.Mode == ModeOn
 	case tenant != nil:
 		return tenant.Mode == ModeOn
 	case everyone != nil:
-		unit := userID(sub)
+		unit := subjectOf(sub).String()
 		if f.ByTenant {
 			unit = sub.Tenant
 		}
@@ -276,8 +269,8 @@ func inRollout(name, unit string, percent int) bool {
 	return int(binary.BigEndian.Uint32(h[:4])%100) < percent
 }
 
-// Set 保存 f 在 scope 上的设置，已有设置时覆盖。f 不在目录中、租户或用户 ID 为空、
-// 给租户或用户设置比例、比例不在 0 到 100 之间时返回 ErrInvalid。
+// Set 保存 f 在 scope 上的设置，已有设置时覆盖。f 不在目录中、租户 ID 为空、主体不合法、
+// 给租户或主体设置比例、比例不在 0 到 100 之间时返回 ErrInvalid。
 func (s *Store) Set(ctx context.Context, f Flag, scope Scope, state State) error {
 	if !s.names[f.Name] {
 		return ErrInvalid.New(errorx.Public("field", "flag"))
@@ -292,14 +285,14 @@ func (s *Store) Set(ctx context.Context, f Flag, scope Scope, state State) error
 		return ErrInvalid.New(errorx.Public("field", "state"))
 	}
 	r := &row{
-		Name: f.Name, Tenant: scope.Tenant(), SubjectID: scope.User(),
+		Name: f.Name, Tenant: scope.tenant, SubjectType: string(scope.ref.Type), SubjectID: scope.ref.ID,
 		Mode: state.Mode, Percent: state.Percent, UpdatedAt: s.now().UTC(),
 	}
 	q := s.db.NewInsert().Model(r)
 	if s.db.Dialect().Name() == dialect.MySQL {
 		q = q.On("DUPLICATE KEY UPDATE")
 	} else {
-		q = q.On("CONFLICT (name, tenant, subject_id) DO UPDATE")
+		q = q.On("CONFLICT (name, tenant, subject_type, subject_id) DO UPDATE")
 	}
 	_, err := q.Set("mode = ?", r.Mode).Set("percent = ?", r.Percent).Set("updated_at = ?", r.UpdatedAt).Exec(ctx)
 	return errors.Wrap(err, "feature: set")
@@ -311,15 +304,16 @@ func (s *Store) Clear(ctx context.Context, f Flag, scope Scope) error {
 		return err
 	}
 	_, err := s.db.NewDelete().Model((*row)(nil)).
-		Where("name = ?", f.Name).Where("tenant = ?", scope.Tenant()).Where("subject_id = ?", scope.User()).Exec(ctx)
+		Where("name = ?", f.Name).Where("tenant = ?", scope.tenant).
+		Where("subject_type = ? AND subject_id = ?", scope.ref.Type, scope.ref.ID).Exec(ctx)
 	return errors.Wrap(err, "feature: clear")
 }
 
-// Settings 返回 f 的全部设置：全员在前，然后是各租户、各用户，同类按 ID 排序。
+// Settings 返回 f 的全部设置：全员在前，然后是各租户、各主体；租户按 ID 排序，主体按类型和 ID 排序。
 func (s *Store) Settings(ctx context.Context, f Flag) ([]Setting, error) {
 	var rows []row
 	err := s.db.NewSelect().Model(&rows).Where("name = ?", f.Name).
-		OrderExpr("subject_id ASC, tenant ASC").Scan(ctx)
+		OrderExpr("subject_type ASC, subject_id ASC, tenant ASC").Scan(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "feature: list settings")
 	}
@@ -355,7 +349,9 @@ func (s *Store) Prune(ctx context.Context) (int, error) {
 }
 
 func checkScope(scope Scope) error {
-	if scope.kind != everyone && !validKey(scope.id) {
+	switch {
+	case scope.kind == tenantScope && !validKey(scope.tenant),
+		scope.kind == subjectScope && scope.ref.Validate() != nil:
 		return ErrInvalid.New(errorx.Public("field", "scope"))
 	}
 	return nil
@@ -364,7 +360,7 @@ func checkScope(scope Scope) error {
 func scopeOf(r row) Scope {
 	switch {
 	case r.SubjectID != "":
-		return User(r.SubjectID)
+		return Subject(identity.Ref{Type: identity.SubjectType(r.SubjectType), ID: r.SubjectID})
 	case r.Tenant != "":
 		return Tenant(r.Tenant)
 	}

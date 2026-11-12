@@ -31,7 +31,7 @@ func authServer(t *testing.T, store scs.Store, configure ...func(*web.Options)) 
 	router := chi.NewRouter()
 	public := pages.Routes(router, web.Public)
 	public.Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		sub := identity.Subject{ID: r.FormValue("user"), Type: identity.SubjectUser}
+		sub := identity.Subject{ID: r.FormValue("user"), Type: "user"}
 		if sub.ID == "root" {
 			sub.Permissions = []string{"admin"}
 		}
@@ -244,7 +244,7 @@ func TestTenantPages(t *testing.T) {
 	public := pages.Routes(router, web.Public)
 	// 登录时可以把会话绑定到一个租户，例如只属于该租户的终端客户账号。
 	public.Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		return pages.Login(r, identity.Subject{ID: r.FormValue("user"), Tenant: r.FormValue("tenant")})
+		return pages.Login(r, identity.Subject{Type: "user", ID: r.FormValue("user"), Tenant: r.FormValue("tenant")})
 	})
 	public.Get("/t/{tenant}/about", show)
 	pages.Routes(router, web.Require("articles:read")).Get("/t/{tenant}/dash", show)
@@ -295,11 +295,19 @@ func TestImpersonation(t *testing.T) {
 	pages := web.New(o)
 	router := chi.NewRouter()
 	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		return pages.Login(r, identity.Subject{ID: r.FormValue("user"), Impersonator: r.FormValue("impersonator")})
+		sub := identity.Subject{Type: "user", ID: r.FormValue("user")}
+		if v := r.FormValue("impersonator"); v != "" {
+			ref, err := identity.ParseRef(v)
+			if err != nil {
+				return err
+			}
+			sub.Impersonator = ref
+		}
+		return pages.Login(r, sub)
 	})
 	pages.Routes(router, web.Require()).Get("/me", func(w http.ResponseWriter, r *http.Request) error {
 		sub, _ := identity.FromContext(r.Context())
-		_, err := fmt.Fprintf(w, "%s impersonator=%s", sub.ID, sub.Impersonator)
+		_, err := fmt.Fprintf(w, "%s impersonator=%s", sub.ID, sub.Impersonator.String())
 		return err
 	})
 	srv := httptest.NewServer(router)
@@ -314,8 +322,8 @@ func TestImpersonation(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	signIn(map[string][]string{"user": {"alice"}, "impersonator": {"staff"}})
-	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 || body != "alice impersonator=staff" {
+	signIn(map[string][]string{"user": {"alice"}, "impersonator": {"staff:s1"}})
+	if resp, body := get(t, c, srv.URL+"/me"); resp.StatusCode != 200 || body != "alice impersonator=staff:s1" {
 		t.Fatalf("impersonating: %d %q", resp.StatusCode, body)
 	}
 	signIn(map[string][]string{"user": {"staff"}})

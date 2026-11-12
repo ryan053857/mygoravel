@@ -61,7 +61,7 @@ func TestBehindPageRoutes(t *testing.T) {
 	router.Use(httpx.Defaults(httpx.DefaultConfig(), nil, nil)...)
 	router.Use(httpx.Timeout(httpx.TimeoutConfig{Duration: 100 * time.Millisecond}))
 	pages.Routes(router, web.Public).Post("/login", func(w http.ResponseWriter, r *http.Request) error {
-		return pages.Login(r, identity.Subject{ID: "alice", Type: identity.SubjectUser})
+		return pages.Login(r, identity.Subject{ID: "alice", Type: "user"})
 	})
 	pages.Routes(router, web.Require()).Get("/realtime", func(w http.ResponseWriter, r *http.Request) error {
 		rt.Handler().ServeHTTP(w, r)
@@ -95,7 +95,7 @@ func TestBehindPageRoutes(t *testing.T) {
 	c.push()
 
 	// 会话仍然有效时的提醒不会断开连接。
-	if err := creds.RecheckSubject(context.Background(), "alice"); err != nil {
+	if err := creds.RecheckSubject(context.Background(), identity.Ref{Type: "user", ID: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	c.noPush(150 * time.Millisecond)
@@ -103,7 +103,7 @@ func TestBehindPageRoutes(t *testing.T) {
 	if err := store.Delete(cookie.Value); err != nil {
 		t.Fatal(err)
 	}
-	if err := creds.RecheckSubject(context.Background(), "alice"); err != nil {
+	if err := creds.RecheckSubject(context.Background(), identity.Ref{Type: "user", ID: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	if code := c.closed(); code != 3500 {

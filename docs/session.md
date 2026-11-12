@@ -104,9 +104,9 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 | 列 | 说明 |
 | --- | --- |
 | `token` | 主键，即 cookie 中的会话 token |
-| `subject_id` | [登录](views.md#login)的主体 ID，未登录时为空 |
+| `subject_type`、`subject_id` | [登录](views.md#login)的主体，未登录时为空 |
 | `id` | 登录时生成的会话 ID，也是主体的 `Credential`；未登录时为空 |
-| `impersonator` | [代为登录](authentication.md#impersonation)时实际操作的人 |
+| `impersonator_type`、`impersonator_id` | [代为登录](authentication.md#impersonation)时实际操作的人 |
 | `ip`、`user_agent`、`logged_in_at` | 登录设备的地址、User-Agent 和登录时间，由 `pages.Login` 从登录请求中取得 |
 | `data` | scs 编码后的会话数据 |
 | `expiry`、`revoked_at` | 过期时间和撤销时间 |
@@ -133,17 +133,17 @@ for _, s := range list {
 | --- | --- | --- |
 | `Revoke(ctx, sub, id)` | `sub` 的一个会话 | 在设备列表中退出某台设备 |
 | `RevokeOthers(ctx, sub)` | `sub` 除本次请求所用会话以外的全部会话 | “退出其他设备”、修改密码后 |
-| `RevokeSubject(ctx, userID)` | 该用户的全部会话 | 封禁账号、调整权限 |
+| `RevokeSubject(ctx, ref)` | 主体 `ref`（`identity.Ref`）的全部会话 | 封禁账号、调整权限 |
 
 `Revoke` 在会话不存在或不属于 `sub` 时返回 `session.ErrNotFound`，即 `404`。三者的用法与 [API 令牌](api-tokens.md#revoking-tokens)的同名方法相同。在 API 中调用 `RevokeOthers` 时，主体的 `Credential` 是令牌的 ID，不对应任何会话，因此撤销全部会话。
 
 管理员封禁账号或调整权限后，用 `RevokeSubject` 撤销该用户的全部会话：
 
 ```go
-n, err := store.RevokeSubject(ctx, userID)
+n, err := store.RevokeSubject(ctx, target) // target 是被封禁用户的 identity.Ref
 ```
 
-被撤销的设备在下一次请求时成为未登录状态，受保护的页面会跳转到登录页；已经建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)，需要立即结束时见[立即断开](sse.md#immediate-revocation)。两者都是一条按 `subject_id` 索引执行的 `UPDATE`，不随会话总数变慢。
+被撤销的设备在下一次请求时成为未登录状态，受保护的页面会跳转到登录页；已经建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)，需要立即结束时见[立即断开](sse.md#immediate-revocation)。两者都是一条按 `subject_type`、`subject_id` 索引执行的 `UPDATE`，不随会话总数变慢。
 
 应用同时为单页应用或 App 签发了 [API 令牌](api-tokens.md)时，要让用户在所有地方下线，还需要撤销他的令牌，见[撤销令牌](api-tokens.md#revoking-tokens)。
 
