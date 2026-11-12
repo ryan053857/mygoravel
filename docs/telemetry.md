@@ -13,6 +13,7 @@
     - [实时频道](#realtime)
     - [Go 运行时](#runtime)
 - [链路与日志](#trace-logs)
+- [错误追踪](#error-tracking)
 - [告警示例](#alerting)
 
 <a id="introduction"></a>
@@ -90,7 +91,7 @@ router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 
 属性遵循 OpenTelemetry 的 [HTTP 语义约定](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/)，现成的 HTTP 仪表盘可以直接使用。`http.route` 是路由模板，例如 `/articles/{id}`；没有匹配到路由的请求不带这个属性，非标准的请求方法记为 `_OTHER`，客户端无法通过构造路径或方法制造大量的指标序列。
 
-每个请求还是一个服务端 span，名称是方法和路由模板，例如 `GET /articles/{id}`。请求头带有 `traceparent` 时（例如来自前端或另一个服务），span 接在调用方的链路之后；`5xx` 的请求标记为错误。处理器从请求的 `ctx` 中拿到这个 span，自己创建的 span 都接在它下面。耗时指标也用这个 `ctx` 记录，日志平台可以从一个慢请求的数据点跳到它的链路。
+每个请求还是一个服务端 span，名称是方法和路由模板，例如 `GET /articles/{id}`。请求头带有 `traceparent` 时（例如来自前端或另一个服务），span 接在调用方的链路之后；`5xx` 的请求标记为错误，错误链记录为 span 上的 exception 事件，见[错误追踪](#error-tracking)。处理器从请求的 `ctx` 中拿到这个 span，自己创建的 span 都接在它下面。耗时指标也用这个 `ctx` 记录，日志平台可以从一个慢请求的数据点跳到它的链路。
 
 <a id="database"></a>
 ### 数据库
@@ -186,6 +187,33 @@ srv := mcpx.New(mcpx.Options{Name: "blog"}, mcpx.WithTelemetry(a.meters, a.trace
 `ctx` 中有 span 时，用它记录的日志自动带上 `trace_id` 和 `span_id`，包括访问日志、队列和调度器的日志，以及处理函数里 `slog.InfoContext(ctx, ...)` 记录的业务日志。在链路追踪系统中可以按 `trace_id` 找到一条链路的全部日志。
 
 用 [`logging.Export`](#setup) 推送的日志把链路写在记录本身，而不是作为 `trace_id` 字段，日志平台据此在日志和链路之间跳转。
+
+<a id="error-tracking"></a>
+## 错误追踪
+
+组件把出错的执行记录为 span 上的 `exception` 事件：HTTP 请求的 `5xx`（包括 panic 和[页面](views.md#error-pages)的错误）、失败和重试的队列任务、失败的定时任务、出错的数据库语句和 MCP 调用。事件的属性与[错误日志](logging.md#error-logging)的字段一一对应：
+
+| 属性 | 内容 |
+| --- | --- |
+| `exception.message` | `err.Error()` |
+| `exception.type` | [错误码](errors.md)；没有时是最内层错误的类型，例如 `*pgconn.PgError` |
+| `exception.stacktrace` | `%+v` 格式的完整错误链，包含错误**创建处**的堆栈；普通错误没有堆栈时省略 |
+
+`4xx` 是调用方的问题，不记录。按 `exception` 事件聚合错误的链路平台（例如 [SigNoz](https://signoz.io)、[Uptrace](https://uptrace.dev)）据此列出出现过哪些错误、各自的次数和趋势，点进去就是堆栈和整条链路。[Sentry](https://sentry.io) 通过 OTLP 接收链路时，目前还不能可靠地把这些事件变成 Issue，不推荐用它做错误追踪。
+
+用户看到的 `5xx` 错误页和提示上有请求编号，它就是访问日志和错误日志中的 `request_id`：按它找到这个请求的日志，日志中的 `trace_id` 再跳到链路。
+
+自己创建的 span 记录错误时用 `logging.RecordError`，属性与框架的组件一致。`span.RecordError` 记录的类型是最外层包装的类型，堆栈是调用它的位置，看不出错误从哪里来：
+
+```go
+ctx, span := tracer.Start(ctx, "sync feed")
+defer span.End()
+if err := sync(ctx); err != nil {
+    logging.RecordError(span, err)
+    span.SetStatus(codes.Error, "sync failed")
+    return err
+}
+```
 
 <a id="alerting"></a>
 ## 告警示例

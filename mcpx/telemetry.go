@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/ryan053857/mygoravel/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -108,7 +109,7 @@ func (s *Server) observe(ctx context.Context, method string, req mcp.Request, ne
 	if err != nil {
 		errType = jsonrpcErrorType(err)
 		if errType != "" {
-			span.RecordError(err)
+			logging.RecordError(span, err)
 		}
 	}
 	if errType != "" {

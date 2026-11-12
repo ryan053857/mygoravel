@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/ryan053857/mygoravel/logging"
 	"github.com/uptrace/bun"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -186,7 +187,7 @@ func (h *queryHook) AfterQuery(ctx context.Context, e *bun.QueryEvent) {
 		span.SetAttributes(attrs...)
 		span.SetAttributes(attrQueryText.String(text))
 		if errType != "" {
-			span.RecordError(e.Err)
+			logging.RecordError(span, e.Err)
 			span.SetStatus(codes.Error, e.Err.Error())
 		}
 		span.End()

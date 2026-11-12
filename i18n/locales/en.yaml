@@ -55,6 +55,7 @@ web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
 web.bad_query: "Invalid query parameter {{.field}}: {{.message}}"
 web.cross_origin: Cross-origin request rejected
+web.request_id: "Request ID: {{.id}}"
 upload.bad_request: Invalid upload request
 ui.pagination.previous: Previous
 ui.pagination.next: Next

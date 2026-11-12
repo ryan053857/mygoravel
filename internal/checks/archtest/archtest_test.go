@@ -52,7 +52,7 @@ var rules = map[string]rule{
 	"outbound":    {layerInfrastructure, nil},
 	"captcha":     {layerInfrastructure, []string{"errorx", "outbound"}},
 	"imgproxy":    {layerInfrastructure, nil},
-	"database":    {layerInfrastructure, []string{"acquire", "errorx"}},
+	"database":    {layerInfrastructure, []string{"acquire", "errorx", "logging"}},
 	"ratelimit":   {layerInfrastructure, []string{"errorx"}},
 	"document":    {layerInfrastructure, []string{"errorx"}},
 	"pdf":         {layerInfrastructure, []string{"errorx"}},

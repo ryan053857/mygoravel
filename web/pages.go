@@ -15,9 +15,11 @@ import (
 	"github.com/alexedwards/scs/v2"
 	"github.com/cockroachdb/errors"
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/ryan053857/mygoravel/i18n"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/session"
@@ -262,30 +264,37 @@ func (p *Pages) handle(fn HandlerFunc) http.HandlerFunc {
 		}
 		if rw.wrote {
 			p.logger.ErrorContext(r.Context(), "page handler failed after response started", "error", err)
+			logging.RecordError(trace.SpanFromContext(r.Context()), err)
 			return
 		}
 		p.Error(rw, r, err)
 	}
 }
 
-// Error 呈现 err：按 errorx 分类确定状态码，5xx 记录日志，带 errorx.RetryAfter 时设置 Retry-After。
+// Error 呈现 err：按 errorx 分类确定状态码，5xx 记录日志和链路上的 exception 事件（logging.RecordError），
+// 带 errorx.RetryAfter 时设置 Retry-After。
 // 普通请求和整页 htmx 请求渲染 ErrorPage。局部 htmx 请求：设置了 ErrorFragment 时渲染它，
 // 并通过 HX-Retarget、HX-Reswap 放进 ErrorTarget；否则不替换页面内容（HX-Reswap: none），
-// 错误作为 Type 为 error 的提示随 FlashEvent 送达。用于中间件等页面处理器之外的场景。
+// 错误作为 Type 为 error 的提示随 FlashEvent 送达，5xx 的提示以 ErrorReference 为说明。用于中间件等页面处理器之外的场景。
 func (p *Pages) Error(w http.ResponseWriter, r *http.Request, err error) {
 	r = r.WithContext(p.secure(w, r))
 	r = r.WithContext(p.withLook(r))
 	status := httpx.StatusOf(err)
 	if status >= http.StatusInternalServerError {
 		p.logger.ErrorContext(r.Context(), "page handler failed", "error", err)
+		logging.RecordError(trace.SpanFromContext(r.Context()), err)
 	}
 	message := httpx.ErrorDetail(r.Context(), err)
 	if d := errorx.RetryAfterOf(err); d > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(d.Seconds()))))
 	}
 	if IsPartial(r) && p.opts.ErrorFragment == nil {
+		m := Message{Type: "error", Title: message}
+		if status >= http.StatusInternalServerError {
+			m.Description = ErrorReference(r.Context())
+		}
 		w.Header().Set("HX-Reswap", "none")
-		flashError(w, Message{Type: "error", Title: message})
+		flashError(w, m)
 		w.WriteHeader(status)
 		return
 	}
@@ -299,6 +308,20 @@ func (p *Pages) Error(w http.ResponseWriter, r *http.Request, err error) {
 		p.logger.ErrorContext(r.Context(), "render error page failed", "error", rerr)
 		http.Error(w, http.StatusText(status), status)
 	}
+}
+
+// ErrorReference 返回给用户看的请求编号，例如“请求编号：9F2K…”，按请求的语言翻译；
+// 没有请求 ID（未安装 httpx.AssignRequestID）时返回空字符串。
+// 5xx 错误的提示和 ui.ErrorPage 带上它：用户报告问题时附上编号，按它在日志中找到这个请求和错误的堆栈。
+func ErrorReference(ctx context.Context) string {
+	id := httpx.RequestID(ctx)
+	if id == "" {
+		return ""
+	}
+	if s := i18n.T(ctx, "web.request_id", map[string]any{"id": id}); s != "web.request_id" {
+		return s
+	}
+	return "Request ID: " + id
 }
 
 // NotFound 以 ErrNotFound 呈现 404，可以直接传给 chi 的 Router.NotFound。

@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/logging"
 )
 
 // TokenValidator 校验 bearer token 并返回主体。ctx 是请求的 context。
@@ -89,6 +91,7 @@ func RequireAuth(api *API, name string, scheme *huma.SecurityScheme, authenticat
 			case err == nil:
 			case identity.Failed(err):
 				api.logger.ErrorContext(ctx.Context(), "authentication backend failed", "scheme", name, "error", err)
+				logging.RecordError(trace.SpanFromContext(ctx.Context()), err)
 				writeError(api, ctx, huma.NewErrorWithContext(ctx, httpx.StatusOf(err), "authentication unavailable"))
 				return
 			case errors.Is(err, identity.ErrUnauthenticated):

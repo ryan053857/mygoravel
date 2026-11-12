@@ -212,7 +212,7 @@ slog.ErrorContext(ctx, "sync feed failed", "feed_id", id, "error", err)
 | `code` | [错误码](errors.md)，没有时省略 |
 | `stack` | `%+v` 格式的完整错误链，包含错误**创建处**的堆栈；与 `message` 相同（普通错误没有堆栈）时省略 |
 
-不需要再手写 `fmt.Sprintf("%+v", err)`。详见[错误处理](errors.md#reporting-errors)。
+不需要再手写 `fmt.Sprintf("%+v", err)`。详见[错误处理](errors.md#reporting-errors)。在链路上记录同一个错误用 `logging.RecordError`，属性与这些字段对应，见[错误追踪](telemetry.md#error-tracking)。
 
 <a id="pipeline"></a>
 ## 扩展处理链

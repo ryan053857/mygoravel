@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/logging"
@@ -36,6 +37,7 @@ func SSE(fn func(s *httpx.Stream) error) *huma.StreamResponse {
 		err := httpx.SSE(w, r, fn)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			logging.Or(nil).ErrorContext(r.Context(), "event stream failed", logging.AttrComponent, "http", "error", err)
+			logging.RecordError(trace.SpanFromContext(r.Context()), err)
 		}
 	}}
 }

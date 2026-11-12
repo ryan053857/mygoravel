@@ -10,6 +10,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/ryan053857/mygoravel/logging"
 )
 
 // operationID 是操作 ID 的格式：客户端生成器用它命名函数，例如 article-publish 生成 articlePublish；Go 客户端按第一段分组，生成 Article.Publish。
@@ -64,6 +67,7 @@ func register[I, O any](api *API, op huma.Operation, events map[string]reflect.T
 			se := api.httpError(ctx, err)
 			if se.GetStatus() >= 500 {
 				api.logger.ErrorContext(ctx, "request failed", "error", err)
+				logging.RecordError(trace.SpanFromContext(ctx), err)
 			}
 			return out, se
 		}

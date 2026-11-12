@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 
+	"github.com/ryan053857/mygoravel/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
@@ -37,7 +38,7 @@ func (w *Worker) endSpan(ctx context.Context, e Event) {
 	span.SetAttributes(attrOutcome.String(e.Kind.String()))
 	switch e.Kind {
 	case JobRetrying, JobFailed:
-		span.RecordError(e.Err)
+		logging.RecordError(span, e.Err)
 		span.SetStatus(codes.Error, e.Err.Error())
 	}
 	span.End()

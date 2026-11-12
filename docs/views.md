@@ -460,7 +460,7 @@ templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
 
 局部请求的错误需要别的样子时，设置 `Options.ErrorFragment` 和 `ErrorTarget`：错误用 `ErrorFragment` 渲染，通过 `HX-Retarget` 放进 `ErrorTarget` 选择的元素，例如页面顶部的一条横幅。
 
-传给组件的 `message` 与 JSON API 的 `detail` 相同：业务错误按错误码翻译，其他错误只是状态描述，内部错误信息不会出现在页面上。5xx 错误会记录日志。
+传给组件的 `message` 与 JSON API 的 `detail` 相同：业务错误按错误码翻译，其他错误只是状态描述，内部错误信息不会出现在页面上。5xx 错误会记录日志和[链路上的错误](telemetry.md#error-tracking)；`ui.ErrorPage` 和局部请求的提示还显示请求编号（`web.ErrorReference`，例如“请求编号：9F2K…”），用户报告问题时附上它，按它在日志中找到这个请求。自己写错误组件时同样可以调用 `web.ErrorReference(ctx)`。
 
 htmx 4 默认会替换 4xx 和 5xx 响应，表单验证失败时返回 `422` 和带错误提示的表单即可，见[表单](forms.md#redisplaying-forms)。
 

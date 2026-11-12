@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/ryan053857/mygoravel/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -79,7 +80,7 @@ func (s *Scheduler) startSpan(ctx context.Context, task string, tick time.Time) 
 	))
 	return ctx, func(err error) {
 		if err != nil {
-			span.RecordError(err)
+			logging.RecordError(span, err)
 			span.SetStatus(codes.Error, err.Error())
 		}
 		span.End()

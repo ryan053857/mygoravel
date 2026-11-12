@@ -12,9 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5/middleware"
 	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/acquire"
 	"github.com/ryan053857/mygoravel/i18n"
@@ -145,6 +147,7 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 					panic(recovered)
 				}
 				logger.ErrorContext(r.Context(), "request panic", "stack", string(debug.Stack()))
+				logging.RecordError(trace.SpanFromContext(r.Context()), errors.Newf("panic: %v", recovered))
 				if rw.Status() != 0 {
 					panic(http.ErrAbortHandler)
 				}

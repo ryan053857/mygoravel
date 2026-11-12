@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -111,6 +112,15 @@ func TestTelemetryTracing(t *testing.T) {
 	if boom.Name() != "GET /boom" || boom.Status().Code != codes.Error || boom.Parent().IsValid() {
 		t.Fatalf("span %s parent %v status %v", boom.Name(), boom.Parent(), boom.Status())
 	}
+	// panic 记录为 exception 事件，堆栈包含 panic 的位置。
+	if ev := boom.Events(); len(ev) != 1 || ev[0].Name != "exception" ||
+		!hasAttr(ev[0].Attributes, "exception.message", "panic: boom") ||
+		!strings.Contains(attrValue(ev[0].Attributes, "exception.stacktrace"), "TestTelemetryTracing") {
+		t.Fatalf("panic events %+v", boom.Events())
+	}
+	if len(get.Events()) != 0 {
+		t.Fatalf("2xx events %+v", get.Events())
+	}
 
 	// 访问日志带有请求的 trace_id 和 span_id。
 	var first map[string]any
@@ -120,6 +130,19 @@ func TestTelemetryTracing(t *testing.T) {
 	if first["trace_id"] != get.SpanContext().TraceID().String() || first["span_id"] != get.SpanContext().SpanID().String() {
 		t.Fatalf("access log %v", first)
 	}
+}
+
+func attrValue(attrs []attribute.KeyValue, key string) string {
+	for _, a := range attrs {
+		if string(a.Key) == key {
+			return a.Value.AsString()
+		}
+	}
+	return ""
+}
+
+func hasAttr(attrs []attribute.KeyValue, key, value string) bool {
+	return attrValue(attrs, key) == value
 }
 
 func TestTelemetryLinksMetricsToSpan(t *testing.T) {

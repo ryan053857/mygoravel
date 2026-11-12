@@ -17,6 +17,7 @@ import (
 	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ryan053857/mygoravel/httpx"
 	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 	"github.com/ryan053857/mygoravel/web/ui"
@@ -254,4 +255,27 @@ func cssEscape(class string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// 5xx 的错误页显示请求编号，4xx 不显示。
+func TestErrorPageShowsRequestID(t *testing.T) {
+	t.Parallel()
+	render := func(status int) string {
+		var buf bytes.Buffer
+		h := httpx.AssignRequestID(httpx.DefaultRequestIDConfig())(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			if err := ui.ErrorPage(status, "x").Render(r.Context(), &buf); err != nil {
+				t.Error(err)
+			}
+		}))
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set("X-Request-ID", "9F2K")
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		return buf.String()
+	}
+	if html := render(500); !strings.Contains(html, "Request ID: 9F2K") {
+		t.Errorf("500 page:\n%s", html)
+	}
+	if html := render(404); strings.Contains(html, "9F2K") {
+		t.Errorf("404 page shows request ID:\n%s", html)
+	}
 }

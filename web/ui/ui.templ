@@ -87,12 +87,15 @@ templ Confirm() {
 	}
 }
 
-// ErrorPage 用当前主题渲染整页错误，可以直接作为 web.Options.ErrorPage。
+// ErrorPage 用当前主题渲染整页错误，可以直接作为 web.Options.ErrorPage。5xx 错误还显示 web.ErrorReference 的请求编号。
 templ ErrorPage(status int, message string) {
 	@Page(PageProps{Title: message}) {
 		<main class="flex min-h-svh flex-col items-center justify-center gap-2 p-6 text-center">
 			<p class="text-sm text-muted-foreground">{ strconv.Itoa(status) }</p>
 			<h1 class="text-2xl font-semibold">{ message }</h1>
+			if ref := web.ErrorReference(ctx); status >= 500 && ref != "" {
+				<p class="text-xs text-muted-foreground">{ ref }</p>
+			}
 		</main>
 	}
 }
