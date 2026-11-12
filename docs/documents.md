@@ -155,7 +155,7 @@ var IndexAttachment = queue.Topic[uuid.UUID]("attachments.index")
 err := IndexAttachment.Publish(ctx, tx, file.ID)
 ```
 
-任务读取文件，转换、切分、计算向量，在一个事务中替换这个附件原有的分段：
+任务读取文件，转换、切分，在一个事务中替换这个附件原有的分段，再计算向量写入向量库：
 
 ```go
 func (a *Index) Job(ctx context.Context, fileID uuid.UUID) error {
@@ -178,19 +178,13 @@ func (a *Index) Job(ctx context.Context, fileID uuid.UUID) error {
     for i, c := range chunks {
         inputs[i] = c.TextWithContext()
     }
-    vectors, err := a.embedder.Embed(ctx, inputs)
-    if err != nil {
-        return err
-    }
-
     rows := make([]AttachmentChunk, len(chunks))
     for i, c := range chunks {
         rows[i] = AttachmentChunk{
-            FileID: fileID, Position: i, Text: c.Text, Start: c.Start, End: c.End,
-            Pages: pagesOf(doc, c), Embedding: vectors[i],
+            FileID: fileID, Position: i, Text: c.Text, Start: c.Start, End: c.End, Pages: pagesOf(doc, c),
         }
     }
-    return database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+    err = database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         if _, err := tx.NewDelete().Model((*AttachmentChunk)(nil)).Where("file_id = ?", fileID).Exec(ctx); err != nil {
             return err
         }
@@ -200,13 +194,21 @@ func (a *Index) Job(ctx context.Context, fileID uuid.UUID) error {
         _, err := tx.NewInsert().Model(&rows).Exec(ctx)
         return err
     })
+    if err != nil || len(rows) == 0 {
+        return err
+    }
+    vectors, err := a.embedder.Embed(ctx, inputs)
+    if err != nil {
+        return err
+    }
+    return a.vectors.Replace(ctx, fileID, vectors) // 应用对向量库的封装，按附件替换，重复执行结果相同
 }
 ```
 
 - `a.embedder` 是 [ai.Embedder](ai.md#media)，分段很多时用 `openai.WithBatchSize` 让它分批请求。
 - 任务可能重复执行，先删后插让结果保持一致。
 - 多租户应用中，分段表带上租户，查询时按 `sub.Tenant` 过滤，见[多租户](tenancy.md#data-isolation)。
-- 向量如何存储和检索取决于数据库，例如 PostgreSQL 的 pgvector；在此之前，可以先用[全文搜索](search.md#multiple-documents)按关键词检索出候选分段，再用 [ai.RerankBy](ai.md#media) 按语义重排。
+- 向量放在专门的向量数据库中，不放进 PostgreSQL；框架还没有提供向量库的接入。在此之前，可以先用[全文搜索](search.md#multiple-documents)按关键词检索出候选分段，再用 [ai.RerankBy](ai.md#media) 按语义重排。
 
 <a id="formats"></a>
 ## 各种格式
