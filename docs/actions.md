@@ -286,7 +286,7 @@ func Commands() []*cobra.Command {
     return command.Bind(open, func(a *App) []*cobra.Command {
         return []*cobra.Command{
             article.Commands(a.db),
-            queuecmd.New(a.failed),
+            queuecmd.New(a.db),
             schedulecmd.New(a.tasks),
             searchcmd.New(a.db, article.SearchIndex),
             seed(a.db),

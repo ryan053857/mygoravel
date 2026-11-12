@@ -484,7 +484,7 @@ telemetry:
 <a id="queue-monitoring"></a>
 ### 监控积压
 
-复制槽保留 worker 还没读到的 WAL。worker 全部停止、nsqd 不可用时，积压会一直增长。槽的名字是 `queue.SlotName(数据库名)`，用下面的查询监控，积压超过 `max_slot_wal_keep_size` 的一半时告警：
+复制槽保留 worker 还没读到的 WAL。worker 全部停止、nsqd 不可用时，积压会一直增长。用 `queue status` 查看，或者用 worker 报告的[指标](queue.md#metrics)告警：所有实例的 `queue.relay.active` 之和为 0，或者 `queue.relay.lag` 超过 `max_slot_wal_keep_size` 的一半。worker 全部停止时没有人报告指标，所以还要在数据库一侧监控，槽的名字是 `queue.SlotName(数据库名)`：
 
 ```sql
 SELECT slot_name, active, wal_status,
@@ -502,12 +502,13 @@ FROM pg_replication_slots WHERE slot_name LIKE 'mygoravel_queue_%';
 <a id="queue-recovery"></a>
 ### 重建复制槽
 
-复制槽丢失（恢复备份、未同步的主备切换）或失效（`wal_status` 为 `lost`）时，worker 拒绝启动。先删除失效的槽，再用同样的名字重建：
+复制槽丢失（恢复备份、未同步的主备切换）或失效（`wal_status` 为 `lost`）时，worker 拒绝启动。用 `queue slot recreate` 删除失效的槽并用同样的名字重建：
 
-```sql
-SELECT pg_drop_replication_slot('mygoravel_queue_…');  -- 槽失效时
-SELECT pg_create_logical_replication_slot('mygoravel_queue_' || left(md5(current_database()), 16), 'pgoutput', false, false, true);
+```bash
+./bin/api queue slot recreate
 ```
+
+复制槽可用时这个命令拒绝执行：重建会丢弃其中还没转发的任务。确实需要时加上 `--force`。
 
 从丢失到重建期间发布的任务不会被转发：从业务数据中找出没有完成的工作重新发布，例如状态停在“发送中”的记录。
 

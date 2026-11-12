@@ -368,10 +368,14 @@ NSQ 把任务交给 worker 后，等待处理结果的时间是 `lease`（默认
 | --- | --- | --- | --- |
 | `queue.job.wait` | 直方图，秒 | | 任务从可以执行到开始处理等了多久 |
 | `queue.job.duration` | 直方图，秒 | `queue.job.outcome` | 处理耗时；按结果计数就是吞吐和失败率 |
+| `queue.relay.jobs` | 计数 | `queue.relay.route` | 从 WAL 读到并转发的任务：`published` 立即交给 NSQ，`deferred` 作为延迟消息，`scheduled` 存入 `queue_scheduled` |
+| `queue.relay.active` | 仪表 | | 这个实例正在转发时为 1 |
+| `queue.relay.lag` | 仪表，字节 | | 复制槽中还没确认的 WAL，见[监控积压](deployment.md#queue-monitoring) |
+| `queue.scheduled.jobs` | 仪表 | | `queue_scheduled` 中等待的任务数 |
 
-所有指标都带有 `messaging.system`（`nsq`）和 `messaging.destination.name`（topic）属性，与队列的 span 相同。`queue.job.outcome` 是 `succeeded`、`retrying`、`failed`、`released`，与[任务事件](#job-events)对应。NSQ 重新投递的任务（等待不超过 `max_defer` 的重试、放回的任务）给不出可以执行的时间，不记录等待时长。导出到 Prometheus 后，点换成下划线，单位成为后缀，例如 `queue_job_wait_seconds`。
+`queue.job.*` 带有 `messaging.system`（`nsq`）和 `messaging.destination.name`（topic）属性，与队列的 span 相同。`queue.job.outcome` 是 `succeeded`、`retrying`、`failed`、`released`，与[任务事件](#job-events)对应。NSQ 重新投递的任务（等待不超过 `max_defer` 的重试、放回的任务）给不出可以执行的时间，不记录等待时长。导出到 Prometheus 后，点换成下划线，单位成为后缀，例如 `queue_job_wait_seconds`。
 
-积压的任务数由 nsqd 统计，见[队列状态](#stats-command)。HTTP 请求和定时任务的指标见[可观测性](telemetry.md)。
+每个 worker 实例都在采集时查询一次复制槽，报告 `queue.relay.lag` 和 `queue.scheduled.jobs`；所有实例的 `queue.relay.active` 之和为 0 时没有实例在转发，WAL 会一直累积，应当告警。NSQ 中积压的任务数由 nsqd 统计，见[队列状态](#stats-command)。HTTP 请求和定时任务的指标见[可观测性](telemetry.md)。
 
 <a id="job-events"></a>
 ### 任务事件
@@ -411,11 +415,28 @@ w := queue.NewWorker(a.db, a.cfg.Queue, nil,
 
 每个 topic 积压、处理中、延迟中的任务数由 nsqd 统计，在 [nsqadmin](https://nsq.io/components/nsqadmin.html) 中查看，也可以在那里暂停一个 topic 的消费；接入监控系统用 nsqd 的 [statsd 输出](https://nsq.io/components/nsqd.html#statsd--graphite-integration)。还没转发的任务在复制槽中，积压的字节数用 `pg_replication_slots` 查询，见[部署](deployment.md#queue)；延迟超过 `max_defer` 的任务在 `queue_scheduled` 中。
 
-失败任务在数据库中，`queuecmd.New` 返回列出它们的 `queue` 命令，它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明：
+`queuecmd.New` 返回 `queue` 命令，查看数据库一侧的状态和失败任务。它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明：
 
 ```go
-queuecmd.New(a.failed),
+queuecmd.New(a.db),
 ```
+
+`queue status` 显示复制槽是否有 worker 在转发、积压了多少 WAL，以及 `queue_scheduled` 中等待的任务：
+
+```bash
+./bin/api queue status
+```
+
+```text
+slot            mygoravel_queue_3f2a9c1e5b7d4e60
+state           relaying (pid 48213)
+wal status      reserved
+lag             12.4 KiB
+scheduled       3
+next scheduled  2026-11-14 09:00:00
+```
+
+`state` 为 `idle` 时没有 worker 在转发；为 `missing` 或 `lost` 时 worker 拒绝启动，用 `queue slot recreate` 重建复制槽，见[重建复制槽](deployment.md#queue-recovery)。
 
 `queue failed` 从新到旧列出失败任务，错误信息只显示第一行，完整的错误和堆栈用 `FailedJobs.Get` 查看：
 

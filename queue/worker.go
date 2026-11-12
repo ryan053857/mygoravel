@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/nsqio/go-nsq"
 	"github.com/uptrace/bun"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ryan053857/mygoravel/logging"
@@ -53,6 +55,9 @@ type Worker struct {
 	logger    *slog.Logger
 	observers []Observer
 	tracer    trace.Tracer // 为 nil 时不创建 span
+
+	relaying  atomic.Bool         // 这个 Worker 正在转发
+	relayJobs metric.Int64Counter // 为 nil 时不记录
 
 	mu       sync.Mutex
 	handlers []*handler

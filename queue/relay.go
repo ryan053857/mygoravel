@@ -83,6 +83,8 @@ func (w *Worker) stream(ctx context.Context, producer *nsq.Producer) error {
 		return errors.Wrap(err, "queue: start replication")
 	}
 	w.logger.Info("relaying jobs", "slot", w.slot)
+	w.relaying.Store(true)
+	defer w.relaying.Store(false)
 
 	var (
 		open, ready          []relayed // 当前事务中的任务；已提交、还没发出的任务
@@ -210,6 +212,7 @@ func (w *Worker) forward(ctx context.Context, producer *nsq.Producer, jobs []rel
 			if err := producer.DeferredPublish(w.cfg.Prefix+j.topic, delay, j.body); err != nil {
 				return errors.Wrapf(err, "queue: publish to %q", j.topic)
 			}
+			w.countRelayed(ctx, routeDeferred, 1)
 		default:
 			later = append(later, scheduledRow{ID: head.ID, Topic: j.topic, Body: j.body, AvailableAt: head.AvailableAt.UTC(), CreatedAt: now.UTC()})
 		}
@@ -218,8 +221,13 @@ func (w *Worker) forward(ctx context.Context, producer *nsq.Producer, jobs []rel
 		if err := producer.MultiPublish(w.cfg.Prefix+topic, bodies); err != nil {
 			return errors.Wrapf(err, "queue: publish to %q", topic)
 		}
+		w.countRelayed(ctx, routePublished, len(bodies))
 	}
-	return schedule(ctx, w.db, later)
+	if err := schedule(ctx, w.db, later); err != nil {
+		return err
+	}
+	w.countRelayed(ctx, routeScheduled, len(later))
+	return nil
 }
 
 // nsqLogger 把 go-nsq 的日志写进 slog：ERR 开头的记为 Error，其余记为 Warn。
