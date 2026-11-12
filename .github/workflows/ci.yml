@@ -47,6 +47,7 @@ jobs:
       REDIS_TEST_URL: redis://127.0.0.1:6379/0
       MEMCACHED_TEST_ADDR: 127.0.0.1:11211
       NSQD_TEST_ADDR: 127.0.0.1:4150
+      NSQD_TEST_HTTP: http://127.0.0.1:4151
       GOTENBERG_TEST_URL: http://127.0.0.1:3000
     steps:
       - uses: actions/checkout@v4
