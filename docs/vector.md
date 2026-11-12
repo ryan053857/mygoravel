@@ -322,7 +322,7 @@ hits, err = ai.RerankBy(ctx, a.reranker, question, hits, func(h vector.Hit[Chunk
 
 不同模型算出的向量不能比较。索引的每个版本都记录了建立它的模型名称和维度，写入和查询这个版本时总是用这个模型计算向量。`Store` 中没有这个模型时，同步和检索都返回错误，而不会把两种向量混在一起。
 
-换模型分三步：
+名称或维度变了都算换模型，例如同一个模型用 `openai.WithDimensions` 从 3072 维改为 1024 维。换模型分三步：
 
 1. 把配置改为新模型，旧模型用 `vector.WithPrevious` 传入，部署：
 

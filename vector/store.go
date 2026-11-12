@@ -20,10 +20,10 @@ var validPrefix = regexp.MustCompile(`^[a-z0-9_.-]{0,32}$`)
 
 // Model 是计算向量的模型。
 type Model struct {
-	// Name 是模型的名称，例如 text-embedding-3-small。它记录在索引的每个版本中：
-	// 不同模型的向量不能比较，一个版本的写入和查询总是使用建立它的模型。
+	// Name 是模型的名称，例如 text-embedding-3-small。它和 Dims 一起记录在索引的每个版本中：
+	// 不同模型、不同维度的向量都不能比较，一个版本的写入和查询总是使用建立它的模型和维度。
 	Name string
-	// Dims 是向量的维度，与模型输出的一致。
+	// Dims 是向量的维度，与模型输出的一致。同一个模型可以输出不同的维度，例如 openai.WithDimensions。
 	Dims int
 	// Embedder 计算向量，通常是 openai.New(cfg.Embedding)。
 	Embedder ai.Embedder
@@ -34,8 +34,8 @@ type Model struct {
 type Store struct {
 	db     *bun.DB
 	client *qdrant.Client
-	model  Model            // 建立新版本使用的模型
-	models map[string]Model // 按名称索引的所有模型：model 和 WithPrevious 传入的旧模型
+	model  Model             // 建立新版本使用的模型
+	models map[modelID]Model // 所有模型：model 和 WithPrevious 传入的旧模型
 	prefix string
 
 	mu    sync.Mutex
@@ -51,7 +51,8 @@ func WithPrefix(prefix string) Option {
 	return func(s *Store) { s.prefix = prefix }
 }
 
-// WithPrevious 传入换模型之前使用的模型。换了模型之后，索引在重建完成之前仍是用旧模型建立的，
+// WithPrevious 传入换模型之前使用的模型。名称或维度不同都算换了模型，例如同一个模型从 3072 维改为 1024 维。
+// 换了模型之后，索引在重建完成之前仍是用旧模型建立的，
 // 查询和同步它都要用旧模型；重建完成后去掉这个选项。
 func WithPrevious(models ...Model) Option {
 	return func(s *Store) {
@@ -67,7 +68,7 @@ func New(db *bun.DB, client *qdrant.Client, model Model, opts ...Option) *Store 
 	if db == nil || client == nil {
 		panic("vector: nil database or client")
 	}
-	s := &Store{db: db, client: client, model: model, models: map[string]Model{}, ready: map[string]collectionInfo{}}
+	s := &Store{db: db, client: client, model: model, models: map[modelID]Model{}, ready: map[string]collectionInfo{}}
 	s.addModel(model)
 	for _, opt := range opts {
 		opt(s)
@@ -82,10 +83,17 @@ func (s *Store) addModel(m Model) {
 	if m.Name == "" || m.Dims <= 0 || m.Embedder == nil {
 		panic("vector: a model needs a name, positive dimensions and an embedder")
 	}
-	if _, ok := s.models[m.Name]; ok {
-		panic(errors.Newf("vector: duplicate model %q", m.Name))
+	id := modelID{m.Name, m.Dims}
+	if _, ok := s.models[id]; ok {
+		panic(errors.Newf("vector: duplicate model %q with %d dimensions", m.Name, m.Dims))
 	}
-	s.models[m.Name] = m
+	s.models[id] = m
+}
+
+// modelID 标识一个模型：同一个模型可以输出不同维度的向量（例如 openai.WithDimensions），不同维度的向量也不能比较。
+type modelID struct {
+	name string
+	dims int
 }
 
 // collection 返回索引的一个版本的 collection 名称。
@@ -146,14 +154,11 @@ func (s *Store) open(ctx context.Context, collection string, sc *schema, create 
 func (s *Store) modelOf(collection string, info *qdrant.CollectionInfo) (Model, error) {
 	meta := info.GetConfig().GetMetadata()
 	name, dims := meta[metaModel].GetStringValue(), meta[metaDims].GetIntegerValue()
-	m, ok := s.models[name]
+	m, ok := s.models[modelID{name, int(dims)}]
 	if !ok {
-		return Model{}, errors.Newf("vector: collection %s was built with model %q, which is not configured; "+
-			"pass it with vector.WithPrevious until a reindex with %q finishes", collection, name, s.model.Name)
-	}
-	if dims != int64(m.Dims) {
-		return Model{}, errors.Newf("vector: collection %s has %d dimensions, model %q is configured with %d",
-			collection, dims, name, m.Dims)
+		return Model{}, errors.Newf("vector: collection %s was built with model %q (%d dimensions), which is not configured; "+
+			"pass it with vector.WithPrevious until a reindex with %q (%d dimensions) finishes",
+			collection, name, dims, s.model.Name, s.model.Dims)
 	}
 	return m, nil
 }

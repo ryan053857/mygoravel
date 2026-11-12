@@ -186,3 +186,35 @@ func TestReindexInvalidDocument(t *testing.T) {
 		t.Fatalf("documents = %v", got)
 	}
 }
+
+func TestReindexChangesDimensions(t *testing.T) {
+	ctx := context.Background()
+	f := setup(t)
+	shared := newShared(t, f.db)
+	full, reduced := aitest.NewEmbedder(dims), aitest.NewEmbedder(dims/2)
+	fullModel := vector.Model{Name: "embedding", Dims: dims, Embedder: full}
+	f.src.set("a", chunkDoc{Text: "原来的a"})
+	if err := chunks.Refresh(ctx, shared.store(fullModel), f.src.load, "a"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 同一个模型改用更少的维度：名称相同、维度不同的旧模型用 WithPrevious 传入
+	changed := shared.store(vector.Model{Name: "embedding", Dims: dims / 2, Embedder: reduced}, vector.WithPrevious(fullModel))
+	if hits, err := chunks.Search(ctx, changed, vector.Query{Text: "原来的a"}); err != nil || len(hits) != 1 {
+		t.Fatalf("search before reindex = %+v, %v", hits, err)
+	}
+	id := startReindex(t, f.db)
+	f.src.set("b", chunkDoc{Text: "重建期间的b"})
+	if err := chunks.Refresh(ctx, changed, f.src.load, "b"); err != nil {
+		t.Fatal(err)
+	}
+	runWorker(t, f.db, changed, f.src)
+	if op := waitOperation(t, f.db, id); op.Status != operation.StatusCompleted || op.Processed != 2 {
+		t.Fatalf("operation = %+v", op)
+	}
+	only := shared.store(vector.Model{Name: "embedding", Dims: dims / 2, Embedder: reduced})
+	hits, err := chunks.Search(ctx, only, vector.Query{Text: "重建期间的b"})
+	if err != nil || len(hits) != 2 || hits[0].Key != "b" {
+		t.Fatalf("search after reindex = %+v, %v", hits, err)
+	}
+}

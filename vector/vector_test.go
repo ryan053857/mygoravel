@@ -437,3 +437,14 @@ func TestConcurrentRefresh(t *testing.T) {
 		t.Fatalf("documents = %v, want %v", got, want)
 	}
 }
+
+func TestDuplicateModels(t *testing.T) {
+	f := setup(t)
+	m := vector.Model{Name: "m", Dims: dims, Embedder: f.emb}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("duplicate model accepted")
+		}
+	}()
+	newShared(t, f.db).store(m, vector.WithPrevious(m))
+}
