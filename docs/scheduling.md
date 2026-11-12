@@ -287,6 +287,7 @@ article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) erro
 | [通知](notifications.md#retention) | `notification.Cleanup(db, 保留期)` | 每天 |
 | [推送设备](push.md#cleanup) | `push.Cleanup(db, 保留期)` | 每天 |
 | [后台操作](operations.md#cleanup)（包括导入和导出） | `operation.New(db)` 的 `Cleanup(保留期)` | 每天 |
+| [OAuth 授权码](oauth-server.md#assembling) | `oauthserver.New(…)` 的 `Cleanup` | 每小时 |
 | [Webhook 投递记录](webhooks.md#retention) | `webhook.Cleanup(db, 保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(保留期)` | 每天 |
 

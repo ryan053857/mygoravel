@@ -146,7 +146,7 @@ blog/
 mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包分为四层，包只引用同层或更低层的包：
 
 ```text
-功能        apitoken  login  authz  notification  push  activity  feature  operation  webhook  search  vector  sheet/imports  sheet/exports  ai
+功能        apitoken  login  oauthserver  authz  notification  push  activity  feature  operation  webhook  search  vector  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  mcpx  command
 基础设施    database  queue  schedule  cachex  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  sms  pdf  outbound  sheet  document
 基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt
@@ -241,6 +241,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `login` | 登录标识、密码、验证码登录与注册、找回密码、二次验证 | [登录与注册](login.md) |
 | `login/oauth` | Google、Apple、GitHub 等第三方账号登录（OpenID Connect、OAuth 2.0） | [第三方登录](social-login.md) |
 | `login/passkey` | 用 passkey（WebAuthn）登录和注册 | [登录与注册](login.md#passkeys) |
+| `oauthserver` | OAuth 2.1 授权服务器：页面中登录并同意后签发 OAuth 令牌，让 claude.ai、ChatGPT 的远程连接器访问 MCP 服务 | [OAuth 授权服务器](oauth-server.md) |
 | `authz` | 基于角色的权限：代码中声明的权限目录，角色按租户分配 | [授权](authorization.md)、[多租户](tenancy.md) |
 | `notification` | 站内通知收件箱，带已读状态 | [通知](notifications.md) |
 | `push` | 移动推送：服务端登记设备，在业务事务中发送，按平台分批推送 | [移动推送](push.md) |

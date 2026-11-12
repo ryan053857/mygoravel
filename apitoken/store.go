@@ -37,6 +37,9 @@ const (
 	KindRefresh Kind = "refresh"
 	// KindPersonal 是个人访问令牌，供脚本和第三方集成使用，过期时间由创建者指定。
 	KindPersonal Kind = "personal"
+	// KindOAuth 是用户授权 OAuth 客户端（例如 claude.ai 的连接器）后签发的令牌，见 Authorize。
+	// 它只能用于授权时指定的资源，由 ValidateFor 校验；Validate 不接受它。
+	KindOAuth Kind = "oauth"
 )
 
 // Device 描述登录 token 所在的设备，用于设备列表。
@@ -54,7 +57,10 @@ type Token struct {
 	ID           string
 	Kind         Kind
 	Name         string       // 个人访问令牌的名称；登录 token 为空
-	Scopes       []string     // 个人访问令牌的权限限制；登录 token 为空
+	Scopes       []string     // 个人访问令牌和 OAuth 令牌的权限限制；登录 token 为空
+	ClientID     string       // OAuth 令牌授权的客户端；其余为空
+	ClientName   string       // OAuth 令牌授权时客户端的名称，例如 Claude；其余为空
+	Resource     string       // OAuth 令牌只能用于的资源，例如 https://blog.example.com/mcp；其余为空
 	Tenant       string       // token 绑定的租户；"" 表示不绑定
 	Impersonator identity.Ref // 代为登录时签发 token 的实际操作者，见 identity.Subject.Impersonator；零值表示用户本人
 	IP           string
@@ -108,6 +114,9 @@ type row struct {
 	CreatedAt        time.Time `bun:"created_at,notnull"`
 	LastUsedAt       time.Time `bun:"last_used_at,notnull"`
 	ExpiresAt        time.Time `bun:"expires_at,nullzero"`
+	ClientID         string    `bun:"client_id,notnull"`
+	ClientName       string    `bun:"client_name,notnull"`
+	Resource         string    `bun:"resource,notnull"`
 }
 
 // NewStore 创建 token 存储。db 必须已执行 api_tokens 迁移。cfg 不合法或 db 为 nil 时 panic。
@@ -184,6 +193,53 @@ func (s *Store) Create(ctx context.Context, sub identity.Subject, p Personal) (s
 	return s.issue(ctx, sub, r, now)
 }
 
+// Grant 描述用户对一个 OAuth 客户端的授权，由 OAuth 授权服务器（oauthserver）在用户同意后使用。
+type Grant struct {
+	// ClientID 是客户端 ID，ClientName 是同意页上显示的名称，记录下来用于“已连接的应用”列表。
+	ClientID   string
+	ClientName string
+	// Resource 是令牌只能用于的资源，例如 MCP 服务的地址 https://blog.example.com/mcp。
+	Resource string
+	// Scopes 是用户同意的范围，至少一个，与个人访问令牌的 Scopes 相同：令牌能做的是用户当前权限与它的交集。
+	Scopes []string
+	// Lifetime 是令牌从签发起的最长有效期，IdleTimeout 是最长空闲时间（0 表示不限制），与登录 token 相同按使用滑动延长。
+	Lifetime    time.Duration
+	IdleTimeout time.Duration
+}
+
+// Authorize 为 sub 签发 OAuth 令牌，返回 token 明文，明文只在这里返回一次。sub.Tenant 不为空时令牌只能在这个租户中使用。
+// 令牌只由 ValidateFor(g.Resource) 接受；它出现在 List 中，可以用 Revoke 撤销，不受 RevokeOthers 影响。
+func (s *Store) Authorize(ctx context.Context, sub identity.Subject, g Grant) (string, error) {
+	if g.ClientID == "" || g.Resource == "" {
+		return "", errors.New("apitoken: an OAuth grant needs a client ID and a resource")
+	}
+	if len(g.Scopes) == 0 {
+		return "", errors.New("apitoken: an OAuth grant needs at least one scope")
+	}
+	if g.Lifetime <= 0 || g.IdleTimeout < 0 {
+		return "", errors.New("apitoken: an OAuth grant needs a positive lifetime and a non-negative idle timeout")
+	}
+	joined, err := joinScopes(g.Scopes)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	end := now.Add(g.Lifetime)
+	r := &row{
+		Kind:        KindOAuth,
+		Name:        truncate(g.ClientName, maxName),
+		Scopes:      joined,
+		Tenant:      sub.Tenant,
+		IdleTimeout: int64(g.IdleTimeout / time.Second),
+		EndsAt:      end,
+		ExpiresAt:   deadline(end, g.IdleTimeout, now),
+		ClientID:    g.ClientID,
+		ClientName:  truncate(g.ClientName, maxName),
+		Resource:    g.Resource,
+	}
+	return s.issue(ctx, sub, r, now)
+}
+
 func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now time.Time) (string, error) {
 	if err := sub.Ref().Validate(); err != nil {
 		return "", errors.Wrap(err, "apitoken")
@@ -208,15 +264,40 @@ func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now tim
 // 两者的 Permissions 都为空，由 Resolve 加载。token 不存在、已撤销或已过期时返回 ErrInvalid。
 //
 // 距上次记录使用超过一分钟时，更新最近使用时间，并延长登录 token 的有效期。
-// JWT 模式的 refresh token 不能直接作为 Bearer 凭据，校验返回 ErrInvalid。
+// JWT 模式的 refresh token 不能直接作为 Bearer 凭据，OAuth 令牌只能用于它的资源（见 ValidateFor），两者校验都返回 ErrInvalid。
 func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, error) {
+	return s.validate(ctx, token, "")
+}
+
+// ValidateFor 返回只接受发给 resource 的令牌的校验器：登录 token、个人访问令牌，以及 Resource 为 resource 的 OAuth 令牌。
+// 发给其他资源的 OAuth 令牌按无效处理。用于 OAuth 客户端访问的资源，例如 mcpx.HandlerOptions.Validate：
+//
+//	Validate: tokens.ValidateFor("https://blog.example.com/mcp")
+//
+// OAuth 令牌得到的主体与个人访问令牌相同，Scopes 是用户同意的范围。resource 为空时 panic。
+func (s *Store) ValidateFor(resource string) func(ctx context.Context, token string) (identity.Subject, error) {
+	if resource == "" {
+		panic("apitoken: ValidateFor needs a resource")
+	}
+	return func(ctx context.Context, token string) (identity.Subject, error) {
+		return s.validate(ctx, token, resource)
+	}
+}
+
+// validate 校验 token。resource 为空时不接受 OAuth 令牌，否则只接受发给 resource 的 OAuth 令牌。
+func (s *Store) validate(ctx context.Context, token, resource string) (identity.Subject, error) {
 	if token == "" {
 		return identity.Subject{}, ErrInvalid.New()
 	}
 	now := time.Now().UTC()
 	var r row
-	err := s.live(s.db.NewSelect().Model(&r), now).
-		Where("token_hash = ?", hash(token)).Where("kind <> ?", KindRefresh).Scan(ctx)
+	q := s.live(s.db.NewSelect().Model(&r), now).Where("token_hash = ?", hash(token)).Where("kind <> ?", KindRefresh)
+	if resource == "" {
+		q = q.Where("kind <> ?", KindOAuth)
+	} else {
+		q = q.Where("(kind <> ? OR resource = ?)", KindOAuth, resource)
+	}
+	err := q.Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return identity.Subject{}, ErrInvalid.New()
 	}
@@ -236,7 +317,7 @@ func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, e
 		Tenant:       r.Tenant,
 		Impersonator: r.impersonator(),
 	}
-	if r.Kind == KindPersonal {
+	if r.Kind == KindPersonal || r.Kind == KindOAuth {
 		sub.Scopes = strings.Fields(r.Scopes)
 	}
 	return sub, nil
@@ -288,6 +369,17 @@ func (s *Store) Revoke(ctx context.Context, sub identity.Subject, id string) err
 	return nil
 }
 
+// RevokeToken 按明文撤销一个 OAuth 令牌，用于 OAuth 的撤销端点（RFC 7009）：客户端断开连接时交回令牌。
+// 令牌不存在、已过期或不是 OAuth 令牌时什么也不做，返回 nil。
+func (s *Store) RevokeToken(ctx context.Context, token string) error {
+	if token == "" {
+		return nil
+	}
+	_, err := affected(s.db.NewDelete().Model((*row)(nil)).
+		Where("token_hash = ?", hash(token)).Where("kind = ?", KindOAuth).Exec(ctx))
+	return err
+}
+
 // RevokeOthers 撤销 sub 除本次请求所用 token（sub.Credential）以外的全部登录 token（包括 JWT 模式的登录），返回撤销的个数，
 // 例如“退出其他设备”。个人访问令牌不受影响。sub 来自会话等其他凭据时，撤销它的全部登录 token。
 func (s *Store) RevokeOthers(ctx context.Context, sub identity.Subject) (int, error) {
@@ -335,6 +427,9 @@ func (r *row) token() Token {
 		CreatedAt:    r.CreatedAt,
 		LastUsedAt:   r.LastUsedAt,
 		ExpiresAt:    r.ExpiresAt,
+		ClientID:     r.ClientID,
+		ClientName:   r.ClientName,
+		Resource:     r.Resource,
 	}
 }
 

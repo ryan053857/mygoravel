@@ -9,6 +9,7 @@
 - [撤销令牌](#revoking-tokens)
 - [加载权限](#loading-permissions)
 - [JWT 模式](#jwt)
+- [OAuth 令牌](#oauth-tokens)
 - [过期清理](#cleanup)
 - [单页应用](#single-page-applications)
 
@@ -348,6 +349,19 @@ router.Method(http.MethodGet, "/.well-known/jwks.json", customerJWT.JWKS())
 ```
 
 `a.cfg.JWTKey` 是应用配置中的 `ed25519.PrivateKey`，用 `ed25519.GenerateKey` 生成，按应用保管密钥的方式存放。
+
+<a id="oauth-tokens"></a>
+## OAuth 令牌
+
+用户在 claude.ai 这类客户端中授权访问 [MCP 服务](mcp.md)后，[OAuth 授权服务器](oauth-server.md)用 `Authorize` 签发 `Kind` 为 `oauth` 的令牌。它和个人访问令牌一样带有 `Scopes`，另外记录 `ClientID`、`ClientName` 和 `Resource`，按使用滑动过期。
+
+OAuth 令牌只能用于授权时的资源：`Validate` 不接受它，`ValidateFor(resource)` 只接受发给 `resource` 的 OAuth 令牌，同时照常接受登录 token 和个人访问令牌：
+
+```go
+mcpx.HandlerOptions{Validate: tokens.ValidateFor("https://blog.example.com/mcp") /* … */}
+```
+
+它出现在 `List` 中，`ClientName` 用于“已连接的应用”页面，`Revoke` 断开连接；`RevokeOthers` 不影响它，`RevokeSubject` 一并撤销。客户端交回令牌时，授权服务器调用 `RevokeToken`。
 
 <a id="cleanup"></a>
 ## 过期清理

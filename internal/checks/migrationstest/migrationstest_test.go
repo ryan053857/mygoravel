@@ -23,6 +23,7 @@ import (
 	"github.com/ryan053857/mygoravel/login"
 	"github.com/ryan053857/mygoravel/login/passkey"
 	"github.com/ryan053857/mygoravel/notification"
+	"github.com/ryan053857/mygoravel/oauthserver"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/push"
 	"github.com/ryan053857/mygoravel/queue"
@@ -48,6 +49,7 @@ var sources = map[string]migrate.Source{
 	"login":         {Name: "login", FS: login.Migrations()},
 	"login/passkey": {Name: "passkey", FS: passkey.Migrations()},
 	"notification":  {Name: "notification", FS: notification.Migrations()},
+	"oauthserver":   {Name: "oauthserver", FS: oauthserver.Migrations()},
 	"operation":     {Name: "operation", FS: operation.Migrations()},
 	"push":          {Name: "push", FS: push.Migrations()},
 	"queue":         {Name: "queue", FS: queue.Migrations()},

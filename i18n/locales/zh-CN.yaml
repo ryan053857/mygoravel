@@ -28,6 +28,8 @@ login.two_factor_enabled: 已经启用了二次验证
 login.two_factor_disabled: 没有启用二次验证
 oauth.invalid: 第三方登录失败，请重试
 oauth.denied: 已取消第三方登录
+oauth.invalid_client: 无法识别请求授权的应用
+oauth.invalid_redirect_uri: 授权后的跳转地址不属于这个应用
 passkey.invalid: 通行密钥验证失败，请重试
 passkey.not_found: 通行密钥不存在
 authz.not_member: 不存在或没有访问权限
@@ -63,6 +65,13 @@ ui.theme.toggle: 切换暗色模式
 ui.file.remove: 移除
 ui.file.failed: 上传失败
 ui.file.too_large: 文件不能超过
+ui.consent.description: 请求访问你的账号
+ui.consent.account: 当前账号
+ui.consent.switch: 使用其他账号
+ui.consent.scopes: 授权后它将可以
+ui.consent.redirect: 授权后将跳转到
+ui.consent.allow: 允许
+ui.consent.deny: 拒绝
 docs.toc: 本页目录
 docs.previous: 上一页
 docs.next: 下一页

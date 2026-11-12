@@ -212,7 +212,7 @@ Cursor、VS Code 等在 MCP 配置文件中写明地址和请求头：
 }
 ```
 
-claude.ai 网页版和 ChatGPT 的远程连接器要求 MCP 的 OAuth 流程，用户在浏览器中登录授权，不能填写请求头。框架目前没有 OAuth 授权服务器，这些客户端还不能连接。
+claude.ai（网页、桌面、手机）和 ChatGPT 的远程连接器不能填写请求头，它们走 MCP 的 OAuth 流程：用户在浏览器中登录你的应用并同意授权。设置 [OAuth 授权服务器](oauth-server.md) 后，在这些客户端中只需填写 `https://blog.example.com/mcp`。
 
 <a id="stdio"></a>
 ## 本地 stdio

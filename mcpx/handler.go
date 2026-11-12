@@ -22,6 +22,11 @@ type HandlerOptions struct {
 	// Tenant 从请求中取出本次请求所在的租户，例如子域名或请求头；nil 表示平台本身（""）。
 	// 凭据绑定了租户时，两者必须相同。
 	Tenant func(r *http.Request) string
+	// Resource 不为 nil 时，这个端点是 OAuth 受保护资源：未认证的 401 响应带上
+	// WWW-Authenticate: Bearer resource_metadata="…"，客户端据此找到授权服务器。
+	// 同时把 ResourceMetadata 挂在 Resource.MetadataPath() 上，并用 apitoken.Store 的 ValidateFor(Resource.URL) 作为 Validate，
+	// 只接受发给这个地址的 OAuth 令牌。
+	Resource *Resource
 	// Permissions 是使用这个端点需要的权限，例如 mcp:use；为空时不额外要求。
 	// 个人访问令牌的 Scopes 中也要有它，令牌才能用于 MCP。
 	Permissions []string
@@ -48,6 +53,13 @@ func Handler(s *Server, opts HandlerOptions) http.Handler {
 	}
 	if err := opts.Accounts.Validate(); err != nil {
 		panic(err)
+	}
+	challenge := "Bearer"
+	if opts.Resource != nil {
+		if err := opts.Resource.Validate(); err != nil {
+			panic(err)
+		}
+		challenge = `Bearer resource_metadata="` + opts.Resource.MetadataURL() + `"`
 	}
 	sdk := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.sdk }, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
@@ -79,7 +91,7 @@ func Handler(s *Server, opts HandlerOptions) http.Handler {
 			httpx.WriteProblem(w, httpx.StatusOf(err), "authentication unavailable")
 			return
 		case errors.Is(err, identity.ErrUnauthenticated):
-			w.Header().Set("WWW-Authenticate", "Bearer")
+			w.Header().Set("WWW-Authenticate", challenge)
 			httpx.WriteProblem(w, http.StatusUnauthorized, httpx.ErrorDetail(ctx, err))
 			return
 		default:
