@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/rueidis"
+
 	"github.com/ryan053857/mygoravel/internal/redistest"
 	"github.com/ryan053857/mygoravel/ratelimit"
 	"github.com/ryan053857/mygoravel/ratelimit/redislimit"
@@ -15,15 +17,23 @@ import (
 func testName() string { return "test:ratelimit:" + rand.Text() }
 
 func TestRedis(t *testing.T) {
-	rdb := redistest.Open(t)
-	testLimiter(t, func(cfg ratelimit.Config) ratelimit.Limiter {
-		return redislimit.New(rdb, testName(), cfg)
-	})
+	for _, srv := range redistest.Servers {
+		t.Run(srv.Name, func(t *testing.T) {
+			rdb := srv.Open(t)
+			t.Run("limiter", func(t *testing.T) {
+				testLimiter(t, func(cfg ratelimit.Config) ratelimit.Limiter {
+					return redislimit.New(rdb, testName(), cfg)
+				})
+			})
+			t.Run("names are isolated", func(t *testing.T) { testNamesAreIsolated(t, rdb) })
+			t.Run("concurrent calls are exact", func(t *testing.T) { testConcurrentCallsAreExact(t, rdb) })
+			t.Run("key expires when refilled", func(t *testing.T) { testKeyExpiresWhenRefilled(t, rdb) })
+		})
+	}
 }
 
-func TestRedisNamesAreIsolated(t *testing.T) {
+func testNamesAreIsolated(t *testing.T, rdb rueidis.Client) {
 	ctx := context.Background()
-	rdb := redistest.Open(t)
 	cfg := ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1}
 	name := testName()
 	login, reset := redislimit.New(rdb, name, cfg), redislimit.New(rdb, testName(), cfg)
@@ -38,9 +48,9 @@ func TestRedisNamesAreIsolated(t *testing.T) {
 	}
 }
 
-func TestRedisConcurrentCallsAreExact(t *testing.T) {
+func testConcurrentCallsAreExact(t *testing.T, rdb rueidis.Client) {
 	ctx := context.Background()
-	l := redislimit.New(redistest.Open(t), testName(), ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 5})
+	l := redislimit.New(rdb, testName(), ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 5})
 	results := make(chan error, 20)
 	for range cap(results) {
 		go func() { results <- l.Allow(ctx, "k") }()
@@ -56,9 +66,8 @@ func TestRedisConcurrentCallsAreExact(t *testing.T) {
 	}
 }
 
-func TestRedisKeyExpiresWhenRefilled(t *testing.T) {
+func testKeyExpiresWhenRefilled(t *testing.T, rdb rueidis.Client) {
 	ctx := context.Background()
-	rdb := redistest.Open(t)
 	name := testName()
 	l := redislimit.New(rdb, name, ratelimit.Config{Rate: 1, Interval: time.Minute, Burst: 3})
 	for range 2 {

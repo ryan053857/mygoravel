@@ -684,7 +684,7 @@ func TestChannelPatterns(t *testing.T) {
 }
 
 func TestAcrossInstancesOnRedis(t *testing.T) {
-	rdb, channel := redistest.Open(t), "test:realtime:"+rand.Text()
+	rdb, channel := redistest.Standalone.Open(t), "test:realtime:"+rand.Text()
 	a := start(t, redisbroadcast.New(rdb, channel), realtime.Options{}, nil)
 	b := start(t, redisbroadcast.New(rdb, channel), realtime.Options{}, nil)
 	broadcasttest.Ready(t, a.hub, b.hub)

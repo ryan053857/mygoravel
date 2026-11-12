@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/rueidis"
+
 	"github.com/ryan053857/mygoravel/internal/redistest"
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/lock/locktest"
@@ -13,15 +15,24 @@ import (
 )
 
 func TestRedisStore(t *testing.T) {
-	rdb := redistest.Open(t)
-	locktest.TestStore(t, func() lock.Store {
-		return prefixed{redislock.New(rdb), "test:lock:" + rand.Text() + ":"}
-	})
+	for _, srv := range redistest.Servers {
+		t.Run(srv.Name, func(t *testing.T) {
+			rdb := srv.Open(t)
+			locktest.TestStore(t, func() lock.Store {
+				return prefixed{redislock.New(rdb), "test:lock:" + rand.Text() + ":"}
+			})
+		})
+	}
 }
 
 func TestRedisStoreKeyExpires(t *testing.T) {
+	for _, srv := range redistest.Servers {
+		t.Run(srv.Name, func(t *testing.T) { testRedisStoreKeyExpires(t, srv.Open(t)) })
+	}
+}
+
+func testRedisStoreKeyExpires(t *testing.T, rdb rueidis.Client) {
 	ctx := context.Background()
-	rdb := redistest.Open(t)
 	store := redislock.New(rdb)
 	name := "test:lock:" + rand.Text()
 	if ok, err := store.Acquire(ctx, name, "o", time.Minute); !ok || err != nil {

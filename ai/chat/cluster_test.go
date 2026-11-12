@@ -62,7 +62,7 @@ func TestClusterMirrorsRunOnOtherInstance(t *testing.T) {
 
 // TestClusterOnRedis 用 Redis 广播和 Redis 锁运行同一个场景。
 func TestClusterOnRedis(t *testing.T) {
-	rdb := redistest.Open(t)
+	rdb := redistest.Standalone.Open(t)
 	m := chattest.NewModel(
 		chattest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []chattest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
 		chattest.Text("都 查好了"),

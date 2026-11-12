@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/rueidis"
+
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/internal/redistest"
 	"github.com/ryan053857/mygoravel/realtime"
@@ -14,16 +16,25 @@ import (
 )
 
 func TestStore(t *testing.T) {
-	rdb := redistest.Open(t)
-	realtimetest.TestPresenceStore(t, func(*testing.T) realtime.PresenceStore {
-		return redispresence.New(rdb, "test:presence:"+rand.Text()+":")
-	})
+	for _, srv := range redistest.Servers {
+		t.Run(srv.Name, func(t *testing.T) {
+			rdb := srv.Open(t)
+			realtimetest.TestPresenceStore(t, func(*testing.T) realtime.PresenceStore {
+				return redispresence.New(rdb, "test:presence:"+rand.Text()+":")
+			})
+		})
+	}
 }
 
 // 没有成员的频道不留下键：两个键都带过期时间，过期的连接在读取时从哈希中删除。
 func TestStoreLeavesNoKeysBehind(t *testing.T) {
+	for _, srv := range redistest.Servers {
+		t.Run(srv.Name, func(t *testing.T) { testStoreLeavesNoKeysBehind(t, srv.Open(t)) })
+	}
+}
+
+func testStoreLeavesNoKeysBehind(t *testing.T, rdb rueidis.Client) {
 	ctx := context.Background()
-	rdb := redistest.Open(t)
 	prefix := "test:presence:" + rand.Text() + ":"
 	s := redispresence.New(rdb, prefix)
 	for _, client := range []string{"gone", "kept"} {
@@ -42,7 +53,8 @@ func TestStoreLeavesNoKeysBehind(t *testing.T) {
 		t.Fatalf("hash fields after listing = %v", fields)
 	}
 	time.Sleep(400 * time.Millisecond)
-	if keys, _ := rdb.Do(ctx, rdb.B().Keys().Pattern(prefix+"*").Build()).AsStrSlice(); len(keys) != 0 {
-		t.Fatalf("keys left behind: %v", keys)
+	// 两个键在同一个槽，集群中也能用一条 EXISTS 检查。
+	if n, err := rdb.Do(ctx, rdb.B().Exists().Key(prefix+"{room:1}:exp", prefix+"{room:1}:data").Build()).AsInt64(); err != nil || n != 0 {
+		t.Fatalf("keys left behind: %d, %v", n, err)
 	}
 }

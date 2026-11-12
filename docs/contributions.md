@@ -50,6 +50,7 @@ go test -race ./...
 docker compose -f compose.test.yml up -d --wait
 export POSTGRES_TEST_URL='postgres://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable'
 export REDIS_TEST_URL='redis://127.0.0.1:56379/0'
+export REDIS_CLUSTER_TEST_URL='redis://127.0.0.1:56380'
 export MEMCACHED_TEST_ADDR='127.0.0.1:51211'
 export NSQD_TEST_ADDR='127.0.0.1:54150'
 export NSQD_TEST_HTTP='http://127.0.0.1:54151'
@@ -57,6 +58,8 @@ export GOTENBERG_TEST_URL='http://127.0.0.1:53000'
 export QDRANT_TEST_ADDR='127.0.0.1:56334'
 go test -race -count=1 ./...
 ```
+
+Redis 的锁、限流、在线成员和广播的测试对单机 Redis 和集群各运行一遍。集群由 `internal/redistest/cluster.sh` 在一个容器里启动，包含三个主节点。
 
 没有设置这些环境变量时，集成测试会失败而不是跳过。每个数据库测试使用自己的临时库，Redis 测试给每个键加随机前缀，队列测试给每个 topic、向量测试给每个 collection 加随机前缀并在结束时删除，所以服务可以一直开着反复运行测试。数据放在 tmpfs 中，测试完成后执行 `docker compose -f compose.test.yml down -v` 清理，不会留下任何数据。
 

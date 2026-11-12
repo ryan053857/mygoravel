@@ -68,6 +68,7 @@ jobs:
     env:
       POSTGRES_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
       REDIS_TEST_URL: redis://127.0.0.1:6379/0
+      REDIS_CLUSTER_TEST_URL: redis://127.0.0.1:7000
       MEMCACHED_TEST_ADDR: 127.0.0.1:11211
       NSQD_TEST_ADDR: 127.0.0.1:4150
       NSQD_TEST_HTTP: http://127.0.0.1:4151
@@ -76,7 +77,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 服务容器不能传启动参数，nsqd 和 PostgreSQL 在这里启动。
+      # 服务容器不能传启动参数，Redis 集群、nsqd 和 PostgreSQL 在这里启动。
+      # 集群由三个主节点组成，节点向客户端报告 127.0.0.1，所以端口原样映射。
+      - name: Start Redis cluster
+        run: |
+          docker run -d --name redis-cluster -p 127.0.0.1:7000-7002:7000-7002 \
+            -v "$PWD/internal/redistest/cluster.sh:/cluster.sh:ro" redis:8 sh /cluster.sh 7000 7001 7002
+          for i in $(seq 1 60); do docker exec redis-cluster redis-cli -p 7000 cluster info | grep -q cluster_state:ok && exit 0; sleep 1; done
+          docker logs redis-cluster
+          exit 1
+
       - name: Start nsqd
         run: docker run -d --name nsqd -p 4150:4150 -p 4151:4151 nsqio/nsq:v1.3.0 /nsqd --mem-queue-size=0
 

@@ -29,6 +29,22 @@ services:
       interval: 1s
       retries: 30
 
+  # 三个主节点组成的集群，由 internal/redistest/cluster.sh 在一个容器里启动。
+  # 节点向客户端报告 127.0.0.1，所以端口原样映射。
+  redis-cluster:
+    image: redis:8
+    command: [sh, /cluster.sh, "56380", "56381", "56382"]
+    volumes:
+      - ./internal/redistest/cluster.sh:/cluster.sh:ro
+    ports:
+      - 127.0.0.1:56380-56382:56380-56382
+    tmpfs:
+      - /data
+    healthcheck:
+      test: redis-cli -p 56380 cluster info | grep -q cluster_state:ok
+      interval: 1s
+      retries: 30
+
   memcached:
     image: memcached:1.6-alpine
     ports:

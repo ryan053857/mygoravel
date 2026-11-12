@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewRejectsInvalidArguments(t *testing.T) {
-	rdb := redistest.Open(t)
+	rdb := redistest.Standalone.Open(t)
 	valid := ratelimit.Config{Rate: 1, Interval: time.Second, Burst: 1}
 	for name, fn := range map[string]func(){
 		"nil client":     func() { redislimit.New(nil, "x", valid) },

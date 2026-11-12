@@ -4,6 +4,7 @@
 - [安装](#installation)
 - [配置](#configuration)
 - [连接 Redis](#connecting)
+- [集群](#cluster)
 - [执行命令](#running-commands)
 - [在其他组件中使用](#using-with-components)
 - [测试](#testing)
@@ -51,7 +52,7 @@ redis:
   url: ${REDIS_URL}
 ```
 
-URL 形如 `redis://:password@localhost:6379/0`，路径部分是 DB 编号；使用 TLS 时把协议换成 `rediss://`，哨兵和集群的写法见 [`ParseURL`](https://pkg.go.dev/github.com/redis/rueidis#ParseURL)。
+URL 形如 `redis://:password@localhost:6379/0`，路径部分是 DB 编号；使用 TLS 时把协议换成 `rediss://`。集群的写法见[集群](#cluster)，哨兵的写法见 [`ParseURL`](https://pkg.go.dev/github.com/redis/rueidis#ParseURL)。
 
 <a id="connecting"></a>
 ## 连接 Redis
@@ -74,6 +75,26 @@ stack.MustAdd("redis", func(context.Context) error {
 ```
 
 `NewClient` 会立即连接，Redis 不可达时返回错误。客户端可以并发使用，并发的命令会自动合并成批量发送。整个应用共享这一个 `rdb`：把它存进 `App` 的 `rdb` 字段，各个运行部分通过 `a.rdb` 使用。
+
+<a id="cluster"></a>
+## 集群
+
+连接集群不需要改代码，只改 URL：写出几个节点的地址，不写 DB 编号：
+
+```yaml
+redis:
+  url: redis://:password@10.0.0.1:6379?addr=10.0.0.2:6379&addr=10.0.0.3:6379
+```
+
+`NewClient` 从这些节点读取集群的拓扑，之后按键所在的槽把命令发到对应的节点；只写一个地址也能连上，多写几个是为了其中一个不可达时仍能启动。
+
+框架的组件都可以在集群上使用，CI 对单机和集群各运行一遍它们的测试：
+
+- 锁和限流的每次操作只涉及一个键；
+- 在线成员的每个频道有两个键，频道名写在花括号里（`<prefix>{<channel>}:exp`），两个键落在同一个槽，脚本可以同时操作它们；
+- 广播使用分片 Pub/Sub，见[广播](broadcasting.md#backends)。
+
+应用自己的命令也要遵守集群的限制：一条命令或一个 Lua 脚本涉及的所有键必须在同一个槽，否则 Redis 返回 `CROSSSLOT` 错误。需要一起操作的键，把相同的部分写在花括号里，例如 `blog:{user:42}:views` 和 `blog:{user:42}:likes`。
 
 <a id="running-commands"></a>
 ## 执行命令

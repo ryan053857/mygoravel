@@ -98,7 +98,7 @@ func Receive(t *testing.T, sub *broadcast.Subscription) broadcast.Message {
 }
 
 // Ready 等到 hubs 都已经开始接收：反复从第一个 Hub 发布探测消息，直到每个 Hub 都收到一条。
-// Backend 在后台开始监听，刚创建的 Hub 可能还收不到消息。
+// Backend 在后台开始监听，刚创建的 Hub 可能还收不到消息；重新订阅之前 Backend 报告的丢失会结束探测订阅，这时换一个新的。
 func Ready(t *testing.T, hubs ...*broadcast.Hub) {
 	t.Helper()
 	for _, h := range hubs {
@@ -110,8 +110,12 @@ func Ready(t *testing.T, hubs ...*broadcast.Hub) {
 			}
 			publish(t, hubs[0], "broadcasttest:ready", "")
 			select {
-			case <-probe.C():
-				ready = true
+			case _, ok := <-probe.C():
+				if ok {
+					ready = true
+				} else {
+					probe = h.Subscribe("broadcasttest:ready")
+				}
 			case <-time.After(100 * time.Millisecond):
 			}
 		}

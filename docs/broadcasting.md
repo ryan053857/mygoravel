@@ -123,7 +123,7 @@ return web.SSE(w, r, func(s *web.Stream) error {
 <a id="backends"></a>
 ## 后端
 
-实例之间的消息经由 Redis Pub/Sub 传递，`rdb` 是[入口中创建的 Redis 客户端](redis.md#connecting)：
+实例之间的消息经由 Redis 的分片 Pub/Sub（`SPUBLISH`、`SSUBSCRIBE`，需要 Redis 7 或更新的版本）传递，`rdb` 是[入口中创建的 Redis 客户端](redis.md#connecting)：
 
 ```go
 hub := broadcast.New(redisbroadcast.New(rdb, "blog:broadcast"), nil)
@@ -131,7 +131,9 @@ hub := broadcast.New(redisbroadcast.New(rdb, "blog:broadcast"), nil)
 
 频道名区分不同的应用，同一个应用的实例必须相同。单机部署也要经由 Redis 传递：[不停机升级](deployment.md#upgrade-overlap)或滚动发布时新旧进程短暂并存，旧进程中还没结束的请求和任务发布的事件，要送到已经重连到新进程的浏览器。
 
-Redis Pub/Sub 不保存消息：订阅连接中断时，期间发布的消息就丢了。后端发现连接中断过，会结束本实例的全部订阅，让浏览器重连补发，见下一节。
+单机和[集群](redis.md#cluster)都可以使用。集群中频道按名称落在一个槽上，消息只经过负责这个槽的节点，不会转发给所有节点。
+
+Redis Pub/Sub 不保存消息：订阅连接中断，或者集群把频道所在的槽迁移到别的节点时，期间发布的消息就丢了。后端发现这两种情况，会结束本实例的全部订阅，让浏览器重连补发，见下一节。
 
 <a id="delivery-guarantees"></a>
 ## 投递保证

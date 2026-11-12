@@ -103,7 +103,7 @@ func TestPresenceChannel(t *testing.T) {
 // 在另一个实例上取消订阅时立即发出 leave，而且只发一次。
 // 取消订阅的控制消息在 Hub 的投递中到达，离开事件又要发布到 Hub，这里确认两者不会互相等待。
 func TestPresenceAcrossInstancesOnRedis(t *testing.T) {
-	rdb := redistest.Open(t)
+	rdb := redistest.Standalone.Open(t)
 	prefix := "test:realtime:" + rand.Text()
 	presence := redispresence.New(rdb, prefix+":presence:")
 	store := &tokens{}
