@@ -82,7 +82,7 @@ http:
 
 ```go
 skipHealth := func(r *http.Request) string {
-    if r.URL.Path == "/healthz" {
+    if r.URL.Path == "/livez" || r.URL.Path == "/readyz" {
         return ""
     }
     return httpx.KeyByIP(r)

@@ -89,7 +89,7 @@ http:
   client_ip:
     trusted_proxies: [10.20.0.0/16]
   access_log:
-    ignore_paths: [/healthz, /readyz]
+    ignore_paths: [/livez, /readyz]
   timeout:
     duration: 15s
   body_limit:

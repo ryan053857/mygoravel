@@ -87,28 +87,38 @@ return httpx.Serve(ctx, a.cfg.HTTP, ln, api.Handler(), httpx.ServeOptions{
 <a id="health-checks"></a>
 ## 健康检查
 
-部署平台（如 Kubernetes）通常通过两类接口判断应用的状态：
+部署平台（如 Kubernetes）和负载均衡器通常通过两类接口判断应用的状态：
 
-- **存活检查**（liveness）：进程是否还能响应。通常只需要返回成功即可。
-- **就绪检查**（readiness）：应用现在能否处理业务请求。它应该检查是否正在排空，以及必需的依赖是否可用。
+- **存活检查**（liveness）：进程是否还能响应，失败时平台重启它。只需要返回成功，不要检查依赖：数据库故障时重启应用无济于事。
+- **就绪检查**（readiness）：应用现在能否处理请求，失败时停止向它转发流量。它检查是否正在排空，以及必需的依赖是否可用。
 
-mygoravel 不会自动注册健康检查路由，你可以根据自己的部署环境决定路径和检查内容。下面的处理器可以注册为 `/readyz`。其中 `db` 是已经打开的数据库，`draining` 是一个 `httpx.Draining`，与上面 `ServeOptions.OnDraining` 使用的是同一个对象：
+mygoravel 不会自动注册这两个路由，路径由部署环境决定。就绪检查用 `httpx.Ready`，下面注册在 `/readyz`。其中 `draining` 与上面 `ServeOptions.OnDraining` 使用的是同一个 `httpx.Draining`：
 
 ```go
 var draining httpx.Draining
 
-api.Router().Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
-    ctx, cancel := context.WithTimeout(r.Context(), time.Second)
-    defer cancel()
-    if draining.Load() || db.PingContext(ctx) != nil {
-        httpx.WriteProblem(w, http.StatusServiceUnavailable, "not ready")
-        return
-    }
-    w.WriteHeader(http.StatusNoContent)
-})
+router.Get("/livez", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+router.Handle("/readyz", httpx.Ready(httpx.ReadyOptions{
+    Draining: &draining,
+    Checks: []httpx.Check{
+        {Name: "database", Ping: a.db.PingContext},
+        {Name: "redis", Ping: func(ctx context.Context) error {
+            return a.rdb.Do(ctx, a.rdb.B().Ping().Build()).Error()
+        }},
+        {Name: "cache", Ping: func(context.Context) error { return a.mc.Ping() }, Optional: true},
+    },
+}))
 ```
 
-一旦开始排空，`draining.Load()` 就会返回 `true`，就绪检查随之失败，负载均衡器会停止向这个实例转发新请求。
+`a.rdb` 是 [Redis](redis.md) 客户端，`a.mc` 是[缓存](cache.md)用的 Memcached 客户端。每项检查是一个 `func(ctx) error`。全部检查并行执行，每项最多 1 秒（`ReadyOptions.Timeout`），超时按失败处理，不理会 `ctx` 的检查（例如 Memcached 客户端的 `Ping`）也不会拖住响应。必需的检查都通过时返回 `200`，否则返回 `503`；正在排空时不再检查，直接返回 `503`，负载均衡器随即停止向这个实例转发新请求。响应体列出每项的结果：
 
-> [!TIP]
-> 就绪检查只应探测处理业务请求**必需**的依赖，并使用较短的超时。如果把可选依赖（例如缓存）也纳入检查，缓存的短暂故障就可能导致所有实例同时被摘除。
+```json
+{"status":"ready","checks":{"cache":"failed","database":"ok","redis":"ok"}}
+```
+
+失败的原因不出现在响应中，而是记录在日志里。日志只记录变化：一项检查从通过变为失败时记录 `Warn` 和原因，恢复时记录 `Info`，平台每隔几秒的探测不会让日志刷屏。
+
+只把处理请求**必需**的依赖放进检查。缓存这类坏了也能降级运行的依赖标为 `Optional`：它失败时结果中报告，但不让就绪检查失败。否则缓存的短暂故障会让全部实例同时被摘除，整个服务因为一个可选的依赖而不可用。队列（请求只写数据库中的 outbox）、PDF、向量检索这类只有部分接口用到的服务也不要放进来，它们的故障由各自的接口返回错误、由[告警](telemetry.md#alerting)发现。
+
+探测很频繁，在[访问日志](middleware.md#http-configuration)的 `ignore_paths` 中排除这两个路径。
+
