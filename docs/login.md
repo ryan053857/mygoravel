@@ -81,6 +81,8 @@ func sendCode(mailer mail.Mailer, emails *mail.Templates) func(context.Context, 
 
 `c.Purpose` 是 `sign_in`、`reset`、`verify` 或 `confirm`（[确认身份](#confirming)），对应四个模板。`c.Registered` 表示邮箱已经注册，模板可以据此写“登录”还是“注册”。用短信时按 `c.To.Kind` 区分 `email` 和 `phone`。
 
+验证码是同步发送的，用户在等着收码。邮件服务故障时用户就无法登录，所以这里的 `mailer` 最好用 [`mail.Failover`](mail.md#failover) 组合一个备用的服务。
+
 <a id="identifiers"></a>
 ## 登录标识
 

@@ -55,7 +55,7 @@ var rules = map[string]rule{
 	"ratelimit":  {layerInfrastructure, []string{"errorx"}},
 	"document":   {layerInfrastructure, []string{"errorx"}},
 	"pdf":        {layerInfrastructure, []string{"errorx"}},
-	"mail":       {layerInfrastructure, []string{"i18n"}},
+	"mail":       {layerInfrastructure, []string{"i18n", "logging"}},
 	"queue":      {layerInfrastructure, []string{"logging"}},
 	"cachex":     {layerInfrastructure, []string{"logging"}},
 	"schedule":   {layerInfrastructure, []string{"lock", "logging"}},

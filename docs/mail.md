@@ -11,6 +11,7 @@
 - [使用 SMTP](#smtp)
 - [使用 Resend](#resend)
 - [使用 Amazon SES](#ses)
+- [多个发送器](#failover)
 - [自定义发送器](#custom-mailers)
 
 <a id="introduction"></a>
@@ -373,6 +374,38 @@ mail:
 client := sesv2.NewFromConfig(awsCfg, func(o *sesv2.Options) { o.HTTPClient = httpClient })
 mailer, err := ses.NewWithClient(client, cfg.Mail.SES.From)
 ```
+
+<a id="failover"></a>
+## 多个发送器
+
+交给[队列](queue.md#publishing-jobs)发送的邮件，服务暂时故障时由任务按退避重试，恢复后照样发出。[登录验证码](login.md#codes)、找回密码这类邮件不一样：同步发送，用户在页面上等着，邮件服务一出问题（故障、限流、额度用完、账号被暂停），用户就登录不了。`mail.Failover` 把几个发送器组合成一个，前一个失败时换下一个：
+
+```go
+primary, err := resend.New(cfg.Mail.Resend)
+if err != nil {
+    return err
+}
+backup, err := ses.New(cfg.Mail.SES)
+if err != nil {
+    return err
+}
+mailer := mail.Failover([]mail.Named{
+    {Name: "resend", Mailer: primary},
+    {Name: "ses", Mailer: backup},
+}, mail.FailoverOptions{})
+```
+
+它本身也是 `mail.Mailer`，交给 action 和 `login` 的方式不变。
+
+- 按顺序尝试，第一个成功的为准；全部失败时返回合并的错误，每个都带着发送器的名称。
+- 邮件本身不合法（`mail.ErrInvalid`），或者 `ctx` 已经取消、超时时，不再尝试后面的发送器。
+- 一个发送器失败后，`Cooldown`（默认 1 分钟）内排到最后，这期间的邮件直接从下一个开始，不必每封都先等它超时；冷却期过后重新先试它，恢复了就继续用。这个状态只在本进程中。
+- 换用后面的发送器时记录一条 `Warn` 日志（`mail sent by a fallback mailer`），带着失败的发送器和原因；冷却后恢复时记录 `Info`。
+
+两点需要注意：
+
+- **可能收到两封**。前一个服务其实已经收下了邮件，只是响应超时，后一个又发了一次。验证码重复一封没有关系；Resend 的[幂等键](#resend)也会交给后面的发送器，但 SES 和 SMTP 不支持幂等键。
+- **每个发送器使用自己配置的默认发件人**。备用服务的发件域名同样要配置 SPF、DKIM，否则换过去的邮件可能进垃圾箱。上线前用备用服务单独发一封试试。
 
 <a id="custom-mailers"></a>
 ## 自定义发送器
