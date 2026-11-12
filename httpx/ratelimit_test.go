@@ -73,6 +73,7 @@ func TestRateLimitCustomKey(t *testing.T) {
 type failingLimiter struct{}
 
 func (failingLimiter) Allow(context.Context, string) error { return errors.New("db down") }
+func (failingLimiter) Reset(context.Context, string) error { return nil }
 
 func TestRateLimitBackendFailureAndProxyResolvedClient(t *testing.T) {
 	var logs bytes.Buffer

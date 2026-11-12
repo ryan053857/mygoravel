@@ -73,3 +73,8 @@ func (l *Limiter) Allow(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+// Reset 实现 ratelimit.Limiter：删除 key 的 Redis 键。
+func (l *Limiter) Reset(ctx context.Context, key string) error {
+	return errors.Wrap(l.rdb.Del(ctx, l.prefix+key).Err(), "ratelimit: reset")
+}

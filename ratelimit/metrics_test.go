@@ -17,6 +17,7 @@ import (
 type failing struct{ err error }
 
 func (f failing) Allow(context.Context, string) error { return f.err }
+func (f failing) Reset(context.Context, string) error { return nil }
 
 // counts 返回 ratelimit.requests 按 name/result 的累计值。
 func counts(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {

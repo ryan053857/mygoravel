@@ -347,6 +347,7 @@ article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) erro
 | [广播](broadcasting.md#database-backend) | `broadcast.NewDatabase(db, nil).Cleanup` | 每 10 分钟 |
 | [实时频道](realtime.md#presence-stores) | `realtime.NewDatabasePresence(db).Cleanup` | 每 10 分钟 |
 | [限流](rate-limiting.md#cleanup) | 任意一个 `ratelimit.NewDatabase(...)` 的 `Cleanup` | 每小时 |
+| [登录验证码](login.md#cleanup) | 每套账号的 `login.Realm` 的 `Cleanup` | 每小时 |
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
 | [操作日志](activity.md#retention) | `activity.Cleanup(db, 保留期)` | 每天 |
 | [通知](notifications.md#retention) | `notification.Cleanup(db, 保留期)` | 每天 |

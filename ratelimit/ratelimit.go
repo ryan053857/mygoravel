@@ -17,6 +17,9 @@ var ErrExceeded = errorx.Define(errorx.ResourceExhausted, "rate_limit.exceeded")
 type Limiter interface {
 	// Allow 为 key 消耗一次配额。配额用完时返回 ErrExceeded，存储故障时返回其他错误。
 	Allow(ctx context.Context, key string) error
+	// Reset 让 key 回到配额全满的状态，例如登录成功后清零失败计数：
+	// 每次尝试前调用 Allow，成功后调用 Reset，于是只有连续的失败受到限制。
+	Reset(ctx context.Context, key string) error
 }
 
 // Config 是限流参数：每个 key 平均每 Interval 允许 Rate 次，最多连续 Burst 次。

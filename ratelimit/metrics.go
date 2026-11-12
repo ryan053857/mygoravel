@@ -58,6 +58,9 @@ type observed struct {
 	results  map[string]metric.MeasurementOption
 }
 
+// Reset 不记录指标。
+func (o *observed) Reset(ctx context.Context, key string) error { return o.l.Reset(ctx, key) }
+
 func (o *observed) Allow(ctx context.Context, key string) error {
 	err := o.l.Allow(ctx, key)
 	result := "allowed"

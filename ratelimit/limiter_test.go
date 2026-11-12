@@ -33,6 +33,27 @@ func testLimiter(t *testing.T, newLimiter func(ratelimit.Config) ratelimit.Limit
 		}
 	})
 
+	t.Run("reset refills one key", func(t *testing.T) {
+		l := newLimiter(ratelimit.Config{Rate: 1, Interval: time.Hour, Burst: 1})
+		for _, key := range []string{"a", "b"} {
+			if err := l.Allow(ctx, key); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := l.Reset(ctx, "a"); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Reset(ctx, "never seen"); err != nil {
+			t.Fatalf("reset unknown key: %v", err)
+		}
+		if err := l.Allow(ctx, "a"); err != nil {
+			t.Fatalf("after reset: %v", err)
+		}
+		if err := l.Allow(ctx, "b"); !errors.Is(err, ratelimit.ErrExceeded) {
+			t.Fatalf("reset affected another key: %v", err)
+		}
+	})
+
 	t.Run("refills and rejected calls do not consume", func(t *testing.T) {
 		// 结果取决于调用耗时：一组调用接近 interval 时（例如 CI 上 SQLite 写盘慢），
 		// 无法区分配额回满和实现错误，放大 interval 重新检查。

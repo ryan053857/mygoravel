@@ -1,0 +1,255 @@
+# 登录与注册
+
+- [简介](#introduction)
+- [装配](#assembling)
+- [登录标识](#identifiers)
+- [密码登录](#password)
+- [验证码登录与注册](#codes)
+- [找回密码](#reset)
+- [管理登录方式](#managing)
+- [后台创建账号](#admin-accounts)
+- [注销账号](#forget)
+- [限流与防探测](#limits)
+- [清理](#cleanup)
+
+<a id="introduction"></a>
+## 简介
+
+`login` 包回答“这个人是谁”：用登录标识和密码登录、用验证码登录或注册、找回密码、绑定和更换邮箱或手机号。得到 `identity.Subject` 之后，由入口签发凭据：页面调用 [`pages.Login`](views.md#login)，API 调用 [`tokens.Login`](api-tokens.md#login-and-logout) 或 [`JWT.Login`](api-tokens.md#jwt)。
+
+框架不拥有账号表。博客的 `users` 表只保存业务字段，不需要 `email`、`password_hash` 这类列；登录标识、密码哈希和验证码保存在框架的 `auth_*` 表中，按 [`identity.Ref`](authentication.md#key-concepts) 引用账号。一个账号可以有多个邮箱、手机号，也可以没有密码只用验证码登录。
+
+每套[账号体系](authentication.md#account-systems)各用一个 `login.Realm`。
+
+<a id="assembling"></a>
+## 装配
+
+先发布 `login` 的迁移；默认的限流器存在数据库中，同时发布 `ratelimit` 的迁移，见[发布框架迁移](migrations.md#publishing-framework-migrations)：
+
+```go
+migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
+    migrate.Source{Name: "login", FS: login.Migrations()},
+    migrate.Source{Name: "ratelimit", FS: ratelimit.Migrations()},
+))
+```
+
+在[入口](dependencies.md#assembling-the-application)中为博客用户创建 `Realm`，[`Hasher`](hashing.md) 哈希密码，[`Crypt`](encryption.md) 派生验证码的密钥：
+
+```go
+users := login.New(a.db, login.Options{
+    Type:     user.Type,
+    Register: true,
+    Hasher:   hashing.New(a.cfg.Hashing),
+    Crypt:    a.crypt,
+    Send:     sendCode(mailer, emails),
+    Resolve:  user.Resolve,
+})
+```
+
+| 选项 | 含义 |
+| --- | --- |
+| `Type` | 这套账号体系，`Realm` 只管理这个类型的主体 |
+| `Register` | 是否开放自助注册：为 `true` 时验证码也发给未注册的邮箱或手机号，验证后可以注册 |
+| `Send` | 发送验证码，邮件和短信的内容、通道由应用决定 |
+| `Resolve` | 登录成功、签发凭据之前调用一次，通常就是入口的 [Resolver](authentication.md#resolving-subjects)：账号已停用时返回错误，登录失败 |
+| `PerTenant` | 登录标识在租户内唯一，见[登录标识](#identifiers) |
+
+验证码默认 6 位数字、15 分钟有效、最多试 3 次，都可以在 `Options` 中修改。`Send` 收到的 `login.Code` 带有用途、接收的标识和验证码，下面用[邮件模板](mail.md#writing-templates)发送：
+
+```go
+func sendCode(mailer mail.Mailer, emails *mail.Templates) func(context.Context, login.Code) error {
+    return func(ctx context.Context, c login.Code) error {
+        msg, err := emails.Render(ctx, "code_"+string(c.Purpose), c)
+        if err != nil {
+            return err
+        }
+        msg.To = []mail.Address{{Email: c.To.Value}}
+        return mailer.Send(ctx, msg)
+    }
+}
+```
+
+`c.Purpose` 是 `sign_in`、`reset` 或 `verify`，对应三个模板。`c.Registered` 表示邮箱已经注册，模板可以据此写“登录”还是“注册”。用短信时按 `c.To.Kind` 区分 `email` 和 `phone`。
+
+<a id="identifiers"></a>
+## 登录标识
+
+登录标识是“用什么找到这个账号”：
+
+| 构造 | 规范化 |
+| --- | --- |
+| `login.Email(s)` | 去掉首尾空白，转为小写 |
+| `login.Phone(s)` | 必须是 E.164 格式，例如 `+8613800138000`，由应用把用户输入的号码转换成这个格式 |
+| `login.Username(s)` | 去掉首尾空白，转为小写，不能包含空白 |
+
+格式不正确时返回 `login.ErrInvalidIdentifier`。[第三方登录](social-login.md)的账号也是一种标识，类型是提供方的名称。
+
+同一个标识在一套账号体系中只能属于一个账号。`PerTenant` 为 `true` 时只在租户内唯一：同一个邮箱可以在两个店铺各注册一个客户账号。这时查找和写入都使用 `identity.TenantFromContext(ctx)`，即入口的 [`Options.Tenant`](tenancy.md#identifying-tenants) 取出的租户；登录得到的主体带有 `Tenant`，签发的凭据只能在这个租户使用。验证码和完成凭证也只能在发送时的租户中使用。
+
+<a id="password"></a>
+## 密码登录
+
+`Password` 用标识和密码登录，成功后把 `out.Subject` 交给入口签发凭据：
+
+```go
+out, err := users.Password(ctx, login.Email(in.Body.Email), in.Body.Password)
+if err != nil {
+    return nil, err
+}
+plain, err := tokens.Login(ctx, out.Subject, device)
+```
+
+完整的接口见 [API 令牌的登录与登出](api-tokens.md#login-and-logout)，页面中的写法见[页面登录](views.md#login)。邮箱不存在、没有设置密码、密码错误都返回 `login.ErrInvalidCredentials`，响应 `401`。连续失败太多次时返回 `ratelimit.ErrExceeded`，响应 `429`，见[限流与防探测](#limits)。
+
+允许用哪些标识配合密码登录由 `Options.PasswordKinds` 决定，默认是邮箱、手机号和用户名。登录成功时，如果密码哈希是用旧的算法或参数生成的，会按当前配置[重新哈希](hashing.md#rehashing)。
+
+<a id="codes"></a>
+## 验证码登录与注册
+
+验证码分两步：`SendCode` 发出验证码，返回请求 ID；客户端把请求 ID 和用户输入的验证码交给 `VerifyCode`。
+
+```go
+requestID, err := users.SendCode(ctx, login.SignIn, login.Email(in.Body.Email))
+```
+
+```go
+out, err := users.VerifyCode(ctx, in.Body.RequestID, in.Body.Code)
+if err != nil {
+    return nil, err // 验证码不正确或已失效：login.ErrInvalidCode
+}
+if out.Proof != "" {
+    // 邮箱还没有注册：把完成凭证交给客户端，进入注册页
+    resp.Body.Proof = out.Proof
+    return resp, nil
+}
+plain, err := tokens.Login(ctx, out.Subject, device)
+```
+
+邮箱已注册时，`VerifyCode` 直接登录，返回 `out.Subject`。还没有注册时返回 `out.Proof`：一个一次性的完成凭证，15 分钟内有效，证明客户端确实收到了验证码。
+
+框架不替应用创建账号。博客的注册 action 在自己的事务中插入 `users` 行，再调用 `Register`，把已验证的邮箱挂到这个账号上：
+
+```go
+func (a *SignUp) Handle(ctx context.Context, in SignUpInput) (identity.Subject, error) {
+    var sub identity.Subject
+    err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+        u := &User{ID: uuid.Must(uuid.NewV7()).String(), Name: in.Name}
+        if _, err := tx.NewInsert().Model(u).Exec(ctx); err != nil {
+            return err
+        }
+        var err error
+        sub, err = a.users.Register(ctx, tx, in.Proof, u.Ref(), login.WithPassword(in.Password))
+        return err
+    })
+    return sub, err
+}
+```
+
+注册需要什么资料、要不要同意协议都由应用决定。任何一步失败，账号行和凭证的使用一起回滚，客户端可以修正后用同一个凭证重试。两个人同时用同一个邮箱注册时，后完成的得到 `login.ErrTaken`。`WithPassword` 可以省略，只用验证码登录的账号没有密码。
+
+`Register` 为 `false` 时不开放自助注册：未注册的邮箱收不到验证码。为了不暴露哪些邮箱注册过，`SendCode` 照样返回请求 ID，只是用它验证必然失败。
+
+验证码也可以放进链接：模板中的链接同时带上 `RequestID` 和 `Code`，链接打开的页面把两者交给 `VerifyCode`。
+
+<a id="reset"></a>
+## 找回密码
+
+找回密码用 `login.Reset`：
+
+```go
+requestID, err := users.SendCode(ctx, login.Reset, login.Email(in.Body.Email))
+```
+
+验证码只发给已注册的邮箱，未注册的同样返回一个请求 ID。`VerifyCode` 通过后得到 `out.Proof`，客户端连同新密码交给 `ResetPassword`：
+
+```go
+sub, err := users.ResetPassword(ctx, in.Body.Proof, in.Body.Password)
+if err != nil {
+    return nil, err
+}
+if _, err := tokens.RevokeSubject(ctx, sub.Ref()); err != nil {
+    return nil, err
+}
+```
+
+新密码按 `Options.PasswordPolicy` 检查，默认要求 8 到 128 个字符、首尾没有空白，不符合时返回 `login.ErrWeakPassword`。接收验证码的邮箱同时标为已验证，它的登录失败计数清零。找回密码后通常撤销这个账号的全部会话和 token，见[撤销令牌](api-tokens.md#revoking-tokens)；也可以接着用 `sub` 直接登录。没有设置过密码的账号同样可以用这个流程设置密码。
+
+<a id="managing"></a>
+## 管理登录方式
+
+账号设置页面中，`Identifiers` 列出账号的全部标识和是否已验证，`HasPassword` 决定显示“设置密码”还是“修改密码”。
+
+添加或更换邮箱、手机号时，先用 `login.Verify` 向新的标识发验证码，验证后把完成凭证交给 `Link`。更换时在同一个事务中用 `Detach` 移除旧的：
+
+```go
+err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+    if err := a.users.Link(ctx, tx, sub.Ref(), in.Proof); err != nil {
+        return err // 已被其他账号使用：login.ErrTaken
+    }
+    return a.users.Detach(ctx, tx, sub.Ref(), login.Email(in.OldEmail))
+})
+```
+
+`Detach` 不允许移除最后一个标识，否则账号将无法登录，返回 `login.ErrLastIdentifier`。
+
+| 方法 | 用途 |
+| --- | --- |
+| `SetPassword(ctx, db, ref, password)` | 设置或修改密码，按密码策略检查 |
+| `RemovePassword(ctx, db, ref)` | 删除密码，之后只能用验证码等方式登录 |
+| `Confirm(ctx, ref, password)` | 修改邮箱、删除账号等敏感操作前再次确认密码 |
+| `Lookup(ctx, id)` | 管理后台按邮箱或手机号查找账号 |
+
+修改密码后，用 `RevokeOthers` 让其他设备下线，见[撤销令牌](api-tokens.md#revoking-tokens)。
+
+<a id="admin-accounts"></a>
+## 后台创建账号
+
+运营后台的员工账号通常由管理员创建，不开放注册。管理员创建 `staff` 行后，用 `Attach` 直接写入邮箱，再发一个设置密码的验证码，也就是邀请：
+
+```go
+if err := a.staff.Attach(ctx, tx, member.Ref(), login.Email(in.Email), false); err != nil {
+    return err
+}
+// 事务提交后发送
+_, err := a.staff.SendCode(ctx, login.Reset, login.Email(in.Email))
+```
+
+员工通过邀请邮件中的链接设置密码，邮箱随之标为已验证。`Attach` 不经过验证码，未验证的标识同样占用唯一性，所以只用于管理员建号这类可信的场景；自助注册一律通过验证码。
+
+<a id="forget"></a>
+## 注销账号
+
+`Forget` 删除账号的全部登录标识、密码和验证码。在注销账号的事务中与删除账号行一起调用，再撤销会话和 token：
+
+```go
+err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+    if _, err := tx.NewDelete().Model((*User)(nil)).Where("id = ?", sub.ID).Exec(ctx); err != nil {
+        return err
+    }
+    return a.users.Forget(ctx, tx, sub.Ref())
+})
+```
+
+注销后，这个邮箱可以重新注册。
+
+<a id="limits"></a>
+## 限流与防探测
+
+| 限制 | 默认 | 超出时 |
+| --- | --- | --- |
+| 同一个标识的密码登录，`Options.Attempts` | 15 分钟内连续失败 5 次，登录成功或找回密码后清零 | `ratelimit.ErrExceeded`，`429` |
+| 向同一个标识发送验证码，`Options.Sends` | 15 分钟 5 次 | `ratelimit.ErrExceeded`，`429` |
+| 同一个验证码的尝试次数，`Options.CodeAttempts` | 3 次 | 验证码作废，`login.ErrInvalidCode` |
+
+默认限流器存在数据库中，多个实例共享计数。已经在用 Redis 时可以换成 [`redislimit`](rate-limiting.md#redis-limiter)。按 IP 的限流不在 `login` 中，需要时在登录接口上安装 [`httpx.RateLimit`](rate-limiting.md#http-middleware)。
+
+为了不暴露哪些邮箱注册过：密码登录对“邮箱不存在”和“密码错误”返回同一个错误，耗时相同；找回密码和不开放注册时的验证码不发给未注册的邮箱，但同样返回请求 ID。验证码在库中只保存由应用密钥派生的 HMAC，数据库泄露也不能在有效期内穷举出验证码；完成凭证只保存 SHA-256。
+
+<a id="cleanup"></a>
+## 清理
+
+过期和已用过的验证码不会再通过验证，但行仍然留在表中。`Cleanup` 每次最多删除 `limit` 条，可以注册为[定时任务](scheduling.md)：
+
+```go
+n, err := users.Cleanup(ctx, 1000)
+```

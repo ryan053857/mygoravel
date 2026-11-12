@@ -156,5 +156,11 @@ func TestDatabaseLongKeys(t *testing.T) {
 		if err := l.Allow(ctx, a); !errors.Is(err, ratelimit.ErrExceeded) {
 			t.Fatalf("long key not limited: %v", err)
 		}
+		if err := l.Reset(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Allow(ctx, a); err != nil {
+			t.Fatalf("long key not reset: %v", err)
+		}
 	})
 }

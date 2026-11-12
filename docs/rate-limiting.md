@@ -98,26 +98,28 @@ router.Use(httpx.RateLimit(ratelimit.NewMemory(a.cfg.HTTP.RateLimit), skipHealth
 <a id="in-handlers"></a>
 ## 在处理器中限流
 
-博客的编辑后台使用邮箱和密码[登录](views.md#login)。为了防止密码被暴力猜测，同一个邮箱每分钟最多尝试 5 次。只需在登录处理器开头调用限流器：
+博客文章可以设置[访问口令](hashing.md#hashing-passwords)。为了防止口令被暴力猜测，同一篇文章每分钟最多尝试 5 次。只需在校验口令的处理器开头调用限流器：
 
 ```go
-func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
-    if err := h.attempts.Allow(r.Context(), r.PostFormValue("email")); err != nil {
+func (h *Handlers) Unlock(w http.ResponseWriter, r *http.Request) error {
+    if err := h.attempts.Allow(r.Context(), chi.URLParam(r, "id")); err != nil {
         return err
     }
-    // ……解析表单、校验密码、登录
+    // ……校验口令
 }
 ```
+
+只想限制连续的失败时，在成功后调用 `Reset(ctx, key)`，让这个 key 回到配额全满的状态。[登录与注册](login.md#limits)的密码登录就是这样做的：每次尝试前 `Allow`，登录成功后 `Reset`，所以已经内置了按账号的限流。
 
 `ErrExceeded` 是分类为 `errorx.ResourceExhausted` 的业务错误，处理器直接返回即可：页面显示 `429` 错误页，带 `Retry-After` 响应头，提示文案按请求语言翻译。JSON API 的处理器同样直接返回它，响应 `429` 和错误码 `rate_limit.exceeded`。
 
 入口中创建限流器并传给登录处理器：
 
 ```go
-attempts := ratelimit.NewDatabase(db, "login", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
+attempts := ratelimit.NewDatabase(db, "article-passcode", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
 ```
 
-登录需要多个实例共享计数，否则攻击者把请求分散到各个实例，就能得到成倍的尝试次数，所以这里使用数据库限流器。
+校验口令需要多个实例共享计数，否则攻击者把请求分散到各个实例，就能得到成倍的尝试次数，所以这里使用数据库限流器。
 
 <a id="database-limiter"></a>
 ## 使用数据库存储
@@ -161,10 +163,10 @@ sched.Add("rate-limits:cleanup", "@hourly", schedule.Cleanup(attempts.Cleanup, 1
 ```go
 import "github.com/ryan053857/mygoravel/ratelimit/redislimit"
 
-attempts := redislimit.New(rdb, "blog:login", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
+attempts := redislimit.New(rdb, "blog:passcode", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
 ```
 
-每个 key 对应一个 Redis 键，键名是 `name:key`，例如 `blog:login:alice@example.com`；多个应用共用一个 Redis 时，在 `name` 中带上应用的命名空间。每次 `Allow` 是一次原子的脚本调用，时间取自 Redis 服务端时钟，多个实例并发调用时计数也是精确的。键在配额回满时自动过期，不需要迁移，也不需要清理。
+每个 key 对应一个 Redis 键，键名是 `name:key`，例如 `blog:passcode:42`；多个应用共用一个 Redis 时，在 `name` 中带上应用的命名空间。每次 `Allow` 是一次原子的脚本调用，时间取自 Redis 服务端时钟，多个实例并发调用时计数也是精确的。键在配额回满时自动过期，不需要迁移，也不需要清理。
 
 Redis 的写入很快，也适合多个实例共享的全局限流：
 
@@ -184,7 +186,7 @@ logins := ratelimit.NewDatabase(a.db, "login", ratelimit.Config{Rate: 5, Interva
 attempts := ratelimit.Observe(a.meters, "login", logins)
 ```
 
-登录处理器使用 `attempts`，[清理](#cleanup)仍然调用 `logins.Cleanup`。第二个参数是指标中的名称，与存储的 `name` 分开：Redis 限流器的 `name` 往往带着应用的前缀，指标中不需要。任何 `Limiter` 都可以包装，包括中间件使用的内存限流器。
+把 `attempts` 交给 [`login.Options.Attempts`](login.md#limits)，[清理](#cleanup)仍然调用 `logins.Cleanup`。第二个参数是指标中的名称，与存储的 `name` 分开：Redis 限流器的 `name` 往往带着应用的前缀，指标中不需要。任何 `Limiter` 都可以包装，包括中间件使用的内存限流器。
 
 每次 `Allow` 计入计数器 `ratelimit.requests`，属性 `ratelimit.name` 是名称，`ratelimit.result` 是结果：
 

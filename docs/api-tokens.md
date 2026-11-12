@@ -84,7 +84,7 @@ plain, err := customerTokens.Login(ctx, sub, device)
 <a id="login-and-logout"></a>
 ## 登录与登出
 
-单页应用和 App 用账号密码换取登录 token。下面是 `internal/auth/authhttp/routes.go` 中的登录和登出接口，`authenticate` 是用户模块校验密码的 `user.Authenticate` action，见[哈希](hashing.md#hashing-passwords)：
+单页应用和 App 用账号密码换取登录 token。下面是 `internal/auth/authhttp/routes.go` 中的登录和登出接口，`users` 是博客用户的 [`login.Realm`](login.md)，它校验邮箱和密码：
 
 ```go
 type TokenInput struct {
@@ -109,14 +109,13 @@ type TokenOutput struct {
     }
 }
 
-func issueToken(authenticate *user.Authenticate, tokens *apitoken.Store) func(context.Context, *TokenInput) (*TokenOutput, error) {
+func issueToken(users *login.Realm, tokens *apitoken.Store) func(context.Context, *TokenInput) (*TokenOutput, error) {
     return func(ctx context.Context, in *TokenInput) (*TokenOutput, error) {
-        u, err := authenticate.Handle(ctx, in.Body.Email, in.Body.Password)
+        out, err := users.Password(ctx, login.Email(in.Body.Email), in.Body.Password)
         if err != nil {
             return nil, err
         }
-        sub := identity.Subject{Type: user.Type, ID: u.ID}
-        plain, err := tokens.Login(ctx, sub, apitoken.Device{
+        plain, err := tokens.Login(ctx, out.Subject, apitoken.Device{
             Remember:  in.Body.Remember,
             IP:        in.ip,
             UserAgent: in.UserAgent,
@@ -124,9 +123,9 @@ func issueToken(authenticate *user.Authenticate, tokens *apitoken.Store) func(co
         if err != nil {
             return nil, err
         }
-        out := &TokenOutput{}
-        out.Body.Token = plain
-        return out, nil
+        resp := &TokenOutput{}
+        resp.Body.Token = plain
+        return resp, nil
     }
 }
 
@@ -143,14 +142,14 @@ func revokeToken(tokens *apitoken.Store) func(context.Context, *struct{}) (*stru
 ```go
 op := huma.Operation{OperationID: "auth-token-create", Method: http.MethodPost, Path: "/auth/tokens"}
 rest.Public()(&op)
-rest.Register(api, op, issueToken(authenticate, tokens))
+rest.Register(api, op, issueToken(users, tokens))
 
 op = huma.Operation{OperationID: "auth-token-delete", Method: http.MethodDelete, Path: "/auth/tokens/current"}
 rest.RequireBearer(api, tokens.Validate)(&op)
 rest.Register(api, op, revokeToken(tokens))
 ```
 
-`Login` 记录 IP 和 User-Agent，用于[设备列表](#listing-tokens)。登出时把主体的 `Credential` 交给 `Revoke`，撤销的就是本次请求所用的 token。防止密码被暴力猜测，见[在处理器中限流](rate-limiting.md#in-handlers)。
+`Login` 记录 IP 和 User-Agent，用于[设备列表](#listing-tokens)。登出时把主体的 `Credential` 交给 `Revoke`，撤销的就是本次请求所用的 token。验证码登录、注册和找回密码见[登录与注册](login.md)。
 
 <a id="personal-access-tokens"></a>
 ## 个人访问令牌

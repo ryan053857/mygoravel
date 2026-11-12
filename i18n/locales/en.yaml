@@ -11,6 +11,14 @@ ai.awaiting_approval: The conversation is waiting for approval
 ai.not_pending: No such pending action
 apitoken.not_found: Token not found
 session.not_found: Session not found
+login.invalid_credentials: Incorrect account or password
+login.invalid_code: The code is incorrect or has expired
+login.invalid_proof: The verification has expired, please request a new code
+login.invalid_identifier: Invalid format
+login.weak_password: The password must be 8 to 128 characters without leading or trailing spaces
+login.identifier_taken: Already used by another account
+login.last_identifier: The last way to sign in cannot be removed
+login.not_found: Account not found
 authz.not_member: Not found or no access
 authz.role_not_found: Role not found
 authz.role_exists: A role with this name already exists

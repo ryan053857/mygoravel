@@ -276,14 +276,19 @@ err = roles.Assign(ctx, staff, authz.AllTenants, support.ID)
 租户的终端客户也是主体。客户账号有两种设计：
 
 - **平台统一账号**：客户注册一次，可以成为多个租户的客户，在租户中分配一个只有客户权限的角色，例如 `customer`，和租户成员的处理完全相同；
-- **租户内账号**：每个租户的客户是独立的账号，同一个邮箱在两个租户中各注册一次。它们通常是单独的一张表、单独的一套[账号体系](authentication.md#account-systems)，例如 `customer.Type`。客户的 App 和网页调用一个只接受客户的 API，登录接口签发令牌时把租户写进主体，令牌就只能在这个租户中使用：
+- **租户内账号**：每个租户的客户是独立的账号，同一个邮箱在两个租户中各注册一次。它们通常是单独的一张表、单独的一套[账号体系](authentication.md#account-systems)，例如 `customer.Type`。客户的 App 和网页调用一个只接受客户的 API。客户的 [`login.Realm`](login.md#identifiers) 设置 `PerTenant: true`，邮箱和手机号就在租户内唯一，登录得到的主体带有请求所在的租户，签发的令牌只能在这个租户中使用：
 
 ```go
-sub := identity.Subject{Type: customer.Type, ID: c.ID, Tenant: identity.TenantFromContext(ctx)}
-plain, err := customerTokens.Login(ctx, sub, device)
+customers := login.New(a.db, login.Options{Type: customer.Type, PerTenant: true, Register: true /* 其余字段见登录与注册 */})
+
+out, err := customers.Password(ctx, login.Email(in.Body.Email), in.Body.Password)
+if err != nil {
+    return nil, err
+}
+plain, err := customerTokens.Login(ctx, out.Subject, device) // out.Subject.Tenant 是请求所在的租户
 ```
 
-带着这样的令牌访问其他租户时，请求返回 `403`。租户内账号的唯一约束应当是 `(tenant_id, email)`，第三方登录的[账号关联](social-login.md#linking-accounts)也要加上租户。
+带着这样的令牌访问其他租户时，请求返回 `403`。客户表的主键是 `(tenant_id, id)` 时，把租户编进主体的 ID，见[多套账号体系](authentication.md#account-systems)；第三方登录的[账号关联](social-login.md#linking-accounts)也要加上租户。
 
 <a id="tokens"></a>
 ## 令牌与租户

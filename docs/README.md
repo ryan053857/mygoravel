@@ -76,6 +76,7 @@
 ## 安全
 
 - [认证](authentication.md)
+- [登录与注册](login.md)
 - [API 令牌](api-tokens.md)
 - [第三方登录](social-login.md)
 - [多租户](tenancy.md)

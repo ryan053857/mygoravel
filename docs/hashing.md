@@ -14,7 +14,7 @@
 
 以后还要读出明文的值（例如第三方 API Key）不能哈希，要用[加密](encryption.md#encrypting-data)。
 
-本章为博客应用的用户模块实现密码校验，也就是[页面登录](views.md#login)中登录处理器调用的 `user.Authenticate` action。
+账号的密码由[登录与注册](login.md)保存和校验，包括下面的重新哈希，不需要直接调用本章的方法。应用自己保存其他需要校验的口令时才直接使用 `Hasher`，本章以博客文章的访问口令为例：作者可以给文章设一个口令，读者输入正确才能阅读。
 
 <a id="configuration"></a>
 ## 配置
@@ -46,81 +46,51 @@ argon2id 的默认值是 OWASP 推荐的最低配置。参数越大越难暴力�
 <a id="hashing-passwords"></a>
 ## 哈希与校验密码
 
-在[入口](dependencies.md#assembling-the-application)的 `open` 中创建 `Hasher`，保存在 `App` 中，传给需要它的 action：
+在[入口](dependencies.md#assembling-the-application)的 `open` 中创建 `Hasher`，交给 [`login.New`](login.md#assembling) 和其他需要它的 action：
 
 ```go
 hasher := hashing.New(cfg.Hashing)
-authenticate := user.NewAuthenticate(db, hasher)
 ```
 
 `Hasher` 可以并发使用，整个应用共用一个即可。
 
-保存密码时用 `Make` 生成哈希。每次调用都使用新的随机盐，同一个密码两次的结果不同：
+保存口令时用 `Make` 生成哈希。每次调用都使用新的随机盐，同一个口令两次的结果不同：
 
 ```go
-hash, err := a.hasher.Make(password)
+hash, err := a.hasher.Make(in.Passcode)
 if err != nil {
     return err
 }
-u := &User{Email: email, PasswordHash: hash}
+_, err = a.db.NewUpdate().Model((*Article)(nil)).Set("passcode_hash = ?", hash).Where("id = ?", id).Exec(ctx)
 ```
 
-登录时用 `Check` 校验密码。下面是用户模块的 `Authenticate` action，`ErrInvalidCredentials` 是应用定义的 `errorx.Unauthenticated` 类错误：
+校验时用 `Check`，它比较的是哈希，耗时与口令是否正确无关：
 
 ```go
-var ErrInvalidCredentials = errorx.Define(errorx.Unauthenticated, "auth.invalid_credentials")
-
-type Authenticate struct {
-    db     *bun.DB
-    hasher *hashing.Hasher
-}
-
-func NewAuthenticate(db *bun.DB, hasher *hashing.Hasher) *Authenticate {
-    return &Authenticate{db: db, hasher: hasher}
-}
-
-func (a *Authenticate) Handle(ctx context.Context, email, password string) (*User, error) {
-    var u User
-    err := a.db.NewSelect().Model(&u).Where("email = ?", email).Scan(ctx)
-    if errors.Is(err, sql.ErrNoRows) {
-        return nil, ErrInvalidCredentials.New()
-    }
-    if err != nil {
-        return nil, errors.Wrap(err, "find user")
-    }
-    if !a.hasher.Check(password, u.PasswordHash) {
-        return nil, ErrInvalidCredentials.New()
-    }
-    return &u, nil
+if !a.hasher.Check(in.Passcode, art.PasscodeHash) {
+    return nil, ErrWrongPasscode.New()
 }
 ```
 
-邮箱不存在和密码错误返回同一个错误，客户端无法据此判断某个邮箱是否注册过。防止暴力猜测密码，见[在处理器中限流](rate-limiting.md#in-handlers)。
+口令可以被反复猜测，校验接口要[限流](rate-limiting.md#in-handlers)。
 
-bcrypt 只处理密码的前 72 字节。driver 为 bcrypt 时，`Make` 对更长的密码返回 `hashing.ErrPasswordTooLong`，请在注册接口的输入中用 `maxLength:"72"` 限制长度。argon2id 没有这个限制。
+bcrypt 只处理密码的前 72 字节。driver 为 bcrypt 时，`Make` 对更长的密码返回 `hashing.ErrPasswordTooLong`，请在输入中用 `maxLength:"72"` 限制长度。argon2id 没有这个限制。
 
 <a id="rehashing"></a>
 ## 重新哈希
 
-`Check` 能校验 argon2id 和 bcrypt 两种哈希，与当前的 `driver` 无关。因此调高参数、切换算法或导入旧系统的 bcrypt 哈希之后，已有的密码仍然可以登录。
+`Check` 能校验 argon2id 和 bcrypt 两种哈希，与当前的 `driver` 无关。因此调高参数、切换算法或导入旧系统的 bcrypt 哈希之后，已有的密码仍然可以校验。
 
-`NeedsRehash` 判断一个哈希是否用当前的算法和参数生成。登录时手上有明文密码，是更新哈希的唯一时机：
+`NeedsRehash` 判断一个哈希是否用当前的算法和参数生成。校验通过时手上有明文，是更新哈希的唯一时机：
 
 ```go
-if !a.hasher.Check(password, u.PasswordHash) {
-    return nil, ErrInvalidCredentials.New()
-}
-if a.hasher.NeedsRehash(u.PasswordHash) {
-    hash, err := a.hasher.Make(password)
+if a.hasher.NeedsRehash(art.PasscodeHash) {
+    hash, err := a.hasher.Make(in.Passcode)
     if err != nil {
         return nil, err
     }
-    u.PasswordHash = hash
-    if _, err := a.db.NewUpdate().Model(&u).Column("password_hash").WherePK().Exec(ctx); err != nil {
-        return nil, errors.Wrap(err, "rehash password")
-    }
+    // 保存新的哈希
 }
-return &u, nil
 ```
 
-这样，用户在下次登录时就会自然地迁移到新的算法和参数。
+`login` 在密码登录成功时就是这样做的，用户在下次登录时自然迁移到新的算法和参数。从其他系统导入账号时，把旧的 bcrypt 或 argon2id 哈希原样写入 `auth_passwords` 表即可。

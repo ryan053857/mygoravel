@@ -19,6 +19,8 @@
 
 JSON API 只使用 Bearer token，不使用会话。面向用户的一端，无论是网页、桌面客户端还是移动端，都调用 JSON API。服务端渲染的页面用于运营后台和内部管理后台，使用会话登录，见[页面登录](views.md#login)。两者产生的都是 `identity.Subject`，action 和[授权](authorization.md)规则不需要区分。
 
+本章讲每个请求如何确认调用者。用户如何用密码或验证码登录、注册和找回密码，见[登录与注册](login.md)。
+
 mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API Key，也可以是由认证服务签发的 JWT——你只需要写一个函数，告诉框架这个 token 对应谁。
 
 > [!NOTE]
@@ -296,7 +298,7 @@ shop := rest.New(rest.Options{Accounts: identity.Accounts{customer.Type: custome
 
 几个 API 可以共用一个 token 校验器：客户的 token 发到商家后台的 API，与无效 token 一样返回 `401`。一个入口也可以接受多套账号，例如 `identity.Accounts{member.Type: roles.Resolve, customer.Type: customers.Resolve}`，`sub.Can` 和 action 不需要区分。[`authz`](authorization.md#roles) 按主体的类型和 ID 保存角色，可以同时服务几套账号；终端客户通常不需要角色，它的 Resolver 只要检查账号是否停用、按“数据归属本人”授权即可。
 
-**3. 每套账号可以有自己的令牌有效期**，用各自的配置创建 `apitoken.Store` 签发，见[装配](api-tokens.md#assembling)。
+**3. 每套账号有自己的登录方式和令牌有效期。** 每套账号用一个 [`login.Realm`](login.md) 管理登录标识和密码，例如运营人员只能由管理员创建、必须用密码登录，客户可以用手机验证码自助注册；令牌用各自的配置创建 `apitoken.Store` 签发，见[装配](api-tokens.md#assembling)。
 
 **4. ID 只需在同一套账号中唯一。** 会话、令牌、角色、[操作日志](activity.md)、[通知](notifications.md)、[功能开关](features.md)和实时频道的在线成员都同时保存主体的类型和 ID，员工表和客户表都用自增 ID 也不会混淆。主键是 `(tenant_id, id)` 这类组合时，把租户编进 ID，例如 `t42:1001`。新表推荐使用 UUIDv7。需要把主体放进一个字符串时，例如缓存键、广播主题，使用 `sub.Ref().String()`，结果形如 `customer:42`。
 

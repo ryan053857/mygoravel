@@ -37,6 +37,14 @@ func (m *Memory) Allow(_ context.Context, key string) error {
 	return nil
 }
 
+// Reset 实现 Limiter，不会返回错误。
+func (m *Memory) Reset(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.tats, key)
+	return nil
+}
+
 // sweep 每隔一个 Burst 周期删除已回满的 key，摊销后每次调用为 O(1)。
 func (m *Memory) sweep(now time.Time) {
 	if now.Sub(m.swept) < m.ahead+m.step {

@@ -91,6 +91,13 @@ func (d *Database) Allow(ctx context.Context, key string) error {
 	return nil
 }
 
+// Reset 实现 Limiter：删除 key 的行，与从未出现过的 key 等价。
+func (d *Database) Reset(ctx context.Context, key string) error {
+	_, err := d.db.NewDelete().Model((*row)(nil)).
+		Where("name = ?", d.name).Where("? = ?", bun.Ident("key"), storedKey(key)).Exec(ctx)
+	return errors.Wrap(err, "ratelimit: reset")
+}
+
 // storedKey 返回 key 在表中保存的形式：不超过 maxKeyLength 时原样保存，否则保存 SHA-256 摘要。
 func storedKey(key string) string {
 	if len(key) <= maxKeyLength {

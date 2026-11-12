@@ -187,7 +187,7 @@ func DocRouter() chi.Routes {
 | 缺少所需的权限 | 呈现 `403`，见[错误页](#error-pages) |
 | 通过 | 主体写入请求的 context，处理器用 `identity.FromContext` 读取，再传给 action |
 
-登录页由应用自己实现，注册为公开路由。下面是 `internal/auth/authweb/routes.go`，`user.Authenticate` 是用户模块校验密码的 action，见[哈希](hashing.md#hashing-passwords)：
+登录页由应用自己实现，注册为公开路由。下面是 `internal/auth/authweb/routes.go`，`users` 是博客用户的 [`login.Realm`](login.md)，它校验邮箱和密码：
 
 ```go
 type LoginInput struct {
@@ -195,8 +195,8 @@ type LoginInput struct {
     Password string `json:"password" minLength:"1"`
 }
 
-func Register(r chi.Router, pages *web.Pages, db *bun.DB, hasher *hashing.Hasher) {
-    h := &Handlers{pages: pages, authenticate: user.NewAuthenticate(db, hasher)}
+func Register(r chi.Router, pages *web.Pages, users *login.Realm) {
+    h := &Handlers{pages: pages, users: users}
     public := pages.Routes(r, web.Public)
     public.Get("/login", h.LoginPage)
     public.Post("/login", h.Login)
@@ -209,16 +209,15 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
         return err
     }
     if f.Valid() {
-        u, err := h.authenticate.Handle(r.Context(), f.Data.Email, f.Data.Password)
+        out, err := h.users.Password(r.Context(), login.Email(f.Data.Email), f.Data.Password)
         if err == nil {
-            sub := identity.Subject{Type: user.Type, ID: u.ID, Permissions: u.Permissions}
-            if err := h.pages.Login(r, sub); err != nil {
+            if err := h.pages.Login(r, out.Subject); err != nil {
                 return err
             }
             web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
             return nil
         }
-        if !errors.Is(err, user.ErrInvalidCredentials) {
+        if !errors.Is(err, login.ErrInvalidCredentials) {
             return err
         }
         f.SetError("password", httpx.ErrorDetail(r.Context(), err))
@@ -235,7 +234,7 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-`pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效；它还从请求中记录客户端地址和 User-Agent，用于[设备列表](session.md#listing-sessions)。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)，防止密码被暴力猜测见[在处理器中限流](rate-limiting.md#in-handlers)。
+`pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效；它还从请求中记录客户端地址和 User-Agent，用于[设备列表](session.md#listing-sessions)。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)。同一个邮箱连续失败太多次时，`Password` 返回 `ratelimit.ErrExceeded`，交给 `pages` 呈现为 `429` 错误页，见[限流与防探测](login.md#limits)。
 
 会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时，在 `Options.Accounts` 中为这套账号指定 Resolver，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回本次请求的主体。它与 API 的 [`rest.Options.Accounts`](authentication.md#resolving-subjects) 是同一个类型，同一个 Resolver 可以交给两者：
 
