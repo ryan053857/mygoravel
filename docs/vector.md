@@ -11,6 +11,7 @@
 - [检索](#searching)
     - [过滤](#filtering)
     - [多租户](#tenancy)
+    - [混合检索](#hybrid-search)
     - [重排](#reranking)
 - [换模型](#changing-models)
 - [测试](#testing)
@@ -283,6 +284,23 @@ hits, err := Chunks.Search(ctx, a.vectors, vector.Query{Text: question, Tenant: 
 `Tenant` 为空表示平台本身，也只查询租户为空的文档，不会查到所有租户的。没有 `tenant` 字段的索引，传入租户时返回错误。
 
 有租户字段的索引，Qdrant 中的数据按租户存放，HNSW 图也按租户分别建立，不建全局的图，所以查询一个租户的速度不受其他租户数据量的影响。
+
+<a id="hybrid-search"></a>
+### 混合检索
+
+语义检索不认识具体的字：读者问“X-2000 的保修期”，向量最接近的可能是另一个型号的保修说明。型号、编号、人名、专有名词这类问题，关键词检索更准。把索引声明为混合索引，检索时两路同时进行：
+
+```go
+var Chunks = vector.Define[ChunkDoc]("attachment-chunks", vector.Hybrid(search.Bigram))
+```
+
+- 同步时，`embed` 字段的文本除了交给模型，还用[分词器](search.md#tokenizers)切分，按 BM25 的词频部分算出稀疏向量，和模型的向量存在同一个文档上。IDF 由 Qdrant 按整个索引统计，有租户字段时也是所有租户一起统计。
+- 检索时，查询文本同样切分，语义和关键词两路各取若干候选，带着相同的过滤条件和租户，再在 Qdrant 中按两路的排名用 RRF 融合。只在一路中靠前的文档也能排进结果。
+- 中文用 `search.Bigram` 就能用，不需要词典；需要按词语切分时换成 `search/gse`。
+
+混合索引的 `Hit.Score` 是 RRF 分数，不再是余弦相似度，只能比较同一次查询的结果；`MinScore` 只过滤语义那一路的候选。
+
+给已有的索引加上或去掉 `Hybrid`、换分词器之后，要[重建索引](#reindexing)。重建完成之前，原来的版本照常写入和查询，只是还没有关键词那一路。
 
 <a id="reranking"></a>
 ### 重排

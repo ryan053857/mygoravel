@@ -17,6 +17,7 @@ import (
 
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/search"
 )
 
 // validName 是索引名称的格式，它也是 collection 名称和同步任务 topic 的一部分。
@@ -72,8 +73,10 @@ type Index[D any] struct {
 // 过滤条件按字段的 JSON 名称引用字段。文档整体编码为 JSON 保存在索引中，查询结果直接解码出 D，
 // 所以 D 只放使用查询结果需要的字段。
 //
+// 默认只按模型计算的向量检索语义，用 Hybrid 声明为混合索引后同时按关键词检索。
+//
 // name 由小写字母、数字、_、.、- 组成，最长 63 字节。D 的标签不正确时 panic。
-func Define[D any](name string) *Index[D] {
+func Define[D any](name string, opts ...IndexOption) *Index[D] {
 	if !validName.MatchString(name) {
 		panic(errors.Newf("vector: invalid index name %q", name))
 	}
@@ -81,11 +84,30 @@ func Define[D any](name string) *Index[D] {
 	if err != nil {
 		panic(err)
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
 	return &Index[D]{
 		name: name, schema: s,
 		sync:    queue.Topic[string]("vector.sync." + name),
 		reindex: queue.Topic[uuid.UUID]("vector.reindex." + name),
 	}
+}
+
+// IndexOption 是 Define 的选项。
+type IndexOption func(*schema)
+
+// Hybrid 把索引声明为混合索引：除了模型计算的向量，还用 tok 切分 embed 字段的文本，按 BM25 计算关键词的稀疏向量。
+// 查询时语义和关键词两路分别检索，再按排名用 RRF 融合，型号、编号、人名这类语义相近却不对的结果因此排在后面。
+// tok 通常是 search.Bigram，需要按词语切分时用 search/gse。
+//
+// 混合索引的 collection 与普通索引的结构不同：给已有的索引加上或去掉 Hybrid、换分词器之后都要用 Reindex 重建，
+// 重建完成之前原来的版本按原来的方式写入和查询。
+func Hybrid(tok search.Tokenizer) IndexOption {
+	if tok == nil {
+		panic("vector: nil tokenizer")
+	}
+	return func(s *schema) { s.tokenizer = tok }
 }
 
 // Name 返回索引的名称。
@@ -199,11 +221,11 @@ func (ix *Index[D]) write(ctx context.Context, s *Store, version int, key string
 	collection := s.collection(ix.name, version)
 	// 重建可能在读取版本之后切换并删除了 version：这时会重新创建它，写入的文档不会被查询，
 	// 下一次重建开始时随其他废弃的版本一起删除
-	m, _, err := s.open(ctx, collection, ix.schema, true)
+	c, _, err := s.open(ctx, collection, ix.schema, true)
 	if err != nil {
 		return err
 	}
-	points, err := s.embed(ctx, collection, m, key, entries)
+	points, err := s.embed(ctx, collection, c, key, entries)
 	if err != nil {
 		return err
 	}
@@ -228,9 +250,10 @@ func (ix *Index[D]) write(ctx context.Context, s *Store, version int, key string
 
 // entry 是一个文档要写入 Qdrant 的内容。
 type entry struct {
-	text  string // 计算向量的文本
-	hash  string // text 的 SHA-256
-	point *qdrant.PointStruct
+	text   string // 计算向量的文本
+	hash   string // text 的 SHA-256
+	sparse sparse // 混合索引中 text 的稀疏向量
+	point  *qdrant.PointStruct
 }
 
 // entries 把 key 的文档转换为 point，向量留空，由 Store.embed 填入。
@@ -274,6 +297,9 @@ func (ix *Index[D]) entries(key string, docs []D) ([]entry, error) {
 			}
 		}
 		out[i] = entry{text: text, hash: hash, point: &qdrant.PointStruct{Id: pointID(key, i), Payload: payload}}
+		if tok := ix.schema.tokenizer; tok != nil {
+			out[i].sparse = documentSparse(tok, text)
+		}
 	}
 	return out, nil
 }

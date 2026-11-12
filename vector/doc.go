@@ -16,7 +16,7 @@
 //
 //	Chunks.Handle(w, store, loadChunks, scanChunkKeys)
 //
-// Search 计算查询文本的向量，返回语义最接近的文档：
+// Search 计算查询文本的向量，返回语义最接近的文档；用 Hybrid 声明的混合索引同时按关键词检索，两路按排名融合：
 //
 //	hits, err := Chunks.Search(ctx, store, vector.Query{Text: question, Tenant: sub.Tenant, Limit: 20})
 //

@@ -11,6 +11,12 @@ import (
 // DefaultLimit 是 Query.Limit 不大于 0 时返回的结果数。
 const DefaultLimit = 10
 
+// 混合索引每一路检索的候选数：Limit 的 prefetchFactor 倍，至少 minPrefetch 个。
+const (
+	prefetchFactor = 4
+	minPrefetch    = 20
+)
+
 // Query 是一次检索的条件。
 type Query struct {
 	// Text 是查询文本，用建立索引当前版本的模型计算向量后检索语义最接近的文档。不能为空。
@@ -22,14 +28,17 @@ type Query struct {
 	// Limit 是最多返回的结果数，不大于 0 时为 DefaultLimit。
 	Limit int
 	// MinScore 是结果的最低相似度，0 时不限制。相似度是余弦相似度，范围是 -1 到 1。
+	// 混合索引中它只过滤语义那一路的候选，关键词命中的结果不受它限制。
 	MinScore float64
 }
 
 // Hit 是一条检索结果。
 type Hit[D any] struct {
-	Key   string  `json:"key"`   // 文档所属的 key，即 Sync 时传入的 key
-	Doc   D       `json:"doc"`   // 同步时保存的文档
-	Score float64 `json:"score"` // 与查询文本的余弦相似度，越大越接近
+	Key string `json:"key"` // 文档所属的 key，即 Sync 时传入的 key
+	Doc D      `json:"doc"` // 同步时保存的文档
+	// Score 越大越相关，只用于比较同一次查询的结果：普通索引中是与查询文本的余弦相似度，
+	// 混合索引中是两路排名的 RRF 分数。
+	Score float64 `json:"score"`
 }
 
 // Search 检索与 q.Text 语义最接近的文档，按相似度从高到低返回。查询使用索引当前的版本，
@@ -94,10 +103,11 @@ func (ix *Index[D]) query(ctx context.Context, s *Store, text string, filter *qd
 		return nil, err
 	}
 	collection := s.collection(ix.name, st.Version)
-	m, ok, err := s.open(ctx, collection, ix.schema, false)
+	c, ok, err := s.open(ctx, collection, ix.schema, false)
 	if err != nil || !ok {
 		return nil, err
 	}
+	m := c.model
 	vecs, err := m.Embedder.Embed(ctx, []string{text})
 	if err != nil {
 		return nil, errors.Wrap(err, "vector: embed query")
@@ -114,6 +124,24 @@ func (ix *Index[D]) query(ctx context.Context, s *Store, text string, filter *qd
 	}
 	if minScore != 0 {
 		req.ScoreThreshold = qdrant.PtrOf(float32(minScore))
+	}
+	if c.hybrid {
+		req.Using = qdrant.PtrOf(vectorDense)
+	}
+	if tok := ix.schema.tokenizer; tok != nil && c.hybrid {
+		// 语义和关键词两路各取 prefetchFactor 倍的候选，按排名用 RRF 融合；MinScore 只作用于语义那一路
+		n := qdrant.PtrOf(uint64(max(limit*prefetchFactor, minPrefetch)))
+		prefetch := []*qdrant.PrefetchQuery{{
+			Query: qdrant.NewQueryDense(vecs[0]), Using: qdrant.PtrOf(vectorDense), Filter: filter, Limit: n,
+			ScoreThreshold: req.ScoreThreshold,
+		}}
+		if q := querySparse(tok, text); len(q.indices) > 0 {
+			prefetch = append(prefetch, &qdrant.PrefetchQuery{
+				Query: qdrant.NewQuerySparse(q.indices, q.values), Using: qdrant.PtrOf(vectorSparse), Filter: filter, Limit: n,
+			})
+		}
+		req.Prefetch, req.Query = prefetch, qdrant.NewQueryFusion(qdrant.Fusion_RRF)
+		req.Using, req.Filter, req.ScoreThreshold = nil, nil, nil // 已经在每一路中
 	}
 	found, err := s.client.Query(ctx, req)
 	if notFound(err) {

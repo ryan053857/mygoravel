@@ -9,6 +9,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/qdrant/go-client/qdrant"
+
+	"github.com/ryan053857/mygoravel/search"
 )
 
 var (
@@ -43,6 +45,8 @@ type schema struct {
 	embed   *field
 	filters map[string]*field
 	tenant  *field
+	// tokenizer 是混合索引切分文本的分词器，用于计算稀疏向量；nil 时只有模型计算的稠密向量。
+	tokenizer search.Tokenizer
 }
 
 // parseSchema 解析 D 中带 vector 标签的字段：

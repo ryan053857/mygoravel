@@ -39,7 +39,7 @@ type Store struct {
 	prefix string
 
 	mu    sync.Mutex
-	ready map[string]Model // 已经确认模型、建好 payload 索引的 collection 和它的模型
+	ready map[string]collectionInfo // 已经确认模型、建好 payload 索引的 collection
 }
 
 // Option 是 New 的选项。
@@ -67,7 +67,7 @@ func New(db *bun.DB, client *qdrant.Client, model Model, opts ...Option) *Store 
 	if db == nil || client == nil {
 		panic("vector: nil database or client")
 	}
-	s := &Store{db: db, client: client, model: model, models: map[string]Model{}, ready: map[string]Model{}}
+	s := &Store{db: db, client: client, model: model, models: map[string]Model{}, ready: map[string]collectionInfo{}}
 	s.addModel(model)
 	for _, opt := range opts {
 		opt(s)
@@ -99,39 +99,47 @@ const (
 	metaDims  = "mygoravel.dims"
 )
 
-// open 确认 collection 存在，返回建立它的模型。不存在时，create 为 true 则用 s.model 创建，否则 ok 为 false。
-func (s *Store) open(ctx context.Context, collection string, sc *schema, create bool) (m Model, ok bool, err error) {
+// collectionInfo 是 collection 的结构，写入和查询它都按这个结构：索引的每个版本保持建立时的模型和结构，
+// 给索引加上或去掉 Hybrid、换模型之后，重建完成之前原来的版本照常使用。
+type collectionInfo struct {
+	model  Model // 建立它的模型
+	hybrid bool  // 有没有稀疏向量
+}
+
+// open 确认 collection 存在，返回它的结构。不存在时，create 为 true 则按 s.model 和 sc 创建，否则 ok 为 false。
+func (s *Store) open(ctx context.Context, collection string, sc *schema, create bool) (c collectionInfo, ok bool, err error) {
 	s.mu.Lock()
-	m, ok = s.ready[collection]
+	c, ok = s.ready[collection]
 	s.mu.Unlock()
 	if ok {
-		return m, true, nil
+		return c, true, nil
 	}
 
 	info, err := s.client.GetCollectionInfo(ctx, collection)
 	if notFound(err) {
 		if !create {
-			return Model{}, false, nil
+			return c, false, nil
 		}
 		if err := s.create(ctx, collection, sc); err != nil {
-			return Model{}, false, err
+			return c, false, err
 		}
 		info, err = s.client.GetCollectionInfo(ctx, collection)
 	}
 	if err != nil {
-		return Model{}, false, errors.Wrapf(err, "vector: get collection %s", collection)
+		return c, false, errors.Wrapf(err, "vector: get collection %s", collection)
 	}
-	if m, err = s.modelOf(collection, info); err != nil {
-		return Model{}, false, err
+	if c.model, err = s.modelOf(collection, info); err != nil {
+		return c, false, err
 	}
+	c.hybrid = info.GetConfig().GetParams().GetSparseVectorsConfig().GetMap()[vectorSparse] != nil
 	// 文档类型新增的过滤字段也在这里建立索引；已经存在的索引不受影响
 	if err := s.createFieldIndexes(ctx, collection, sc); err != nil {
-		return Model{}, false, err
+		return c, false, err
 	}
 	s.mu.Lock()
-	s.ready[collection] = m
+	s.ready[collection] = c
 	s.mu.Unlock()
-	return m, true, nil
+	return c, true, nil
 }
 
 // modelOf 返回建立 collection 的模型，它必须是 Store 的模型之一。
@@ -152,15 +160,21 @@ func (s *Store) modelOf(collection string, info *qdrant.CollectionInfo) (Model, 
 
 // create 用 s.model 创建 collection。多个进程同时创建时只有一个成功，其余的沿用它。
 func (s *Store) create(ctx context.Context, collection string, sc *schema) error {
+	dense := &qdrant.VectorParams{Size: uint64(s.model.Dims), Distance: qdrant.Distance_Cosine}
 	req := &qdrant.CreateCollection{
 		CollectionName: collection,
-		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
-			Size: uint64(s.model.Dims), Distance: qdrant.Distance_Cosine,
-		}),
+		VectorsConfig:  qdrant.NewVectorsConfig(dense),
 		Metadata: map[string]*qdrant.Value{
 			metaModel: qdrant.NewValueString(s.model.Name),
 			metaDims:  qdrant.NewValueInt(int64(s.model.Dims)),
 		},
+	}
+	if sc.tokenizer != nil {
+		// 混合索引：命名的稠密向量，加上由 Qdrant 按 collection 统计 IDF 的稀疏向量
+		req.VectorsConfig = qdrant.NewVectorsConfigMap(map[string]*qdrant.VectorParams{vectorDense: dense})
+		req.SparseVectorsConfig = qdrant.NewSparseVectorsConfig(map[string]*qdrant.SparseVectorParams{
+			vectorSparse: {Modifier: qdrant.Modifier_Idf.Enum()},
+		})
 	}
 	if sc.tenant != nil {
 		// 查询总是限定在一个租户中：只给每个租户建立 HNSW 图，不建全局的图
@@ -205,7 +219,9 @@ func (s *Store) createFieldIndexes(ctx context.Context, name string, sc *schema)
 
 // embed 给 entries 填入 m 计算的向量，返回它们的 point：文本与这个 key 在 collection 中已有的某个文档相同时
 // 沿用它的向量，其余的去掉重复后一次交给模型计算。
-func (s *Store) embed(ctx context.Context, collection string, m Model, key string, entries []entry) ([]*qdrant.PointStruct, error) {
+// 有稀疏向量的 collection 中，point 同时带上 entries 的稀疏向量（索引没有声明 Hybrid 时没有）。
+func (s *Store) embed(ctx context.Context, collection string, c collectionInfo, key string, entries []entry) ([]*qdrant.PointStruct, error) {
+	m, hybrid := c.model, c.hybrid
 	points := make([]*qdrant.PointStruct, len(entries))
 	if len(entries) == 0 {
 		return points, nil
@@ -214,7 +230,7 @@ func (s *Store) embed(ctx context.Context, collection string, m Model, key strin
 	for i, e := range entries {
 		hashes[i] = e.hash
 	}
-	known, err := s.vectors(ctx, collection, m, key, hashes)
+	known, err := s.vectors(ctx, collection, m, hybrid, key, hashes)
 	if err != nil {
 		return nil, err
 	}
@@ -243,13 +259,20 @@ func (s *Store) embed(ctx context.Context, collection string, m Model, key strin
 	}
 	for i, e := range entries {
 		e.point.Vectors = qdrant.NewVectorsDense(known[e.hash])
+		if hybrid {
+			named := map[string]*qdrant.Vector{vectorDense: qdrant.NewVectorDense(known[e.hash])}
+			if len(e.sparse.indices) > 0 { // 没有切分出词的文本只有稠密向量
+				named[vectorSparse] = qdrant.NewVectorSparse(e.sparse.indices, e.sparse.values)
+			}
+			e.point.Vectors = qdrant.NewVectorsMap(named)
+		}
 		points[i] = e.point
 	}
 	return points, nil
 }
 
 // vectors 返回 key 已有的文档中，文本的哈希在 hashes 中的文档的向量，按哈希索引。
-func (s *Store) vectors(ctx context.Context, collection string, m Model, key string, hashes []string) (map[string][]float32, error) {
+func (s *Store) vectors(ctx context.Context, collection string, m Model, hybrid bool, key string, hashes []string) (map[string][]float32, error) {
 	known := map[string][]float32{}
 	req := &qdrant.ScrollPoints{
 		CollectionName: collection,
@@ -260,13 +283,20 @@ func (s *Store) vectors(ctx context.Context, collection string, m Model, key str
 		WithPayload: qdrant.NewWithPayloadInclude(payloadHash),
 		WithVectors: qdrant.NewWithVectors(true),
 	}
+	if hybrid {
+		req.WithVectors = qdrant.NewWithVectorsInclude(vectorDense)
+	}
 	for {
 		found, next, err := s.client.ScrollAndOffset(ctx, req)
 		if err != nil {
 			return nil, errors.Wrap(err, "vector: read existing points")
 		}
 		for _, p := range found {
-			if v := p.GetVectors().GetVector().GetDenseVector().GetData(); len(v) == m.Dims {
+			v := p.GetVectors().GetVector()
+			if hybrid {
+				v = p.GetVectors().GetVectors().GetVectors()[vectorDense]
+			}
+			if v := v.GetDenseVector().GetData(); len(v) == m.Dims {
 				known[p.GetPayload()[payloadHash].GetStringValue()] = v
 			}
 		}
