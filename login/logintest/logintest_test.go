@@ -8,10 +8,9 @@ import (
 	"time"
 
 	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/database/sqlite"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/hashing"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/dbtesting"
 	"github.com/ryan053857/mygoravel/login"
 	"github.com/ryan053857/mygoravel/login/logintest"
 	"github.com/ryan053857/mygoravel/ratelimit"
@@ -54,7 +53,7 @@ func TestWithRealm(t *testing.T) {
 		ctx := context.Background()
 		outbox := logintest.NewOutbox()
 		loose := ratelimit.Config{Rate: 100, Interval: time.Minute, Burst: 100}
-		db := dbtesting.Open(t, sqlite.Driver, login.Migrations())
+		db := dbtest.Open(t, login.Migrations())
 		var hc hashing.Config
 		hc.SetDefaults()
 		hc.Driver, hc.Bcrypt.Cost = "bcrypt", 4 // 测试中用最低成本，哈希密码不拖慢测试
