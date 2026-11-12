@@ -8,6 +8,7 @@
     - [调用接口](#calling-endpoints)
     - [事件流](#event-streams)
     - [上传文件](#uploading-files)
+    - [TanStack Query](#tanstack)
 - [其他语言](#other-languages)
 - [App 版本](#app-version)
 - [检查接口变更](#checking-changes)
@@ -160,6 +161,71 @@ const { data } = await api.POST("/files", {
   body: form as unknown as { file: string }, // 生成的类型把文件写作 string
 })
 ```
+
+<a id="tanstack"></a>
+### TanStack Query
+
+React 应用用 [TanStack Query](https://tanstack.com/query) 管理接口数据时，用 [openapi-react-query](https://openapi-ts.dev/openapi-react-query/) 把上面的 `api` 包装成 hooks。它按方法、路径和参数生成 query key，类型照旧来自 `api.d.ts`：
+
+```bash
+npm i @tanstack/react-query openapi-react-query
+```
+
+```ts
+import { QueryClient } from "@tanstack/react-query"
+import createQueryClient from "openapi-react-query"
+import { api } from "./client"
+
+export const $api = createQueryClient(api)
+export const queryClient = new QueryClient()
+```
+
+query key 是 `[方法, 路径, 参数]`，例如 `["get", "/articles/{id}", { params: { path: { id } } }]`。修改数据后按前缀让相关的查询失效：
+
+```tsx
+function Article({ id }: { id: string }) {
+  const { data, error } = $api.useQuery("get", "/articles/{id}", { params: { path: { id } } })
+  const publish = $api.useMutation("post", "/articles/{id}/publish", {
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["get", "/articles"] })      // 文章列表
+      queryClient.invalidateQueries({ queryKey: ["get", "/articles/{id}"] }) // 所有文章详情
+    },
+  })
+  // ……
+}
+```
+
+`error` 同样是 `ErrorModel`，按 `code` 处理。
+
+[实时频道](realtime.md#subscribing)收到消息后，让对应的查询失效，由 TanStack Query 重新获取，不要把消息内容合并进缓存：
+
+```ts
+articles.on("publication", () => queryClient.invalidateQueries({ queryKey: ["get", "/articles"] }))
+```
+
+[固定分页](responses.md#offset-pagination)的列表由服务端分页。TanStack Table 的 `pageIndex` 从 0 开始，`page` 从 1 开始；把 `items` 和 `total` 交给表格，并开启 `manualPagination`：
+
+```ts
+const { data } = $api.useQuery(
+  "get", "/articles",
+  { params: { query: { page: pagination.pageIndex + 1, per_page: pagination.pageSize } } },
+  { placeholderData: keepPreviousData }, // 翻页时保留上一页，表格不闪烁
+)
+// 表格：data = data?.items ?? []，rowCount = data?.total，manualPagination = true
+```
+
+[游标分页](responses.md#cursor-pagination)的列表用 `$api.useInfiniteQuery`：`pageParamName` 为 `"cursor"`，`initialPageParam` 为 `""`，`getNextPageParam` 返回上一页的 `next_cursor`。
+
+[验证错误](validation.md#validation-error-response)的 `errors[].location` 去掉 `body.` 就是字段名。TanStack Form 在 `validators.onSubmitAsync` 中提交，把它们作为字段错误返回：
+
+```ts
+const { error } = await api.POST("/articles", { body: value })
+if (error?.errors) {
+  return { fields: Object.fromEntries(error.errors.map((e) => [e.location?.replace(/^body\./, ""), e.message])) }
+}
+```
+
+`message` 是英文，中文界面按字段和约束自己写提示。
 
 <a id="other-languages"></a>
 ## 其他语言

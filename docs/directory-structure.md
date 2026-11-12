@@ -56,6 +56,7 @@ blog/
 │           ├── routes.go    页面路由
 │           ├── handlers.go  页面处理器
 │           └── views/       templ 组件及生成的 _templ.go
+├── frontend/                单页应用（Vite 项目）和嵌入构建产物的 frontend.go
 ├── migrations/              SQL 迁移文件和 embed.go
 └── locales/                 应用自己的翻译文件
 ```
@@ -78,6 +79,7 @@ blog/
 | `internal/article/routes.go`、`dto.go` | [模块内注册](routing.md#module-registration)、[共享响应结构](routing.md#shared-responses) |
 | `internal/web/`、`internal/article/articleweb/` | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[界面组件](components.md) |
 | `internal/auth/authweb/` | [登录](views.md#login) |
+| `frontend/` | [单页应用](spa.md) |
 | `migrations/` | [迁移](migrations.md#embedding-migrations) |
 
 目录不必一次建齐，等真正有代码要放时再创建即可。
@@ -213,7 +215,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `httpx` | HTTP 中间件、平滑停机、就绪检查 | [中间件](middleware.md)、[请求生命周期](lifecycle.md) |
+| `httpx` | HTTP 中间件、平滑停机、就绪检查、单页应用 | [中间件](middleware.md)、[请求生命周期](lifecycle.md)、[单页应用](spa.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
 | `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
 | `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、提示消息、主题、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
