@@ -559,26 +559,28 @@ htmx 用 `outerMorph` 或 `innerMorph` 替换内容时，内嵌的 hx-alpine-com
 <a id="content-security-policy"></a>
 ## 内容安全策略
 
-内容安全策略（CSP）告诉浏览器只执行带有正确 nonce 的脚本，即使页面中被注入了 `<script>`，它也不会执行。每个请求生成一个随机的 nonce，同时写进 CSP 响应头和 templ 的 context：
+内容安全策略（CSP）告诉浏览器只执行带有正确 nonce 的脚本，即使页面中被注入了 `<script>`，它也不会执行。`Pages` 为每个页面响应（包括错误页）生成一个随机的 nonce，写进 `Content-Security-Policy` 响应头和 templ 的 context，默认的策略是 `web.DefaultCSP`：
 
-```go
-func csp(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        nonce := rand.Text()
-        w.Header().Set("Content-Security-Policy",
-            "script-src 'self' 'nonce-"+nonce+"' 'unsafe-eval'; object-src 'none'; base-uri 'none'")
-        next.ServeHTTP(w, r.WithContext(templ.WithNonce(r.Context(), nonce)))
-    })
-}
+```text
+script-src 'self' 'nonce-…' 'unsafe-eval'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 ```
 
-`rand` 是 `crypto/rand`。在页面路由之前安装它，例如 `router.Use(csp)`。
-
 - `ui.Head()` 读取 context 中的 nonce，给它输出的 `<script>`、`<style>` 带上它；其中的 `web.Scripts()` 还设置了 htmx 的 `inlineScriptNonce`，htmx 执行交换进来的脚本时也使用这个 nonce。
-- 布局中自己写的内联脚本，要加上 `nonce={ templ.GetNonce(ctx) }`。
-- `'self'` 允许加载本站的脚本文件，包括[静态文件](assets.md)。
+- 布局中自己写的内联脚本，以及其他网站的脚本（例如[人机验证](login.md#captcha)的组件），要加上 `nonce={ templ.GetNonce(ctx) }`。
+- `'self'` 允许加载本站的脚本文件，包括[静态文件](assets.md)。样式、图片、字体和 iframe 不受限制。
+- `frame-ancestors 'none'` 禁止其他网站把后台嵌入框架，诱导用户点击。
 
-Alpine 的表达式（`x-data`、`x-on` 等）和 htmx 的 `hx-on` 在运行时编译执行，需要 `'unsafe-eval'`。去掉它之后，这两类属性都会失效。只用 htmx 属性和[界面组件](components.md)、不写 Alpine 表达式的页面可以去掉它；也可以改用 Alpine 的 [CSP 版本](https://alpinejs.dev/advanced/csp)。
+页面响应同时带有 `Referrer-Policy: same-origin`，从后台点开其他网站的链接时，不会带上后台页面的地址。
+
+Alpine 的表达式（`x-data`、`x-on` 等）和 htmx 的 `hx-on` 在运行时编译执行，需要 `'unsafe-eval'`。去掉它之后，这两类属性都会失效。只用 htmx 属性和[界面组件](components.md)、不写 Alpine 表达式的页面可以用 `Options.CSP` 去掉它。
+
+需要别的策略时设置 `Options.CSP`，它接收本次的 nonce，返回完整的策略；返回空字符串时不设置这个响应头。例如允许合作方的网站嵌入页面：
+
+```go
+CSP: func(nonce string) string {
+    return strings.Replace(web.DefaultCSP(nonce), "frame-ancestors 'none'", "frame-ancestors https://partner.example.com", 1)
+},
+```
 
 > [!WARNING]
 > 不要把应用的脚本写在 `<body>` 里。用户点后退时，htmx 会重新请求整页并替换 `body`，其中的脚本会再执行一次，事件监听器就注册了两遍。应用的脚本放进静态文件，在 `<head>` 中加载：`<script defer src={ web.StaticURL(ctx, "js/app.js") }></script>`。

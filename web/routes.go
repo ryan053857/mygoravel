@@ -103,6 +103,7 @@ func (p *Pages) route(access Access, h HandlerFunc) http.Handler {
 	}
 	handler := p.cop.Handler(p.opts.Sessions.LoadAndSave(p.authorize(access, p.handle(h))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(p.secure(w, r))
 		ctx := context.WithValue(p.withLook(r), sessionsKey{}, p.opts.Sessions)
 		if tenant := p.opts.Tenant; tenant != nil {
 			ctx = identity.WithTenant(ctx, tenant(r))

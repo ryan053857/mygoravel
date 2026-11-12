@@ -63,7 +63,7 @@ func body(t *testing.T, h http.Handler, r *http.Request) (*httptest.ResponseReco
 }
 
 var linkHref = regexp.MustCompile(`<link rel="stylesheet" href="([^"]+)">`)
-var scriptSrc = regexp.MustCompile(`<script defer src="(/_web/ui/[^"]+)"`)
+var scriptSrc = regexp.MustCompile(`<script defer(?: nonce="[^"]+")? src="(/_web/ui/[^"]+)"`)
 
 func TestPageWithDefaultTheme(t *testing.T) {
 	h := pages(t, web.Theme{}, nil, func() templ.Component { return ui.Page(ui.PageProps{Title: "文章"}) })
@@ -117,7 +117,7 @@ func TestPageWithTheme(t *testing.T) {
 	for _, want := range []string{
 		`<html lang="en" class="style-maia dark">`,
 		`href="` + ui.StylesheetURL("maia") + `"`,
-		`<style>:root{--primary:oklch(0.55 0.22 275);--radius:1rem;--ring:oklch(0.6 0.2 275);}.dark{--primary:oklch(0.7 0.16 275);}</style>`,
+		`">:root{--primary:oklch(0.55 0.22 275);--radius:1rem;--ring:oklch(0.6 0.2 275);}.dark{--primary:oklch(0.7 0.16 275);}</style>`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %s in\n%s", want, html)

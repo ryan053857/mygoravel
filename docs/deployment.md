@@ -359,7 +359,7 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 
 反向代理转发请求时请保留原始的 `Host` 请求头（包括端口），例如 nginx 使用 `proxy_set_header Host $http_host;`。`$host` 会丢掉端口，[跨站请求伪造](session.md#csrf)防护会因为 `Origin` 与 `Host` 不一致而拒绝所有 `POST` 等请求。使用[服务端推送](sse.md#deployment)时，还要在反向代理上启用 HTTP/2。
 
-TLS 终止和响应压缩通常在反向代理中配置；应用直接对外提供服务时，安装 [httpx.Compress](middleware.md#compression) 压缩响应。跨域请求使用内置的 [CORS](middleware.md#cors)。限流既可以在网关中配置，也可以使用内置的[限流](rate-limiting.md)；内存限流器按实例分别计数，多实例部署时请把这一点计入配置值，需要共享计数时使用数据库限流器。
+TLS 终止和响应压缩通常在反向代理中配置。全站使用 HTTPS 后，在反向代理上加上 `Strict-Transport-Security` 响应头（HSTS），例如 nginx 的 `add_header Strict-Transport-Security "max-age=31536000" always;`，浏览器此后只用 HTTPS 访问这个域名；页面的[内容安全策略](views.md#content-security-policy)由应用设置。应用直接对外提供服务时，安装 [httpx.Compress](middleware.md#compression) 压缩响应。跨域请求使用内置的 [CORS](middleware.md#cors)。限流既可以在网关中配置，也可以使用内置的[限流](rate-limiting.md)；内存限流器按实例分别计数，多实例部署时请把这一点计入配置值，需要共享计数时使用数据库限流器。
 
 <a id="maintenance-windows"></a>
 ## 维护窗口

@@ -201,9 +201,10 @@ func (s *Server) account(r *http.Request, sub identity.Subject) string {
 }
 
 // noFrame 禁止同意页被嵌入其他网站的框架，防止诱导点击。
+// CSP 用 Add 追加为第二条策略：浏览器同时执行全部策略，web.Options.CSP 放开了 frame-ancestors 时同意页仍然不能被嵌入。
 func noFrame(w http.ResponseWriter) {
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+	w.Header().Add("Content-Security-Policy", "frame-ancestors 'none'")
 	w.Header().Set("Cache-Control", "no-store")
 }
 

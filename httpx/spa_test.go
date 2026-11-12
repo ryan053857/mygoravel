@@ -106,6 +106,25 @@ func TestSPAConditionalAndMethods(t *testing.T) {
 	}
 }
 
+func TestSPAFrameAncestors(t *testing.T) {
+	t.Parallel()
+	s := newSPA(t, httpx.SPAOptions{})
+	for path, want := range map[string]string{
+		"/":                         "frame-ancestors 'none'",
+		"/articles/42":              "frame-ancestors 'none'",
+		"/assets/index-BjXc12aB.js": "",
+		"/favicon.svg":              "",
+	} {
+		if got := spaGet(s, http.MethodGet, path, htmlAccept).Header().Get("Content-Security-Policy"); got != want {
+			t.Errorf("%s: CSP %q, want %q", path, got, want)
+		}
+	}
+	s = newSPA(t, httpx.SPAOptions{FrameAncestors: []string{"'self'", "https://partner.example.com"}})
+	if got := spaGet(s, http.MethodGet, "/", htmlAccept).Header().Get("Content-Security-Policy"); got != "frame-ancestors 'self' https://partner.example.com" {
+		t.Errorf("custom CSP %q", got)
+	}
+}
+
 func TestSPABase(t *testing.T) {
 	t.Parallel()
 	s := newSPA(t, httpx.SPAOptions{Base: "/app/"})
@@ -133,6 +152,8 @@ func TestNewSPAErrors(t *testing.T) {
 		"base no slash":  {spaFS(), httpx.SPAOptions{Base: "/app"}},
 		"relative base":  {spaFS(), httpx.SPAOptions{Base: "app/"}},
 		"bad dev server": {nil, httpx.SPAOptions{DevServer: "localhost:5173"}},
+		"empty frame":    {spaFS(), httpx.SPAOptions{FrameAncestors: []string{""}}},
+		"frame with ;":   {spaFS(), httpx.SPAOptions{FrameAncestors: []string{"https://a.example; script-src *"}}},
 	} {
 		if _, err := httpx.NewSPA(c.fsys, c.opts); err == nil {
 			t.Errorf("%s: expected error", name)

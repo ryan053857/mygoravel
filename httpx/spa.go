@@ -22,6 +22,9 @@ type SPAOptions struct {
 	// DevServer 非空时（例如 http://localhost:5173）把全部请求转发给前端的开发服务器，
 	// 包括热更新的 WebSocket，不读取 fsys。只在开发时设置。
 	DevServer string
+	// FrameAncestors 是允许把页面嵌入框架的来源，例如 'self' 或 https://partner.example.com；
+	// 默认（nil）不允许任何网站嵌入，防止诱导点击。写入 HTML 文件响应的 Content-Security-Policy: frame-ancestors。
+	FrameAncestors []string
 }
 
 // SPA 提供打包进二进制的单页应用，例如 Vite 的构建产物 dist。可以并发使用。
@@ -29,10 +32,12 @@ type SPAOptions struct {
 // 存在的文件原样返回：assets/ 下的文件名带内容哈希，永久缓存；index.html 等其余文件按 ETag 协商。
 // 不存在的地址是前端路由，浏览器打开页面（Accept 含 text/html）时返回 index.html，
 // 其余请求（脚本、图片、fetch）和 assets/ 下缺失的文件返回 404，不会把页面当作脚本返回。
+// HTML 文件带有 Content-Security-Policy: frame-ancestors，默认不允许被其他网站嵌入，见 SPAOptions.FrameAncestors。
 type SPA struct {
-	base  string
-	files map[string]spaFile
-	proxy *httputil.ReverseProxy
+	base   string
+	frames string
+	files  map[string]spaFile
+	proxy  *httputil.ReverseProxy
 }
 
 type spaFile struct {
@@ -53,7 +58,15 @@ func NewSPA(fsys fs.FS, opts SPAOptions) (*SPA, error) {
 	if !strings.HasPrefix(base, "/") || !strings.HasSuffix(base, "/") {
 		return nil, errors.Newf("httpx: SPA base %q must start and end with /", base)
 	}
-	s := &SPA{base: base}
+	s := &SPA{base: base, frames: "frame-ancestors 'none'"}
+	if len(opts.FrameAncestors) > 0 {
+		for _, origin := range opts.FrameAncestors {
+			if origin == "" || strings.ContainsAny(origin, " \t\r\n;,") {
+				return nil, errors.Newf("httpx: invalid SPA frame ancestor %q", origin)
+			}
+		}
+		s.frames = "frame-ancestors " + strings.Join(opts.FrameAncestors, " ")
+	}
 	if opts.DevServer != "" {
 		target, err := url.Parse(opts.DevServer)
 		if err != nil || target.Scheme == "" || target.Host == "" {
@@ -129,6 +142,9 @@ func (s *SPA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {
 		h.Set("Cache-Control", "no-cache")
+	}
+	if strings.HasSuffix(name, ".html") {
+		h.Set("Content-Security-Policy", s.frames)
 	}
 	h.Set("ETag", f.etag)
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(f.data))

@@ -83,6 +83,15 @@ type Options struct {
 	Theme Theme
 	// Static 是应用的静态资源，见 NewStatic；页面和错误页的组件用 StaticURL 取地址。可空。
 	Static *Static
+	// CSP 返回页面响应的 Content-Security-Policy，nonce 是本次请求随机生成的、已写入 templ.WithNonce 的值。
+	// nil 时使用 DefaultCSP；返回空字符串时不设置。例如允许合作方的网站嵌入页面：
+	//
+	//	CSP: func(nonce string) string {
+	//		return strings.Replace(web.DefaultCSP(nonce), "frame-ancestors 'none'", "frame-ancestors https://partner.example.com", 1)
+	//	},
+	//
+	// 页面响应同时带有 Referrer-Policy: same-origin，跳转到其他网站时不带上后台的地址。
+	CSP func(nonce string) string
 	// TrustedOrigins 是允许跨站提交的来源，例如 https://admin.example.com；可空。
 	TrustedOrigins []string
 	// Logger 记录 5xx 错误；nil 表示 slog.Default()。
@@ -92,7 +101,7 @@ type Options struct {
 	Credentials httpx.CredentialWatcher
 }
 
-// Pages 注册页面路由：为每条路由加载会话、防御跨站请求伪造、检查登录，并统一呈现错误。可以并发使用。
+// Pages 注册页面路由：为每条路由设置内容安全策略、加载会话、防御跨站请求伪造、检查登录，并统一呈现错误。可以并发使用。
 type Pages struct {
 	opts   Options
 	logger *slog.Logger
@@ -264,6 +273,7 @@ func (p *Pages) handle(fn HandlerFunc) http.HandlerFunc {
 // 并通过 HX-Retarget、HX-Reswap 放进 ErrorTarget；否则不替换页面内容（HX-Reswap: none），
 // 错误作为 Type 为 error 的提示随 FlashEvent 送达。用于中间件等页面处理器之外的场景。
 func (p *Pages) Error(w http.ResponseWriter, r *http.Request, err error) {
+	r = r.WithContext(p.secure(w, r))
 	r = r.WithContext(p.withLook(r))
 	status := httpx.StatusOf(err)
 	if status >= http.StatusInternalServerError {
