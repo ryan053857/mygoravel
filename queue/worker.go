@@ -18,6 +18,9 @@ import (
 	"github.com/ryan053857/mygoravel/logging"
 )
 
+// outputBufferTimeout 是 nsqd 缓冲发给消费者的消息的最长时间。
+const outputBufferTimeout = 25 * time.Millisecond
+
 // ErrShuttingDown 是处理函数 context 的取消原因：停止等待超时，任务已放回 NSQ。
 var ErrShuttingDown = errors.New("queue: shutting down")
 
@@ -177,6 +180,9 @@ func (w *Worker) consume(h *handler) (*nsq.Consumer, error) {
 	cfg.MaxInFlight = h.concurrency
 	cfg.MsgTimeout = w.cfg.Lease
 	cfg.MaxAttempts = 0 // 次数由 Worker 判断
+	// nsqd 把发给消费者的消息攒在缓冲区中，默认最多 250ms 才发出，任务少时每个都要等这么久。
+	// 25ms 是 nsqd 允许的最小值（--min-output-buffer-timeout）；-1 关闭缓冲会让 nsqd 偶尔停顿数十秒。
+	cfg.OutputBufferTimeout = outputBufferTimeout
 	c, err := nsq.NewConsumer(w.cfg.Prefix+h.topic, w.cfg.Channel, cfg)
 	if err != nil {
 		return nil, errors.Wrapf(err, "queue: nsq consumer for %q", h.topic)
