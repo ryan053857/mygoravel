@@ -4,6 +4,8 @@ package api
 
 import (
 	"context"
+	"iter"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 
@@ -15,6 +17,33 @@ import (
 
 // ArticleGroup 包含 operationId 以 article- 开头的接口。
 type ArticleGroup struct{ c *wire.Client }
+
+// Cover 上传封面
+//
+// POST /articles/{id}/cover
+func (g ArticleGroup) Cover(ctx context.Context, id uuid.UUID, form article.CoverInputForm) (article.Cover, error) {
+	var out article.Cover
+	err := g.c.Do(ctx, &wire.Request{
+		Method: "POST",
+		Path:   "/articles/" + wire.PathValue(id) + "/cover",
+		Multipart: func(w *multipart.Writer) error {
+			if err := wire.WriteFile(w, "file", form.File); err != nil {
+				return err
+			}
+			if err := wire.WriteFiles(w, "extras", form.Extras); err != nil {
+				return err
+			}
+			if err := wire.WriteValue(w, "alt", form.Alt); err != nil {
+				return err
+			}
+			return nil
+		},
+		Files: append([]wire.File{form.File}, form.Extras...),
+		Auth:  true,
+		Out:   &out,
+	})
+	return out, err
+}
 
 // Create 创建文章
 //
@@ -46,6 +75,53 @@ func (g ArticleGroup) Delete(ctx context.Context, id uuid.UUID) error {
 		Path:   "/articles/" + wire.PathValue(id),
 		Auth:   true,
 	})
+}
+
+// ArticleEventsEvent 是 Article.Events 的一条事件：只有一个事件字段不为 nil，不认识的事件被跳过。
+type ArticleEventsEvent struct {
+	// ID 是事件 ID，断线后交给 wire.WithLastEventID 从它之后继续接收。
+	ID string
+	// Changed 是 changed 事件。
+	Changed *article.ArticleDTO
+	// Deleted 是 deleted 事件。
+	Deleted *uuid.UUID
+	// Message 是 message 事件。
+	Message *string
+}
+
+// Events 文章变化
+//
+// GET /articles/events
+func (g ArticleGroup) Events(ctx context.Context, in article.EventsInput) iter.Seq2[ArticleEventsEvent, error] {
+	return func(yield func(ArticleEventsEvent, error) bool) {
+		q := url.Values{}
+		wire.SetQuery(q, "tag", in.Tag, false)
+		for ev, err := range g.c.Stream(ctx, &wire.Request{
+			Method: "GET",
+			Path:   "/articles/events",
+			Query:  q,
+			Auth:   true,
+		}) {
+			if err != nil {
+				yield(ArticleEventsEvent{}, err)
+				return
+			}
+			out := ArticleEventsEvent{ID: ev.ID}
+			switch ev.Name {
+			case "changed":
+				out.Changed, err = wire.Decode[article.ArticleDTO](ev.Data)
+			case "deleted":
+				out.Deleted, err = wire.Decode[uuid.UUID](ev.Data)
+			case "", "message":
+				out.Message, err = wire.Decode[string](ev.Data)
+			default:
+				continue
+			}
+			if !yield(out, err) || err != nil {
+				return
+			}
+		}
+	}
 }
 
 // Feature 设置精选

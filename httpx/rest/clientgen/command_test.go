@@ -53,7 +53,7 @@ func TestCommandWritesClientAndRemovesStaleFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err, stderr)
 	}
-	if !strings.Contains(stderr, "skipped article-events: SSE endpoints are not generated yet") {
+	if stderr != "" {
 		t.Fatalf("stderr %q", stderr)
 	}
 	data, err := os.ReadFile(filepath.Join(out, "article.go"))

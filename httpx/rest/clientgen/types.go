@@ -162,6 +162,9 @@ func (g *generator) named(t *types.Named, f *file) (string, error) {
 		return obj.Name(), nil // error、comparable
 	}
 	p := obj.Pkg().Path()
+	if p == humaPath && obj.Name() == "FormFile" {
+		return f.use(g.outPath+"/wire", "wire") + ".File", nil
+	}
 	var name string
 	switch {
 	case isStd(p) || g.importable(p):

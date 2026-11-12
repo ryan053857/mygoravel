@@ -1,8 +1,9 @@
-// Package wire 是生成的 Go 客户端的运行时：发送请求、刷新凭据、解码错误。
+// Package wire 是生成的 Go 客户端的运行时：发送请求、刷新凭据、解码错误，接收 SSE，上传文件。
 // 生成的方法调用它，应用代码通常只用到 Options、Auth、Error 和 Code。
 package wire
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding"
@@ -10,7 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"reflect"
 	"strconv"
@@ -146,6 +150,11 @@ type Request struct {
 	Header http.Header
 	// Body 编码为 JSON 请求体；nil 或空指针表示没有请求体。
 	Body any
+	// Multipart 写出 multipart/form-data 请求体，边写边发送，不整个读进内存。
+	Multipart func(*multipart.Writer) error
+	// Files 是 Multipart 写出的文件。它们的内容都实现 io.Seeker 时，401 刷新凭据后回到开头重传；
+	// 否则不重传，调用方收到 401，凭据已经刷新，再调用一次即可。
+	Files []File
 	// Auth 表示接口需要凭据。
 	Auth bool
 	// Out 是 JSON 响应体的解码目标；nil 表示忽略响应体。
@@ -156,34 +165,11 @@ type Request struct {
 
 // Do 发送请求：受保护的接口带上凭据，401 时刷新凭据并重试一次；非 2xx 响应返回 *Error。
 func (c *Client) Do(ctx context.Context, r *Request) error {
-	body, err := encodeBody(r.Body)
+	res, err := c.roundTrip(ctx, r, "application/json")
 	if err != nil {
 		return err
-	}
-	auth := r.Auth && c.opts.Auth != nil
-	var token string
-	if auth {
-		if token, err = c.opts.Auth.Token(ctx); err != nil {
-			return err
-		}
-	}
-	res, err := c.send(ctx, r, body, token)
-	if err != nil {
-		return err
-	}
-	if res.StatusCode == http.StatusUnauthorized && auth {
-		fresh, ok := c.renew(ctx, token)
-		if ok {
-			drain(res)
-			if res, err = c.send(ctx, r, body, fresh); err != nil {
-				return err
-			}
-		}
 	}
 	defer drain(res)
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return decodeError(res)
-	}
 	if r.Response != nil {
 		if err := r.Response(res); err != nil {
 			return err
@@ -198,14 +184,160 @@ func (c *Client) Do(ctx context.Context, r *Request) error {
 	return nil
 }
 
-func (c *Client) send(ctx context.Context, r *Request, body []byte, token string) (*http.Response, error) {
+// Event 是 SSE 的一条消息。
+type Event struct {
+	// Name 是事件名，默认的 message 事件为空。
+	Name string
+	// ID 是事件 ID；断线后用 WithLastEventID 从它之后继续接收。
+	ID   string
+	Data []byte
+}
+
+type lastEventIDKey struct{}
+
+// WithLastEventID 让 ctx 中发出的 SSE 请求带上 Last-Event-ID 请求头，服务端从这个事件之后继续发送。
+func WithLastEventID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, lastEventIDKey{}, id)
+}
+
+// Stream 发送请求并逐条返回 SSE 消息。建立连接前的错误（例如 401、404）作为唯一的一个元素返回；
+// 服务端结束响应、收到 data 为 [DONE] 的消息或 ctx 取消时迭代结束。连接中断不自动重连。
+func (c *Client) Stream(ctx context.Context, r *Request) iter.Seq2[Event, error] {
+	return func(yield func(Event, error) bool) {
+		res, err := c.roundTrip(ctx, r, "text/event-stream")
+		if err != nil {
+			yield(Event{}, err)
+			return
+		}
+		defer drain(res)
+		reader := bufio.NewReader(res.Body)
+		var ev Event
+		var data []byte
+		hasData := false
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if !errors.Is(err, io.EOF) && ctx.Err() == nil {
+					yield(Event{}, fmt.Errorf("wire: read %s %s events: %w", r.Method, r.Path, err))
+				}
+				return
+			}
+			line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+			switch {
+			case line == "":
+				if hasData {
+					if string(data) == "[DONE]" {
+						return
+					}
+					ev.Data = data
+					if !yield(ev, nil) {
+						return
+					}
+				}
+				ev, data, hasData = Event{}, nil, false
+			case strings.HasPrefix(line, ":"): // 心跳等注释
+			default:
+				field, value, _ := strings.Cut(line, ":")
+				value = strings.TrimPrefix(value, " ")
+				switch field {
+				case "event":
+					ev.Name = value
+				case "id":
+					ev.ID = value
+				case "data":
+					if hasData {
+						data = append(data, '\n')
+					}
+					data, hasData = append(data, value...), true
+				}
+			}
+		}
+	}
+}
+
+// Decode 把事件数据解码为 T。
+func Decode[T any](data []byte) (*T, error) {
+	v := new(T)
+	if err := json.Unmarshal(data, v); err != nil {
+		return nil, fmt.Errorf("wire: decode event: %w", err)
+	}
+	return v, nil
+}
+
+// roundTrip 发送请求并返回 2xx 响应，非 2xx 响应返回 *Error。受保护的接口带上凭据，
+// 401 时刷新凭据，请求可以重发时再发一次。
+func (c *Client) roundTrip(ctx context.Context, r *Request, accept string) (*http.Response, error) {
+	body, err := encodeBody(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	auth := r.Auth && c.opts.Auth != nil
+	var token string
+	if auth {
+		if token, err = c.opts.Auth.Token(ctx); err != nil {
+			return nil, err
+		}
+	}
+	res, err := c.send(ctx, r, body, token, accept)
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode == http.StatusUnauthorized && auth {
+		if fresh, ok := c.renew(ctx, token); ok && rewind(r) {
+			drain(res)
+			if res, err = c.send(ctx, r, body, fresh, accept); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		defer drain(res)
+		return nil, decodeError(res)
+	}
+	return res, nil
+}
+
+// rewind 准备重发请求：multipart 的文件内容都实现 io.Seeker 时回到开头，否则不能重发。
+func rewind(r *Request) bool {
+	if r.Multipart == nil {
+		return true
+	}
+	for _, f := range r.Files {
+		if _, ok := f.Body.(io.Seeker); f.Body != nil && !ok {
+			return false
+		}
+	}
+	for _, f := range r.Files {
+		if s, ok := f.Body.(io.Seeker); ok {
+			if _, err := s.Seek(0, io.SeekStart); err != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (c *Client) send(ctx context.Context, r *Request, body []byte, token, accept string) (*http.Response, error) {
 	target := c.base + r.Path
 	if len(r.Query) > 0 {
 		target += "?" + r.Query.Encode()
 	}
 	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
+	contentType := ""
+	switch {
+	case r.Multipart != nil:
+		pr, pw := io.Pipe()
+		mw := multipart.NewWriter(pw)
+		go func() {
+			err := r.Multipart(mw)
+			if err == nil {
+				err = mw.Close()
+			}
+			_ = pw.CloseWithError(err)
+		}()
+		reader, contentType = pr, mw.FormDataContentType()
+	case body != nil:
+		reader, contentType = bytes.NewReader(body), "application/json"
 	}
 	req, err := http.NewRequestWithContext(ctx, r.Method, target, reader)
 	if err != nil {
@@ -214,9 +346,9 @@ func (c *Client) send(ctx context.Context, r *Request, body []byte, token string
 	for name, values := range r.Header {
 		req.Header[name] = values
 	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", accept)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -229,7 +361,72 @@ func (c *Client) send(ctx context.Context, r *Request, body []byte, token string
 			req.Header.Set("Accept-Language", lang)
 		}
 	}
+	if id, ok := ctx.Value(lastEventIDKey{}).(string); ok && id != "" {
+		req.Header.Set("Last-Event-ID", id)
+	}
 	return c.opts.HTTPClient.Do(req)
+}
+
+// File 是上传的一个文件。
+type File struct {
+	// Name 是文件名，例如 cover.png。
+	Name string
+	// ContentType 是文件的类型，例如 image/png；为空时是 application/octet-stream。
+	ContentType string
+	// Body 是文件内容；为 nil 时不发送这个文件。实现 io.Seeker 时，凭据过期后可以自动重传。
+	Body io.Reader
+}
+
+var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
+// WriteFile 写出一个文件字段；f.Body 为 nil 时跳过。
+func WriteFile(w *multipart.Writer, field string, f File) error {
+	if f.Body == nil {
+		return nil
+	}
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, quoteEscaper.Replace(field), quoteEscaper.Replace(f.Name)))
+	ct := f.ContentType
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	h.Set("Content-Type", ct)
+	part, err := w.CreatePart(h)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(part, f.Body)
+	return err
+}
+
+// WriteFiles 写出同一个字段的多个文件。
+func WriteFiles(w *multipart.Writer, field string, files []File) error {
+	for _, f := range files {
+		if err := WriteFile(w, field, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WriteValue 写出一个普通字段；零值不发送，切片的每个元素一个字段。
+func WriteValue(w *multipart.Writer, field string, v any) error {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() || rv.IsZero() {
+		return nil
+	}
+	for rv.Kind() == reflect.Pointer {
+		rv = rv.Elem()
+	}
+	if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() != reflect.Uint8 {
+		for i := range rv.Len() {
+			if err := w.WriteField(field, format(rv.Index(i).Interface())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return w.WriteField(field, format(rv.Interface()))
 }
 
 // renew 在 stale 被拒绝后取得新 token。别的请求已经换过 token 时直接使用；

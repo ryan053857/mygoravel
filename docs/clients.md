@@ -14,6 +14,8 @@
     - [调用接口](#calling-go-client)
     - [错误](#go-client-errors)
     - [认证](#go-client-auth)
+    - [事件流](#go-client-events)
+    - [上传文件](#go-client-uploads)
     - [复制的类型](#copied-types)
 - [其他语言](#other-languages)
 - [App 版本](#app-version)
@@ -281,7 +283,7 @@ blog/
 
 目录名就是根包的包名。重新生成时，不再生成的文件会被删除，你自己放进去的文件保持不变。把生成的代码提交到仓库，CI 中重新生成后用 `git diff --exit-code` 检查是否忘了更新，与 [openapi.json](#checking-changes) 的做法相同。
 
-SSE 接口、上传文件（`RawBody`）和返回原始字节的接口暂时不生成，命令把它们列在标准错误中。
+返回原始字节或非 SSE 流的接口、`RawBody` 不是 `huma.MultipartFormFiles` 的接口不生成，命令把它们列在标准错误中。
 
 <a id="calling-go-client"></a>
 ### 调用接口
@@ -372,6 +374,49 @@ func (t *tokens) Refresh(ctx context.Context) error {
 ```
 
 受保护的接口返回 `401` 时，客户端调用一次 `Refresh`，再用新 token 重试一次。几个请求同时收到 `401` 时只刷新一次；`Refresh` 返回错误时，调用方收到原来的 `401`，这时让用户重新登录。
+
+<a id="go-client-events"></a>
+### 事件流
+
+用 [`rest.RegisterSSE`](sse.md#json-api) 登记的接口返回事件的迭代器。每个接口生成一个事件结构体，每种事件一个指针字段，一次只有一个不为 `nil`；默认的 `message` 事件是 `Message` 字段：
+
+```go
+for ev, err := range c.Article.Events(ctx, article.EventsInput{}) {
+    if err != nil {
+        return err // 建立连接前的错误（例如 401）也从这里返回
+    }
+    switch {
+    case ev.Changed != nil:
+        refresh(*ev.Changed)
+    case ev.Deleted != nil:
+        remove(*ev.Deleted)
+    }
+}
+```
+
+服务端结束响应、收到 `data: [DONE]`、`ctx` 取消或者你跳出循环时，迭代结束。服务端新增的、客户端还不认识的事件被跳过，旧版本的 App 不受影响。连接中断时不会自动重连：需要接着上次的位置继续时，把最后一个事件的 `ID` 用 `wire.WithLastEventID` 放进 `ctx`，请求会带上 `Last-Event-ID`：
+
+```go
+events := c.Article.Events(wire.WithLastEventID(ctx, lastID), article.EventsInput{})
+```
+
+<a id="go-client-uploads"></a>
+### 上传文件
+
+`RawBody` 为 `huma.MultipartFormFiles[T]` 的接口（见[服务端上传接口](filesystem.md#rest-upload)），表单 `T` 作为最后一个参数；`huma.FormFile` 字段是 `wire.File`，其余字段原样保留。表单是匿名结构体时，类型以输入类型的名字加 `Form` 命名：
+
+```go
+f, err := os.Open("cover.png")
+if err != nil {
+    return err
+}
+defer f.Close()
+uploaded, err := c.File.Upload(ctx, file.UploadInputForm{
+    File: wire.File{Name: "cover.png", ContentType: "image/png", Body: f},
+})
+```
+
+请求体边读边发送，不会把文件整个读进内存。`Body` 为 `nil` 的文件不发送。受保护的接口返回 `401` 时，文件内容实现了 `io.Seeker`（例如 `*os.File`、`bytes.Reader`）就在刷新凭据后从头重传；否则只刷新凭据，调用方收到 `401`，再调用一次即可。
 
 <a id="copied-types"></a>
 ### 复制的类型

@@ -43,6 +43,10 @@ type endpoint struct {
 	input         *types.TypeName // 需要输入类型的副本作为参数时不为 nil
 	inputKeep     fieldFilter     // input 不为 nil 时，副本保留的字段
 
+	form       types.Type  // multipart 表单的类型，没有为 nil
+	formFields []formField // 表单的字段
+	events     []event     // SSE 端点的事件，按名称排序；其他端点为 nil
+
 	outBody    types.Type // 响应体类型，没有为 nil
 	outObj     *types.TypeName
 	outBodyAt  int             // Body 字段的序号
@@ -194,15 +198,34 @@ func (g *generator) emit(res *Result, name, pkg, doc string, f *file, body strin
 	return nil
 }
 
+// formField 是 multipart 表单的一个字段。
+type formField struct {
+	name string // 表单字段名
+	sel  string // Go 字段名
+	kind string // file、files 或 value
+}
+
+// event 是 SSE 端点的一种事件。
+type event struct {
+	name  string // 事件名，默认事件为 message
+	field string // 事件结构体中的字段名
+	typ   reflect.Type
+	ref   string // 渲染时得到的数据类型写法
+}
+
+var humaPath = reflect.TypeFor[huma.FormFile]().PkgPath()
+
 // analyze 把端点的输入输出类型分解为方法的参数和返回值。
 func (g *generator) analyze(ep rest.Endpoint) (*endpoint, error) {
-	if ep.Output == reflect.TypeFor[huma.StreamResponse]() {
-		if ep.Events != nil {
-			return nil, skip("SSE endpoints are not generated yet")
-		}
-		return nil, skip("streaming responses are not generated")
-	}
 	e := &endpoint{ep: ep}
+	if ep.Output == reflect.TypeFor[huma.StreamResponse]() {
+		if ep.Events == nil {
+			return nil, skip("streaming responses other than SSE are not generated")
+		}
+		if err := e.analyzeEvents(); err != nil {
+			return nil, err
+		}
+	}
 	parts := strings.Split(ep.OperationID, "-")
 	if len(parts) > 1 {
 		e.group = pascal(parts[:1])
@@ -212,10 +235,33 @@ func (g *generator) analyze(ep rest.Endpoint) (*endpoint, error) {
 	if err := g.analyzeInput(e); err != nil {
 		return nil, err
 	}
-	if err := g.analyzeOutput(e); err != nil {
-		return nil, err
+	if e.events == nil {
+		if err := g.analyzeOutput(e); err != nil {
+			return nil, err
+		}
 	}
 	return e, nil
+}
+
+// analyzeEvents 为每种事件确定事件结构体中的字段名。
+func (e *endpoint) analyzeEvents() error {
+	fields := map[string]string{"ID": "id"}
+	for name, t := range e.ep.Events {
+		if name == "" {
+			name = "message"
+		}
+		field := pascal(strings.FieldsFunc(name, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }))
+		if !token.IsIdentifier(field) || !unicode.IsUpper([]rune(field)[0]) {
+			return errors.Newf("event %q cannot be turned into a field name", name)
+		}
+		if other, ok := fields[field]; ok {
+			return errors.Newf("events %q and %q would both be the field %s", other, name, field)
+		}
+		fields[field] = name
+		e.events = append(e.events, event{name: name, field: field, typ: t})
+	}
+	slices.SortFunc(e.events, func(a, b event) int { return strings.Compare(a.name, b.name) })
+	return nil
 }
 
 func groupSegment(opID string) string {
@@ -245,7 +291,9 @@ func (g *generator) analyzeInput(e *endpoint) error {
 		case v.Name() == "Body" && !v.Embedded():
 			e.body, e.inBody, keep[i] = v.Type(), i, true
 		case v.Name() == "RawBody" && !v.Embedded():
-			return skip("raw and multipart request bodies are not generated yet")
+			if err := e.analyzeForm(v.Type()); err != nil {
+				return err
+			}
 		case v.Embedded() && !hasParamTag(tag):
 			inner, ok := v.Type().Underlying().(*types.Struct)
 			if !ok {
@@ -284,6 +332,48 @@ func (g *generator) analyzeInput(e *endpoint) error {
 		e.inputKeep = func(i int, _ *types.Var, _ reflect.StructTag) bool { return keep[i] }
 	}
 	return nil
+}
+
+// analyzeForm 分析 RawBody huma.MultipartFormFiles[T] 的表单 T；其他形式的 RawBody 不生成。
+func (e *endpoint) analyzeForm(t types.Type) error {
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != humaPath ||
+		named.Obj().Name() != "MultipartFormFiles" || named.TypeArgs().Len() != 1 {
+		return skip("raw request bodies are not generated; use huma.MultipartFormFiles for uploads")
+	}
+	e.form = named.TypeArgs().At(0)
+	st, ok := e.form.Underlying().(*types.Struct)
+	if !ok {
+		return errors.Newf("multipart form %s is not a struct", e.form)
+	}
+	for i := range st.NumFields() {
+		v := st.Field(i)
+		if !v.Exported() || v.Embedded() {
+			continue
+		}
+		f := formField{name: reflect.StructTag(st.Tag(i)).Get("form"), sel: v.Name(), kind: "value"}
+		if f.name == "" {
+			f.name = v.Name()
+		}
+		switch {
+		case isFormFile(v.Type()):
+			f.kind = "file"
+		case isSliceOf(v.Type(), isFormFile):
+			f.kind = "files"
+		}
+		e.formFields = append(e.formFields, f)
+	}
+	return nil
+}
+
+func isFormFile(t types.Type) bool {
+	n, ok := t.(*types.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == humaPath && n.Obj().Name() == "FormFile"
+}
+
+func isSliceOf(t types.Type, elem func(types.Type) bool) bool {
+	s, ok := t.(*types.Slice)
+	return ok && elem(s.Elem())
 }
 
 func (e *endpoint) add(loc string, p param) {
@@ -350,7 +440,7 @@ func paramOf(v *types.Var, tag reflect.StructTag, prefix string) (string, param,
 	case tag.Get("cookie") != "":
 		return "", p, skip("cookie parameters are not supported")
 	case tag.Get("form") != "":
-		return "", p, skip("form parameters are not generated yet")
+		return "", p, skip("urlencoded form parameters are not generated")
 	}
 	return "", p, nil
 }
@@ -432,9 +522,9 @@ func isInt(t types.Type) bool {
 	return ok && b.Info()&types.IsInteger != 0
 }
 
-// bodyRef 返回请求体或响应体类型在文件 f 中的写法。匿名结构体在 owner 的镜像包中生成为
-// <owner>Body，调用方不必重复写出带 tag 的结构体。
-func (g *generator) bodyRef(owner *types.TypeName, body types.Type, kind string, f *file) (string, error) {
+// bodyRef 返回请求体、响应体或表单类型在文件 f 中的写法。匿名结构体在 owner 的镜像包中生成为
+// <owner><suffix>，例如 RefreshInputBody，调用方不必重复写出带 tag 的结构体。
+func (g *generator) bodyRef(owner *types.TypeName, body types.Type, suffix, kind string, f *file) (string, error) {
 	st, ok := body.(*types.Struct)
 	if !ok {
 		return g.expr(body, f)
@@ -443,17 +533,17 @@ func (g *generator) bodyRef(owner *types.TypeName, body types.Type, kind string,
 	if err != nil {
 		return "", err
 	}
-	name := owner.Name() + "Body"
+	name := owner.Name() + suffix
 	if !m.bodies[name] {
 		if owner.Pkg().Scope().Lookup(name) != nil {
-			return "", errors.Newf("clientgen: the anonymous %s body of %s.%s would be named %s, which the package already declares",
+			return "", errors.Newf("clientgen: the anonymous %s of %s.%s would be named %s, which the package already declares",
 				kind, owner.Pkg().Name(), owner.Name(), name)
 		}
 		decl, err := g.structExpr(st, m.file, nil)
 		if err != nil {
 			return "", errors.Wrapf(err, "%s.%s", owner.Pkg().Name(), owner.Name())
 		}
-		m.overrides[name] = "// " + name + " 是 " + owner.Name() + " 的" + kind + "体。\ntype " + name + " " + decl + "\n"
+		m.overrides[name] = "// " + name + " 是 " + owner.Name() + " 的" + kind + "。\ntype " + name + " " + decl + "\n"
 		m.bodies[name] = true
 	}
 	if m.path == f.path {
@@ -472,7 +562,7 @@ func (g *generator) override(obj *types.TypeName, keep fieldFilter, at int, body
 	if _, ok := m.overrides[obj.Name()]; !ok {
 		replace := map[int]string{}
 		if body != nil {
-			ref, err := g.bodyRef(obj, body, kind, m.file)
+			ref, err := g.bodyRef(obj, body, "Body", kind, m.file)
 			if err != nil {
 				return "", err
 			}
@@ -491,60 +581,88 @@ func (g *generator) override(obj *types.TypeName, keep fieldFilter, at int, body
 }
 
 // locals 是生成的方法中使用的局部名称，参数名不能与它们相同。
-var locals = []string{"ctx", "out", "err", "q", "h", "in", "body", "res", "g", "c"}
+var locals = []string{"ctx", "out", "err", "q", "h", "in", "body", "form", "res", "w", "ev", "yield", "g", "c"}
 
-// method 把端点渲染为方法。
+// method 把端点渲染为方法；SSE 端点还生成它的事件结构体。
 func (g *generator) method(b *strings.Builder, f *file, recv, client string, e *endpoint) error {
 	ctxName := f.use("context", "context")
 	wire := f.use(g.outPath+"/wire", "wire")
+	wrap := func(err error) error { return errors.Wrapf(err, "clientgen: %s", e.ep.OperationID) }
 	// 先渲染所有类型，记下方法中用到的导入名，再给路径参数取名。
 	pathTypes := make([]string, len(e.path))
 	for i, p := range e.path {
 		t, err := g.expr(p.field.Type(), f)
 		if err != nil {
-			return errors.Wrapf(err, "clientgen: %s: path parameter %s", e.ep.OperationID, p.name)
+			return wrap(errors.Wrapf(err, "path parameter %s", p.name))
 		}
 		pathTypes[i] = t
 	}
-	var paramType, bodyExpr string
+	var params []string
+	var bodyExpr string
 	switch {
 	case e.input != nil:
-		t, err := g.override(e.input, e.inputKeep, e.inBody, e.body, "请求", f)
+		t, err := g.override(e.input, e.inputKeep, e.inBody, e.body, "请求体", f)
 		if err != nil {
-			return errors.Wrapf(err, "clientgen: %s", e.ep.OperationID)
+			return wrap(err)
 		}
-		paramType = "in " + t
+		params = append(params, "in "+t)
 		if e.body != nil {
 			bodyExpr = "in.Body"
 		}
 	case e.body != nil:
-		t, err := g.bodyRef(e.inObj, e.body, "请求", f)
+		t, err := g.bodyRef(e.inObj, e.body, "Body", "请求体", f)
 		if err != nil {
-			return errors.Wrapf(err, "clientgen: %s: request body", e.ep.OperationID)
+			return wrap(errors.Wrap(err, "request body"))
 		}
-		paramType, bodyExpr = "body "+t, "body"
+		params, bodyExpr = append(params, "body "+t), "body"
 	}
-	var result string
-	switch {
-	case e.output != nil:
-		t, err := g.override(e.output, e.outputKeep, e.outBodyAt, e.outBody, "响应", f)
+	if e.form != nil {
+		t, err := g.bodyRef(e.inObj, e.form, "Form", "表单", f)
 		if err != nil {
-			return errors.Wrapf(err, "clientgen: %s", e.ep.OperationID)
+			return wrap(errors.Wrap(err, "form"))
+		}
+		params = append(params, "form "+t)
+	}
+	var result, eventType string
+	var eventDecl strings.Builder
+	switch {
+	case e.events != nil:
+		eventType = e.group + e.method + "Event"
+		eventDecl.WriteString("// " + eventType + " 是 " + strings.TrimPrefix(e.group+"."+e.method, ".") +
+			" 的一条事件：只有一个事件字段不为 nil，不认识的事件被跳过。\n")
+		eventDecl.WriteString("type " + eventType + " struct {\n\t// ID 是事件 ID，断线后交给 wire.WithLastEventID 从它之后继续接收。\n\tID string\n")
+		for i, ev := range e.events {
+			t, err := g.reflectRef(ev.typ, f)
+			if err != nil {
+				return wrap(errors.Wrapf(err, "event %s", ev.name))
+			}
+			e.events[i].ref = t
+			eventDecl.WriteString("\t// " + ev.field + " 是 " + ev.name + " 事件。\n\t" + ev.field + " *" + t + "\n")
+		}
+		eventDecl.WriteString("}\n\n")
+		result = f.use("iter", "iter") + ".Seq2[" + eventType + ", error]"
+	case e.output != nil:
+		t, err := g.override(e.output, e.outputKeep, e.outBodyAt, e.outBody, "响应体", f)
+		if err != nil {
+			return wrap(err)
 		}
 		result = t
 	case e.outBody != nil:
-		t, err := g.bodyRef(e.outObj, e.outBody, "响应", f)
+		t, err := g.bodyRef(e.outObj, e.outBody, "Body", "响应体", f)
 		if err != nil {
-			return errors.Wrapf(err, "clientgen: %s: response body", e.ep.OperationID)
+			return wrap(errors.Wrap(err, "response body"))
 		}
 		result = t
 	}
-	var urlName, httpName string
+	var urlName, httpName, multipartName string
 	if len(e.query) > 0 {
 		urlName = f.use("net/url", "url")
 	}
 	if len(e.header) > 0 || e.output != nil {
 		httpName = f.use("net/http", "http")
+	}
+	if e.form != nil {
+		multipartName = f.use("mime/multipart", "multipart")
 	}
 
 	taken := map[string]bool{}
@@ -560,73 +678,138 @@ func (g *generator) method(b *strings.Builder, f *file, recv, client string, e *
 		taken[args[i]] = true
 	}
 
+	b.WriteString(eventDecl.String())
 	b.WriteString(g.methodDoc(e))
 	b.WriteString("func (" + recv + ") " + e.method + "(ctx " + ctxName + ".Context")
 	for i := range e.path {
 		b.WriteString(", " + args[i] + " " + pathTypes[i])
 	}
-	if paramType != "" {
-		b.WriteString(", " + paramType)
+	for _, p := range params {
+		b.WriteString(", " + p)
 	}
 	b.WriteString(") ")
-	if result != "" {
+	indent := "\t"
+	switch {
+	case e.events != nil:
+		b.WriteString(result + " {\n\treturn func(yield func(" + eventType + ", error) bool) {\n")
+		indent = "\t\t"
+	case result != "":
 		b.WriteString("(" + result + ", error) {\n\tvar out " + result + "\n")
-	} else {
+	default:
 		b.WriteString("error {\n")
 	}
 	if len(e.query) > 0 {
-		b.WriteString("\tq := " + urlName + ".Values{}\n")
+		b.WriteString(indent + "q := " + urlName + ".Values{}\n")
 		for _, p := range e.query {
-			b.WriteString("\t" + wire + ".SetQuery(q, " + strconv.Quote(p.name) + ", in." + p.sel + ", " + strconv.FormatBool(p.explode) + ")\n")
+			b.WriteString(indent + wire + ".SetQuery(q, " + strconv.Quote(p.name) + ", in." + p.sel + ", " + strconv.FormatBool(p.explode) + ")\n")
 		}
 	}
 	if len(e.header) > 0 {
-		b.WriteString("\th := " + httpName + ".Header{}\n")
+		b.WriteString(indent + "h := " + httpName + ".Header{}\n")
 		for _, p := range e.header {
-			b.WriteString("\t" + wire + ".SetHeader(h, " + strconv.Quote(p.name) + ", in." + p.sel + ")\n")
+			b.WriteString(indent + wire + ".SetHeader(h, " + strconv.Quote(p.name) + ", in." + p.sel + ")\n")
 		}
 	}
-	call := "\t" + "err := "
-	if result == "" {
-		call = "\treturn "
+	request := g.request(e, wire, httpName, multipartName, bodyExpr, args, indent)
+	switch {
+	case e.events != nil:
+		b.WriteString(indent + "for ev, err := range " + client + ".Stream(ctx, " + request + ") {\n")
+		b.WriteString(indent + "\tif err != nil {\n" + indent + "\t\tyield(" + eventType + "{}, err)\n" + indent + "\t\treturn\n" + indent + "\t}\n")
+		b.WriteString(indent + "\tout := " + eventType + "{ID: ev.ID}\n" + indent + "\tswitch ev.Name {\n")
+		for _, ev := range e.events {
+			names := strconv.Quote(ev.name)
+			if ev.name == "message" {
+				names = `"", "message"`
+			}
+			b.WriteString(indent + "\tcase " + names + ":\n" + indent + "\t\tout." + ev.field + ", err = " + wire + ".Decode[" + ev.ref + "](ev.Data)\n")
+		}
+		b.WriteString(indent + "\tdefault:\n" + indent + "\t\tcontinue\n" + indent + "\t}\n")
+		b.WriteString(indent + "\tif !yield(out, err) || err != nil {\n" + indent + "\t\treturn\n" + indent + "\t}\n")
+		b.WriteString(indent + "}\n\t}\n}\n\n")
+	case result != "":
+		b.WriteString("\terr := " + client + ".Do(ctx, " + request + ")\n\treturn out, err\n}\n\n")
+	default:
+		b.WriteString("\treturn " + client + ".Do(ctx, " + request + ")\n}\n\n")
 	}
-	b.WriteString(call + client + ".Do(ctx, &" + wire + ".Request{\n")
-	b.WriteString("\t\tMethod: " + strconv.Quote(e.ep.Method) + ",\n")
-	b.WriteString("\t\tPath: " + pathExpr(e.ep.Path, e.path, args, wire) + ",\n")
+	return nil
+}
+
+// request 返回 &wire.Request{...} 表达式。
+func (g *generator) request(e *endpoint, wire, httpName, multipartName, bodyExpr string, args []string, indent string) string {
+	var b strings.Builder
+	in := indent + "\t"
+	b.WriteString("&" + wire + ".Request{\n")
+	b.WriteString(in + "Method: " + strconv.Quote(e.ep.Method) + ",\n")
+	b.WriteString(in + "Path: " + pathExpr(e.ep.Path, e.path, args, wire) + ",\n")
 	if len(e.query) > 0 {
-		b.WriteString("\t\tQuery: q,\n")
+		b.WriteString(in + "Query: q,\n")
 	}
 	if len(e.header) > 0 {
-		b.WriteString("\t\tHeader: h,\n")
+		b.WriteString(in + "Header: h,\n")
 	}
 	if bodyExpr != "" {
-		b.WriteString("\t\tBody: " + bodyExpr + ",\n")
+		b.WriteString(in + "Body: " + bodyExpr + ",\n")
+	}
+	if e.form != nil {
+		b.WriteString(in + "Multipart: func(w *" + multipartName + ".Writer) error {\n")
+		for _, f := range e.formFields {
+			fn := map[string]string{"file": "WriteFile", "files": "WriteFiles", "value": "WriteValue"}[f.kind]
+			b.WriteString(in + "\tif err := " + wire + "." + fn + "(w, " + strconv.Quote(f.name) + ", form." + f.sel + "); err != nil {\n" +
+				in + "\t\treturn err\n" + in + "\t}\n")
+		}
+		b.WriteString(in + "\treturn nil\n" + in + "},\n")
+		var singles, lists []string
+		for _, f := range e.formFields {
+			switch f.kind {
+			case "file":
+				singles = append(singles, "form."+f.sel)
+			case "files":
+				lists = append(lists, "form."+f.sel)
+			}
+		}
+		if len(singles)+len(lists) > 0 {
+			files := "[]" + wire + ".File{" + strings.Join(singles, ", ") + "}"
+			for _, l := range lists {
+				files = "append(" + files + ", " + l + "...)"
+			}
+			b.WriteString(in + "Files: " + files + ",\n")
+		}
 	}
 	if !e.ep.Public {
-		b.WriteString("\t\tAuth: true,\n")
+		b.WriteString(in + "Auth: true,\n")
 	}
 	switch {
+	case e.events != nil:
 	case e.output != nil:
 		if e.outBody != nil {
-			b.WriteString("\t\tOut: &out.Body,\n")
+			b.WriteString(in + "Out: &out.Body,\n")
 		}
-		b.WriteString("\t\tResponse: func(res *" + httpName + ".Response) error {\n")
+		b.WriteString(in + "Response: func(res *" + httpName + ".Response) error {\n")
 		if e.outStatus != "" {
-			b.WriteString("\t\t\tout." + e.outStatus + " = res.StatusCode\n")
+			b.WriteString(in + "\tout." + e.outStatus + " = res.StatusCode\n")
 		}
 		for _, h := range e.outHeaders {
-			b.WriteString("\t\t\tif err := " + wire + ".ParseHeader(res, " + strconv.Quote(h.name) + ", &out." + h.sel + "); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n")
+			b.WriteString(in + "\tif err := " + wire + ".ParseHeader(res, " + strconv.Quote(h.name) + ", &out." + h.sel + "); err != nil {\n" +
+				in + "\t\treturn err\n" + in + "\t}\n")
 		}
-		b.WriteString("\t\t\treturn nil\n\t\t},\n")
+		b.WriteString(in + "\treturn nil\n" + in + "},\n")
 	case e.outBody != nil:
-		b.WriteString("\t\tOut: &out,\n")
+		b.WriteString(in + "Out: &out,\n")
 	}
-	b.WriteString("\t})\n")
-	if result != "" {
-		b.WriteString("\treturn out, err\n")
+	b.WriteString(indent + "}")
+	return b.String()
+}
+
+// reflectRef 返回 SSE 事件数据类型在文件 f 中的写法：命名类型从源码中找到声明，基本类型直接使用。
+func (g *generator) reflectRef(t reflect.Type, f *file) (string, error) {
+	if t.PkgPath() == "" && t.Name() != "" {
+		return t.Name(), nil
 	}
-	b.WriteString("}\n\n")
-	return nil
+	obj, err := g.lookup(t)
+	if err != nil {
+		return "", err
+	}
+	return g.expr(obj.Type(), f)
 }
 
 func (g *generator) methodDoc(e *endpoint) string {

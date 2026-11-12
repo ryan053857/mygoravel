@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -60,7 +59,7 @@ func generate(t *testing.T, api *rest.API, opts clientgen.Options) *clientgen.Re
 
 func TestGeneratedExampleIsUpToDate(t *testing.T) {
 	res := generate(t, exampleAPI(rest.ModeOpenAPI, nil), clientgen.Options{})
-	if want := []string{"article-events: SSE endpoints are not generated yet"}; strings.Join(res.Skipped, "\n") != strings.Join(want, "\n") {
+	if len(res.Skipped) > 0 {
 		t.Fatalf("skipped %q", res.Skipped)
 	}
 	if *update {

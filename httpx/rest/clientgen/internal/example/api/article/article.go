@@ -38,10 +38,31 @@ type Changes struct {
 	Tags []string `json:"tags,omitempty" required:"false"`
 }
 
+// Cover 是上传的封面。
+type Cover struct {
+	Filename    string   `json:"filename"`
+	ContentType string   `json:"content_type"`
+	Size        int64    `json:"size"`
+	Alt         string   `json:"alt"`
+	Extras      []string `json:"extras"`
+}
+
+// CoverInputForm 是 CoverInput 的表单。
+type CoverInputForm struct {
+	File   wire.File   `form:"file" contentType:"image/png,image/jpeg" required:"true"`
+	Extras []wire.File `form:"extras"`
+	Alt    string      `form:"alt"`
+}
+
 // CreatedOutput 是创建文章的响应。
 type CreatedOutput struct {
 	Location string `header:"Location"`
 	Body     ArticleDTO
+}
+
+// EventsInput 订阅文章的变化。
+type EventsInput struct {
+	Tag string `query:"tag"`
 }
 
 // FeatureInputBody 是 FeatureInput 的请求体。

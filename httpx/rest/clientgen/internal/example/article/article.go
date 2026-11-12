@@ -3,8 +3,10 @@ package article
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -119,7 +121,33 @@ type FeatureInput struct {
 	}
 }
 
-type EventsInput struct{}
+// EventsInput 订阅文章的变化。
+type EventsInput struct {
+	Tag string `query:"tag"`
+}
+
+// CoverInput 上传文章的封面和附图。
+type CoverInput struct {
+	ID      uuid.UUID `path:"id"`
+	RawBody huma.MultipartFormFiles[struct {
+		File   huma.FormFile   `form:"file" contentType:"image/png,image/jpeg" required:"true"`
+		Extras []huma.FormFile `form:"extras"`
+		Alt    string          `form:"alt"`
+	}]
+}
+
+// Cover 是上传的封面。
+type Cover struct {
+	Filename    string   `json:"filename"`
+	ContentType string   `json:"content_type"`
+	Size        int64    `json:"size"`
+	Alt         string   `json:"alt"`
+	Extras      []string `json:"extras"`
+}
+
+type CoverOutput struct {
+	Body Cover
+}
 
 type PingOutput struct {
 	Body struct {
@@ -158,7 +186,8 @@ func Register(api *rest.API, s *Store, auth func(*huma.Operation)) {
 	rest.Register(api, op("article-feature", http.MethodPut, "/articles/{id}/feature", "设置精选", true), s.feature)
 	rest.Register(api, op("article-list", http.MethodGet, "/articles", "文章列表", false), s.list)
 	rest.RegisterSSE(api, op("article-events", http.MethodGet, "/articles/events", "文章变化", true),
-		map[string]any{"changed": ArticleDTO{}}, s.events)
+		map[string]any{"changed": ArticleDTO{}, "deleted": uuid.UUID{}, "message": ""}, s.events)
+	rest.Register(api, op("article-cover", http.MethodPost, "/articles/{id}/cover", "上传封面", true), s.cover)
 	rest.Register(api, op("ping", http.MethodGet, "/ping", "", false), ping)
 }
 
@@ -268,8 +297,54 @@ func (s *Store) list(_ context.Context, in *ListInput) (*ListOutput, error) {
 	return &ListOutput{Body: page.NewOffset(matched[from:to], in.OffsetParams, int64(len(matched)))}, nil
 }
 
-func (s *Store) events(context.Context, *EventsInput) (*huma.StreamResponse, error) {
-	return rest.SSE(func(*httpx.Stream) error { return nil }), nil
+// events 发出固定的几条事件：Last-Event-ID 之前的跳过，future 是客户端不认识的事件，最后以 [DONE] 结束。
+func (s *Store) events(_ context.Context, in *EventsInput) (*huma.StreamResponse, error) {
+	if in.Tag == "missing" {
+		return nil, ErrNotFound.New()
+	}
+	id := uuid.MustParse("0193a5c2-7d1e-7b3a-9f61-2c4e8d0a1b2c")
+	events := []struct {
+		name string
+		data any
+	}{
+		{"changed", ArticleDTO{ID: id, Title: "Hello", Status: StatusPublished, Tags: []string{}}},
+		{"future", map[string]int{"n": 1}},
+		{"deleted", id},
+		{"", "multi\nline"},
+	}
+	return rest.SSE(func(st *httpx.Stream) error {
+		after := 0
+		if v := st.LastEventID(); v != "" {
+			after, _ = strconv.Atoi(v)
+		}
+		for i, ev := range events {
+			if i+1 <= after {
+				continue
+			}
+			if err := st.SendJSON(httpx.Event{Name: ev.name, ID: strconv.Itoa(i + 1)}, ev.data); err != nil {
+				return err
+			}
+		}
+		return st.Send(httpx.Event{}, "[DONE]")
+	}), nil
+}
+
+func (s *Store) cover(_ context.Context, in *CoverInput) (*CoverOutput, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.index(in.ID); err != nil {
+		return nil, err
+	}
+	form := in.RawBody.Data()
+	data, err := io.ReadAll(form.File)
+	if err != nil {
+		return nil, err
+	}
+	c := Cover{Filename: form.File.Filename, ContentType: form.File.ContentType, Size: int64(len(data)), Alt: form.Alt, Extras: []string{}}
+	for _, f := range form.Extras {
+		c.Extras = append(c.Extras, f.Filename)
+	}
+	return &CoverOutput{Body: c}, nil
 }
 
 func (s *Store) find(slug string) int {
