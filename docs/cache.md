@@ -8,6 +8,7 @@
     - [读取：先缓存后数据库](#cache-aside)
     - [热点、集中过期与不存在的数据](#hot-keys)
     - [失效：提交后删除](#invalidation)
+    - [一次失效一批：tag](#tags)
 - [缓存键与序列化](#keys-and-serialization)
 - [部署](#deployment)
 - [测试](#testing)
@@ -163,7 +164,30 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 
 这是**最终一致**的缓存：删除之前开始的加载可能在删除之后才写回读到的旧值，直到过期才会更新。所以过期时间应当有限；不能接受短暂旧数据的场景，请直接读数据库。
 
-如果还缓存了文章列表，修改文章时列表的键也要一并删除。
+如果还缓存了文章列表，修改文章时列表也要失效，见下一节。
+
+<a id="tags"></a>
+### 一次失效一批：tag
+
+文章列表按页缓存，发布一篇文章会影响每一页，逐个删除需要知道缓存了哪些页。这时给值加上 tag，修改后让 tag 失效，带有它的值一起作废。`Remember` 最后的参数是值的 tag：
+
+```go
+page, err := a.lists.Remember(ctx, strconv.Itoa(n), func(ctx context.Context) ([]Summary, error) {
+    return listPublished(ctx, a.db, n)
+}, "blog:articles")
+```
+
+发布文章的事务提交后，`Invalidate` 让这个 tag 失效：
+
+```go
+tx.AfterCommit(func(ctx context.Context) error {
+    return a.lists.Invalidate(ctx, "blog:articles")
+})
+```
+
+tag 是一个版本号。`Remember` 在同一次请求中读取值和它的 tag 的版本，版本变了就重新加载；`Invalidate` 只是把版本加一，不需要知道有哪些键。tag 不属于某个 `Cache`，共用同一个 Memcached 的 `Cache` 之间可以共用 tag，所以 tag 由应用自己加上命名空间。
+
+和 `Forget` 不同，tag 没有[短暂的旧数据](#invalidation)：版本在加载之前读取，`Invalidate` 返回之后，`Remember` 不会再返回失效之前开始加载的值。代价是每次读取都要多读 tag 的版本（与值在同一次请求中），值所带的 tag 越多，任何一个失效都会让它重新加载。读取 tag 的版本失败时，`Remember` 直接加载，结果不写入缓存；tag 被 Memcached 淘汰时，带有它的值全部重新加载。
 
 <a id="keys-and-serialization"></a>
 ## 缓存键与序列化
@@ -187,7 +211,7 @@ Memcached 的键最长 250 字节，不能有空白和控制字符。超出这�
 <a id="testing"></a>
 ## 测试
 
-`cachex.New` 的第一个参数是只有 `Get`、`Set`、`Delete` 三个方法的 `cachex.Client` 接口，`*memcache.Client` 实现了它。测试读取逻辑时连接真实的 Memcached，和数据库测试一样通过环境变量取得地址，每个测试使用随机的前缀，互不影响：
+`cachex.New` 的第一个参数是 `cachex.Client` 接口，包含 `cachex` 用到的几个 Memcached 操作，`*memcache.Client` 实现了它。测试读取逻辑时连接真实的 Memcached，和数据库测试一样通过环境变量取得地址，每个测试使用随机的前缀，互不影响：
 
 ```go
 func newTestCache(t *testing.T) *cachex.Cache[*article.Article] {

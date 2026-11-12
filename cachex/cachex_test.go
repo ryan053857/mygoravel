@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,7 +31,57 @@ type fake struct {
 	ttls    map[string]int32
 	getErr  error
 	setErr  error
+	addErr  error
+	incrErr error
 	deleted []string
+}
+
+func (f *fake) GetMulti(keys []string) (map[string]*memcache.Item, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	items := map[string]*memcache.Item{}
+	for _, k := range keys {
+		if v, ok := f.values[k]; ok {
+			items[k] = &memcache.Item{Key: k, Value: []byte(v)}
+		}
+	}
+	return items, nil
+}
+
+func (f *fake) Add(item *memcache.Item) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.addErr != nil {
+		return f.addErr
+	}
+	if _, ok := f.values[item.Key]; ok {
+		return memcache.ErrNotStored
+	}
+	f.values[item.Key] = string(item.Value)
+	f.ttls[item.Key] = item.Expiration
+	return nil
+}
+
+func (f *fake) Increment(key string, delta uint64) (uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.incrErr != nil {
+		return 0, f.incrErr
+	}
+	v, ok := f.values[key]
+	if !ok {
+		return 0, memcache.ErrCacheMiss
+	}
+	n, err := strconv.ParseUint(v, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	n += delta
+	f.values[key] = strconv.FormatUint(n, 10)
+	return n, nil
 }
 
 func newFake() *fake { return &fake{values: map[string]string{}, ttls: map[string]int32{}} }
