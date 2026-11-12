@@ -109,3 +109,6 @@ validation.time: 时间格式不正确
 validation.format: 格式不正确
 validation.pattern: 格式不正确
 validation.pattern_description: 必须是{{.Description}}
+validation.type: 类型不正确
+validation.unexpected: 不支持这个字段
+validation.failed: 提交的内容有误

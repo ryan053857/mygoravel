@@ -47,9 +47,12 @@ type Error struct {
 
 // FieldError 是一个输入字段的问题。
 type FieldError struct {
+	// Message 是按 Options.Language 翻译的提示。
 	Message  string `json:"message"`
 	Location string `json:"location"`
 	Value    any    `json:"value,omitempty"`
+	// Code 是违反的验证规则，例如 validation.min_length；无法识别的规则为空。
+	Code string `json:"code,omitempty"`
 }
 
 func (e *Error) Error() string {

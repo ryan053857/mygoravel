@@ -222,7 +222,7 @@ const { data } = $api.useQuery(
 
 [游标分页](responses.md#cursor-pagination)的列表用 `$api.useInfiniteQuery`：`pageParamName` 为 `"cursor"`，`initialPageParam` 为 `""`，`getNextPageParam` 返回上一页的 `next_cursor`。
 
-[验证错误](validation.md#validation-error-response)的 `errors[].location` 去掉 `body.` 就是字段名。TanStack Form 在 `validators.onSubmitAsync` 中提交，把它们作为字段错误返回：
+[验证错误](validation.md#validation-error-response)的 `errors[].location` 去掉 `body.` 就是字段名，`message` 已经按请求的语言翻译。TanStack Form 在 `validators.onSubmitAsync` 中提交，把它们作为字段错误返回：
 
 ```ts
 const { error } = await api.POST("/articles", { body: value })
@@ -230,8 +230,6 @@ if (error?.errors) {
   return { fields: Object.fromEntries(error.errors.map((e) => [e.location?.replace(/^body\./, ""), e.message])) }
 }
 ```
-
-`message` 是英文，中文界面按字段和约束自己写提示。
 
 <a id="go"></a>
 ## Go 客户端
@@ -317,7 +315,7 @@ for _, a := range list.Items { // page.Offset[article.ArticleDTO]
 <a id="go-client-errors"></a>
 ### 错误
 
-非 2xx 的响应返回 `*wire.Error`：`Status` 是状态码，`Code` 是业务错误码，`Detail` 是可以展示给用户的说明，`Fields` 是 `422` 时每个字段的问题，`RequestID` 用来报告问题。
+非 2xx 的响应返回 `*wire.Error`：`Status` 是状态码，`Code` 是业务错误码，`Detail` 是可以展示给用户的说明，`Fields` 是 `422` 时每个字段的问题（[翻译后的提示和规则 `code`](validation.md#validation-error-response)），`RequestID` 用来报告问题。
 
 服务端用 [`errorx.Define`](errors.md#defining-errors) 定义的错误码，在对应的包中生成为同名常量，用 `errors.Is` 判断：
 

@@ -97,10 +97,12 @@ func New(opts Options) *API {
 	// schema 名带包名，不同包的同名类型（例如 article.Changes 和 comment.Changes）不会冲突，见 schemaNames。
 	names := &schemaNames{anon: map[reflect.Type]string{}}
 	cfg.OpenAPI.Components.Schemas = huma.NewMapRegistry("#/components/schemas/", names.name)
-	// huma.ErrorModel 的 JSON 是 ErrorModel 的合法实例，因此文档统一描述为 ErrorModel；
+	// Huma 产生的错误由 localizeErrors 转为 ErrorModel，因此文档统一描述为 ErrorModel；
 	// 不覆盖全局 huma.NewError，避免影响同一进程中的其他 Huma API。
 	cfg.OpenAPI.Components.Schemas.RegisterTypeAlias(reflect.TypeOf(huma.ErrorModel{}), reflect.TypeOf(ErrorModel{}))
-	cfg.Transformers = append(cfg.Transformers, opts.Transformers...)
+	cfg.OpenAPI.Components.Schemas.RegisterTypeAlias(reflect.TypeOf(huma.ErrorDetail{}), reflect.TypeOf(ErrorDetail{}))
+	// localizeErrors 排在最前，应用的 Transformer 看到的已经是翻译后的 ErrorModel。
+	cfg.Transformers = append([]huma.Transformer{localizeErrors}, opts.Transformers...)
 	if opts.BasePath != "" {
 		cfg.OpenAPI.Servers = []*huma.Server{{URL: opts.BasePath}}
 	}

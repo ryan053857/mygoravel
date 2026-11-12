@@ -140,20 +140,7 @@ if _, err := h.update.Handle(r.Context(), sub, id, f.Data); errors.Is(err, artic
 <a id="validation-messages"></a>
 ## 验证提示
 
-验证提示按请求协商的语言翻译，框架内置了中文和英文：
-
-| 标签 | 中文提示 |
-| --- | --- |
-| 必填字段没有提交 | 必填 |
-| `minLength:"1"` | 不能为空 |
-| `minLength`、`maxLength` | 至少 N 个字符、最多 N 个字符（按字符计数） |
-| `minimum`、`maximum` | 不能小于 N、不能大于 N |
-| `pattern` 加 `patternDescription` | 必须是 + 描述，例如“必须是小写字母、数字和连字符” |
-| `pattern` | 格式不正确 |
-| `format:"email"` | 邮箱格式不正确 |
-| 数字字段类型错误 | 必须是整数、必须是数字 |
-
-完整的消息 ID 以 `validation.` 开头，见框架的 `i18n/locales/zh-CN.yaml`。在应用的翻译文件中写同名消息即可覆盖，见[本地化](localization.md)。没有安装 `httpx.Locale` 中间件时，提示是 Huma 的英文原文。
+验证提示按请求协商的语言翻译，框架内置了中文和英文，例如 `minLength:"1"` 的字段为空时提示“不能为空”，`pattern` 加 `patternDescription` 时提示“必须是”加描述。JSON API 的验证错误使用同一套提示，完整的规则和覆盖方法见[验证提示](validation.md#validation-messages)。没有安装 `httpx.Locale` 中间件时，提示是 Huma 的英文原文。
 
 <a id="file-uploads"></a>
 ## 上传文件

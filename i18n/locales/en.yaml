@@ -109,3 +109,6 @@ validation.time: Must be a valid time
 validation.format: Invalid format
 validation.pattern: Invalid format
 validation.pattern_description: Must be {{.Description}}
+validation.type: Wrong type
+validation.unexpected: Unknown field
+validation.failed: Validation failed

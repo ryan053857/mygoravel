@@ -162,7 +162,7 @@ return ErrSlugTaken.Wrap(err, errorx.Public("slug", c.Slug))
 如果请求语言中缺少某个错误码的翻译，`detail` 会使用默认语言的译文；默认语言也没有时，使用 HTTP 状态的通用描述。这两种情况下，这个请求的[访问日志](middleware.md#access-log)都会带上 `"untranslated":true`，方便你查找需要补充的翻译。
 
 > [!NOTE]
-> 只有业务错误会被翻译。验证错误、路由不存在、服务端内部错误等不带 `code` 的错误保持 Huma 的英文描述，客户端应根据状态码自行展示提示。
+> 业务错误和[验证错误](validation.md#validation-messages)会被翻译。路由不存在、服务端内部错误等其他错误保持 Huma 的英文描述，客户端应根据状态码自行展示提示。
 
 <a id="outside-http"></a>
 ## 在 HTTP 之外使用

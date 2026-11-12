@@ -64,7 +64,8 @@ func Decode[T any](ctx context.Context, values map[string][]string) (T, map[stri
 	huma.Validate(registry, s, huma.NewPathBuffer(nil, 0), huma.ModeWriteToServer, input, res)
 	for _, e := range res.Errors {
 		if d, ok := e.(*huma.ErrorDetail); ok {
-			set(describe(ctx, d))
+			fe := Describe(ctx, d)
+			set(fe.Location, fe.Message)
 		}
 	}
 	// 没能转换成目标类型的值不参与解码，其余字段照常写入 data。

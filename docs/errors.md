@@ -201,10 +201,10 @@ Content-Type: application/problem+json
 {
   "title": "Unprocessable Entity",
   "status": 422,
-  "detail": "validation failed",
+  "detail": "提交的内容有误",
   "errors": [
-    {"message": "expected string to match pattern ^[a-z0-9]+(-[a-z0-9]+)*$", "location": "body.slug", "value": "Hello World"},
-    {"message": "expected length >= 1", "location": "body.title", "value": ""}
+    {"message": "必须是小写字母、数字和连字符", "location": "body.slug", "value": "Hello World", "code": "validation.pattern_description"},
+    {"message": "不能为空", "location": "body.title", "value": "", "code": "validation.filled"}
   ]
 }
 ```
@@ -349,7 +349,7 @@ errorx.KindOf(err) // errorx.Conflict，不是业务错误时为 errorx.Internal
 | `title` | 状态码的标准描述 |
 | `detail` | 展示给用户的文案 |
 | `code` | 稳定的错误码，**只有业务错误包含** |
-| `errors` | 字段级的错误明细，**只有输入格式错误包含**，见[验证](validation.md#validation-error-response) |
+| `errors` | 字段级的错误明细，**只有输入格式错误包含**，每一项带有违反的规则 `code` 和翻译后的 `message`，见[验证](validation.md#validation-error-response) |
 
 客户端可以这样区分错误：有 `code` 时按 `code` 处理；有 `errors` 时把提示显示在对应字段旁边；两者都没有时（路由不存在、服务端故障等）按 `status` 处理。
 

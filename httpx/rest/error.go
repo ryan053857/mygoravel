@@ -10,18 +10,57 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/ryan053857/mygoravel/form"
 	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/ryan053857/mygoravel/i18n"
 )
 
-// ErrorModel 在 Huma 原生 Problem Details 上增加业务错误码。
+// ErrorModel 在 Huma 原生 Problem Details 上增加业务错误码和字段错误的验证规则。
 //
-// 只有业务错误带 code。Huma 自身产生的校验和协议错误保持 huma.ErrorModel 原样，
-// 它们同样是本类型 schema 的合法实例，因此 OpenAPI 统一用本类型描述错误响应。
+// 只有业务错误带 code。Huma 产生的错误在写出前由 localizeErrors 转为本类型：
+// 字段错误带上验证规则，提示按请求的语言翻译。OpenAPI 统一用本类型描述错误响应。
 type ErrorModel struct {
 	huma.ErrorModel
 	Code string `json:"code,omitempty" doc:"Stable business error code. Present only on business errors."`
+	// Errors 覆盖 huma.ErrorModel 的同名字段。
+	Errors []*ErrorDetail `json:"errors,omitempty" doc:"Field errors. Present only on validation errors."`
 
 	headers http.Header
+}
+
+// ErrorDetail 是一条字段错误：Huma 的 message、location、value，加上验证规则 code。
+type ErrorDetail struct {
+	huma.ErrorDetail
+	Code string `json:"code,omitempty" doc:"Validation rule, e.g. validation.min_length. Absent when the rule is not recognized."`
+}
+
+// localizeErrors 是 Huma 的 Transformer：把 Huma 产生的错误（验证失败、参数格式错误等）转为 ErrorModel，
+// 字段错误由 form.Describe 识别规则、按请求的语言翻译，"validation failed" 同样翻译。
+func localizeErrors(hctx huma.Context, _ string, v any) (any, error) {
+	e, ok := v.(*huma.ErrorModel)
+	if !ok {
+		return v, nil
+	}
+	ctx := hctx.Context()
+	m := &ErrorModel{ErrorModel: *e}
+	m.ErrorModel.Errors = nil
+	if e.Detail == "validation failed" {
+		if msg := i18n.T(ctx, "validation.failed", nil); msg != "validation.failed" {
+			m.Detail = msg
+		}
+	}
+	for _, d := range e.Errors {
+		fe := form.Describe(ctx, d)
+		value := d.Value
+		if fe.Location != d.Location {
+			value = nil // 必填错误的位置换成了缺少的字段，原来的值是父对象
+		}
+		m.Errors = append(m.Errors, &ErrorDetail{
+			ErrorDetail: huma.ErrorDetail{Message: fe.Message, Location: fe.Location, Value: value},
+			Code:        fe.Code,
+		})
+	}
+	return m, nil
 }
 
 // GetHeaders 实现 huma.HeadersError，返回随错误写出的响应头，例如 Retry-After。

@@ -5,6 +5,7 @@
 - [可用的验证规则](#available-validation-rules)
 - [必填与可选字段](#required-and-optional-fields)
 - [验证错误响应](#validation-error-response)
+    - [验证提示](#validation-messages)
 - [业务规则验证](#business-validation)
 
 <a id="introduction"></a>
@@ -78,7 +79,7 @@ type PatchInput struct {
 <a id="validation-error-response"></a>
 ## 验证错误响应
 
-请求体不是合法的 JSON 时返回 `400`，字段验证失败时返回 `422`。两种情况都是 Huma 原生的错误响应，带有 `errors` 数组逐条说明每个字段的问题。例如，客户端创建文章时发送了空标题和不合法的 slug：
+请求体不是合法的 JSON 时返回 `400`，字段验证失败时返回 `422`。两种情况都带有 `errors` 数组，逐条说明每个字段的问题。例如，客户端创建文章时发送了空标题和不合法的 slug，请求语言是中文：
 
 ```json
 {"title": "", "slug": "Hello World", "content": "……"}
@@ -90,25 +91,48 @@ type PatchInput struct {
 {
   "title": "Unprocessable Entity",
   "status": 422,
-  "detail": "validation failed",
+  "detail": "提交的内容有误",
   "errors": [
-    {"message": "expected string to match pattern ^[a-z0-9]+(-[a-z0-9]+)*$", "location": "body.slug", "value": "Hello World"},
-    {"message": "expected length >= 1", "location": "body.title", "value": ""}
+    {"message": "必须是小写字母、数字和连字符", "location": "body.slug", "value": "Hello World", "code": "validation.pattern_description"},
+    {"message": "不能为空", "location": "body.title", "value": "", "code": "validation.filled"}
   ]
 }
 ```
 
 | 字段 | 说明 |
 | --- | --- |
-| `message` | 违反的约束，例如 `expected length >= 1` |
-| `location` | 出错的位置，例如 `body.title`、`query.limit` |
+| `message` | 展示给用户的提示，按请求的语言翻译 |
+| `location` | 出错的位置，例如 `body.title`、`query.limit`。缺少必填字段时是这个字段的位置 |
 | `value` | 服务端收到的值 |
+| `code` | 违反的规则，见[验证提示](#validation-messages)，不随语言变化 |
 
-客户端可以根据 `errors[].location` 把错误提示显示在对应的表单字段旁边。`message` 是 Huma 生成的英文描述，不会被翻译。需要本地化提示时，客户端应当根据 `location` 和接口文档中的约束自行生成文案。
+客户端根据 `location` 把 `message` 显示在对应的表单字段旁边，需要自己的文案时按 `code` 处理。
 
-验证错误不带 `code` 字段，客户端根据状态码 `400` 或 `422` 识别它们，见[错误响应格式](errors.md#response-format)。
+验证错误本身不带 `code` 字段，`code` 只出现在 `errors` 的每一项中，见[错误响应格式](errors.md#response-format)。
 
 如果路由需要认证，认证会先于验证执行。因此，一个没有携带凭据且请求体也不合法的请求，会得到 `401` 而不是 `422`。
+
+<a id="validation-messages"></a>
+### 验证提示
+
+提示按请求协商的语言翻译，框架内置了中文和英文。`code` 就是翻译用的消息 ID：
+
+| `code` | 规则 | 中文提示 |
+| --- | --- | --- |
+| `validation.required` | 缺少必填字段或参数 | 必填 |
+| `validation.filled` | `minLength:"1"` | 不能为空 |
+| `validation.min_length`、`validation.max_length` | `minLength`、`maxLength` | 至少 N 个字符、最多 N 个字符（按字符计数） |
+| `validation.minimum`、`validation.maximum` | `minimum`、`maximum` | 不能小于 N、不能大于 N |
+| `validation.pattern_description` | `pattern` 加 `patternDescription` | 必须是 + 描述，例如“必须是小写字母、数字和连字符” |
+| `validation.pattern` | `pattern` | 格式不正确 |
+| `validation.email`、`validation.url` | `format:"email"`、`format:"uri"` | 邮箱格式不正确、网址格式不正确 |
+| `validation.one_of` | `enum` | 不是可选的值 |
+| `validation.integer`、`validation.number` | 数字字段收到了其他值 | 必须是整数、必须是数字 |
+| `validation.unexpected` | 请求体中有未声明的字段 | 不支持这个字段 |
+
+完整的列表见框架的 `i18n/locales/zh-CN.yaml`，以 `validation.` 开头。在应用的翻译文件中写同名消息即可覆盖，见[本地化](localization.md)。[页面表单](forms.md#validation-messages)的提示与 API 相同。
+
+少数无法识别的消息没有 `code`，`message` 保持 Huma 的英文原文，例如 `oneOf` 等组合规则。没有安装 `httpx.Locale` 中间件时，所有提示都是英文原文，`code` 照常返回。
 
 <a id="business-validation"></a>
 ## 业务规则验证
