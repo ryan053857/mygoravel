@@ -41,6 +41,7 @@ var blogFiles = []docFile{
 	{"internal/article/queue_export.go", "import-export.md"},
 	{"internal/article/bulk_publish.go", "operations.md"},
 	{"internal/article/search.go", "search.md"},
+	{"internal/attachment/vector.go", "vector.md"},
 	{"internal/article/article_test.go", "testing.md"},
 	{"internal/article/commands_test.go", "testing.md"},
 	{"internal/article/commands.go", "actions.md"},
@@ -107,6 +108,16 @@ func toDTOs(items []Article) []ArticleDTO {
 	}
 	return out
 }
+`},
+	{"internal/attachment/find.go", "vector.md", "type Find struct", `package attachment
+
+import (
+	"context"
+
+	"github.com/google/uuid"
+
+	"github.com/ryan053857/mygoravel/vector"
+)
 `},
 	{"internal/bootstrap/mailer.go", "mail.md", "func newMailer(", `package bootstrap
 

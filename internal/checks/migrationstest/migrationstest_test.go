@@ -30,6 +30,7 @@ import (
 	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/sheet/exports"
 	"github.com/ryan053857/mygoravel/sheet/imports"
+	"github.com/ryan053857/mygoravel/vector"
 	"github.com/ryan053857/mygoravel/webhook"
 )
 
@@ -51,6 +52,7 @@ var sources = map[string]migrate.Source{
 	"push":          {Name: "push", FS: push.Migrations()},
 	"queue":         {Name: "queue", FS: queue.Migrations()},
 	"search":        {Name: "search", FS: search.Migrations()},
+	"vector":        {Name: "vector", FS: vector.Migrations()},
 	"session":       {Name: "session", FS: session.Migrations()},
 	"webhook":       {Name: "webhook", FS: webhook.Migrations()},
 }

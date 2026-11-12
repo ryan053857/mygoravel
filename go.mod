@@ -43,6 +43,7 @@ require (
 	github.com/openai/openai-go v1.12.0
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/prometheus/client_golang v1.25.0
+	github.com/qdrant/go-client v1.19.0
 	github.com/redis/rueidis v1.0.79
 	github.com/resend/resend-go/v3 v3.17.0
 	github.com/rs/cors v1.11.1
@@ -76,6 +77,7 @@ require (
 	golang.org/x/sync v0.24.0
 	golang.org/x/term v0.48.0
 	golang.org/x/text v0.43.0
+	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 	trpc.group/trpc-go/trpc-agent-go v1.12.0
 	trpc.group/trpc-go/trpc-agent-go/session/postgres v1.12.0
@@ -179,7 +181,6 @@ require (
 	golang.org/x/tools v0.52.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261110000943-09e21b237f2c // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
-	google.golang.org/grpc v1.84.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/sqlite v1.62.0 // indirect
 	trpc.group/trpc-go/trpc-a2a-go v0.2.6-0.20260721084546-18c8244d0acb // indirect

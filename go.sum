@@ -255,6 +255,8 @@ github.com/prometheus/procfs v0.22.0 h1:6q9+/JL9IKAPbCmBrv9n5O5Ty3NKnciV5X7YGw0o
 github.com/prometheus/procfs v0.22.0/go.mod h1:CvmFr/GVhIjIvWJZW3tgkODBQMRIf0EyWMQLHCHab58=
 github.com/puzpuzpuz/xsync/v3 v3.5.1 h1:GJYJZwO6IdxN/IKbneznS6yPkVC+c3zyY/j19c++5Fg=
 github.com/puzpuzpuz/xsync/v3 v3.5.1/go.mod h1:VjzYrABPabuM4KyBh1Ftq6u8nhwY5tBPKP9jpmh0nnA=
+github.com/qdrant/go-client v1.19.0 h1:WGyC1YDXXU8/Od8+kcFncgD3eMqulAoNHy8Ip76tBE8=
+github.com/qdrant/go-client v1.19.0/go.mod h1:/pjMgiL4SxFxD5rLorlS5/FXcvBSx/P2M81gnqn5fb8=
 github.com/quagmt/udecimal v1.10.1 h1:h4t88kp/x21hCdhRhzBNW9e7D50l7pLEc1iwIEsCB28=
 github.com/quagmt/udecimal v1.10.1/go.mod h1:ScmJ/xTGZcEoYiyMMzgDLn79PEJHcMBiJ4NNRT3FirA=
 github.com/redis/rueidis v1.0.79 h1:2faCYvkq0G8ozDIAn7+3d5k5bBYCc0DBG2THK5WYXF0=

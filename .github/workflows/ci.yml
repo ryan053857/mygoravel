@@ -42,6 +42,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      qdrant:
+        image: qdrant/qdrant:v1.19.0
+        ports:
+          - 6334:6334
+        options: >-
+          --health-cmd "bash -c ':> /dev/tcp/127.0.0.1/6333'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       POSTGRES_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
       REDIS_TEST_URL: redis://127.0.0.1:6379/0
@@ -49,6 +58,7 @@ jobs:
       NSQD_TEST_ADDR: 127.0.0.1:4150
       NSQD_TEST_HTTP: http://127.0.0.1:4151
       GOTENBERG_TEST_URL: http://127.0.0.1:3000
+      QDRANT_TEST_ADDR: 127.0.0.1:6334
     steps:
       - uses: actions/checkout@v4
 

@@ -150,16 +150,21 @@ for _, s := range doc.SectionsIn(chunk.Start, chunk.End) {
 博客允许作者给文章上传附件，AI 助手回答读者问题时可以引用附件的内容。附件通过[文件存储](filesystem.md)上传，确认时发布一个队列任务，见[确认后异步处理](filesystem.md#processing-files)：
 
 ```go
-var IndexAttachment = queue.Topic[uuid.UUID]("attachments.index")
+type IndexJob struct {
+    ArticleID uuid.UUID `json:"article_id"`
+    FileID    uuid.UUID `json:"file_id"`
+}
 
-err := IndexAttachment.Publish(ctx, tx, file.ID)
+var IndexAttachment = queue.Topic[IndexJob]("attachments.index")
+
+err := IndexAttachment.Publish(ctx, tx, IndexJob{ArticleID: item.ID, FileID: file.ID})
 ```
 
-任务读取文件，转换、切分，在一个事务中替换这个附件原有的分段，再计算向量写入向量库：
+任务读取文件，转换、切分，在一个事务中替换这个附件原有的分段，并发起[向量索引](vector.md)的同步：
 
 ```go
-func (a *Index) Job(ctx context.Context, fileID uuid.UUID) error {
-    r, file, err := a.files.Open(ctx, fileID)
+func (a *Index) Job(ctx context.Context, job IndexJob) error {
+    r, file, err := a.files.Open(ctx, job.FileID)
     if err != nil {
         return err
     }
@@ -174,41 +179,31 @@ func (a *Index) Job(ctx context.Context, fileID uuid.UUID) error {
     }
 
     chunks := a.splitter.Split(doc.Markdown)
-    inputs := make([]string, len(chunks))
-    for i, c := range chunks {
-        inputs[i] = c.TextWithContext()
-    }
     rows := make([]AttachmentChunk, len(chunks))
     for i, c := range chunks {
         rows[i] = AttachmentChunk{
-            FileID: fileID, Position: i, Text: c.Text, Start: c.Start, End: c.End, Pages: pagesOf(doc, c),
+            ArticleID: job.ArticleID, FileID: job.FileID, Position: i,
+            Text: c.Text, Context: c.TextWithContext(), Start: c.Start, End: c.End, Pages: pagesOf(doc, c),
         }
     }
-    err = database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
-        if _, err := tx.NewDelete().Model((*AttachmentChunk)(nil)).Where("file_id = ?", fileID).Exec(ctx); err != nil {
+    return database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+        if _, err := tx.NewDelete().Model((*AttachmentChunk)(nil)).Where("file_id = ?", job.FileID).Exec(ctx); err != nil {
             return err
         }
-        if len(rows) == 0 {
-            return nil // 没有文字的文档，例如扫描件
+        if len(rows) > 0 { // 没有文字的文档，例如扫描件，没有分段
+            if _, err := tx.NewInsert().Model(&rows).Exec(ctx); err != nil {
+                return err
+            }
         }
-        _, err := tx.NewInsert().Model(&rows).Exec(ctx)
-        return err
+        return Chunks.Sync(ctx, tx, job.FileID.String())
     })
-    if err != nil || len(rows) == 0 {
-        return err
-    }
-    vectors, err := a.embedder.Embed(ctx, inputs)
-    if err != nil {
-        return err
-    }
-    return a.vectors.Replace(ctx, fileID, vectors) // 应用对向量库的封装，按附件替换，重复执行结果相同
 }
 ```
 
-- `a.embedder` 是 [ai.Embedder](ai.md#media)，分段很多时用 `openai.WithBatchSize` 让它分批请求。
 - 任务可能重复执行，先删后插让结果保持一致。
-- 多租户应用中，分段表带上租户，查询时按 `sub.Tenant` 过滤，见[多租户](tenancy.md#data-isolation)。
-- 向量放在专门的向量数据库中，不放进 PostgreSQL；框架还没有提供向量库的接入。在此之前，可以先用[全文搜索](search.md#multiple-documents)按关键词检索出候选分段，再用 [ai.RerankBy](ai.md#media) 按语义重排。
+- `Context` 是带标题路径的正文，用来计算向量；`Text` 是原文，引用时展示。
+- 向量在同步任务中计算并写入 Qdrant，文本没变的分段沿用原来的向量。`Chunks` 的声明和检索见[向量检索](vector.md#defining-indexes)。
+- 多租户应用中，分段表和向量索引的文档都带上租户，见[向量检索的多租户](vector.md#tenancy)。
 
 <a id="formats"></a>
 ## 各种格式

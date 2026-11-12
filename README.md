@@ -45,7 +45,7 @@ go get github.com/ryan053857/mygoravel@main
 | 向租户推送事件 | [Webhook](docs/webhooks.md) |
 | 按关键词搜索文章、商品 | [全文搜索](docs/search.md) |
 | 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |
-| 让 AI 引用 PDF、Word 等文档 | [文档转换与切分](docs/documents.md) |
+| 让 AI 引用 PDF、Word 等文档 | [文档转换与切分](docs/documents.md) · [向量检索](docs/vector.md) |
 | 保护接口 | [认证](docs/authentication.md) · [登录与注册](docs/login.md) · [授权](docs/authorization.md) · [哈希](docs/hashing.md) · [加密与签名链接](docs/encryption.md) · [限流](docs/rate-limiting.md) · [人机验证](docs/login.md#captcha) |
 | 使用数据库 | [数据库](docs/database.md) · [迁移](docs/migrations.md) |
 | 测试与上线 | [测试](docs/testing.md) · [部署](docs/deployment.md) |

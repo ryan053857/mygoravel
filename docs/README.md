@@ -75,6 +75,7 @@
 
 - [AI 助手](ai.md)
 - [文档转换与切分](documents.md)
+- [向量检索](vector.md)
 
 ## 安全
 
