@@ -333,7 +333,7 @@ Laravel 的 [laravel-data](https://github.com/spatie/laravel-data) 用一个类�
 | 表格导入 | 同一个结构体：`sheet.Decode[article.Changes](ctx, r)`，见[导入与导出](import-export.md) |
 | 业务参数 | `Handle` 直接接收 `Changes`，验证标签对它没有影响 |
 | 响应 | `ArticleDTO` 和转换函数 `toDTO`，见[共享响应结构](routing.md#shared-responses) |
-| 前端类型 | 由导出的 [OpenAPI 文档](routing.md#exporting-openapi)生成，例如用 openapi-typescript |
+| 前端类型 | 由导出的 OpenAPI 文档生成，见[客户端代码](clients.md) |
 
 `Changes` 只在一处声明，JSON 接口、页面表单和业务代码都使用它，验证规则不会在几个地方写得不一致。转换函数是普通的函数，字段改名时编译器会发现遗漏。
 
