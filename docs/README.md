@@ -54,6 +54,7 @@
 - [实时频道](realtime.md)
 - [文件存储与上传](filesystem.md)
 - [邮件](mail.md)
+- [短信](sms.md)
 - [生成 PDF](pdf.md)
 - [出站请求](outbound.md)
 - [本地化](localization.md)

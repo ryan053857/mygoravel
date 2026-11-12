@@ -215,7 +215,7 @@ func (a *Delete) Handle(ctx context.Context, ref identity.Ref) error {
 <a id="assembling"></a>
 ## 装配
 
-下面是完整的 `internal/accounts/accounts.go`，它为两套账号各创建一个 [`login.Realm`](login.md#assembling)：编辑只能用邮箱和密码登录，验证码通过邮件发出邀请链接；读者开放注册，验证码通过短信发送。读者的 API 令牌使用 [JWT 模式](api-tokens.md#jwt)：
+下面是完整的 `internal/accounts/accounts.go`，它为两套账号各创建一个 [`login.Realm`](login.md#assembling)：编辑只能用邮箱和密码登录，验证码通过邮件发出邀请链接；读者开放注册，验证码通过[短信](sms.md)发送，模板 `login_code` 在短信服务商处申请。读者的 API 令牌使用 [JWT 模式](api-tokens.md#jwt)：
 
 ```go
 package accounts
@@ -238,6 +238,7 @@ import (
     "github.com/ryan053857/mygoravel/mail"
     "github.com/ryan053857/mygoravel/ratelimit"
     "github.com/ryan053857/mygoravel/ratelimit/redislimit"
+    "github.com/ryan053857/mygoravel/sms"
 )
 
 type Config struct {
@@ -254,11 +255,6 @@ type Apple struct {
     BundleID     string `yaml:"bundle_id"` // App 原生登录时 ID token 的受众
 }
 
-// SMS 发送短信，由应用接入的短信服务实现。
-type SMS interface {
-    Send(ctx context.Context, phone, text string) error
-}
-
 type Accounts struct {
     Editors      *login.Realm
     Readers      *login.Realm
@@ -267,7 +263,7 @@ type Accounts struct {
     Apple        *oauth.Provider
 }
 
-func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher *hashing.Hasher, c *crypt.Crypt, mailer mail.Mailer, sms SMS) (*Accounts, error) {
+func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher *hashing.Hasher, c *crypt.Crypt, mailer mail.Mailer, texts sms.Sender) (*Accounts, error) {
     every15 := ratelimit.Config{Rate: 5, Interval: 15 * time.Minute, Burst: 5}
     editors := login.New(db, login.Options{
         Type:          editor.Type,
@@ -296,7 +292,11 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
         Attempts: redislimit.New(rdb, "blog:login:reader:attempts", every15),
         Sends:    redislimit.New(rdb, "blog:login:reader:sends", every15),
         Send: func(ctx context.Context, code login.Code) error {
-            return sms.Send(ctx, code.To.Value, "Blog 验证码 "+code.Code+"，15 分钟内有效。")
+            return texts.Send(ctx, sms.Message{
+                To:       code.To.Value,
+                Template: "login_code",
+                Params:   map[string]string{"code": code.Code},
+            })
         },
     })
     apple, err := oauth.Discover(ctx, oauth.Config{
@@ -839,10 +839,10 @@ func (h *handlers) confirm(ctx context.Context, ref identity.Ref, in *ConfirmInp
 <a id="wiring"></a>
 ## 接入入口
 
-在[入口](dependencies.md#assembling-the-application)中创建 `accounts.Accounts`，交给两组入口。页面只接受编辑，API 只接受读者：
+在[入口](dependencies.md#assembling-the-application)中创建 `accounts.Accounts`，交给两组入口。`texts` 是[短信发送器](sms.md#assembling)。页面只接受编辑，API 只接受读者：
 
 ```go
-acc, err := accounts.New(ctx, a.db, a.rdb, a.cfg.Accounts, hashing.New(a.cfg.Hashing), a.crypt, mailer, sms)
+acc, err := accounts.New(ctx, a.db, a.rdb, a.cfg.Accounts, hashing.New(a.cfg.Hashing), a.crypt, mailer, texts)
 if err != nil {
     return err
 }

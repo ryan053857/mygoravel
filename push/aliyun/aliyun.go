@@ -11,12 +11,8 @@
 package aliyun
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -26,6 +22,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 
+	"github.com/ryan053857/mygoravel/internal/aliyunapi"
 	"github.com/ryan053857/mygoravel/outbound"
 	"github.com/ryan053857/mygoravel/push"
 	"github.com/ryan053857/mygoravel/queue"
@@ -39,9 +36,6 @@ const Timeout = 10 * time.Second
 
 // version 是移动推送 OpenAPI 的版本。
 const version = "2016-08-01"
-
-// maxResponse 是读取的响应体的最大字节数。
-const maxResponse = 64 << 10
 
 // Config 是阿里云移动推送的配置段。
 //
@@ -133,9 +127,8 @@ func (c Config) Validate() error {
 
 // Provider 调用阿里云移动推送的 PushV2 接口，可以并发使用。
 type Provider struct {
-	cfg    Config
-	host   string
-	client *http.Client
+	cfg Config
+	api *aliyunapi.Client
 }
 
 var _ push.Provider = (*Provider)(nil)
@@ -153,7 +146,8 @@ func New(cfg Config, client *http.Client) (*Provider, error) {
 	if client == nil {
 		client = outbound.New(outbound.Options{Timeout: Timeout})
 	}
-	return &Provider{cfg: cfg, host: host, client: client}, nil
+	api := &aliyunapi.Client{Host: host, Version: version, AccessKeyID: cfg.AccessKeyID, AccessKeySecret: cfg.AccessKeySecret, HTTP: client}
+	return &Provider{cfg: cfg, api: api}, nil
 }
 
 // Push 把 b 作为一个 PushV2 任务推送给 b.Tokens 中的设备（阿里云的 deviceId）。
@@ -276,58 +270,17 @@ func (p *Provider) task(b push.Batch) (*pushTask, error) {
 	return t, nil
 }
 
-// apiError 是接口返回错误时的响应体。
-type apiError struct {
-	RequestID string `json:"RequestId"`
-	Code      string `json:"Code"`
-	Message   string `json:"Message"`
-}
-
-// call 以 V3 签名调用一个 RPC 风格的接口，参数放在表单请求体中。
+// call 调用接口 action，把失败分为可以重试的和不能重试的（queue.Permanent）。
 func (p *Provider) call(ctx context.Context, action string, params url.Values) error {
-	body := []byte(params.Encode())
-	sum := sha256.Sum256(body)
-	payloadHash := hex.EncodeToString(sum[:])
-	headers := map[string]string{
-		"host":                  p.host,
-		"content-type":          "application/x-www-form-urlencoded",
-		"x-acs-action":          action,
-		"x-acs-version":         version,
-		"x-acs-date":            time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-		"x-acs-signature-nonce": uuid.NewString(),
-		"x-acs-content-sha256":  payloadHash,
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+p.host+"/", bytes.NewReader(body))
+	resp, err := p.api.Call(ctx, action, params)
 	if err != nil {
-		return queue.Permanent(errors.Wrap(err, "aliyun push: new request"))
+		return errors.Wrap(err, "aliyun push")
 	}
-	for name, value := range headers {
-		if name != "host" {
-			req.Header.Set(name, value)
-		}
-	}
-	req.Header.Set("Authorization",
-		authorization(http.MethodPost, headers, payloadHash, p.cfg.AccessKeyID, p.cfg.AccessKeySecret))
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return errors.Wrapf(err, "aliyun push: %s", action)
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
-	if err != nil {
-		return errors.Wrapf(err, "aliyun push: %s: read response", action)
-	}
-	if resp.StatusCode == http.StatusOK {
+	if resp.Status == http.StatusOK {
 		return nil
 	}
-	var e apiError
-	_ = json.Unmarshal(data, &e)
-	if e.Code == "" {
-		e.Message = strings.TrimSpace(string(data))
-	}
-	err = errors.Newf("aliyun push: %s: HTTP %d %s: %s (request %s)", action, resp.StatusCode, e.Code, e.Message, e.RequestID)
-	if retryable(resp.StatusCode, e.Code) {
+	err = errors.Wrap(resp.Error(action), "aliyun push")
+	if retryable(resp.Status, resp.Code) {
 		return err
 	}
 	return queue.Permanent(err)

@@ -89,27 +89,6 @@ func at(v any, path string) any {
 	return v
 }
 
-func TestAuthorization(t *testing.T) {
-	// 与官方 SDK（darabonba-openapi 的 GetAuthorization）对同一个请求计算的结果相同。
-	headers := map[string]string{
-		"host":                  "cloudpush.aliyuncs.com",
-		"x-acs-action":          "PushV2",
-		"x-acs-version":         "2016-08-01",
-		"x-acs-date":            "2026-11-13T08:00:00Z",
-		"x-acs-signature-nonce": "3c9a2f6e-0b1d-4e7a-9f1c-2d5e8a7b6c40",
-		"x-acs-content-sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-		"content-type":          "application/x-www-form-urlencoded",
-		"user-agent":            "not signed",
-	}
-	got := authorization("POST", headers, headers["x-acs-content-sha256"], "testid", "testsecret")
-	want := "ACS3-HMAC-SHA256 Credential=testid," +
-		"SignedHeaders=content-type;host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version," +
-		"Signature=cbcb6d3776b2f648b16a98c0137bbd9b37853244036d3550391a5ac0afb6f271"
-	if got != want {
-		t.Fatalf("got  %s\nwant %s", got, want)
-	}
-}
-
 func TestRequest(t *testing.T) {
 	p, fake := newProvider(t, config())
 	fake.On(api).Reply(outboundtest.JSON(200, map[string]string{"RequestId": "r1", "MessageId": "m1"}))

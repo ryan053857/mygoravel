@@ -34,6 +34,7 @@ go get github.com/ryan053857/mygoravel@main
 | 防止任务重复执行 | [原子锁](docs/locks.md) |
 | 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |
 | 发送邮件 | [邮件](docs/mail.md) |
+| 发送短信验证码 | [短信](docs/sms.md) |
 | 生成发票、报表等 PDF | [生成 PDF](docs/pdf.md) |
 | 请求用户填写的地址 | [出站请求](docs/outbound.md) |
 | 给用户发站内通知 | [通知](docs/notifications.md) |

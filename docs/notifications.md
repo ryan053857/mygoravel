@@ -160,7 +160,7 @@ return mailjob.Send.Publish(ctx, tx, msg)
 <a id="telegram"></a>
 ## 其他渠道：Telegram
 
-短信、Slack、Telegram 等渠道都按邮件的方式实现：在事务中把消息交给队列，由一个任务调用第三方接口。下面以 Telegram 为例，框架不提供它的客户端，[Bot API](https://core.telegram.org/bots/api) 发一条消息只是一次 HTTP 请求。
+Slack、Telegram 等渠道都按邮件的方式实现：在事务中把消息交给队列，由一个任务调用第三方接口；短信由 [`sms`](sms.md) 发送，`sms.Message` 可以完整地序列化为 JSON 交给队列。下面以 Telegram 为例，框架不提供它的客户端，[Bot API](https://core.telegram.org/bots/api) 发一条消息只是一次 HTTP 请求。
 
 **绑定。** bot 不能主动给陌生人发消息，用户要先在 Telegram 中启动它，应用才能拿到他的 `chat_id`：
 

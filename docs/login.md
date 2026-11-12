@@ -59,7 +59,7 @@ users := login.New(a.db, login.Options{
 | --- | --- |
 | `Type` | 这套账号体系，`Realm` 只管理这个类型的主体 |
 | `Register` | 是否开放自助注册：为 `true` 时验证码也发给未注册的邮箱或手机号，验证后可以注册 |
-| `Send` | 发送验证码，邮件和短信的内容、通道由应用决定 |
+| `Send` | 发送验证码，邮件和短信的内容、通道由应用决定，见[邮件](mail.md)和[短信](sms.md) |
 | `Resolve` | 登录成功、签发凭据之前调用一次，通常就是入口的 [Resolver](authentication.md#resolving-subjects)：账号已停用时返回错误，登录失败 |
 | `PerTenant` | 登录标识在租户内唯一，见[登录标识](#identifiers) |
 | `Attempts`、`Sends` | 密码登录失败和发送验证码的[限流器](#limits)，必填 |
@@ -504,7 +504,7 @@ bots, err := captcha.New(captcha.Config{Secret: "test"}, fake.Client())
 `Sends` 和人机验证之外，验证码用短信发送时再给费用设一个上限：在 `Send` 中先过一个全局限流器，超出后不再发送。`Send` 返回的错误由 `SendCode` 原样返回，这次的验证记录同时删除：
 
 ```go
-smsBudget := ratelimit.NewDatabase(db, "sms", ratelimit.Config{Rate: 5000, Interval: 24 * time.Hour, Burst: 5000})
+smsBudget := redislimit.New(rdb, "blog:sms:budget", ratelimit.Config{Rate: 5000, Interval: 24 * time.Hour, Burst: 5000})
 
 readers := login.New(db, login.Options{
     // ……
@@ -512,10 +512,12 @@ readers := login.New(db, login.Options{
         if err := smsBudget.Allow(ctx, "all"); err != nil {
             return err // 当天的额度用完：返回 429，同时应当告警
         }
-        return sms.Send(ctx, code.To.Value, "Blog 验证码 "+code.Code+"，15 分钟内有效。")
+        return texts.Send(ctx, sms.Message{To: code.To.Value, Template: "login_code", Params: map[string]string{"code": code.Code}})
     },
 })
 ```
+
+`texts` 是 [`sms.Sender`](sms.md)。服务商对同一号码也有频率限制，触发时返回 `sms.ErrLimited`，同样以 `429` 返回给客户端。
 
 国际短信更贵，也是刷量的重点。只服务部分国家和地区时，发送前检查手机号的国家码，不在范围内的直接拒绝。App 不方便嵌入人机验证组件时，可以用 Apple App Attest 或 Google Play Integrity 证明请求来自自己的 App。
 
