@@ -33,6 +33,8 @@ type API struct {
 	accounts identity.Accounts
 	watcher  httpx.CredentialWatcher
 	names    *schemaNames
+
+	endpoints []Endpoint
 }
 
 // Options 创建 API。

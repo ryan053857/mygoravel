@@ -217,6 +217,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | --- | --- | --- |
 | `httpx` | HTTP 中间件、平滑停机、就绪检查、单页应用 | [中间件](middleware.md)、[请求生命周期](lifecycle.md)、[单页应用](spa.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
+| `httpx/rest/clientgen` | 从路由生成 Go 客户端的 `client` 命令 | [Go 客户端](clients.md#go) |
 | `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
 | `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、提示消息、主题、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
 | `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载，提示、对话框与页面的衔接 | [界面组件](components.md) |

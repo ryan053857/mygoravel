@@ -21,7 +21,11 @@ import (
 // 准备好后返回 SSE(fn)，fn 在连接上写出事件，不受 httpx.Timeout 的超时限制。
 func RegisterSSE[I any](api *API, op huma.Operation, events map[string]any, handler func(context.Context, *I) (*huma.StreamResponse, error)) {
 	addEventStream(api, &op, events)
-	Register(api, op, handler)
+	types := make(map[string]reflect.Type, len(events))
+	for name, v := range events {
+		types[name] = deref(reflect.TypeOf(v))
+	}
+	register(api, op, types, handler)
 }
 
 // SSE 返回一个 SSE 响应，fn 用 Stream.SendJSON 写出事件，连接管理见 httpx.SSE。

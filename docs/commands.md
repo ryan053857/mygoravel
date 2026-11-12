@@ -103,6 +103,7 @@ func main() {
 | `migratecmd.Publish(driver, sources...)` | 显式挂载的 `migrate publish` | 否 |
 | `httpcmd.OpenAPI(opts, register)` | `openapi` | 否 |
 | `httpcmd.Routes(router)` | `routes` | 否 |
+| `clientgen.Command(opts, register)` | `client`，生成 Go 客户端，见 [Go 客户端](clients.md#generating-go-client) | 否 |
 | `devcmd.New(opts, addr)` | `dev`，开发页面时监听文件变化并刷新浏览器，见 [dev 命令](#dev-command) | 是 |
 | `command.Bind(open, declare)` | 应用声明的命令，例如 `article publish`，见[从命令行运行 action](actions.md#as-commands) | 是 |
 | `queuecmd.New(db)` | `queue status`、`queue failed`、`queue slot recreate`，在 `command.Bind` 中声明，见[队列状态](queue.md#stats-command) | 是 |
