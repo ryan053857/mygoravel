@@ -19,10 +19,33 @@ import (
 	"github.com/ryan053857/mygoravel/database/migrate"
 )
 
+// Option 调整 New 构造的命令。
+type Option func(*options)
+
+type options struct {
+	name string // 为空时是主库的 migrate 命令
+}
+
+// Name 为另一个数据库构造迁移命令：命令名是 name，挂在主库的 migrate 命令下，例如 migrate analytics up；
+// make 默认在 migrations/<name> 中新建文件。每个数据库有自己的迁移文件和迁移记录表。name 为空时 panic。
+//
+//	mig := migratecmd.New(migrations.FS, func(c Config) database.Config { return c.Database })
+//	mig.AddCommand(migratecmd.New(analytics.FS, func(c Config) database.Config { return c.Analytics }, migratecmd.Name("analytics")))
+func Name(name string) Option {
+	if name == "" {
+		panic("migratecmd: empty name")
+	}
+	return func(o *options) { o.name = name }
+}
+
 // New 构造 migrate 命令及其 up、status、down、make 子命令。fsys 的根目录直接包含 SQL 迁移文件，
 // dbConfig 从应用配置中取出数据库配置。数据库连不上时以 ExitUnavailable 退出；
-// make 不加载配置、不连接数据库。
-func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command {
+// make 不加载配置、不连接数据库。应用连接多个数据库时，其他数据库的命令用 Name 构造。
+func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config, opts ...Option) *cobra.Command {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	// withProvider 连接数据库并创建迁移器，run 结束后关闭连接。
 	withProvider := func(run func(context.Context, io.Writer, *goose.Provider) error) func(*cobra.Command) error {
 		return func(cmd *cobra.Command) error {
@@ -42,7 +65,11 @@ func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command
 			return run(cmd.Context(), cmd.OutOrStdout(), provider)
 		}
 	}
-	root := leaf("migrate", "数据库迁移", func(cmd *cobra.Command) error { return cmd.Help() })
+	use, short, dir := "migrate", "数据库迁移", "migrations"
+	if o.name != "" {
+		use, short, dir = o.name, "数据库 "+o.name+" 的迁移", "migrations/"+o.name
+	}
+	root := leaf(use, short, func(cmd *cobra.Command) error { return cmd.Help() })
 	root.AddCommand(
 		leaf("up", "执行全部未执行的迁移", withProvider(func(ctx context.Context, out io.Writer, p *goose.Provider) error {
 			results, err := p.Up(ctx)
@@ -72,7 +99,7 @@ func New[C any](fsys fs.FS, dbConfig func(cfg C) database.Config) *cobra.Command
 			}
 			return errors.Wrap(err, "migrate: down")
 		})),
-		Make(),
+		makeIn(dir),
 	)
 	return root
 }

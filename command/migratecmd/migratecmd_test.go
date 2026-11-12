@@ -3,16 +3,20 @@ package migratecmd_test
 import (
 	"bytes"
 	"context"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/spf13/cobra"
+	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/command/migratecmd"
 	"github.com/ryan053857/mygoravel/database"
+	"github.com/ryan053857/mygoravel/database/dbtest"
 )
 
 type settings struct {
@@ -69,5 +73,66 @@ func TestHelpWithoutSubcommand(t *testing.T) {
 	out, _, err := execute(newRoot(migratecmd.New(fstest.MapFS{}, dbConfig)), "migrate")
 	if err != nil || !bytes.Contains([]byte(out), []byte("status")) {
 		t.Fatalf("out=%q err=%v", out, err)
+	}
+}
+
+// 另一个数据库的迁移命令挂在 migrate 下，迁移各自的数据库，互不影响。
+func TestNamedDatabase(t *testing.T) {
+	type twoDBs struct {
+		Database  database.Config `yaml:"database"`
+		Analytics database.Config `yaml:"analytics"`
+	}
+	main := dbtest.Open(t, nil)
+	analytics := dbtest.Open(t, nil)
+	dsn := func(db *bun.DB) string {
+		var name string
+		if err := db.NewRaw("SELECT current_database()").Scan(context.Background(), &name); err != nil {
+			t.Fatal(err)
+		}
+		u, err := url.Parse(dbtest.URL(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.Path = "/" + name
+		return u.String()
+	}
+	cfg := writeConfig(t, "database:\n  dsn: "+dsn(main)+"\nanalytics:\n  dsn: "+dsn(analytics)+"\n")
+	mainFS := fstest.MapFS{"00001_notes.sql": {Data: []byte("-- +goose Up\nCREATE TABLE notes (id int);\n-- +goose Down\nDROP TABLE notes;\n")}}
+	analyticsFS := fstest.MapFS{"00001_events.sql": {Data: []byte("-- +goose Up\nCREATE TABLE events (id int);\n-- +goose Down\nDROP TABLE events;\n")}}
+	newCmds := func() *cobra.Command {
+		mig := migratecmd.New(mainFS, func(c twoDBs) database.Config { return c.Database })
+		mig.AddCommand(migratecmd.New(analyticsFS, func(c twoDBs) database.Config { return c.Analytics }, migratecmd.Name("analytics")))
+		return newRoot(mig)
+	}
+
+	if _, _, err := execute(newCmds(), "migrate", "analytics", "up", "--config", cfg); err != nil {
+		t.Fatal(err)
+	}
+	tables := func(db *bun.DB) []string {
+		var names []string
+		if err := db.NewRaw("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('notes', 'events') ORDER BY 1").Scan(context.Background(), &names); err != nil {
+			t.Fatal(err)
+		}
+		return names
+	}
+	if got := tables(analytics); len(got) != 1 || got[0] != "events" {
+		t.Fatalf("analytics tables %v", got)
+	}
+	if got := tables(main); len(got) != 0 {
+		t.Fatalf("main migrated by the analytics command: %v", got)
+	}
+	if _, _, err := execute(newCmds(), "migrate", "up", "--config", cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := tables(main); len(got) != 1 || got[0] != "notes" {
+		t.Fatalf("main tables %v", got)
+	}
+
+	// make 默认写入 migrations/analytics。
+	dir := t.TempDir()
+	t.Chdir(dir)
+	out, _, err := execute(newCmds(), "migrate", "analytics", "make", "add_index")
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(out), filepath.Join("migrations", "analytics")) {
+		t.Fatalf("make: %q %v", out, err)
 	}
 }

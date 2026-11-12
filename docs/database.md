@@ -15,6 +15,8 @@
     - [提交后执行](#after-commit)
     - [隔离级别与死锁](#isolation-and-deadlocks)
 - [处理约束错误](#constraint-errors)
+- [只读副本](#read-replicas)
+- [多个数据库](#multiple-databases)
 - [测试](#testing)
 
 <a id="introduction"></a>
@@ -107,7 +109,7 @@ func Check(ctx context.Context, dsn string) error {
 }
 ```
 
-`database.Open` 使用你传入的配置值，包括显式设置的零值。为 `ctx` 设置一个截止时间，可以避免数据库不可达时启动过程无限等待。
+连接池参数为 `0` 时使用默认值，所以 `database.Config{DSN: dsn}` 也能直接打开。为 `ctx` 设置一个截止时间，可以避免数据库不可达时启动过程无限等待。
 
 在应用中，连接池应当在入口打开**一次**，然后传给所有需要它的 [action](actions.md)，在应用退出时关闭，见[依赖装配](dependencies.md)。报告每条语句的耗时指标和链路用 `database.WithTelemetry`，见[可观测性](telemetry.md#database)。
 
@@ -396,6 +398,65 @@ func (a *Create) Handle(ctx context.Context, subject identity.Subject, c Changes
 | `IsDeadlock(err)` | 死锁 | 40P01 |
 
 `IsUniqueViolation` 可以传入约束名，只在指定的约束冲突时返回 `true`。推荐总是指定约束名，为不同的约束返回不同的业务错误，例如“slug 已被使用”和“邮箱已注册”；其他错误则保留原因继续返回。
+
+<a id="read-replicas"></a>
+## 只读副本
+
+读多写少的应用可以把一部分读取交给只读副本，减轻主库的压力。副本是主库之外的另一个连接池，用 `database.ReadOnly` 打开，在入口和主库一起创建：
+
+```go
+replica, err := database.Open(ctx, cfg.Replica, database.Name("replica"), database.ReadOnly(),
+    database.WithTelemetry(tel.Meters, tel.Tracers))
+```
+
+`ReadOnly` 让副本的会话默认只读：误把写操作交给它时，立即得到 `database.IsReadOnly` 能识别的错误。`Name` 是连接池指标中的名字，区分主库和副本。有多个副本时，在它们前面放一个负载均衡（云数据库的只读地址、HAProxy 等），`replica.dsn` 指向它。
+
+哪些读取交给副本，由 action 在构造函数中声明。文章列表能容忍几百毫秒的复制延迟，交给副本；发布文章要在事务中读取并修改，用主库：
+
+```go
+list := article.NewList(a.replica)
+publish := article.NewPublish(a.db, a.emails)
+```
+
+副本上的数据比主库晚一点，选择时注意：
+
+- **刚写入的数据可能还读不到。** 写完立即要读的地方用主库，例如修改后返回最新内容、标记已读后刷新未读数。
+- **授权检查和事务中的读取用主库**，见[在事务中检查](authorization.md#checking-in-transactions)。
+- **框架的组件都用主库**：权限、token、会话、功能开关、队列。`search.Search` 这类只读取的函数接收 `db` 参数，可以传入副本。
+- 副本上运行很久的查询可能因为与复制冲突被取消，报表类的长查询可以在副本上开启 `hot_standby_feedback`。监控副本的复制延迟（`pg_stat_replication.replay_lag`）。
+
+测试中用 `dbtest.Replica(t, db)` 代替副本：它连接同一个测试库，没有延迟，写入时失败，能发现误把写操作交给副本的代码。
+
+<a id="multiple-databases"></a>
+## 多个数据库
+
+按模块拆分的数据库，例如把埋点事件放进单独的分析库，同样是一个连接池。在配置中加一段，在入口打开，传给这个模块的 action：
+
+```yaml
+analytics:
+  dsn: ${ANALYTICS_DATABASE_URL}
+```
+
+```go
+analytics, err := database.Open(ctx, cfg.Analytics, database.Name("analytics"))
+track := events.NewTrack(analytics)
+```
+
+每个数据库有自己的迁移文件。`migratecmd.Name` 构造另一个数据库的迁移命令，挂在 `migrate` 下：
+
+```go
+mig := migratecmd.New(migrations.FS, func(c Config) database.Config { return c.Database })
+mig.AddCommand(migratecmd.New(analyticsmigrations.FS, func(c Config) database.Config { return c.Analytics },
+    migratecmd.Name("analytics")))
+```
+
+`migrate analytics up` 迁移分析库，`migrate analytics make add_index` 在 `migrations/analytics` 中新建文件。部署时两个数据库的迁移都要执行。
+
+拆库之后要注意：
+
+- **没有跨库的事务。** 两个库的修改需要一起成功时，在一个库的事务中发布[任务](queue.md)，由任务修改另一个库，任务至少执行一次。
+- **任务在哪个库发布，就要有一个用这个库的 worker 转发**：队列把任务写进发布它的事务所在数据库的 WAL。通常只在主库发布任务；某个模块必须在自己的库中发布时，`work` 进程为这个库再创建一个 `queue.Worker`。
+- 框架包的迁移（队列、权限等）发布到使用它们的那个库，通常是主库。
 
 <a id="testing"></a>
 ## 测试

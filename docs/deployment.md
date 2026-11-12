@@ -19,6 +19,7 @@
     - [维护步骤](#maintenance-steps)
     - [不必整站停服时](#without-downtime)
 - [日志](#logging)
+- [PgBouncer](#pgbouncer)
 - [队列](#queue)
     - [监控积压](#queue-monitoring)
     - [主备切换](#queue-failover)
@@ -465,6 +466,27 @@ telemetry:
 
 排查问题时，可以使用响应头 `X-Request-ID` 中的请求 ID，在日志中找到同一请求的访问日志和错误诊断。详见[日志](logging.md)。
 
+<a id="pgbouncer"></a>
+## PgBouncer
+
+实例和进程多了以后，每个连接池都占着数据库的连接，所有实例的 `max_conns` 之和可能超过 PostgreSQL 能承受的连接数。这时在应用和数据库之间放一个 [PgBouncer](https://www.pgbouncer.org)，用 transaction 模式：连接只在事务期间占用数据库的一个连接，事务结束就还回去。
+
+```ini
+; pgbouncer.ini
+[pgbouncer]
+pool_mode = transaction
+default_pool_size = 50          ; 每个数据库、每个用户到 PostgreSQL 的连接数
+max_client_conn = 2000          ; 各实例的 max_conns 之和不超过它
+max_prepared_statements = 200   ; pgx 默认使用命名的预编译语句，需要 PgBouncer 1.21 以上
+```
+
+`database.dsn` 指向 PgBouncer。有两处必须直连 PostgreSQL，因为它们依赖会话，transaction 模式下会失效：
+
+- **迁移**：goose 用会话级的 advisory lock 防止多个实例同时迁移。迁移命令的 `dbConfig` 取一个直连地址，例如配置中单独的 `migrate_database` 段。
+- **队列的复制连接**：设置 `queue.replication_dsn`，见[队列](#queue)。
+
+PgBouncer 的连接数不改变数据库的处理能力：`default_pool_size` 仍然要按数据库的 CPU 和磁盘设置。应用自己的连接池用满时，请求按 [`db_acquire_timeout`](database.md#pool-exhaustion) 快速失败；PgBouncer 到数据库的连接用满时，语句在 PgBouncer 中排队，不受这个时限约束，用 PgBouncer 的 `query_wait_timeout` 限制排队时间（例如 `5`，单位秒）。
+
 <a id="queue"></a>
 ## 队列
 
@@ -479,7 +501,7 @@ telemetry:
 | `wal_sender_timeout` | `10s` | 转发的 worker 失联后多久释放复制槽，由待命的 worker 接手 |
 | `max_replication_slots`、`max_wal_senders` | 默认的 10 足够 | 每个数据库一个槽、一个复制连接 |
 
-数据库连接经过 PgBouncer 时，配置 `queue.replication_dsn` 直连 PostgreSQL：复制协议不能经过连接池。
+数据库连接经过 [PgBouncer](#pgbouncer) 时，配置 `queue.replication_dsn` 直连 PostgreSQL：复制协议不能经过连接池。
 
 <a id="queue-monitoring"></a>
 ### 监控积压

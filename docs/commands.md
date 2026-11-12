@@ -99,7 +99,7 @@ func main() {
 | --- | --- | --- |
 | `command.Run(use, short, run)` | 任意名称，例如 `serve`、`worker` | 是 |
 | `command.Config[C]()` | `config check`、`config show` | 是 |
-| `migratecmd.New(fsys, driver, dbConfig)` | `migrate up`、`migrate status`、`migrate down`、`migrate make` | 是 |
+| `migratecmd.New(fsys, dbConfig, opts...)` | `migrate up`、`migrate status`、`migrate down`、`migrate make`；`migratecmd.Name` 构造其他数据库的命令，见[多个数据库](database.md#multiple-databases) | 是 |
 | `migratecmd.Publish(driver, sources...)` | 显式挂载的 `migrate publish` | 否 |
 | `httpcmd.OpenAPI(opts, register)` | `openapi` | 否 |
 | `httpcmd.Routes(router)` | `routes` | 否 |
@@ -251,7 +251,7 @@ devcmd.Tool{
 <a id="migrate-command"></a>
 ### migrate 命令
 
-`migratecmd.New(fsys, driver, dbConfig)` 创建四个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`driver` 是应用使用的数据库驱动，`dbConfig` 从应用配置中取出数据库配置：
+`migratecmd.New(fsys, dbConfig)` 创建四个迁移命令。`fsys` 是[嵌入的迁移文件](migrations.md#embedding-migrations)，`dbConfig` 从应用配置中取出数据库配置：
 
 ```bash
 ./bin/api migrate up       # 执行全部未执行的迁移
@@ -268,9 +268,9 @@ VERSION         STATE    APPLIED AT           FILE
 20261112100000  pending  -                    20261112100000_create_article_tags_table.sql
 ```
 
-`make` 按 `driver` 生成对应数据库的骨架，不加载配置、不连接数据库；其他命令会加载配置、连接数据库，并在结束后关闭连接。数据库连不上时以 `ExitUnavailable` 退出，部署脚本可以据此重试。迁移文件的编写与嵌入见[迁移](migrations.md)。
+`make` 生成迁移文件的骨架，不加载配置、不连接数据库；其他命令会加载配置、连接数据库，并在结束后关闭连接。数据库连不上时以 `ExitUnavailable` 退出，部署脚本可以据此重试。迁移文件的编写与嵌入见[迁移](migrations.md)。应用连接多个数据库时，用 `migratecmd.Name` 为其他数据库构造 `migrate <name> …` 命令，见[多个数据库](database.md#multiple-databases)。
 
-需要文件上传等功能自带的 SQL 时，可在 `migratecmd.New` 返回的命令上显式添加 `migratecmd.Publish(driver, sources...)`。其中 `driver` 是应用使用的数据库驱动，`sources` 是应用选择的 `[]migrate.Source`，例如 `migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}`。注册后可以执行：
+需要文件上传等功能自带的 SQL 时，可在 `migratecmd.New` 返回的命令上显式添加 `migratecmd.Publish(sources...)`。其中 `sources` 是应用选择的 `[]migrate.Source`，例如 `migrate.Source{Name: "filesystem", FS: filesystem.Migrations()}`。注册后可以执行：
 
 ```bash
 go run ./cmd/api migrate publish --dir migrations
