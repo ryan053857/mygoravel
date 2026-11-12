@@ -12,8 +12,10 @@
 - [确认身份](#confirming)
 - [后台创建账号](#admin-accounts)
 - [注销账号](#forget)
+- [操作日志与安全提醒](#security-events)
 - [限流与防探测](#limits)
     - [人机验证](#captcha)
+    - [短信费用](#sms-cost)
 - [清理](#cleanup)
 - [测试](#testing)
 
@@ -385,6 +387,42 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 
 注销后，这个邮箱可以重新注册。
 
+<a id="security-events"></a>
+## 操作日志与安全提醒
+
+`login` 不在登录、修改密码这些时候回调应用：它们都由处理器调用，结果当场就知道。要记[操作日志](activity.md)时，在同一个事务中调用 `activity.Record`：
+
+```go
+err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
+    if err := a.users.SetPassword(ctx, tx, sub.Ref(), in.Body.Password); err != nil {
+        return err
+    }
+    return activity.Record(ctx, tx, sub, activity.Activity{
+        Event: "account.password_changed", TargetType: string(sub.Type), TargetID: sub.ID,
+    })
+})
+```
+
+启用或关闭二次验证、绑定或移除登录方式的写法相同。登录成功时用 `out.Subject` 作为操作者记录；登录失败没有可以确定的操作者，需要时写进日志。
+
+“新设备登录”提醒在签发凭据之前查一下已有的登录。下面是读者 App 的 `issue`，其他设备上有登录、但都不是这个 User-Agent 时提醒一次：
+
+```go
+known, err := h.acc.ReaderTokens.List(ctx, out.Subject)
+if err != nil {
+    return nil, err
+}
+pair, err := h.acc.ReaderJWT.Login(ctx, out.Subject, device)
+if err != nil {
+    return nil, err
+}
+if len(known) > 0 && !slices.ContainsFunc(known, func(t apitoken.Token) bool { return t.UserAgent == device.UserAgent }) {
+    // 发邮件、短信或站内通知，带上时间和 IP，提醒用户不是本人时去设备列表退出这台设备
+}
+```
+
+页面用[会话存储](session.md#listing-sessions)的 `List` 做同样的判断。refresh token 被另一方使用时，框架撤销这次登录并调用 [`OnReuse`](api-tokens.md#jwt)，在那里提醒用户。
+
 <a id="limits"></a>
 ## 限流与防探测
 
@@ -454,6 +492,27 @@ fake.On("POST " + captcha.Turnstile).Reply(outboundtest.JSON(200, map[string]any
 }))
 bots, err := captcha.New(captcha.Config{Secret: "test"}, fake.Client())
 ```
+
+<a id="sms-cost"></a>
+### 短信费用
+
+`Sends` 和人机验证之外，验证码用短信发送时再给费用设一个上限：在 `Send` 中先过一个全局限流器，超出后不再发送。`Send` 返回的错误由 `SendCode` 原样返回，这次的验证记录同时删除：
+
+```go
+smsBudget := ratelimit.NewDatabase(db, "sms", ratelimit.Config{Rate: 5000, Interval: 24 * time.Hour, Burst: 5000})
+
+readers := login.New(db, login.Options{
+    // ……
+    Send: func(ctx context.Context, code login.Code) error {
+        if err := smsBudget.Allow(ctx, "all"); err != nil {
+            return err // 当天的额度用完：返回 429，同时应当告警
+        }
+        return sms.Send(ctx, code.To.Value, "Blog 验证码 "+code.Code+"，15 分钟内有效。")
+    },
+})
+```
+
+国际短信更贵，也是刷量的重点。只服务部分国家和地区时，发送前检查手机号的国家码，不在范围内的直接拒绝。App 不方便嵌入人机验证组件时，可以用 Apple App Attest 或 Google Play Integrity 证明请求来自自己的 App。
 
 <a id="cleanup"></a>
 ## 清理
