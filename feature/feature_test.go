@@ -112,57 +112,36 @@ func TestAccountSystems(t *testing.T) {
 	check(t, s, user("alice", ""), search, false, "user alice unaffected")
 }
 
+// TestRollout 经过数据库检查比例放量的接线：设置的比例生效、结果对同一个人稳定。
+// 哈希的统计性质由 TestInRolloutDistribution 直接检查纯函数，这里每次判断都查一次数据库，只用少量主体。
 func TestRollout(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	active := func(f feature.Flag, sub identity.Subject) bool { return s.Active(ctx, sub, f) }
 
-	const n = 2000
-	count := func(percent int) (map[string]bool, int) {
+	const n = 100
+	count := func(percent int) map[string]bool {
 		set(t, s, search, feature.Everyone, feature.Percent(percent))
-		on, total := map[string]bool{}, 0
+		on := map[string]bool{}
 		for i := range n {
-			id := fmt.Sprint("u", i)
-			if active(search, user(id, "")) {
+			if id := fmt.Sprint("u", i); active(search, user(id, "")) {
 				on[id] = true
-				total++
 			}
 		}
-		return on, total
+		return on
 	}
-	zero, total := count(0)
-	assert.Zero(t, total)
-	assert.Empty(t, zero)
-	ten, total10 := count(10)
-	assert.InDelta(t, n/10, total10, n/25, "about 10%")
-	half, total50 := count(50)
-	assert.InDelta(t, n/2, total50, n/25, "about 50%")
-	for id := range ten {
-		assert.True(t, half[id], "raising the percentage keeps %s enabled", id)
-	}
-	_, total100 := count(100)
-	assert.Equal(t, n, total100)
+	assert.Empty(t, count(0))
+	half := count(50)
+	assert.NotEmpty(t, half, "50% enables someone")
+	assert.Less(t, len(half), n, "50% leaves someone out")
+	assert.Len(t, count(100), n)
 
 	// 结果对同一个人稳定。
 	set(t, s, search, feature.Everyone, feature.Percent(50))
-	for i := range 50 {
+	for i := range n {
 		sub := user(fmt.Sprint("u", i), "")
 		assert.Equal(t, half[sub.ID], active(search, sub))
 	}
-
-	// 不同开关选中的人不同。
-	other := feature.Flag{Name: "other"}
-	s2 := feature.NewStore(dbtest.Open(t, feature.Migrations()), feature.Catalog{search, other})
-	set(t, s2, search, feature.Everyone, feature.Percent(50))
-	set(t, s2, other, feature.Everyone, feature.Percent(50))
-	same := 0
-	for i := range n {
-		sub := user(fmt.Sprint("u", i), "")
-		if s2.Active(ctx, sub, search) == s2.Active(ctx, sub, other) {
-			same++
-		}
-	}
-	assert.InDelta(t, n/2, same, n/10, "flags pick independent cohorts")
 
 	// 未登录的访客不在 100 以下的比例内。
 	assert.False(t, active(search, identity.Subject{}))
@@ -173,17 +152,19 @@ func TestRolloutByTenant(t *testing.T) {
 	ctx := context.Background()
 	set(t, s, editor, feature.Everyone, feature.Percent(50))
 	on := 0
-	for i := range 200 {
+	const tenants = 40
+	for i := range tenants {
 		tenant := fmt.Sprint("t", i)
 		first := s.Active(ctx, user("a", tenant), editor)
-		for j := range 5 {
+		for j := range 3 {
 			assert.Equal(t, first, s.Active(ctx, user(fmt.Sprint("u", j), tenant), editor), "same result within %s", tenant)
 		}
 		if first {
 			on++
 		}
 	}
-	assert.InDelta(t, 100, on, 25)
+	assert.NotZero(t, on, "50% enables some tenants")
+	assert.Less(t, on, tenants, "50% leaves some tenants out")
 	assert.False(t, s.Active(ctx, user("a", ""), editor), "no tenant, not in a tenant rollout")
 }
 

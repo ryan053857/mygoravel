@@ -85,13 +85,16 @@ go test -race -count=1 ./...
 <a id="continuous-integration"></a>
 ## 持续集成
 
-CI 配置位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，每次推送和 Pull Request 都会依次执行：
+CI 配置位于 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，每次推送和 Pull Request 都会同时运行两个 job：
 
-1. `gofmt` 格式检查；
-2. `go vet ./...`；
-3. `golangci-lint run`，配置在 [.golangci.yml](../.golangci.yml)；
-4. 在 `web/ui` 中重新运行 `go tool templ generate`，确认提交的 `_templ.go` 是最新的；
-5. `go test ./...`（使用 PostgreSQL 18、Redis 8、Memcached、nsqd 和 Gotenberg 服务容器）。
+- `lint` 依次执行：
+  1. `gofmt` 格式检查；
+  2. `go vet ./...`；
+  3. `golangci-lint run`，配置在 [.golangci.yml](../.golangci.yml)；
+  4. 在 `web/ui` 中重新运行 `go tool templ generate`，确认提交的 `_templ.go` 是最新的。
+- `test` 执行 `go test ./...`，使用 PostgreSQL 18、Redis 8、Memcached、nsqd、Gotenberg 和 Qdrant 服务容器。
+
+`go test` 同时运行多个包，整体耗时取决于最慢的那个包。每次判断都要查询数据库或调用服务的测试，不要用大量样本检查统计性质：把统计性质留给纯函数的测试，经过服务的测试只用少量数据检查接线，例如 `feature` 的放量。
 
 CI 不运行 `-race`，它让整个流程慢了好几倍。提交之前，请在本地至少运行前三项和 `go test ./...`；改动涉及并发时，另外用 `go test -race` 运行相关的包，时序敏感的测试还要不带 `-race` 多跑几轮。
 
