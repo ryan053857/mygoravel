@@ -139,13 +139,13 @@ func blockingTask(runs *atomic.Int64, started chan<- struct{}, release <-chan st
 func TestOverlap(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		opts      []schedule.Option
+		opts      []schedule.TaskOption
 		instances int
 		want      int64
 	}{
 		{"same instance skipped", nil, 1, 1},
 		{"other instance skipped", nil, 2, 1},
-		{"allowed", []schedule.Option{schedule.AllowOverlap()}, 1, 2},
+		{"allowed", []schedule.TaskOption{schedule.AllowOverlap()}, 1, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			locker := lock.New(locktest.NewStore())

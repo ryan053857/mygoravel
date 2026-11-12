@@ -5,7 +5,6 @@ go 1.27.3
 require (
 	code.dny.dev/ssrf v0.3.0
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
-	github.com/ThreeDotsLabs/watermill v1.5.3
 	github.com/a-h/templ v0.3.1100
 	github.com/adhocore/gronx v1.20.6
 	github.com/alexedwards/scs/v2 v2.9.0
@@ -132,7 +131,6 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/lithammer/shortuuid/v3 v3.0.7 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/maypok86/otter/v2 v2.4.0 // indirect
@@ -142,7 +140,6 @@ require (
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
-	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/panjf2000/ants/v2 v2.10.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
@@ -159,7 +156,6 @@ require (
 	github.com/samber/lo v1.53.0 // indirect
 	github.com/samber/slog-common v0.22.0 // indirect
 	github.com/sethvargo/go-retry v0.5.0 // indirect
-	github.com/sony/gobreaker v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect

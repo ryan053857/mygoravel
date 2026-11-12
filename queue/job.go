@@ -11,12 +11,6 @@ import (
 	"github.com/uptrace/bun/dialect"
 )
 
-// metadataAvailableAt 是通过 Publisher 发布 Watermill 消息时指定可执行时间的元数据，入队时转为 Job.AvailableAt。
-const metadataAvailableAt = "_queue_available_at"
-
-// metadataUnique 是通过 Publisher 发布 Watermill 消息时指定 Unique 键的元数据，入队时转为 Job.Unique。
-const metadataUnique = "_queue_unique"
-
 type job struct {
 	bun.BaseModel `bun:"table:queue_jobs,alias:j"`
 

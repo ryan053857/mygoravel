@@ -17,7 +17,7 @@ var (
 )
 
 // Describe 为任务添加一句说明，供 Tasks 列出，例如在后台页面和命令中展示。
-func Describe(description string) Option { return func(t *task) { t.description = description } }
+func Describe(description string) TaskOption { return func(t *task) { t.description = description } }
 
 // Task 描述一个注册的任务，由 Tasks 返回。
 type Task struct {

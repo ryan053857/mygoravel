@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -20,6 +19,9 @@ import (
 
 // DefaultTimeout 是 Options.Timeout 不大于 0 时每次请求的超时。
 const DefaultTimeout = 10 * time.Second
+
+// DefaultMaxAttempts 是 Options.MaxAttempts 不大于 0 时每次投递最多的请求次数，按队列的退避，最后一次约在 2 天后。
+const DefaultMaxAttempts = 16
 
 // maxError 是投递记录中 last_error 保存的最大字节数。
 const maxError = 1024
@@ -32,13 +34,16 @@ type Options struct {
 	Client *http.Client
 	// Timeout 是每次请求的超时，包括读取响应；不大于 0 时为 DefaultTimeout。
 	Timeout time.Duration
+	// MaxAttempts 是每次投递最多的请求次数，覆盖 Worker 的 Config.MaxAttempts；不大于 0 时为 DefaultMaxAttempts。
+	MaxAttempts int
 }
 
 // Deliverer 处理投递任务：签名并发送请求，把结果写回投递记录。
 type Deliverer struct {
-	db      bun.IDB
-	client  *http.Client
-	timeout time.Duration
+	db          bun.IDB
+	client      *http.Client
+	timeout     time.Duration
+	maxAttempts int
 }
 
 // NewDeliverer 创建投递任务的处理器，db 是投递记录和端点所在的数据库。
@@ -52,22 +57,24 @@ func NewDeliverer(db bun.IDB, opts Options) *Deliverer {
 	}
 	noRedirect := *client
 	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	d := &Deliverer{db: db, client: &noRedirect, timeout: opts.Timeout}
+	d := &Deliverer{db: db, client: &noRedirect, timeout: opts.Timeout, maxAttempts: opts.MaxAttempts}
 	if d.timeout <= 0 {
 		d.timeout = DefaultTimeout
+	}
+	if d.maxAttempts <= 0 {
+		d.maxAttempts = DefaultMaxAttempts
 	}
 	return d
 }
 
-// Handle 把 Deliver 的处理函数注册到 Router。sub 必须从数据库队列领取任务，
-// 它的 MaxAttempts 决定重试多久，见 queue.Config。
+// Handle 把 Deliver 的处理函数注册到 w，最多请求 Options.MaxAttempts 次。w 必须使用 Send 发布任务的数据库队列。
 //
 // 端点返回 2xx 时投递成功；其他状态码、超时和网络错误按队列的退避重试；
 // 端点地址被 outbound 拒绝（内网地址）时不再重试，投递记录直接标记为失败。
 // 429 和 503 带有 Retry-After 时按它等待。最后一次仍然失败时投递记录标记为失败，任务正常结束，
 // 不进入失败任务表：端点出错是接收方的问题，投递记录就是它的处理结果，需要时用 Resend 重发。
-func (d *Deliverer) Handle(r *message.Router, sub message.Subscriber) *message.Handler {
-	return Deliver.Handle(r, sub, d.deliver)
+func (d *Deliverer) Handle(w *queue.Worker) {
+	Deliver.Handle(w, d.deliver, queue.MaxAttempts(d.maxAttempts))
 }
 
 func (d *Deliverer) deliver(ctx context.Context, id uuid.UUID) error {

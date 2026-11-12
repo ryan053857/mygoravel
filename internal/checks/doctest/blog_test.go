@@ -25,6 +25,7 @@ var blogFiles = []docFile{
 	{"internal/auth/permissions.go", "authorization.md"},
 	{"internal/bootstrap/app.go", "dependencies.md"},
 	{"internal/bootstrap/http.go", "dependencies.md"},
+	{"internal/mailjob/mailjob.go", "queue.md"},
 	{"internal/bootstrap/worker.go", "queue.md"},
 	{"internal/bootstrap/scheduler.go", "scheduling.md"},
 	{"internal/bootstrap/schedules.go", "scheduling.md"},

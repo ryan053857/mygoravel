@@ -6,7 +6,8 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-// Config 是 Subscriber 的配置，对应配置文件的 queue 段。
+// Config 是 Worker 的配置，对应配置文件的 queue 段。Concurrency 和 MaxAttempts 是各 topic 的默认值，
+// 注册处理函数时可以用同名的 HandleOption 覆盖。
 type Config struct {
 	// Concurrency 是每个 topic 同时处理的任务数上限。
 	Concurrency int `yaml:"concurrency"`

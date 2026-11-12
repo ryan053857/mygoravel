@@ -17,7 +17,7 @@ const (
 	attrOutcome     = attribute.Key("queue.job.outcome")
 )
 
-// WithTelemetry 让订阅者报告 OpenTelemetry 指标和链路。
+// WithTelemetry 让 Worker 报告 OpenTelemetry 指标和链路。
 //
 // 指标的属性 messaging.system 是驱动名，messaging.destination.name 是 topic：
 //
@@ -31,14 +31,14 @@ const (
 // 不设置时，任务仍然带着发布方的链路：处理函数的 ctx 中是发布方的 span，处理函数自己创建的 span 接在它之后。
 //
 // 队列中的任务数见 ObserveJobs。mp 或 tp 为 nil 时 panic；只需要其中一种时，另一个传 noop 实现。
-func WithTelemetry(mp metric.MeterProvider, tp trace.TracerProvider) SubscriberOption {
+func WithTelemetry(mp metric.MeterProvider, tp trace.TracerProvider) WorkerOption {
 	if mp == nil || tp == nil {
 		panic("queue: nil meter or tracer provider")
 	}
 	metrics := newJobMetrics(mp)
 	tracer := tp.Tracer(scopeName)
-	return func(s *Subscriber) {
-		s.tracer = tracer
-		s.observers = append(s.observers, metrics.record)
+	return func(w *Worker) {
+		w.tracer = tracer
+		w.observers = append(w.observers, metrics.record)
 	}
 }

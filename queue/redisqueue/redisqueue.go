@@ -1,8 +1,8 @@
 // Package redisqueue 是把任务保存在 Redis 中的队列驱动，实现 queue.Driver。
 //
 //	d := redisqueue.New(rdb, "blog:queue")
-//	err := queue.Publish(ctx, d, "mail.send", msg)
-//	sub := queue.NewSubscriber(d, cfg, logger, queue.WithFailedJobs(queue.NewFailedJobs(db, d)))
+//	err := SendMail.Publish(ctx, d, msg)
+//	w := queue.NewWorker(d, cfg, logger, queue.WithFailedJobs(queue.NewFailedJobs(db, d)))
 //
 // Redis 不能加入数据库事务：需要与业务数据一起提交的任务请使用 queue.Database。
 // 失败任务仍然写入数据库的 queue_failed_jobs，因此需要 WithFailedJobs。

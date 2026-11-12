@@ -311,27 +311,22 @@ func local() *http.Client {
 // startWorker 运行处理投递任务的 worker，可以投递到本机的测试接收方，第一次失败后约 1 秒重试。
 func startWorker(t *testing.T, db *bun.DB, maxAttempts int) {
 	t.Helper()
-	runWorker(t, db, maxAttempts, webhook.Options{Client: local(), Timeout: 2 * time.Second})
+	runWorker(t, db, webhook.Options{Client: local(), Timeout: 2 * time.Second, MaxAttempts: maxAttempts})
 }
 
 // runWorker 用 opts 运行处理投递任务的 worker。
-func runWorker(t *testing.T, db *bun.DB, maxAttempts int, opts webhook.Options) {
+func runWorker(t *testing.T, db *bun.DB, opts webhook.Options) {
 	t.Helper()
 	cfg := queue.DefaultConfig()
 	cfg.PollInterval = 20 * time.Millisecond
-	cfg.MaxAttempts = maxAttempts
-	logger := slog.New(slog.DiscardHandler)
-	r := queue.NewRouter(logger)
-	sub := queue.NewSubscriber(queue.Database(db), cfg, logger)
-	webhook.NewDeliverer(db, opts).Handle(r, sub)
+	w := queue.NewWorker(queue.Database(db), cfg, slog.New(slog.DiscardHandler))
+	webhook.NewDeliverer(db, opts).Handle(w)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- r.Run(ctx) }()
-	<-r.Running()
+	go func() { done <- w.Run(ctx) }()
 	t.Cleanup(func() {
 		cancel()
 		<-done
-		_ = sub.Close()
 	})
 }
 
@@ -423,7 +418,7 @@ func TestDeliverRefusesPrivateAddresses(t *testing.T) {
 	ctx := context.Background()
 	rcv := newReceiver(t)
 	create(t, db, "acme", rcv.srv.URL, "*")
-	runWorker(t, db, 5, webhook.Options{})
+	runWorker(t, db, webhook.Options{MaxAttempts: 5})
 	if err := webhook.Send(ctx, db, acme, webhook.Event{Type: "article.published", Data: map[string]string{"title": "hi"}}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,8 +1,8 @@
 // Package natsqueue 是把任务保存在 NATS JetStream 中的队列驱动，实现 queue.Driver。
 //
 //	d := natsqueue.New(nc, "BLOG_QUEUE")
-//	err := queue.Publish(ctx, d, "mail.send", msg)
-//	sub := queue.NewSubscriber(d, cfg, logger, queue.WithFailedJobs(queue.NewFailedJobs(db, d)))
+//	err := SendMail.Publish(ctx, d, msg)
+//	w := queue.NewWorker(d, cfg, logger, queue.WithFailedJobs(queue.NewFailedJobs(db, d)))
 //
 // 需要 NATS 2.12 或更高版本并开启 JetStream，延迟任务使用服务器的定时消息；版本过低时发布和领取都返回错误。
 // NATS 不能加入数据库事务：需要与业务数据一起提交的任务请使用 queue.Database。

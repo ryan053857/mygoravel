@@ -1,5 +1,5 @@
 // Package queuetest 提供 queue.Driver 实现的契约测试：数据库、Redis、NATS 驱动运行同一组场景，
-// 保证 Subscriber 在任何驱动上的行为相同。实现自己的驱动时用 TestDriver 检查它。
+// 保证 Worker 在任何驱动上的行为相同。实现自己的驱动时用 TestDriver 检查它。
 package queuetest
 
 import (
@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -64,7 +63,7 @@ func TestDriver(t *testing.T, o Options) {
 		{"retry all failed jobs", retryAllFailed},
 		{"permanent failures", permanentFailures},
 		{"concurrent failures", concurrentFailures},
-		{"competing subscribers", competingSubscribers},
+		{"competing workers", competingWorkers},
 		{"failing job does not block others", failingJobDoesNotBlock},
 		{"lease is extended", leaseIsExtended},
 		{"graceful shutdown", gracefulShutdown},
@@ -107,23 +106,17 @@ func config() queue.Config {
 	return cfg
 }
 
-// start 运行一个 Router，register 在运行前注册处理函数；返回的函数停止 Router 并等待它退出。
-func (s *setup) start(t *testing.T, cfg queue.Config, register func(r *message.Router, sub *queue.Subscriber), opts ...queue.SubscriberOption) func() {
+// jobs 是大多数场景使用的 topic。
+var jobs = queue.Topic[payload]("jobs")
+
+// start 运行一个 Worker，register 在运行前注册处理函数；返回的函数停止 Worker 并等待它写回结果。
+func (s *setup) start(t *testing.T, cfg queue.Config, register func(w *queue.Worker), opts ...queue.WorkerOption) func() {
 	t.Helper()
-	logger := slog.New(slog.DiscardHandler)
-	r := queue.NewRouter(logger)
-	sub := queue.NewSubscriber(s.driver, cfg, logger, append([]queue.SubscriberOption{queue.WithFailedJobs(s.failed)}, opts...)...)
-	register(r, sub)
+	w := queue.NewWorker(s.driver, cfg, slog.New(slog.DiscardHandler), append([]queue.WorkerOption{queue.WithFailedJobs(s.failed)}, opts...)...)
+	register(w)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- r.Run(ctx) }()
-	select {
-	case <-r.Running():
-	case err := <-done:
-		t.Fatalf("router exited: %v", err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("router did not start")
-	}
+	go func() { done <- w.Run(ctx) }()
 	var once sync.Once
 	stop := func() {
 		once.Do(func() {
@@ -131,13 +124,10 @@ func (s *setup) start(t *testing.T, cfg queue.Config, register func(r *message.R
 			select {
 			case err := <-done:
 				if err != nil {
-					t.Errorf("router: %v", err)
+					t.Errorf("worker: %v", err)
 				}
 			case <-time.After(30 * time.Second):
-				t.Error("router did not stop")
-			}
-			if err := sub.Close(); err != nil {
-				t.Errorf("close subscriber: %v", err)
+				t.Error("worker did not stop")
 			}
 		})
 	}
@@ -147,7 +137,7 @@ func (s *setup) start(t *testing.T, cfg queue.Config, register func(r *message.R
 
 func (s *setup) publish(t *testing.T, topic string, n int, opts ...queue.PublishOption) {
 	t.Helper()
-	if err := queue.Publish(context.Background(), s.driver, topic, payload{N: n}, opts...); err != nil {
+	if err := queue.Topic[payload](topic).Publish(context.Background(), s.driver, payload{N: n}, opts...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -218,14 +208,14 @@ func publishAndHandle(t *testing.T, s *setup) {
 		requestID, msgID, attempt string
 	}
 	got := make(chan seen, 1)
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			got <- seen{p.N, attr(ctx, logging.AttrRequestID), attr(ctx, logging.AttrMessageID), attr(ctx, logging.AttrAttempt)}
 			return nil
 		})
 	})
 	ctx := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "req-1"))
-	if err := queue.Publish(ctx, s.driver, "jobs", payload{N: 7}); err != nil {
+	if err := jobs.Publish(ctx, s.driver, payload{N: 7}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -245,8 +235,8 @@ func publishAndHandle(t *testing.T, s *setup) {
 
 func delay(t *testing.T, s *setup) {
 	got := make(chan time.Time, 1)
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(context.Context, payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(context.Context, payload) error {
 			got <- time.Now()
 			return nil
 		})
@@ -267,8 +257,8 @@ func retryWithBackoff(t *testing.T, s *setup) {
 	var mu sync.Mutex
 	var attempts []string
 	var done atomic.Bool
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			mu.Lock()
 			attempts = append(attempts, attr(ctx, logging.AttrAttempt))
 			first := len(attempts) == 1
@@ -297,8 +287,8 @@ func retryWithBackoff(t *testing.T, s *setup) {
 func retryAfter(t *testing.T, s *setup) {
 	var calls atomic.Int32
 	var retried atomic.Int64
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			if calls.Add(1) == 1 {
 				return queue.RetryAfter(errors.New("rate limited"), 2*time.Second)
 			}
@@ -322,9 +312,9 @@ func retryAllFailed(t *testing.T, s *setup) {
 	var fail atomic.Bool
 	fail.Store(true)
 	var handled sync.Map
-	s.start(t, cfg, func(r *message.Router, sub *queue.Subscriber) {
+	s.start(t, cfg, func(w *queue.Worker) {
 		for _, topic := range []string{"jobs", "other"} {
-			queue.Handle(r, sub, topic, func(ctx context.Context, p payload) error {
+			queue.Topic[payload](topic).Handle(w, func(ctx context.Context, p payload) error {
 				if fail.Load() {
 					return errors.New("down")
 				}
@@ -370,8 +360,8 @@ func failedJobs(t *testing.T, s *setup) {
 	var handled atomic.Int64
 	var mu sync.Mutex
 	var attempts []string // AttemptFromContext 的结果
-	s.start(t, cfg, func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	s.start(t, cfg, func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			handled.Add(1)
 			n, final := queue.AttemptFromContext(ctx)
 			mu.Lock()
@@ -415,15 +405,15 @@ func failedJobs(t *testing.T, s *setup) {
 }
 
 func permanentFailures(t *testing.T, s *setup) {
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			return queue.Permanent(errors.New("article deleted"))
 		})
 	})
 	s.publish(t, "jobs", 1)
 	// payload 不是合法 JSON：解码失败视为永久失败。
-	bad := message.NewMessage(uuid.NewString(), []byte("not json"))
-	if err := queue.NewPublisher(s.driver).Publish("jobs", bad); err != nil {
+	bad := queue.Job{ID: uuid.Must(uuid.NewV7()), Topic: "jobs", Payload: []byte("not json"), Metadata: map[string]string{}}
+	if err := s.driver.Enqueue(context.Background(), bad); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, 5*time.Second, func() bool { return len(s.failedRows(t)) == 2 })
@@ -432,7 +422,7 @@ func permanentFailures(t *testing.T, s *setup) {
 			t.Fatalf("permanent failure retried: %+v", r)
 		}
 		want := "article deleted"
-		if r.ID.String() == bad.UUID {
+		if r.ID == bad.ID {
 			want = "decode"
 		}
 		if !strings.Contains(r.Error, want) {
@@ -444,8 +434,8 @@ func permanentFailures(t *testing.T, s *setup) {
 // 多个任务同时转入失败表时不能互相阻塞（MySQL 可重复读下的间隙锁会让它们死锁）。
 func concurrentFailures(t *testing.T, s *setup) {
 	const n = 20
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(context.Context, payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(context.Context, payload) error {
 			return queue.Permanent(errors.New("gone"))
 		})
 	})
@@ -460,7 +450,7 @@ func concurrentFailures(t *testing.T, s *setup) {
 	}
 }
 
-func competingSubscribers(t *testing.T, s *setup) {
+func competingWorkers(t *testing.T, s *setup) {
 	const n = 40
 	cfg := config()
 	cfg.Concurrency = 5
@@ -468,8 +458,8 @@ func competingSubscribers(t *testing.T, s *setup) {
 	seen := map[int]int{}
 	per := [2]int{}
 	for i := range 2 {
-		s.start(t, cfg, func(r *message.Router, sub *queue.Subscriber) {
-			queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+		s.start(t, cfg, func(w *queue.Worker) {
+			jobs.Handle(w, func(ctx context.Context, p payload) error {
 				time.Sleep(100 * time.Millisecond)
 				mu.Lock()
 				seen[p.N]++
@@ -479,11 +469,11 @@ func competingSubscribers(t *testing.T, s *setup) {
 			})
 		})
 	}
-	jobs := make([]queue.Job, n)
-	for i := range jobs {
-		jobs[i] = queue.Job{ID: uuid.Must(uuid.NewV7()), Topic: "jobs", Payload: fmt.Appendf(nil, `{"n":%d}`, i)}
+	batch := make([]queue.Job, n)
+	for i := range batch {
+		batch[i] = queue.Job{ID: uuid.Must(uuid.NewV7()), Topic: "jobs", Payload: fmt.Appendf(nil, `{"n":%d}`, i)}
 	}
-	if err := s.driver.Enqueue(context.Background(), jobs...); err != nil {
+	if err := s.driver.Enqueue(context.Background(), batch...); err != nil {
 		t.Fatal(err)
 	}
 	begin := time.Now()
@@ -499,14 +489,14 @@ func competingSubscribers(t *testing.T, s *setup) {
 	}
 	// 串行需要 4 秒；两个实例各 5 个并发约 0.4 秒。
 	if elapsed > 2*time.Second || per[0] == 0 || per[1] == 0 {
-		t.Fatalf("elapsed %v, per subscriber %v", elapsed, per)
+		t.Fatalf("elapsed %v, per worker %v", elapsed, per)
 	}
 }
 
 func failingJobDoesNotBlock(t *testing.T, s *setup) {
 	var ok atomic.Int64
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			if p.N == 0 {
 				return errors.New("always fails")
 			}
@@ -526,8 +516,8 @@ func leaseIsExtended(t *testing.T, s *setup) {
 	var handled atomic.Int64
 	var cause atomic.Value
 	for range 2 {
-		s.start(t, cfg, func(r *message.Router, sub *queue.Subscriber) {
-			queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+		s.start(t, cfg, func(w *queue.Worker) {
+			jobs.Handle(w, func(ctx context.Context, p payload) error {
 				handled.Add(1)
 				time.Sleep(2500 * time.Millisecond)
 				cause.Store(fmt.Sprint(context.Cause(ctx)))
@@ -550,8 +540,8 @@ func gracefulShutdown(t *testing.T, s *setup) {
 	started := make(chan struct{})
 	var finished atomic.Bool
 	var cause atomic.Value
-	stop := s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	stop := s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			close(started)
 			time.Sleep(500 * time.Millisecond)
 			cause.Store(fmt.Sprint(context.Cause(ctx)))
@@ -563,7 +553,7 @@ func gracefulShutdown(t *testing.T, s *setup) {
 	<-started
 	stop()
 	if !finished.Load() {
-		t.Fatal("router stopped before the handler finished")
+		t.Fatal("worker stopped before the handler finished")
 	}
 	if c := cause.Load(); c != "<nil>" {
 		t.Fatalf("handler context canceled: %v", c)
@@ -577,8 +567,8 @@ func shutdownTimeoutReleases(t *testing.T, s *setup) {
 	started := make(chan struct{})
 	causes := make(chan error, 1)
 	var rec recorder
-	stop := s.start(t, cfg, func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	stop := s.start(t, cfg, func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			close(started)
 			<-ctx.Done()
 			causes <- context.Cause(ctx)
@@ -676,8 +666,8 @@ func (r *recorder) kinds(t *testing.T, n int) []string {
 func observerEvents(t *testing.T, s *setup) {
 	var rec recorder
 	var first atomic.Bool
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			switch {
 			case p.N == 2 && !first.Swap(true):
 				return errors.New("temporary")
@@ -812,13 +802,13 @@ func claimedAvailableAt(t *testing.T, s *setup) {
 	}
 }
 
-// metrics 检查订阅者记录的直方图和 ObserveJobs 报告的任务数。
+// metrics 检查 Worker 记录的直方图和 ObserveJobs 报告的任务数。
 func metrics(t *testing.T, s *setup) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	var rec recorder
-	stop := s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	stop := s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			if p.N == 2 {
 				return queue.Permanent(errors.New("gone"))
 			}
@@ -866,8 +856,8 @@ func tracing(t *testing.T, s *setup) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
 	var mu sync.Mutex
 	handled := map[int]trace.SpanContext{}
-	s.start(t, config(), func(r *message.Router, sub *queue.Subscriber) {
-		queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+	s.start(t, config(), func(w *queue.Worker) {
+		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			mu.Lock()
 			handled[p.N] = trace.SpanContextFromContext(ctx)
 			mu.Unlock()
@@ -879,7 +869,7 @@ func tracing(t *testing.T, s *setup) {
 	}, queue.WithTelemetry(metricnoop.NewMeterProvider(), tp))
 
 	ctx, request := tp.Tracer("test").Start(context.Background(), "request")
-	if err := queue.Publish(ctx, s.driver, "jobs", payload{N: 1}); err != nil {
+	if err := jobs.Publish(ctx, s.driver, payload{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	request.End()
@@ -983,7 +973,7 @@ func (s *setup) unique(t *testing.T) bool {
 	if !s.opts.NoUnique {
 		return true
 	}
-	if err := queue.Publish(context.Background(), s.driver, "jobs", payload{N: 1}, queue.Unique("a")); err == nil {
+	if err := jobs.Publish(context.Background(), s.driver, payload{N: 1}, queue.Unique("a")); err == nil {
 		t.Fatal("publish with Unique succeeded on a driver without support")
 	}
 	s.empty(t, "jobs")
@@ -1049,15 +1039,11 @@ func uniqueBatch(t *testing.T, s *setup) {
 	if !s.unique(t) {
 		return
 	}
-	msg := func(n int, key string) *message.Message {
+	job := func(n int, key string) queue.Job {
 		data, _ := json.Marshal(payload{N: n})
-		m := message.NewMessage(uuid.Must(uuid.NewV7()).String(), data)
-		if key != "" {
-			m.Metadata.Set("_queue_unique", key)
-		}
-		return m
+		return queue.Job{ID: uuid.Must(uuid.NewV7()), Topic: "jobs", Payload: data, Metadata: map[string]string{}, Unique: key}
 	}
-	err := queue.NewPublisher(s.driver).Publish("jobs", msg(1, "a"), msg(2, "a"), msg(3, "b"), msg(4, ""))
+	err := s.driver.Enqueue(context.Background(), job(1, "a"), job(2, "a"), job(3, "b"), job(4, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1074,7 +1060,7 @@ func uniqueConcurrent(t *testing.T, s *setup) {
 	errs := make(chan error, 20)
 	for i := range 20 {
 		wg.Go(func() {
-			errs <- queue.Publish(context.Background(), s.driver, "jobs", payload{N: i}, queue.Unique("k"))
+			errs <- jobs.Publish(context.Background(), s.driver, payload{N: i}, queue.Unique("k"))
 		})
 	}
 	wg.Wait()

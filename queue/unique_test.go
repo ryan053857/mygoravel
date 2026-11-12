@@ -40,11 +40,11 @@ func TestUniqueKeyValidation(t *testing.T) {
 	db := openDB(t, dbtesting.Drivers()[0])
 	ctx := context.Background()
 	for _, key := range []string{"", strings.Repeat("k", queue.MaxUniqueLen+1)} {
-		if err := queue.Publish(ctx, queue.Database(db), "jobs", payload{N: 1}, queue.Unique(key)); err == nil {
+		if err := jobs.Publish(ctx, queue.Database(db), payload{N: 1}, queue.Unique(key)); err == nil {
 			t.Errorf("Unique key of %d bytes accepted", len(key))
 		}
 	}
-	if err := queue.Publish(ctx, queue.Database(db), "jobs", payload{N: 1}, queue.Unique(strings.Repeat("键", queue.MaxUniqueLen/3))); err != nil {
+	if err := jobs.Publish(ctx, queue.Database(db), payload{N: 1}, queue.Unique(strings.Repeat("键", queue.MaxUniqueLen/3))); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -57,7 +57,7 @@ func TestUniqueInTransactions(t *testing.T) {
 
 		// 回滚的事务不占用键。
 		err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-			if err := queue.Publish(ctx, queue.Database(tx), "jobs", payload{N: 1}, queue.Unique("k")); err != nil {
+			if err := jobs.Publish(ctx, queue.Database(tx), payload{N: 1}, queue.Unique("k")); err != nil {
 				return err
 			}
 			return boom
@@ -69,11 +69,11 @@ func TestUniqueInTransactions(t *testing.T) {
 		// 事务中合并重复的任务不会让事务中止，之后的语句照常执行。
 		err = db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 			for n := 2; n <= 3; n++ {
-				if err := queue.Publish(ctx, queue.Database(tx), "jobs", payload{N: n}, queue.Unique("k")); err != nil {
+				if err := jobs.Publish(ctx, queue.Database(tx), payload{N: n}, queue.Unique("k")); err != nil {
 					return err
 				}
 			}
-			return queue.Publish(ctx, queue.Database(tx), "jobs", payload{N: 4})
+			return jobs.Publish(ctx, queue.Database(tx), payload{N: 4})
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -94,13 +94,13 @@ func TestUniqueConcurrentTransactions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := queue.Publish(ctx, queue.Database(first), "jobs", payload{N: 1}, queue.Unique("k")); err != nil {
+			if err := jobs.Publish(ctx, queue.Database(first), payload{N: 1}, queue.Unique("k")); err != nil {
 				t.Fatal(err)
 			}
 			done := make(chan error, 1)
 			go func() {
 				done <- db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-					return queue.Publish(ctx, queue.Database(tx), "jobs", payload{N: 2}, queue.Unique("k"))
+					return jobs.Publish(ctx, queue.Database(tx), payload{N: 2}, queue.Unique("k"))
 				})
 			}()
 			select {

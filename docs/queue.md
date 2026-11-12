@@ -4,7 +4,6 @@
 - [准备数据表](#preparing-tables)
 - [发布任务](#publishing-jobs)
     - [延迟执行](#delayed-jobs)
-    - [带类型的 topic](#typed-topics)
     - [合并重复任务](#unique-jobs)
     - [多步任务](#multi-step-jobs)
 - [处理任务](#processing-jobs)
@@ -23,14 +22,13 @@
 - [使用 Redis](#redis-driver)
 - [使用 NATS](#nats-driver)
 - [实现自己的驱动](#custom-drivers)
-- [使用 Watermill](#using-watermill)
 
 <a id="introduction"></a>
 ## 简介
 
 有些工作不需要让用户等它完成，例如发送邮件、生成缩略图、通知第三方。`queue` 包把这些工作作为任务保存在数据库中，由单独的 worker 进程取出执行；执行失败的任务按退避时间自动重试，次数用完后转入失败任务表，等待人工处理。
 
-队列基于 [Watermill](https://watermill.io) 的消息模型：任务就是一条 `message.Message`，worker 用 Watermill 的 `Router` 把任务分发给处理函数，`queue` 提供的发布者和订阅者负责把任务存进数据库、领取、重试和记录失败。
+任务按 topic 分类：发布方把任务发到一个 topic，worker 为每个 topic 注册一个处理函数。
 
 每个任务**至少执行一次**：worker 崩溃或停止超时时，正在处理的任务会交给其他 worker 重新执行，处理函数需要能安全地重复执行。任务之间不保证执行顺序。
 
@@ -58,7 +56,21 @@ migrationCmd.AddCommand(migratecmd.Publish(postgres.Driver,
 <a id="publishing-jobs"></a>
 ## 发布任务
 
-`queue.Publish` 把任意可以编码为 JSON 的值发布到一个 topic。第二个参数是队列驱动，`queue.Database` 把任务保存在数据库中，它接收 `*bun.DB` 或事务：传入事务时，任务和业务数据一起提交，事务回滚时任务也不会执行。
+`queue.Topic` 把 topic 名称和任务内容（payload）的类型声明在一起。发布和处理通常不在一处，两边共用这个声明，名称写错或类型不一致时无法通过编译。发送邮件的 topic 声明在博客应用的 `internal/mailjob/mailjob.go` 中，所有要发邮件的业务包都用它：
+
+```go
+package mailjob
+
+import (
+    "github.com/ryan053857/mygoravel/mail"
+    "github.com/ryan053857/mygoravel/queue"
+)
+
+// Send 把邮件交给 worker 发送。
+var Send = queue.Topic[mail.Message]("mail.send")
+```
+
+`Publish` 把 payload 编码为 JSON 交给队列驱动。`queue.Database` 把任务保存在数据库中，它接收 `*bun.DB` 或事务：传入事务时，任务和业务数据一起提交，事务回滚时任务也不会执行。
 
 下面是改写后的 `Publish` action：通知邮件在发布文章的同一个事务中渲染并入队，它不再需要发送器：
 
@@ -76,7 +88,7 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
             return err
         }
         msg.To = []mail.Address{a.editors}
-        return queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
+        return mailjob.Send.Publish(ctx, queue.Database(tx), msg)
     })
     if err != nil {
         return nil, err
@@ -98,21 +110,12 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
 `queue.Delay` 让任务在一段时间之后才执行，`queue.At` 指定执行时间：
 
 ```go
-err := queue.Publish(ctx, queue.Database(tx), "articles.publish", item.ID, queue.At(item.PublishAt))
-```
-
-<a id="typed-topics"></a>
-### 带类型的 topic
-
-同一个 topic 的发布和处理通常不在一处：上面发布 `articles.publish`，worker 中处理它。用 `queue.Topic` 把 topic 名称和 payload 类型声明在一起，两边共用这个声明，名称写错或类型不一致时无法通过编译：
-
-```go
 var PublishAt = queue.Topic[uuid.UUID]("articles.publish")
 
 err := PublishAt.Publish(ctx, queue.Database(tx), item.ID, queue.At(item.PublishAt))
 ```
 
-`Topic` 的 `Publish` 和 `Handle` 方法与 `queue.Publish`、`queue.Handle` 相同，只是不再需要 topic 参数。把它和处理任务的 action 声明在同一个文件中，见[队列任务](actions.md#as-jobs)。
+业务包自己的 topic 和处理它的 action 声明在同一个文件中，见[队列任务](actions.md#as-jobs)。
 
 <a id="unique-jobs"></a>
 ### 合并重复任务
@@ -163,10 +166,10 @@ Laravel 的 `Bus::chain` 在发出时就固定了每一步的参数，后面的�
 <a id="processing-jobs"></a>
 ## 处理任务
 
-`queue.Handle` 把一个函数注册为某个 topic 的处理函数，任务的内容按 JSON 解码为函数的参数类型。`mail.Mailer` 的 `Send` 方法正好符合要求：
+`Handle` 把一个函数注册为 topic 在 worker 上的处理函数，任务的内容按 JSON 解码为函数的参数类型。`mail.Mailer` 的 `Send` 方法正好符合要求：
 
 ```go
-queue.Handle(router, sub, "mail.send", mailer.Send)
+mailjob.Send.Handle(w, mailer.Send)
 ```
 
 处理函数返回 `nil` 时任务完成并被删除；返回错误时任务稍后重试，见[失败与重试](#failures-and-retries)。
@@ -182,6 +185,7 @@ package bootstrap
 import (
     "context"
 
+    "example.com/blog/internal/mailjob"
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/queue"
@@ -194,13 +198,9 @@ func (a *App) Worker(*command.Daemon) (func(context.Context) error, error) {
         return nil, err
     }
 
-    sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
-    router := queue.NewRouter(nil)
-    queue.Handle(router, sub, "mail.send", mailer.Send)
-    return func(ctx context.Context) error {
-        defer sub.Close()
-        return router.Run(ctx)
-    }, nil
+    w := queue.NewWorker(queue.Database(a.db), a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
+    mailjob.Send.Handle(w, mailer.Send)
+    return w.Run, nil
 }
 
 // Work 只运行队列 worker，work 命令调用它。
@@ -215,7 +215,7 @@ func Work(ctx context.Context, cfg settings.Config) error {
 root.AddCommand(command.Run("work", "处理队列任务", bootstrap.Work))
 ```
 
-`router.Run` 一直运行到进程收到停止信号。`defer sub.Close()` 在它返回后等待最后的处理结果写回数据库；数据库由 `run` 在所有部分都返回之后才关闭。
+`w.Run` 一直运行到进程收到停止信号，然后停止领取，等处理中的任务写回结果才返回；数据库由 `run` 在所有部分都返回之后才关闭。
 
 worker 可以和 HTTP 服务、调度器[运行在同一个进程中](commands.md#running-together)，任务量大了再单独部署，按任务量增减实例数。多个 worker 同时运行是安全的，每个任务只会被其中一个领取。
 
@@ -243,6 +243,14 @@ queue:
 ```
 
 `concurrency` 是每个 worker 实例的上限，部署 3 个实例时同一个 topic 最多有 30 个任务同时执行。任务在发布后最多 `poll_interval` 被领取，对时效敏感的 topic 可以调小它，代价是更频繁的查询。
+
+`concurrency` 和 `max_attempts` 是所有 topic 的默认值。个别 topic 需要不同的值时，在注册时覆盖：
+
+```go
+article.Summarize.Handle(w, summarize.Job, queue.Concurrency(2)) // 调用模型，限制并发
+```
+
+[Webhook](webhooks.md) 的投递任务就用 `queue.MaxAttempts` 把重试延长到约 2 天，不影响其他 topic。
 
 <a id="failures-and-retries"></a>
 ## 失败与重试
@@ -356,7 +364,7 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 <a id="metrics"></a>
 ### 指标
 
-指标使用 OpenTelemetry 的接口，`a.meters`、`a.tracers` 是入口中创建的 Provider，见[推送](telemetry.md#setup)。[`Worker`](#running-workers) 创建订阅者时用 `queue.WithTelemetry` 传入它们，记录每个任务的等待时长和处理耗时，并为每次执行创建 span，见[队列的链路](telemetry.md#queue)。
+指标使用 OpenTelemetry 的接口，`a.meters`、`a.tracers` 是入口中创建的 Provider，见[推送](telemetry.md#setup)。[`Worker`](#running-workers) 创建 worker 时用 `queue.WithTelemetry` 传入它们，记录每个任务的等待时长和处理耗时，并为每次执行创建 span，见[队列的链路](telemetry.md#queue)。
 
 队列中的任务数在采集时读取队列状态，每个注册了它的进程都会定期统计一次 `queue_jobs` 表。只在实例最少的那种进程中注册，通常是调度器：
 
@@ -380,7 +388,7 @@ func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
 
 所有指标都带有 `messaging.system`（驱动名）和 `messaging.destination.name`（topic）属性，与队列的 span 相同。`queue.job.outcome` 是 `succeeded`、`retrying`、`failed`、`released`、`lease_lost`，与[任务事件](#job-events)对应。导出到 Prometheus 后，点换成下划线，单位成为后缀，例如 `queue_job_wait_seconds`。
 
-前两个由订阅者在处理任务时记录。后两个在采集时读取[队列状态](#queue-stats)和失败任务数，5 秒内的多次采集复用同一次读取；出现过的 topic 在任务清空后报告 0，而不是消失。调度器部署了多个实例时，每个实例读到的都是同一份全局数据，所以汇总时取最大值，不要求和。例如积压超过 5 分钟时告警：
+前两个由 worker 在处理任务时记录。后两个在采集时读取[队列状态](#queue-stats)和失败任务数，5 秒内的多次采集复用同一次读取；出现过的 topic 在任务清空后报告 0，而不是消失。调度器部署了多个实例时，每个实例读到的都是同一份全局数据，所以汇总时取最大值，不要求和。例如积压超过 5 分钟时告警：
 
 ```promql
 max by (messaging_destination_name) (queue_job_oldest_ready_age_seconds) > 300
@@ -393,10 +401,10 @@ HTTP 请求和定时任务的指标见[可观测性](telemetry.md)。
 <a id="job-events"></a>
 ### 任务事件
 
-`queue.WithObserver` 让订阅者在每次状态变化时通知你。成功的任务会从队列中删除，执行历史、耗时这类数据只能从事件中得到：
+`queue.WithObserver` 让 worker 在每次状态变化时通知你。成功的任务会从队列中删除，执行历史、耗时这类数据只能从事件中得到：
 
 ```go
-sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil,
+w := queue.NewWorker(queue.Database(a.db), a.cfg.Queue, nil,
     queue.WithObserver(func(ctx context.Context, e queue.Event) {
         if e.Kind == queue.JobStarted {
             return
@@ -517,11 +525,11 @@ import "github.com/ryan053857/mygoravel/queue/redisqueue"
 jobs := redisqueue.New(a.rdb, "blog:queue")
 
 // 发布
-err := queue.Publish(ctx, jobs, "mail.send", msg)
+err := mailjob.Send.Publish(ctx, jobs, msg)
 
 // 处理：失败任务仍然写入数据库
 failed := queue.NewFailedJobs(a.db, jobs)
-sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
+w := queue.NewWorker(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 ```
 
 其余的用法和数据库驱动完全相同：退避重试、失败任务、租约与平滑停止的行为一致，`failed.Retry` 把任务放回 Redis。与数据库驱动的区别：
@@ -535,7 +543,7 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 <a id="publish-after-commit"></a>
 ### 事务提交后再发布
 
-在事务中调用 `queue.Publish(ctx, jobs, ...)` 时，任务会立刻进入 Redis：worker 可能在事务提交之前就领到任务、读不到新数据；事务回滚了，任务也照样执行。所以要用 [AfterCommit](database.md#after-commit) 登记发布，等事务提交之后再执行。改写[发布文章](#publishing-jobs)的例子，`a.jobs` 是上面创建的 Redis 驱动：
+在事务中用 Redis 驱动发布时，任务会立刻进入 Redis：worker 可能在事务提交之前就领到任务、读不到新数据；事务回滚了，任务也照样执行。所以要用 [AfterCommit](database.md#after-commit) 登记发布，等事务提交之后再执行。改写[发布文章](#publishing-jobs)的例子，`a.jobs` 是上面创建的 Redis 驱动：
 
 ```go
 func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID) (*Article, error) {
@@ -552,7 +560,7 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
         }
         msg.To = []mail.Address{a.editors}
         tx.AfterCommit(func(ctx context.Context) error {
-            return errors.Wrap(queue.Publish(ctx, a.jobs, "mail.send", msg), "queue article notification")
+            return errors.Wrap(mailjob.Send.Publish(ctx, a.jobs, msg), "queue article notification")
         })
         return nil
     })
@@ -575,10 +583,10 @@ import "github.com/ryan053857/mygoravel/queue/natsqueue"
 
 jobs := natsqueue.New(nc, "BLOG_QUEUE")
 
-err := queue.Publish(ctx, jobs, "mail.send", msg)
+err := mailjob.Send.Publish(ctx, jobs, msg)
 
 failed := queue.NewFailedJobs(a.db, jobs)
-sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
+w := queue.NewWorker(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 ```
 
 服务器需要 NATS 2.12 或更高版本并开启 JetStream（`nats-server -js`），延迟任务使用服务器的定时消息；版本过低时发布和领取任务都会返回错误。驱动在第一次使用时创建名为 `BLOG_QUEUE` 的流，任务确认后即从流中删除；集群部署时用 `natsqueue.Replicas(3)` 设置副本数。每个 topic 对应一个持久消费者，没有任务时拉取请求在服务器上等待，任务到达后立即被领取，不受 `poll_interval` 影响。
@@ -595,7 +603,7 @@ sub := queue.NewSubscriber(jobs, a.cfg.Queue, nil, queue.WithFailedJobs(failed))
 <a id="custom-drivers"></a>
 ## 实现自己的驱动
 
-驱动实现 `queue.Driver`：保存任务、按租约领取、报告各状态的任务数。重试、失败任务、并发和平滑停止都由 `Subscriber` 负责，驱动不需要处理。实现时可以参考 [`queue/redisqueue`](../queue/redisqueue/redisqueue.go)。
+驱动实现 `queue.Driver`：保存任务、按租约领取、报告各状态的任务数。重试、失败任务、并发和平滑停止都由 `Worker` 负责，驱动不需要处理。实现时可以参考 [`queue/redisqueue`](../queue/redisqueue/redisqueue.go)。
 
 `queuetest.TestDriver` 检查实现是否符合约定，框架自己的三个驱动也用它测试。`New` 为每个场景返回一个空的驱动，以及保存失败任务的数据库：
 
@@ -612,12 +620,3 @@ func TestDriver(t *testing.T) {
 ```
 
 存储做不到的约定在 `Options` 中声明，例如 NATS 驱动的 `NoFencing` 和 `NoUnique`，对应的场景按驱动的实际行为检查。
-
-<a id="using-watermill"></a>
-## 使用 Watermill
-
-`queue.NewRouter` 返回的就是 Watermill 的 `*message.Router`，`queue.Handle` 返回 `*message.Handler`，可以使用 Watermill 提供的[中间件](https://watermill.io/docs/middlewares/)，例如用 `Throttle` 限制处理速率、用 `Timeout` 限制单次执行时间。
-
-`queue.NewRouter` 已经安装了 `Recoverer`，把处理函数的 panic 转为普通的失败。不要再安装 Watermill 的 `Retry` 和 `PoisonQueue`：它们在进程内重试、把失败消息发到另一个 topic，而队列的重试和失败任务是持久化的，两者叠加会让一次失败被重试很多次。
-
-`queue.Subscriber` 实现了 Watermill 的 `message.Subscriber`，也可以用 `router.AddConsumerHandler` 直接注册处理 `*message.Message` 的函数。`queue.NewPublisher(driver)` 返回实现 `message.Publisher` 的发布者，用来发布 Watermill 消息，例如交给 Watermill 中间件使用。

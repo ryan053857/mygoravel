@@ -133,30 +133,21 @@ d, err := webhook.Resend(ctx, a.db, sub.Tenant, deliveryID)
 <a id="delivering"></a>
 ## 运行投递
 
-投递任务总是在数据库队列中，即使应用的其他任务使用 Redis 或 NATS。它们用一个单独的 `Subscriber` 处理，重试次数单独配置。在应用配置中加一段：
-
-```go
-type Config struct {
-    // ...
-    Queue   queue.Config `yaml:"queue"`
-    Webhook queue.Config `yaml:"webhook"` // 投递 webhook 的队列
-}
-```
-
-```yaml
-webhook:
-  max_attempts: 16 # 最后一次重试约在 2 天后
-```
-
 在 [worker](queue.md#running-workers) 中注册：
 
 ```go
-hooks := queue.NewSubscriber(queue.Database(a.db), a.cfg.Webhook, nil)
-defer hooks.Close()
-webhook.NewDeliverer(a.db, webhook.Options{}).Handle(router, hooks)
+webhook.NewDeliverer(a.db, webhook.Options{}).Handle(w)
 ```
 
-`webhook.Options` 的零值即可：每次请求 10 秒超时，不跟随重定向。
+`webhook.Options` 的零值即可：每次请求 10 秒超时，不跟随重定向，每次投递最多请求 16 次，最后一次重试约在 2 天后。重试次数只作用于投递任务，不受 `queue` 段 `max_attempts` 的影响，需要时用 `Options.MaxAttempts` 修改。
+
+投递任务总是在数据库队列中。应用的其他任务使用 Redis 或 NATS 时，再创建一个数据库队列的 worker，和原来的一起运行：
+
+```go
+hooks := queue.NewWorker(queue.Database(a.db), a.cfg.Queue, nil)
+webhook.NewDeliverer(a.db, webhook.Options{}).Handle(hooks)
+return func(ctx context.Context) error { return command.Concurrently(ctx, w.Run, hooks.Run) }, nil
+```
 
 <a id="retries"></a>
 ### 重试
@@ -183,7 +174,7 @@ client := outbound.New(outbound.Options{
     AnyPort: true,
     Allow:   []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32"), netip.MustParsePrefix("::1/128")},
 })
-webhook.NewDeliverer(a.db, webhook.Options{Client: client}).Handle(router, hooks)
+webhook.NewDeliverer(a.db, webhook.Options{Client: client}).Handle(w)
 ```
 
 无论传入什么客户端，投递都不跟随重定向，`3xx` 视为失败。

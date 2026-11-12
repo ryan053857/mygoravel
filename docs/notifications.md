@@ -152,7 +152,7 @@ if err != nil {
     return err
 }
 msg.To = []mail.Address{{Name: authorUser.Name, Address: authorUser.Email}}
-return queue.Publish(ctx, queue.Database(tx), "mail.send", msg)
+return mailjob.Send.Publish(ctx, queue.Database(tx), msg)
 ```
 
 `authorUser` 是事务中查出的作者。用户是否接收邮件这类偏好保存在应用自己的表中，由 action 判断。

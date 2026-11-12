@@ -13,13 +13,13 @@ import (
 var traceContext = propagation.TraceContext{}
 
 // startSpan 还原任务元数据中的链路，设置了 WithTelemetry 时在其后开始本次执行的 span。
-func (s *Subscriber) startSpan(ctx context.Context, j Job) context.Context {
+func (w *Worker) startSpan(ctx context.Context, j Job) context.Context {
 	ctx = traceContext.Extract(ctx, propagation.MapCarrier(j.Metadata))
-	if s.tracer == nil {
+	if w.tracer == nil {
 		return ctx
 	}
-	ctx, _ = s.tracer.Start(ctx, "process "+j.Topic, trace.WithSpanKind(trace.SpanKindConsumer), trace.WithAttributes(
-		attrSystem.String(s.driver.Name()),
+	ctx, _ = w.tracer.Start(ctx, "process "+j.Topic, trace.WithSpanKind(trace.SpanKindConsumer), trace.WithAttributes(
+		attrSystem.String(w.driver.Name()),
 		attribute.String("messaging.operation.type", "process"),
 		attrDestination.String(j.Topic),
 		attribute.String("messaging.message.id", j.ID.String()),
@@ -29,8 +29,8 @@ func (s *Subscriber) startSpan(ctx context.Context, j Job) context.Context {
 }
 
 // endSpan 在任务结束的事件中结束本次执行的 span。
-func (s *Subscriber) endSpan(ctx context.Context, e Event) {
-	if s.tracer == nil || e.Kind == JobStarted {
+func (w *Worker) endSpan(ctx context.Context, e Event) {
+	if w.tracer == nil || e.Kind == JobStarted {
 		return
 	}
 	span := trace.SpanFromContext(ctx)

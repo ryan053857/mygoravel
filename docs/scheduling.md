@@ -147,7 +147,7 @@ sched.Add("tmp:cleanup", "@hourly", cleanTmpDir, schedule.EveryInstance())
 
 ```go
 sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
-    return queue.Publish(ctx, queue.Database(a.db), "reports.generate", time.Now().AddDate(0, 0, -1))
+    return report.Generate.Publish(ctx, queue.Database(a.db), time.Now().AddDate(0, 0, -1)) // queue.Topic[time.Time]
 })
 ```
 
@@ -313,11 +313,14 @@ for _, t := range a.tasks().Tasks() {
 后台页面上的「立即执行」不要在 HTTP 进程中直接调用任务：耗时的任务会占用请求，HTTP 实例也可能有很多个。把它[发布到队列](queue.md#publishing-jobs)，由 worker 执行：
 
 ```go
+// article 包中：
+var PublishScheduledJob = queue.Topic[struct{}]("articles.publish-scheduled")
+
 // 后台页面：
-err := queue.Publish(ctx, queue.Database(a.db), "articles.publish-scheduled", struct{}{})
+err := article.PublishScheduledJob.Publish(ctx, queue.Database(a.db), struct{}{})
 
 // Worker 中：
-queue.Handle(router, sub, "articles.publish-scheduled", func(ctx context.Context, _ struct{}) error {
+article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) error {
     return article.NewPublishScheduled(a.db).Handle(ctx)
 })
 ```

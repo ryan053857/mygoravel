@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -48,30 +47,23 @@ func testConfig() queue.Config {
 	return cfg
 }
 
-// start 运行一个 Router，register 在运行前注册处理函数；返回的函数停止 Router 并等待它退出。
-func start(t *testing.T, db *bun.DB, cfg queue.Config, register func(r *message.Router, sub *queue.Subscriber)) func() {
+// jobs 是测试使用的 topic。
+var jobs = queue.Topic[payload]("jobs")
+
+// start 运行一个 Worker，register 在运行前注册处理函数；返回的函数停止 Worker 并等待它写回结果。
+func start(t *testing.T, db *bun.DB, cfg queue.Config, register func(w *queue.Worker), opts ...queue.WorkerOption) func() {
 	t.Helper()
-	logger := slog.New(slog.DiscardHandler)
-	r := queue.NewRouter(logger)
-	sub := queue.NewSubscriber(queue.Database(db), cfg, logger)
-	register(r, sub)
+	w := queue.NewWorker(queue.Database(db), cfg, slog.New(slog.DiscardHandler), opts...)
+	register(w)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- r.Run(ctx) }()
-	select {
-	case <-r.Running():
-	case err := <-done:
-		t.Fatalf("router exited: %v", err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("router did not start")
-	}
+	go func() { done <- w.Run(ctx) }()
 	var once sync.Once
 	stop := func() {
 		once.Do(func() {
 			cancel()
-			<-done
-			if err := sub.Close(); err != nil {
-				t.Errorf("close subscriber: %v", err)
+			if err := <-done; err != nil {
+				t.Errorf("worker: %v", err)
 			}
 		})
 	}
@@ -90,9 +82,9 @@ func eventually(t *testing.T, timeout time.Duration, cond func() bool) {
 	}
 }
 
-func publish(t *testing.T, db bun.IDB, topic string, n int) {
+func publish(t *testing.T, db bun.IDB, n int) {
 	t.Helper()
-	if err := queue.Publish(context.Background(), queue.Database(db), topic, payload{N: n}); err != nil {
+	if err := jobs.Publish(context.Background(), queue.Database(db), payload{N: n}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -119,8 +111,8 @@ func TestPublishInTransaction(t *testing.T) {
 		ctx := context.Background()
 		var handled atomic.Int64
 		var last atomic.Int64
-		start(t, db, testConfig(), func(r *message.Router, sub *queue.Subscriber) {
-			queue.Handle(r, sub, "jobs", func(ctx context.Context, p payload) error {
+		start(t, db, testConfig(), func(w *queue.Worker) {
+			jobs.Handle(w, func(ctx context.Context, p payload) error {
 				handled.Add(1)
 				last.Store(int64(p.N))
 				return nil
@@ -129,14 +121,14 @@ func TestPublishInTransaction(t *testing.T) {
 
 		rollback := errors.New("rollback")
 		err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-			publish(t, tx, "jobs", 1)
+			publish(t, tx, 1)
 			return rollback
 		})
 		if !errors.Is(err, rollback) {
 			t.Fatal(err)
 		}
 		err = db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-			publish(t, tx, "jobs", 2)
+			publish(t, tx, 2)
 			return nil
 		})
 		if err != nil {
@@ -170,13 +162,13 @@ func TestOpenTransactionDoesNotStallQueue(t *testing.T) {
 		}
 
 		got := make(chan struct{}, 1)
-		start(t, db, testConfig(), func(r *message.Router, sub *queue.Subscriber) {
-			queue.Handle(r, sub, "jobs", func(context.Context, payload) error {
+		start(t, db, testConfig(), func(w *queue.Worker) {
+			jobs.Handle(w, func(context.Context, payload) error {
 				got <- struct{}{}
 				return nil
 			})
 		})
-		publish(t, db, "jobs", 1)
+		publish(t, db, 1)
 		select {
 		case <-got:
 		case <-time.After(2 * time.Second):
@@ -324,6 +316,86 @@ func TestFailedJobsBulk(t *testing.T) {
 		}
 		if rows := failedRows(t, db); len(rows) != 1 || rows[0].ID != fresh {
 			t.Fatalf("remaining %+v", rows)
+		}
+	})
+}
+
+func TestWorkerRegistration(t *testing.T) {
+	db := openDB(t, sqlite.Driver)
+	newWorker := func() *queue.Worker { return queue.NewWorker(queue.Database(db), testConfig(), nil) }
+	noop := func(context.Context, payload) error { return nil }
+	mustPanic := func(name string, fn func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Errorf("%s: no panic", name)
+			}
+		}()
+		fn()
+	}
+
+	if err := newWorker().Run(context.Background()); err == nil {
+		t.Error("Run without handlers succeeded")
+	}
+	mustPanic("empty topic", func() { queue.Topic[payload]("").Handle(newWorker(), noop) })
+	mustPanic("handled twice", func() {
+		w := newWorker()
+		jobs.Handle(w, noop)
+		jobs.Handle(w, noop)
+	})
+	mustPanic("zero attempts", func() { queue.MaxAttempts(0) })
+	mustPanic("zero concurrency", func() { queue.Concurrency(0) })
+
+	w := newWorker()
+	jobs.Handle(w, noop)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := w.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Run(ctx); err == nil {
+		t.Error("second Run succeeded")
+	}
+	mustPanic("Handle after Run", func() { queue.Topic[payload]("other").Handle(w, noop) })
+}
+
+// Handle 的选项覆盖 Config：MaxAttempts 决定转入失败表之前的次数，也决定 AttemptFromContext 的 final；
+// Concurrency 限制同时处理的任务数。
+func TestHandleOptions(t *testing.T) {
+	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
+		db := openDB(t, driver)
+		var finals atomic.Int64
+		var running, peak, done atomic.Int64
+		slow := queue.Topic[payload]("slow")
+		start(t, db, testConfig(), func(w *queue.Worker) {
+			jobs.Handle(w, func(ctx context.Context, p payload) error {
+				if _, final := queue.AttemptFromContext(ctx); final {
+					finals.Add(1)
+				}
+				return queue.RetryAfter(errors.New("boom"), 0)
+			}, queue.MaxAttempts(2))
+			slow.Handle(w, func(context.Context, payload) error {
+				n := running.Add(1)
+				for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+				}
+				time.Sleep(50 * time.Millisecond)
+				running.Add(-1)
+				done.Add(1)
+				return nil
+			}, queue.Concurrency(2))
+		})
+		publish(t, db, 1)
+		for i := range 6 {
+			if err := slow.Publish(context.Background(), queue.Database(db), payload{N: i}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		eventually(t, 5*time.Second, func() bool { return len(failedRows(t, db)) == 1 && done.Load() == 6 })
+		if rows := failedRows(t, db); rows[0].Attempts != 2 || finals.Load() != 1 {
+			t.Fatalf("failed %+v, final attempts seen %d", rows, finals.Load())
+		}
+		if p := peak.Load(); p != 2 {
+			t.Fatalf("peak concurrency %d, want 2", p)
 		}
 	})
 }

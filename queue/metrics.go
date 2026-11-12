@@ -13,7 +13,7 @@ import (
 // secondBuckets 是等待时长和处理耗时的直方图分桶（秒），从 5 毫秒到 1 小时。
 var secondBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300, 900, 3600}
 
-// jobMetrics 是订阅者记录的两个直方图。
+// jobMetrics 是 Worker 记录的两个直方图。
 type jobMetrics struct {
 	wait, duration metric.Float64Histogram
 }

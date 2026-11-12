@@ -57,17 +57,17 @@ type task struct {
 	running bool // 本进程中是否正在执行
 }
 
-// Option 调整 Add 注册的任务。
-type Option func(*task)
+// TaskOption 调整 Add 注册的任务。
+type TaskOption func(*task)
 
 // EveryInstance 让任务在每个实例上都执行。默认整个集群在同一次触发只执行一次。
-func EveryInstance() Option { return func(t *task) { t.everyInstance = true } }
+func EveryInstance() TaskOption { return func(t *task) { t.everyInstance = true } }
 
 // AllowOverlap 允许任务在上一次还没结束时再次执行。默认跳过本次。
-func AllowOverlap() Option { return func(t *task) { t.allowOverlap = true } }
+func AllowOverlap() TaskOption { return func(t *task) { t.allowOverlap = true } }
 
 // In 按 loc 计算 cron 表达式，默认使用 time.Local（可用 TZ 环境变量设置）。对 @every 没有影响。
-func In(loc *time.Location) Option { return func(t *task) { t.loc = loc } }
+func In(loc *time.Location) TaskOption { return func(t *task) { t.loc = loc } }
 
 // SchedulerOption 调整 New 创建的调度器。
 type SchedulerOption func(*Scheduler)
@@ -97,7 +97,7 @@ func New(locker *lock.Locker, cfg Config, logger *slog.Logger, opts ...Scheduler
 // 5 段 cron 表达式（分钟精度，在第 0 秒触发）、6 段（第一段是秒）、@hourly、@daily 这类预定义写法，
 // 以及按 Unix 时间对齐的 "@every 15s"（至少 1 秒，必须是整秒）。
 // 名称为空、过长或重复，表达式非法，或者在 Run 之后调用时 panic。
-func (s *Scheduler) Add(name, expr string, run func(ctx context.Context) error, opts ...Option) {
+func (s *Scheduler) Add(name, expr string, run func(ctx context.Context) error, opts ...TaskOption) {
 	if name == "" || run == nil {
 		panic("schedule: task name and function are required")
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 // Driver 保存和领取任务，是队列中与存储有关的部分。重试策略、失败任务、并发控制、续租时机和平滑停止
-// 由 Subscriber 负责，与驱动无关。框架提供 Database（PostgreSQL、MySQL、SQLite），
+// 由 Worker 负责，与驱动无关。框架提供 Database（PostgreSQL、MySQL、SQLite），
 // 以及子包 redisqueue 和 natsqueue。
 //
 // 每个任务至少交付一次：持有任务的实例在租约到期前没有确认、放回或续租，任务会被重新领取。

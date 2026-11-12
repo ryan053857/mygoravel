@@ -1,12 +1,10 @@
 package queue
 
 import (
-	"context"
 	"math"
 	"testing"
 	"time"
 
-	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
 )
 
@@ -36,25 +34,5 @@ func TestRetryDelay(t *testing.T) {
 	}
 	if got := retryDelay(base, 1); got < 900*time.Millisecond || got > 1100*time.Millisecond {
 		t.Fatalf("plain error = %v, want backoff", got)
-	}
-}
-
-func TestRecordError(t *testing.T) {
-	boom := errors.New("boom")
-	h := recordError(func(*message.Message) ([]*message.Message, error) { return nil, boom })
-
-	o := &outcome{}
-	msg := message.NewMessage("1", nil)
-	msg.SetContext(context.WithValue(context.Background(), outcomeKey{}, o))
-	if _, err := h(msg); !errors.Is(err, boom) {
-		t.Fatalf("err = %v", err)
-	}
-	if !errors.Is(o.err, boom) {
-		t.Fatalf("recorded = %v", o.err)
-	}
-
-	// 不是 Subscriber 交付的消息没有 outcome，照常返回错误。
-	if _, err := h(message.NewMessage("2", nil)); !errors.Is(err, boom) {
-		t.Fatalf("err = %v", err)
 	}
 }

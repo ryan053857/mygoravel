@@ -252,22 +252,18 @@ func TestFinalAttemptFailsExport(t *testing.T) {
 		cfg := queue.DefaultConfig()
 		cfg.PollInterval = 20 * time.Millisecond
 		cfg.MaxAttempts = 1
-		logger := slog.New(slog.DiscardHandler)
-		r := queue.NewRouter(logger)
-		sub := queue.NewSubscriber(queue.Database(e.db), cfg, logger)
-		topic.Handle(r, sub, func(ctx context.Context, id uuid.UUID) error {
+		w := queue.NewWorker(queue.Database(e.db), cfg, slog.New(slog.DiscardHandler))
+		topic.Handle(w, func(ctx context.Context, id uuid.UUID) error {
 			return e.exports.Process(ctx, id, func(context.Context, *exports.Export, *exports.Writer) error {
 				return errors.New("always down")
 			}, rec.saved)
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		stopped := make(chan error, 1)
-		go func() { stopped <- r.Run(ctx) }()
-		<-r.Running()
+		go func() { stopped <- w.Run(ctx) }()
 		t.Cleanup(func() {
 			cancel()
 			<-stopped
-			_ = sub.Close()
 		})
 		if err := topic.Publish(context.Background(), queue.Database(e.db), exp.ID); err != nil {
 			t.Fatal(err)

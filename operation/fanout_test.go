@@ -27,18 +27,14 @@ func worker(t *testing.T, e env, maxAttempts int, handle func(ctx context.Contex
 	cfg := queue.DefaultConfig()
 	cfg.PollInterval = 20 * time.Millisecond
 	cfg.MaxAttempts = maxAttempts
-	logger := slog.New(slog.DiscardHandler)
-	r := queue.NewRouter(logger)
-	sub := queue.NewSubscriber(queue.Database(e.db), cfg, logger)
-	unitTopic.Handle(r, sub, handle)
+	w := queue.NewWorker(queue.Database(e.db), cfg, slog.New(slog.DiscardHandler))
+	unitTopic.Handle(w, handle)
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan error, 1)
-	go func() { stopped <- r.Run(ctx) }()
-	<-r.Running()
+	go func() { stopped <- w.Run(ctx) }()
 	t.Cleanup(func() {
 		cancel()
 		<-stopped
-		_ = sub.Close()
 	})
 }
 

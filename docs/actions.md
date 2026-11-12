@@ -201,7 +201,7 @@ err := PublishAt.Publish(ctx, queue.Database(tx), item.ID, queue.At(publishAt))
 worker 注册处理方法，见[启动 worker](queue.md#running-workers)：
 
 ```go
-article.PublishAt.Handle(router, sub, article.NewPublish(a.db).Job)
+article.PublishAt.Handle(w, article.NewPublish(a.db).Job)
 ```
 
 <a id="as-scheduled-tasks"></a>

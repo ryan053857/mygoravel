@@ -223,7 +223,7 @@ func (a *BulkPublish) Progress(ctx context.Context, in *OperationIDInput) (*huma
 worker 注册任务，见[启动 worker](queue.md#running-workers)：
 
 ```go
-article.BulkPublishJob.Handle(router, sub, article.NewBulkPublish(a.db, a.hub, a.ops, article.NewPublish(a.db)).Job)
+article.BulkPublishJob.Handle(w, article.NewBulkPublish(a.db, a.hub, a.ops, article.NewPublish(a.db)).Job)
 ```
 
 `Run` 先把操作变为 `running`，然后调用回调。进度以“单位”计算，这里一篇文章是一个单位：`SetTotal` 设置总数，`Add(processed, failed)` 记下处理了几个、其中失败了几个，`Save` 把进度保存下来。回调返回 nil 时操作变为 `completed`，没有保存的进度一起保存。

@@ -535,7 +535,7 @@ func (a *QueueImport) Failures(ctx context.Context, in *ImportFailuresInput) (*h
 worker 注册任务，见[启动 worker](queue.md#running-workers)：
 
 ```go
-article.ImportJob.Handle(router, sub, article.NewQueueImport(a.db, a.hub, a.importer, article.NewImport(article.NewCreate(a.db))).Job)
+article.ImportJob.Handle(w, article.NewQueueImport(a.db, a.hub, a.importer, article.NewImport(article.NewCreate(a.db))).Job)
 ```
 
 `imports.Process` 用[后台操作](operations.md#running)的 `Run` 执行导入，一行是一个单位：导入变为 `running`，第一次执行时检查表头、统计行数；然后逐行解码，验证通过的行交给回调。回调与同步导入共用 `row`，发起人由 `imp.Owner()` 得到，它只有 ID、类型和租户；`Create` 需要检查权限时，按 ID 重新加载权限；多租户应用中 `Owner` 已经带着租户，见[队列任务](tenancy.md#tenant-jobs)。
@@ -791,7 +791,7 @@ func (a *QueueExport) Progress(ctx context.Context, in *ExportIDInput) (*huma.St
 worker 注册任务：
 
 ```go
-article.ExportJob.Handle(router, sub, article.NewQueueExport(a.db, a.hub, a.exporter, article.NewExport(a.db)).Job)
+article.ExportJob.Handle(w, article.NewQueueExport(a.db, a.hub, a.exporter, article.NewExport(a.db)).Job)
 ```
 
 `Process` 把导出变为 `running`，回调先用同一个 `query` 统计行数，用 `SetTotal` 告诉前端一共有多少行，再交给 `Export.Handle` 写出。`exports.Writer` 的第一行是表头，之后每写一行计数一次，每秒最多保存一次进度。

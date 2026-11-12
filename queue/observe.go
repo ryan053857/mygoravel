@@ -41,7 +41,7 @@ func (k EventKind) String() string {
 	return "unknown"
 }
 
-// Event 是 Subscriber 报告的一次任务状态变化。除 JobStarted 外，事件都在结果写回驱动之后报告。
+// Event 是 Worker 报告的一次任务状态变化。除 JobStarted 外，事件都在结果写回驱动之后报告。
 type Event struct {
 	Kind   EventKind
 	Driver string
@@ -58,23 +58,23 @@ type Event struct {
 // 耗时会占用并发名额：耗时的工作请缓冲或异步完成。ctx 带有任务的日志字段。Observer 中的 panic 会被恢复并记录。
 type Observer func(ctx context.Context, e Event)
 
-// WithObserver 为订阅者添加 Observer，可以多次使用。
-func WithObserver(o Observer) SubscriberOption {
-	return func(s *Subscriber) { s.observers = append(s.observers, o) }
+// WithObserver 为 Worker 添加 Observer，可以多次使用。
+func WithObserver(o Observer) WorkerOption {
+	return func(w *Worker) { w.observers = append(w.observers, o) }
 }
 
 // observe 依次调用 Observer。
-func (s *Subscriber) observe(ctx context.Context, e Event) {
-	e.Driver = s.driver.Name()
-	for _, o := range s.observers {
+func (w *Worker) observe(ctx context.Context, e Event) {
+	e.Driver = w.driver.Name()
+	for _, o := range w.observers {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					s.logger.ErrorContext(ctx, "queue observer panicked", "event", e.Kind.String(), "panic", r)
+					w.logger.ErrorContext(ctx, "queue observer panicked", "event", e.Kind.String(), "panic", r)
 				}
 			}()
 			o(ctx, e)
 		}()
 	}
-	s.endSpan(ctx, e)
+	w.endSpan(ctx, e)
 }

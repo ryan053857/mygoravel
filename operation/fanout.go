@@ -80,7 +80,7 @@ func Fanout[T any](ctx context.Context, tx bun.IDB, d queue.Driver, id uuid.UUID
 
 // HandleUnit 把 fn 包装为 Fanout 发布的单位的处理函数，交给 topic.Handle：
 //
-//	SummarizeJob.Handle(router, sub, operation.HandleUnit(ops, summarize.Unit, saved))
+//	SummarizeJob.Handle(w, operation.HandleUnit(ops, summarize.Unit, saved))
 //
 // fn 收到单位所属的操作和业务数据。fn 返回 nil 时单位成功，Processed 加一。
 // fn 返回带错误码的业务错误时单位失败，Processed 和 Failed 各加一，任务不再重试。

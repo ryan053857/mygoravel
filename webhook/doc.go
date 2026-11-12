@@ -10,7 +10,7 @@
 //
 //	err := webhook.Send(ctx, tx, subject, webhook.Event{Type: "article.published", Data: ev})
 //
-//	webhook.NewDeliverer(db, webhook.Options{}).Handle(router, sub)
+//	webhook.NewDeliverer(db, webhook.Options{}).Handle(w)
 //
 // 端点和投递记录按租户管理：CreateEndpoint、UpdateEndpoint、DeleteEndpoint、GetEndpoint、ListEndpoints、
 // RotateSecret；ListDeliveries、GetDelivery、Resend；Cleanup 删除超过保留期的投递记录。

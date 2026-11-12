@@ -7,9 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/cockroachdb/errors"
-	"github.com/google/uuid"
 
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/queue"
@@ -61,7 +59,8 @@ func TestPublish(t *testing.T) {
 	at := time.Date(2030, 1, 2, 3, 4, 5, 6000, time.FixedZone("CST", 8*3600))
 
 	var d recorder
-	if err := queue.Publish(ctx, &d, "mail.send", welcome{Email: "a@example.com"}, queue.At(at)); err != nil {
+	send := queue.Topic[welcome]("mail.send")
+	if err := send.Publish(ctx, &d, welcome{Email: "a@example.com"}, queue.At(at)); err != nil {
 		t.Fatal(err)
 	}
 	if len(d.jobs) != 1 || d.ctx != ctx {
@@ -78,33 +77,11 @@ func TestPublish(t *testing.T) {
 		t.Fatalf("metadata %v", j.Metadata)
 	}
 
-	if err := queue.Publish(ctx, &d, "x", func() {}); err == nil {
+	if err := queue.Topic[func()]("x").Publish(ctx, &d, func() {}); err == nil {
 		t.Fatal("expected encode error")
 	}
-	if err := queue.Publish(ctx, &d, "", 1); err == nil {
+	if err := queue.Topic[int]("").Publish(ctx, &d, 1); err == nil {
 		t.Fatal("expected empty topic error")
-	}
-}
-
-func TestPublisher(t *testing.T) {
-	var d recorder
-	pub := queue.NewPublisher(&d)
-	msg := message.NewMessage(uuid.NewString(), []byte("x"))
-	msg.Metadata.Set("k", "v")
-	msg.Metadata.Set("_queue_available_at", "2030-01-01T19:04:05.000006Z")
-	if err := pub.Publish("t", msg); err != nil {
-		t.Fatal(err)
-	}
-	j := d.jobs[0]
-	if j.ID.String() != msg.UUID || j.Topic != "t" || j.Metadata["k"] != "v" || len(j.Metadata) != 1 ||
-		!j.AvailableAt.Equal(time.Date(2030, 1, 1, 19, 4, 5, 6000, time.UTC)) {
-		t.Fatalf("job %+v", j)
-	}
-	if err := pub.Publish("", message.NewMessage(uuid.NewString(), nil)); err == nil {
-		t.Fatal("expected empty topic error")
-	}
-	if err := pub.Publish("t", message.NewMessage("not-a-uuid", nil)); err == nil {
-		t.Fatal("expected invalid UUID error")
 	}
 }
 
