@@ -54,7 +54,6 @@ func New(t testing.TB, db *bun.DB, model vector.Model) *vector.Store {
 		}
 		for _, name := range names {
 			if strings.HasPrefix(name, prefix) {
-				// 删除 collection 时也删除了指向它的别名
 				if err := client.DeleteCollection(ctx, name); err != nil {
 					t.Errorf("vectortest: delete collection %s: %v", name, err)
 				}

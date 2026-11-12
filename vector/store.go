@@ -8,8 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/uptrace/bun"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/ryan053857/mygoravel/ai"
 )
@@ -67,8 +65,8 @@ func New(db *bun.DB, client *qdrant.Client, model Model, opts ...Option) *Store 
 	return s
 }
 
-// collection 返回索引的 collection 的别名，查询和写入都通过别名。
-func (s *Store) collection(index string) string { return s.prefix + index }
+// collection 返回索引的 collection 的名称。
+func (s *Store) collection(index string) string { return s.prefix + index + "_v1" }
 
 // metadata 中记录模型的键。
 const (
@@ -86,17 +84,23 @@ func (s *Store) open(ctx context.Context, index string, sc *schema, create bool)
 		return true, nil
 	}
 
-	info, err := s.client.GetCollectionInfo(ctx, name)
-	if status.Code(err) == codes.NotFound {
+	exists, err := s.client.CollectionExists(ctx, name)
+	if err != nil {
+		return false, errors.Wrapf(err, "vector: check collection %s", name)
+	}
+	if !exists {
 		if !create {
 			return false, nil
 		}
 		if err := s.create(ctx, name, sc); err != nil {
 			return false, err
 		}
-	} else if err != nil {
+	}
+	info, err := s.client.GetCollectionInfo(ctx, name)
+	if err != nil {
 		return false, errors.Wrapf(err, "vector: get collection %s", name)
-	} else if err := s.checkModel(name, info); err != nil {
+	}
+	if err := s.checkModel(name, info); err != nil {
 		return false, err
 	}
 	// 文档类型新增的过滤字段也在这里建立索引；已经存在的索引不受影响
@@ -119,11 +123,10 @@ func (s *Store) checkModel(name string, info *qdrant.CollectionInfo) error {
 	return nil
 }
 
-// create 创建索引的第 1 个版本 <name>_v1，再把别名 name 指向它。多个进程同时创建时只有一个成功，其余的沿用它。
+// create 用 s.model 创建 collection。多个进程同时创建时只有一个成功，其余的沿用它。
 func (s *Store) create(ctx context.Context, name string, sc *schema) error {
-	version := name + "_v1"
 	req := &qdrant.CreateCollection{
-		CollectionName: version,
+		CollectionName: name,
 		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
 			Size: uint64(s.model.Dims), Distance: qdrant.Distance_Cosine,
 		}),
@@ -136,23 +139,13 @@ func (s *Store) create(ctx context.Context, name string, sc *schema) error {
 		// 查询总是限定在一个租户中：只给每个租户建立 HNSW 图，不建全局的图
 		req.HnswConfig = &qdrant.HnswConfigDiff{M: qdrant.PtrOf(uint64(0)), PayloadM: qdrant.PtrOf(uint64(16))}
 	}
-	err := s.client.CreateCollection(ctx, req)
-	if status.Code(err) == codes.AlreadyExists {
-		info, err := s.client.GetCollectionInfo(ctx, version)
-		if err != nil {
-			return errors.Wrapf(err, "vector: get collection %s", version)
+	if err := s.client.CreateCollection(ctx, req); err != nil {
+		// 另一个进程同时创建成功时沿用它
+		if exists, _ := s.client.CollectionExists(ctx, name); !exists {
+			return errors.Wrapf(err, "vector: create collection %s", name)
 		}
-		if err := s.checkModel(version, info); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return errors.Wrapf(err, "vector: create collection %s", version)
 	}
-	// 先建好 payload 索引再创建别名
-	if err := s.createFieldIndexes(ctx, version, sc); err != nil {
-		return err
-	}
-	return errors.Wrapf(s.client.CreateAlias(ctx, name, version), "vector: create alias %s", name)
+	return nil
 }
 
 // createFieldIndexes 给框架使用的 _key、租户和过滤字段建立 payload 索引，已经存在的不变。
