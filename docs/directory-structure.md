@@ -220,7 +220,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载，提示、对话框与页面的衔接 | [界面组件](components.md) |
 | `web/webtest` | 测试页面：保存会话 cookie，不经过登录页登录，读取 htmx 的响应头 | [页面测试](testing.md#page-tests) |
 | `web/upload` | 页面的上传接口，与 `ui.FileField` 配合：直传 S3 或经服务器上传 | [上传文件](forms.md#file-uploads) |
-| `realtime` | 嵌入 Centrifuge 的 WebSocket 实时频道：公开、私有与 presence 频道，频道就是广播的主题；`realtime/redispresence` 是在线成员的 Redis 存储，`realtime/realtimetest` 是存储的契约测试 | [实时频道](realtime.md) |
+| `realtime` | 嵌入 Centrifuge 的 WebSocket 实时频道：公开、私有与 presence 频道，频道就是广播的主题；`realtime/redispresence` 是在线成员的 Redis 存储，`realtime/realtimetest` 是测试用的内存存储与存储的契约测试 | [实时频道](realtime.md) |
 | `command` | 根命令、`Run`、`Bind`、`config` 命令、退出码 | [命令行](commands.md) |
 | `command/devcmd` | `dev` 命令：开发页面时监听文件变化、重启应用、刷新浏览器 | [dev 命令](commands.md#dev-command) |
 | `command/httpcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |

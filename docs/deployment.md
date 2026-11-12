@@ -98,7 +98,7 @@ CONFIG=--config=config/app.yaml,config/prod.yaml
 | 一体 | `start` | 起步阶段和中小规模：一个进程、一份配置，部署和监控都最简单 |
 | 分开 | `serve`、`work`、`schedule` | 任务量大，或者耗时的任务拖慢了接口；各自按负载增减实例 |
 
-从一体改为分开时，只需要把部署中的 `start` 换成三组分别运行 `serve`、`work` 和 `schedule` 的实例。
+从一体改为分开时，只需要把部署中的 `start` 换成三组分别运行 `serve`、`work` 和 `schedule` 的实例。使用[实时频道](realtime.md)时，还可以再加一组 `realtime` 实例专门承接 WebSocket 连接，升级接口时不断开它们，见[单独部署实时连接](realtime.md#separate-process)。
 
 两种形态都可以运行多个实例：
 
@@ -159,7 +159,7 @@ sudo systemctl enable --now blog@start                          # 一体运行
 sudo systemctl enable --now blog@serve blog@work blog@schedule  # 或者分开运行
 ```
 
-从一体改为分开时，先 `sudo systemctl disable --now blog@start`，再启用另外三个。
+从一体改为分开时，先 `sudo systemctl disable --now blog@start`，再启用另外三个。单独部署实时连接时再启用 `blog@realtime`，只改了接口的版本用 `sudo systemctl reload blog@serve` 升级，实时连接不受影响。
 
 几处设置的用意：
 
@@ -296,7 +296,7 @@ services:
     command: [schedule]
 ```
 
-`stop_grace_period` 不能省略：Docker 默认只等 10 秒就发送 `SIGKILL`，比队列和调度器默认的 `shutdown_timeout` 还短。一体运行时把三个服务换成一个运行 `start` 的服务即可。
+`stop_grace_period` 不能省略：Docker 默认只等 10 秒就发送 `SIGKILL`，比队列和调度器默认的 `shutdown_timeout` 还短。一体运行时把三个服务换成一个运行 `start` 的服务即可；单独部署实时连接时，再加一个运行 `realtime` 的服务。
 
 容器中不使用 `reload`：镜像不可变，升级就是换一个新容器。需要不中断服务时，让部署平台先启动新容器，等 `/readyz` 返回成功再停止旧容器，例如 [Kamal](https://kamal-deploy.org)、Docker Swarm 的 `update_config.order: start-first`、Kubernetes 的 `maxUnavailable: 0`。新旧容器同时运行时，同样要满足[上一节](#upgrade-overlap)的条件。
 

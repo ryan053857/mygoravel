@@ -14,6 +14,7 @@
 - [客户端发布](#client-publish)
 - [断线与重连](#reconnecting)
 - [部署](#deployment)
+    - [单独部署实时连接](#separate-process)
 - [指标](#metrics)
 
 <a id="introduction"></a>
@@ -203,7 +204,7 @@ members, err := rt.Members(ctx, "editing:"+id.String())
 <a id="presence-stores"></a>
 ### 保存在线成员
 
-在线成员默认保存在进程内存中，只适合单实例。多个实例要共用一个存储，交给 `Options.Presence`：
+在线成员保存在所有实例共用的存储中，登记 presence 频道之前必须设置 `Options.Presence`，否则 `rt.Channel` 会 panic。只有一个实例时也一样：[不停机升级](deployment.md#zero-downtime-upgrades)时新旧进程同时运行，双方要看到同一份在线成员。最简单的是数据库：
 
 ```go
 rt, err := realtime.New(hub, realtime.Options{Presence: realtime.NewDatabasePresence(db)})
@@ -214,6 +215,8 @@ rt, err := realtime.New(hub, realtime.Options{Presence: realtime.NewDatabasePres
 ```go
 rt, err := realtime.New(hub, realtime.Options{Presence: redispresence.New(rdb, "blog:presence:")})
 ```
+
+没有 presence 频道的应用不需要设置它，`rt.Members` 返回空列表。测试中用 `realtimetest.NewPresence()`，它把在线记录保存在内存中；同一个交给多个 `Realtime`，就模拟了共用存储的多个实例。
 
 <a id="client-publish"></a>
 ## 客户端发布
@@ -253,6 +256,51 @@ articles.on('subscribed', async () => {
 - 实例之间的控制消息由 Centrifuge 编码。升级框架时如果 Centrifuge 的版本有变化，先查看它的发布说明是否要求所有实例同时升级。
 
 只使用 `web.SSE` 的应用不会链接 Centrifuge。
+
+<a id="separate-process"></a>
+### 单独部署实时连接
+
+`serve` 和 `start` 都挂载了 `/realtime`，起步阶段不需要别的安排。WebSocket 是长连接：每次升级，旧进程停止时断开它上面的全部连接，客户端在同一时刻重连。接口发布频繁、连接很多时，把实时连接交给单独的一组 `realtime` 进程，升级接口就不再打扰它们，大量空闲连接也不和接口争抢资源。
+
+`realtime` 进程运行与 `serve` 相同的路由，只是监听另一个地址。把[装配页面](views.md#assembling-pages)中 `HTTP` 方法的内容移到 `serveOn`，两个部分共用：
+
+```go
+// HTTP 运行全部路由，serve 和 start 命令使用它。
+func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
+    return a.serveOn(d, a.cfg.HTTP.Addr)
+}
+
+// Realtime 运行同样的路由，专门承接实时连接，realtime 命令使用它。
+func (a *App) Realtime(d *command.Daemon) (func(context.Context) error, error) {
+    return a.serveOn(d, a.cfg.RealtimeAddr)
+}
+
+// serveOn 装配路由并在 addr 上监听，就是原来 HTTP 方法的内容，只是 d.Listen("tcp", addr)。
+func (a *App) serveOn(d *command.Daemon, addr string) (func(context.Context) error, error)
+
+// Realtime 只运行实时连接，realtime 命令调用它。
+func Realtime(ctx context.Context, cfg settings.Config) error {
+    return run(ctx, cfg, (*App).Realtime)
+}
+```
+
+`RealtimeAddr` 是应用配置中新增的一项，例如 `:8081`。路由相同，所以同源页面的会话、SPA 的 token 都照常认证。反向代理把 `/realtime` 转给 `realtime` 进程，其余请求仍然转给 `serve`：
+
+```nginx
+location /realtime {
+    proxy_pass http://127.0.0.1:8081;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+location / {
+    proxy_pass http://127.0.0.1:8080;
+}
+```
+
+- 只改了接口和页面时，[升级](deployment.md#zero-downtime-upgrades) `serve` 即可，实时连接不受影响；改了频道规则、授权函数，或者升级了框架，再升级 `realtime`。
+- `start` 不包含 `Realtime`，因为 `HTTP` 已经挂载了实时频道。
+- `realtime` 进程同样可以运行多个实例，它们与 `serve`、`work` 共用 Hub 后端，业务代码在哪个进程中发布都一样。
 
 <a id="metrics"></a>
 ## 指标

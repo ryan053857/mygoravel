@@ -14,10 +14,6 @@ import (
 	"github.com/ryan053857/mygoravel/realtime/realtimetest"
 )
 
-func TestMemoryPresence(t *testing.T) {
-	realtimetest.TestPresenceStore(t, func(*testing.T) realtime.PresenceStore { return realtime.NewMemoryPresence() })
-}
-
 func TestDatabasePresence(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		realtimetest.TestPresenceStore(t, func(t *testing.T) realtime.PresenceStore {
@@ -63,7 +59,7 @@ func editors(_ context.Context, sub identity.Subject, p realtime.Params) (any, b
 func TestPresenceChannel(t *testing.T) {
 	store := &tokens{}
 	// 不保留在线记录，离开事件立即发出；宽限期见 TestPresenceGrace。
-	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, PresenceGrace: -1}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, Presence: realtimetest.NewPresence(), PresenceGrace: -1}, nil)
 	n.rt.Channel("editing:{article}", realtime.Presence(editors))
 	n.rt.Channel("articles", realtime.Public())
 	ctx := context.Background()
@@ -201,7 +197,7 @@ func TestPresenceAcrossInstancesOnDatabase(t *testing.T) {
 func TestPresenceGrace(t *testing.T) {
 	const grace = 300 * time.Millisecond
 	store := &tokens{}
-	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, PresenceGrace: grace}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, Presence: realtimetest.NewPresence(), PresenceGrace: grace}, nil)
 	n.rt.Channel("editing:{article}", realtime.Presence(editors))
 	ctx := context.Background()
 	members := func() []realtime.Member {
@@ -268,7 +264,7 @@ func TestPresenceGrace(t *testing.T) {
 // 实例停止时不发离开事件：它上面的成员会重连到其他实例，在线记录保留到自行过期。
 func TestShutdownDoesNotAnnounceLeaves(t *testing.T) {
 	b := &bus{}
-	presence := realtime.NewMemoryPresence()
+	presence := realtimetest.NewPresence()
 	store := &tokens{}
 	opts := realtime.Options{Authenticate: store.validate, Presence: presence, PresenceGrace: 100 * time.Millisecond}
 	stopping := start(t, b.backend(), opts, nil)
@@ -305,7 +301,7 @@ func TestShutdownDoesNotAnnounceLeaves(t *testing.T) {
 func TestUnsubscribeAnnouncesLeaveImmediately(t *testing.T) {
 	const grace = 1500 * time.Millisecond
 	store := &tokens{}
-	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, PresenceGrace: grace}, nil)
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, Presence: realtimetest.NewPresence(), PresenceGrace: grace}, nil)
 	n.rt.Channel("editing:{article}", realtime.Presence(editors))
 	bob := mustConnect(t, n.url, "bob", nil)
 	bob.mustSubscribe("editing:7")
@@ -349,4 +345,21 @@ func TestPresenceGraceIsCapped(t *testing.T) {
 		}
 	}()
 	_, _ = realtime.New(hub, realtime.Options{PresenceGrace: realtime.MaxPresenceGrace + time.Second})
+}
+
+func TestPresenceChannelNeedsStore(t *testing.T) {
+	n := start(t, broadcasttest.NewBackend(), realtime.Options{}, nil)
+	// 没有 presence 频道时不需要存储：没有在线成员，Unsubscribe 照常工作。
+	if m, err := n.rt.Members(context.Background(), "editing:7"); err != nil || len(m) != 0 {
+		t.Fatalf("members without a store = %+v, %v", m, err)
+	}
+	if err := n.rt.Unsubscribe(identity.Ref{Type: "user", ID: "alice"}, "editing:7"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a presence channel without Options.Presence did not panic")
+		}
+	}()
+	n.rt.Channel("editing:{article}", realtime.Presence(editors))
 }

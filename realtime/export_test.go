@@ -17,6 +17,3 @@ func Compile(pattern string) (match func(channel string) (Params, bool), err err
 	}
 	return c.match, nil
 }
-
-// NewMemoryPresence 暴露进程内的 PresenceStore。
-func NewMemoryPresence() PresenceStore { return newMemoryPresence() }

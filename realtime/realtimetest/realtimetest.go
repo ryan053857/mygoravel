@@ -1,4 +1,4 @@
-// Package realtimetest 提供 realtime.PresenceStore 实现的契约测试。
+// Package realtimetest 提供测试用的内存在线记录存储，以及 realtime.PresenceStore 实现的契约测试。
 package realtimetest
 
 import (

@@ -166,6 +166,7 @@ func Start(ctx context.Context, cfg settings.Config) error {
 | `work` | 队列 worker |
 | `schedule` | 定时任务调度器 |
 | `start` | 以上三者，在同一个进程中 |
+| `realtime` | 只承接[实时频道](realtime.md)的连接，可选，见[单独部署实时连接](realtime.md#separate-process) |
 
 小型部署只运行 `start`：一个进程、一份配置、一套资源。业务量增长后改为分别部署 `serve`、`work` 和 `schedule`，各自按负载增减实例，代码不用改。`start` 也可以部署多个实例：worker 竞争领取任务，调度器通过锁保证[每次触发只执行一次](scheduling.md#multiple-instances)。
 

@@ -57,7 +57,7 @@ type Options struct {
 	// 浏览器发起的连接默认只接受同源请求，没有 Origin 请求头的客户端（移动端、服务器）不受限制。
 	TrustedOrigins []string
 	// Presence 保存 presence 频道的在线成员，所有实例共用同一个存储：NewDatabasePresence 或 redispresence.New。
-	// nil 时保存在进程内存中，只适合单实例部署。
+	// 注册 presence 频道时必须设置；不停机升级时新旧进程同时运行，单实例部署同样需要共用的存储。
 	Presence PresenceStore
 	// PresenceGrace 是连接离开 presence 频道后保留在线记录的时间：期间主体重新加入时，
 	// 其他成员看不到离开和加入。零值为 DefaultPresenceGrace（10 秒），负数表示不保留，
@@ -110,7 +110,7 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 		panic("realtime: PresenceGrace is longer than MaxPresenceGrace")
 	}
 	if rt.presence = opts.Presence; rt.presence == nil {
-		rt.presence = newMemoryPresence()
+		rt.presence = noPresence{}
 	}
 	for _, origin := range opts.TrustedOrigins {
 		u, err := url.Parse(origin)
@@ -161,11 +161,15 @@ func New(hub *broadcast.Hub, opts Options) (*Realtime, error) {
 // 订阅时使用第一条匹配的规则，没有匹配规则的频道不能订阅。
 //
 // 频道就是 Hub 的主题：登记规则之后，发布到同名主题的消息会发给订阅它的客户端。
-// 多租户应用的频道名要带上租户，并在 Authorizer 中与主体的租户比较。pattern 不合法时 panic。
+// 多租户应用的频道名要带上租户，并在 Authorizer 中与主体的租户比较。
+// pattern 不合法，或者没有设置 Options.Presence 而 rule 是 Presence 时 panic。
 func (rt *Realtime) Channel(pattern string, rule Rule) {
 	c, err := compile(pattern, rule)
 	if err != nil {
 		panic(err)
+	}
+	if rule.presence != nil && rt.opts.Presence == nil {
+		panic("realtime: presence channel " + pattern + " needs Options.Presence")
 	}
 	rt.mu.Lock()
 	defer rt.mu.Unlock()

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/centrifugal/centrifuge"
@@ -140,57 +139,13 @@ func (m presenceManager) PresenceStats(ch string) (centrifuge.PresenceStats, err
 	return centrifuge.PresenceStats{NumClients: len(clients), NumUsers: len(users)}, nil
 }
 
-// memoryPresence 把在线记录保存在进程内存中，用于单实例部署。
-type memoryPresence struct {
-	mu       sync.Mutex
-	channels map[string]map[string]memoryEntry
+// noPresence 是没有设置 Options.Presence 时使用的存储：没有 presence 频道，也就没有在线记录。
+type noPresence struct{}
+
+func (noPresence) Add(context.Context, PresenceEntry, time.Duration) error {
+	return errors.New("realtime: Options.Presence is not set")
 }
 
-type memoryEntry struct {
-	PresenceEntry
-	expires time.Time
-}
+func (noPresence) Remove(context.Context, string, string) error { return nil }
 
-func newMemoryPresence() *memoryPresence {
-	return &memoryPresence{channels: map[string]map[string]memoryEntry{}}
-}
-
-func (s *memoryPresence) Add(_ context.Context, e PresenceEntry, ttl time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	clients := s.channels[e.Channel]
-	if clients == nil {
-		clients = map[string]memoryEntry{}
-		s.channels[e.Channel] = clients
-	}
-	clients[e.Client] = memoryEntry{PresenceEntry: e, expires: time.Now().Add(ttl)}
-	return nil
-}
-
-func (s *memoryPresence) Remove(_ context.Context, channel, client string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.channels[channel], client)
-	if len(s.channels[channel]) == 0 {
-		delete(s.channels, channel)
-	}
-	return nil
-}
-
-func (s *memoryPresence) List(_ context.Context, channel string) ([]PresenceEntry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now()
-	var out []PresenceEntry
-	for client, e := range s.channels[channel] {
-		if !e.expires.After(now) {
-			delete(s.channels[channel], client)
-			continue
-		}
-		out = append(out, e.PresenceEntry)
-	}
-	if len(s.channels[channel]) == 0 {
-		delete(s.channels, channel)
-	}
-	return out, nil
-}
+func (noPresence) List(context.Context, string) ([]PresenceEntry, error) { return nil, nil }
