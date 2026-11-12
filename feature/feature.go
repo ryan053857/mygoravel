@@ -135,7 +135,6 @@ type Store struct {
 	db      bun.IDB
 	catalog Catalog
 	names   map[string]bool
-	now     func() time.Time
 }
 
 // NewStore 创建存储。db 必须已执行 feature 迁移。
@@ -151,7 +150,7 @@ func NewStore(db bun.IDB, catalog Catalog) *Store {
 		}
 		names[f.Name] = true
 	}
-	return &Store{db: db, catalog: slices.Clone(catalog), names: names, now: time.Now}
+	return &Store{db: db, catalog: slices.Clone(catalog), names: names}
 }
 
 // WithDB 返回使用 db（通常是业务事务）的副本，用于让 Set、Clear 与其他写入（例如操作日志）一起提交。
@@ -286,7 +285,7 @@ func (s *Store) Set(ctx context.Context, f Flag, scope Scope, state State) error
 	}
 	r := &row{
 		Name: f.Name, Tenant: scope.tenant, SubjectType: string(scope.ref.Type), SubjectID: scope.ref.ID,
-		Mode: state.Mode, Percent: state.Percent, UpdatedAt: s.now().UTC(),
+		Mode: state.Mode, Percent: state.Percent, UpdatedAt: time.Now().UTC(),
 	}
 	q := s.db.NewInsert().Model(r)
 	if s.db.Dialect().Name() == dialect.MySQL {

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -20,15 +20,6 @@ import (
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
 )
 
-// clock 是可以拨动的测试时钟。
-type clock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *clock) now() time.Time      { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *clock) add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unlock() }
-
 // testConfig：最长 10 小时，空闲 1 小时，“记住我”空闲 3 小时。
 var testConfig = apitoken.Config{Lifetime: 10 * time.Hour, IdleTimeout: time.Hour, RememberIdleTimeout: 3 * time.Hour}
 
@@ -40,12 +31,9 @@ var (
 	bob   = identity.Subject{ID: "bob", Type: "user"}
 )
 
-func newStore(t *testing.T, driver database.Driver) (*apitoken.Store, *clock) {
+func newStore(t *testing.T, driver database.Driver) *apitoken.Store {
 	t.Helper()
-	s := apitoken.NewStore(dbtesting.Open(t, driver, apitoken.Migrations()), testConfig)
-	c := &clock{t: time.Now().UTC().Truncate(time.Second)}
-	apitoken.SetClock(s, c.now)
-	return s, c
+	return apitoken.NewStore(dbtesting.Open(t, driver, apitoken.Migrations()), testConfig)
 }
 
 func login(t *testing.T, s *apitoken.Store, sub identity.Subject, d apitoken.Device) string {
@@ -111,84 +99,88 @@ func TestConfig(t *testing.T) {
 
 func TestLoginAndValidate(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		s, c := newStore(t, driver)
-		ua := strings.Repeat("浏", 300)
-		plain := login(t, s, alice, apitoken.Device{IP: "203.0.113.7", UserAgent: ua})
+		synctest.Test(t, func(t *testing.T) {
+			ctx := context.Background()
+			s := newStore(t, driver)
+			ua := strings.Repeat("浏", 300)
+			plain := login(t, s, alice, apitoken.Device{IP: "203.0.113.7", UserAgent: ua})
 
-		sub, ok := valid(t, s, plain)
-		// 登录 token 不限制权限，也不携带权限。
-		if !ok || sub.ID != "alice" || sub.Type != "user" || sub.Method != "bearer" ||
-			sub.Scopes != nil || sub.Permissions != nil || sub.Tenant != "" || sub.Credential == "" {
-			t.Fatalf("subject=%+v ok=%v", sub, ok)
-		}
-		for _, bad := range []string{"", "bogus", plain + "x"} {
-			if _, ok := valid(t, s, bad); ok {
-				t.Fatalf("token %q accepted", bad)
+			sub, ok := valid(t, s, plain)
+			// 登录 token 不限制权限，也不携带权限。
+			if !ok || sub.ID != "alice" || sub.Type != "user" || sub.Method != "bearer" ||
+				sub.Scopes != nil || sub.Permissions != nil || sub.Tenant != "" || sub.Credential == "" {
+				t.Fatalf("subject=%+v ok=%v", sub, ok)
 			}
-		}
+			for _, bad := range []string{"", "bogus", plain + "x"} {
+				if _, ok := valid(t, s, bad); ok {
+					t.Fatalf("token %q accepted", bad)
+				}
+			}
 
-		list, err := s.List(ctx, sub)
-		if err != nil || len(list) != 1 {
-			t.Fatalf("list=%+v err=%v", list, err)
-		}
-		tok := list[0]
-		if tok.ID != sub.Credential || !tok.Current || tok.Kind != apitoken.KindLogin || tok.IP != "203.0.113.7" ||
-			len([]rune(tok.UserAgent)) != 255 || !tok.ExpiresAt.Equal(c.now().Add(time.Hour)) {
-			t.Fatalf("token=%+v", tok)
-		}
-		if others, _ := s.List(ctx, bob); len(others) != 0 {
-			t.Fatalf("bob sees %d tokens", len(others))
-		}
-		if _, err := s.Login(ctx, identity.Subject{}, apitoken.Device{}); err == nil {
-			t.Fatal("expected error for empty subject")
-		}
+			list, err := s.List(ctx, sub)
+			if err != nil || len(list) != 1 {
+				t.Fatalf("list=%+v err=%v", list, err)
+			}
+			tok := list[0]
+			if tok.ID != sub.Credential || !tok.Current || tok.Kind != apitoken.KindLogin || tok.IP != "203.0.113.7" ||
+				len([]rune(tok.UserAgent)) != 255 || !tok.ExpiresAt.Equal(time.Now().Add(time.Hour)) {
+				t.Fatalf("token=%+v", tok)
+			}
+			if others, _ := s.List(ctx, bob); len(others) != 0 {
+				t.Fatalf("bob sees %d tokens", len(others))
+			}
+			if _, err := s.Login(ctx, identity.Subject{}, apitoken.Device{}); err == nil {
+				t.Fatal("expected error for empty subject")
+			}
+		})
 	})
 }
 
 func TestLoginSlidingExpiry(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		s, c := newStore(t, driver)
+		synctest.Test(t, func(t *testing.T) {
+			s := newStore(t, driver)
 
-		// 一直在用：每次使用都延长一小时，越过最初的截止时间仍然有效。
-		plain := login(t, s, alice, apitoken.Device{})
-		start := c.now()
-		for c.now().Sub(start) < 10*time.Hour-50*time.Minute {
-			c.add(50 * time.Minute)
-			if _, ok := valid(t, s, plain); !ok {
-				t.Fatalf("active token expired after %v", c.now().Sub(start))
+			// 一直在用：每次使用都延长一小时，越过最初的截止时间仍然有效。
+			plain := login(t, s, alice, apitoken.Device{})
+			start := time.Now()
+			for time.Since(start) < 10*time.Hour-50*time.Minute {
+				time.Sleep(50 * time.Minute)
+				if _, ok := valid(t, s, plain); !ok {
+					t.Fatalf("active token expired after %v", time.Since(start))
+				}
 			}
-		}
-		// 但不超过 Lifetime。
-		c.add(50 * time.Minute)
-		if _, ok := valid(t, s, plain); ok {
-			t.Fatalf("token valid after lifetime: %v", c.now().Sub(start))
-		}
+			// 但不超过 Lifetime。
+			time.Sleep(50 * time.Minute)
+			if _, ok := valid(t, s, plain); ok {
+				t.Fatalf("token valid after lifetime: %v", time.Since(start))
+			}
 
-		// 空闲超过一小时失效。
-		idle := login(t, s, alice, apitoken.Device{})
-		c.add(time.Hour)
-		if _, ok := valid(t, s, idle); ok {
-			t.Fatal("idle token still valid")
-		}
+			// 空闲超过一小时失效。
+			idle := login(t, s, alice, apitoken.Device{})
+			time.Sleep(time.Hour)
+			if _, ok := valid(t, s, idle); ok {
+				t.Fatal("idle token still valid")
+			}
 
-		// “记住我”空闲三小时内有效。
-		remembered := login(t, s, alice, apitoken.Device{Remember: true})
-		c.add(2 * time.Hour)
-		if _, ok := valid(t, s, remembered); !ok {
-			t.Fatal("remembered token expired within remember idle timeout")
-		}
+			// “记住我”空闲三小时内有效。
+			remembered := login(t, s, alice, apitoken.Device{Remember: true})
+			time.Sleep(2 * time.Hour)
+			if _, ok := valid(t, s, remembered); !ok {
+				t.Fatal("remembered token expired within remember idle timeout")
+			}
 
-		// 一分钟内的使用不写库，因此不延长有效期。
-		quick := login(t, s, alice, apitoken.Device{})
-		c.add(30 * time.Second)
-		if _, ok := valid(t, s, quick); !ok {
-			t.Fatal("quick token invalid")
-		}
-		c.add(time.Hour - 30*time.Second)
-		if _, ok := valid(t, s, quick); ok {
-			t.Fatal("use within a minute extended the token")
-		}
+			// 一分钟内的使用不写库，因此不延长有效期。
+			quick := login(t, s, alice, apitoken.Device{})
+			time.Sleep(30 * time.Second)
+			if _, ok := valid(t, s, quick); !ok {
+				t.Fatal("quick token invalid")
+			}
+			time.Sleep(time.Hour - 30*time.Second)
+			if _, ok := valid(t, s, quick); ok {
+				t.Fatal("use within a minute extended the token")
+			}
+		})
 	})
 }
 
@@ -196,103 +188,103 @@ func TestLoginSlidingExpiry(t *testing.T) {
 // 不同账号体系可以各用自己的 Config 签发，共用一个校验器。
 func TestLifetimeFixedAtIssue(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		db := dbtesting.Open(t, driver, apitoken.Migrations())
-		c := &clock{t: time.Now().UTC().Truncate(time.Second)}
-		staff := apitoken.NewStore(db, apitoken.Config{Lifetime: 2 * time.Hour, IdleTimeout: 10 * time.Minute})
-		mobile := apitoken.NewStore(db, apitoken.Config{Lifetime: 90 * 24 * time.Hour, IdleTimeout: 30 * 24 * time.Hour})
-		for _, s := range []*apitoken.Store{staff, mobile} {
-			apitoken.SetClock(s, c.now)
-		}
-		staffToken := login(t, staff, identity.Subject{Type: "staff", ID: "s1"}, apitoken.Device{})
-		customerToken := login(t, mobile, identity.Subject{Type: "customer", ID: "c1"}, apitoken.Device{})
+		synctest.Test(t, func(t *testing.T) {
+			db := dbtesting.Open(t, driver, apitoken.Migrations())
+			staff := apitoken.NewStore(db, apitoken.Config{Lifetime: 2 * time.Hour, IdleTimeout: 10 * time.Minute})
+			mobile := apitoken.NewStore(db, apitoken.Config{Lifetime: 90 * 24 * time.Hour, IdleTimeout: 30 * 24 * time.Hour})
+			staffToken := login(t, staff, identity.Subject{Type: "staff", ID: "s1"}, apitoken.Device{})
+			customerToken := login(t, mobile, identity.Subject{Type: "customer", ID: "c1"}, apitoken.Device{})
 
-		// 用 staff 的 Store 校验移动端的 token：仍然按签发时的 30 天空闲滑动。
-		c.add(9 * time.Minute)
-		for _, token := range []string{staffToken, customerToken} {
-			if _, ok := valid(t, staff, token); !ok {
-				t.Fatal("token expired early")
+			// 用 staff 的 Store 校验移动端的 token：仍然按签发时的 30 天空闲滑动。
+			time.Sleep(9 * time.Minute)
+			for _, token := range []string{staffToken, customerToken} {
+				if _, ok := valid(t, staff, token); !ok {
+					t.Fatal("token expired early")
+				}
 			}
-		}
-		c.add(20 * time.Minute)
-		if _, ok := valid(t, mobile, staffToken); ok {
-			t.Fatal("staff token outlived its 10 minute idle timeout")
-		}
-		if _, ok := valid(t, staff, customerToken); !ok {
-			t.Fatal("customer token used the validating store's idle timeout")
-		}
-		// 每天使用一次，滑动延长不超过签发时的 Lifetime（90 天）。
-		var lasted time.Duration
-		for lasted = 0; lasted < 100*24*time.Hour; lasted += 24 * time.Hour {
-			c.add(24 * time.Hour)
+			time.Sleep(20 * time.Minute)
+			if _, ok := valid(t, mobile, staffToken); ok {
+				t.Fatal("staff token outlived its 10 minute idle timeout")
+			}
 			if _, ok := valid(t, staff, customerToken); !ok {
-				break
+				t.Fatal("customer token used the validating store's idle timeout")
 			}
-		}
-		if lasted < 89*24*time.Hour || lasted > 90*24*time.Hour {
-			t.Fatalf("customer token stopped after %v", lasted)
-		}
+			// 每天使用一次，滑动延长不超过签发时的 Lifetime（90 天）。
+			var lasted time.Duration
+			for lasted = 0; lasted < 100*24*time.Hour; lasted += 24 * time.Hour {
+				time.Sleep(24 * time.Hour)
+				if _, ok := valid(t, staff, customerToken); !ok {
+					break
+				}
+			}
+			if lasted < 89*24*time.Hour || lasted > 90*24*time.Hour {
+				t.Fatalf("customer token stopped after %v", lasted)
+			}
+		})
 	})
 }
 
 func TestCreatePersonal(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		s, c := newStore(t, driver)
-		for name, call := range map[string]func() error{
-			"empty name": func() error { _, err := s.Create(ctx, alice, apitoken.Personal{Name: " ", Scopes: read}); return err },
-			"long name": func() error {
-				_, err := s.Create(ctx, alice, apitoken.Personal{Name: strings.Repeat("名", 256), Scopes: read})
-				return err
-			},
-			"no scopes": func() error { _, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI"}); return err },
-			"past expiry": func() error {
-				_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: read, ExpiresAt: c.now()})
-				return err
-			},
-			"spaced scope": func() error {
-				_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: []string{"a b"}})
-				return err
-			},
-			"empty scope": func() error {
-				_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: []string{""}})
-				return err
-			},
-			"empty subject": func() error {
-				_, err := s.Create(ctx, identity.Subject{}, apitoken.Personal{Name: "CI", Scopes: read})
-				return err
-			},
-		} {
-			if call() == nil {
-				t.Errorf("%s: expected error", name)
+		synctest.Test(t, func(t *testing.T) {
+			ctx := context.Background()
+			s := newStore(t, driver)
+			for name, call := range map[string]func() error{
+				"empty name": func() error { _, err := s.Create(ctx, alice, apitoken.Personal{Name: " ", Scopes: read}); return err },
+				"long name": func() error {
+					_, err := s.Create(ctx, alice, apitoken.Personal{Name: strings.Repeat("名", 256), Scopes: read})
+					return err
+				},
+				"no scopes": func() error { _, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI"}); return err },
+				"past expiry": func() error {
+					_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: read, ExpiresAt: time.Now()})
+					return err
+				},
+				"spaced scope": func() error {
+					_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: []string{"a b"}})
+					return err
+				},
+				"empty scope": func() error {
+					_, err := s.Create(ctx, alice, apitoken.Personal{Name: "CI", Scopes: []string{""}})
+					return err
+				},
+				"empty subject": func() error {
+					_, err := s.Create(ctx, identity.Subject{}, apitoken.Personal{Name: "CI", Scopes: read})
+					return err
+				},
+			} {
+				if call() == nil {
+					t.Errorf("%s: expected error", name)
+				}
 			}
-		}
 
-		forever := create(t, s, alice, apitoken.Personal{Name: "CI 部署", Scopes: []string{"articles:read", "comments:*"}})
-		expiring := create(t, s, alice, apitoken.Personal{Name: "报表", Scopes: read, ExpiresAt: c.now().Add(time.Hour)})
-		sub, ok := valid(t, s, forever)
-		if !ok || strings.Join(sub.Scopes, ",") != "articles:read,comments:*" || sub.Permissions != nil {
-			t.Fatalf("subject=%+v ok=%v", sub, ok)
-		}
-		// 个人访问令牌不按空闲时间过期。
-		c.add(1000 * time.Hour)
-		if _, ok := valid(t, s, forever); !ok {
-			t.Fatal("non-expiring token expired")
-		}
-		if _, ok := valid(t, s, expiring); ok {
-			t.Fatal("token valid after expiresAt")
-		}
-		list, err := s.List(ctx, alice)
-		if err != nil || len(list) != 1 || list[0].Name != "CI 部署" || list[0].Kind != apitoken.KindPersonal ||
-			!list[0].ExpiresAt.IsZero() || list[0].Current {
-			t.Fatalf("list=%+v err=%v", list, err)
-		}
+			forever := create(t, s, alice, apitoken.Personal{Name: "CI 部署", Scopes: []string{"articles:read", "comments:*"}})
+			expiring := create(t, s, alice, apitoken.Personal{Name: "报表", Scopes: read, ExpiresAt: time.Now().Add(time.Hour)})
+			sub, ok := valid(t, s, forever)
+			if !ok || strings.Join(sub.Scopes, ",") != "articles:read,comments:*" || sub.Permissions != nil {
+				t.Fatalf("subject=%+v ok=%v", sub, ok)
+			}
+			// 个人访问令牌不按空闲时间过期。
+			time.Sleep(1000 * time.Hour)
+			if _, ok := valid(t, s, forever); !ok {
+				t.Fatal("non-expiring token expired")
+			}
+			if _, ok := valid(t, s, expiring); ok {
+				t.Fatal("token valid after expiresAt")
+			}
+			list, err := s.List(ctx, alice)
+			if err != nil || len(list) != 1 || list[0].Name != "CI 部署" || list[0].Kind != apitoken.KindPersonal ||
+				!list[0].ExpiresAt.IsZero() || list[0].Current {
+				t.Fatalf("list=%+v err=%v", list, err)
+			}
+		})
 	})
 }
 
 func TestRevoke(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		s, _ := newStore(t, driver)
+		s := newStore(t, driver)
 		laptop := login(t, s, alice, apitoken.Device{})
 		phone := login(t, s, alice, apitoken.Device{})
 		ci := create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
@@ -354,36 +346,38 @@ func TestRevoke(t *testing.T) {
 
 func TestCleanup(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
-		ctx := context.Background()
-		s, c := newStore(t, driver)
-		for range 3 {
-			login(t, s, alice, apitoken.Device{})
-		}
-		live := login(t, s, alice, apitoken.Device{Remember: true})
-		forever := create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
-		c.add(2 * time.Hour)
-
-		if _, err := s.Cleanup(ctx, 0); err == nil {
-			t.Fatal("expected error for non-positive limit")
-		}
-		if n, err := s.Cleanup(ctx, 2); n != 2 || err != nil {
-			t.Fatalf("first cleanup n=%d err=%v", n, err)
-		}
-		if n, err := s.Cleanup(ctx, 10); n != 1 || err != nil {
-			t.Fatalf("second cleanup n=%d err=%v", n, err)
-		}
-		for _, token := range []string{live, forever} {
-			if _, ok := valid(t, s, token); !ok {
-				t.Fatal("live token removed")
+		synctest.Test(t, func(t *testing.T) {
+			ctx := context.Background()
+			s := newStore(t, driver)
+			for range 3 {
+				login(t, s, alice, apitoken.Device{})
 			}
-		}
+			live := login(t, s, alice, apitoken.Device{Remember: true})
+			forever := create(t, s, alice, apitoken.Personal{Name: "CI", Scopes: read})
+			time.Sleep(2 * time.Hour)
+
+			if _, err := s.Cleanup(ctx, 0); err == nil {
+				t.Fatal("expected error for non-positive limit")
+			}
+			if n, err := s.Cleanup(ctx, 2); n != 2 || err != nil {
+				t.Fatalf("first cleanup n=%d err=%v", n, err)
+			}
+			if n, err := s.Cleanup(ctx, 10); n != 1 || err != nil {
+				t.Fatalf("second cleanup n=%d err=%v", n, err)
+			}
+			for _, token := range []string{live, forever} {
+				if _, ok := valid(t, s, token); !ok {
+					t.Fatal("live token removed")
+				}
+			}
+		})
 	})
 }
 
 func TestTenantBinding(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		s, _ := newStore(t, driver)
+		s := newStore(t, driver)
 		customer := identity.Subject{ID: "carol", Type: "user", Tenant: "acme"}
 		loginToken := login(t, s, customer, apitoken.Device{})
 		personal := create(t, s, alice, apitoken.Personal{Name: "acme 报表", Scopes: read, Tenant: "globex"})
@@ -404,7 +398,7 @@ func TestTenantBinding(t *testing.T) {
 func TestAccountSystems(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		s, _ := newStore(t, driver)
+		s := newStore(t, driver)
 		staffAlice := identity.Subject{ID: "alice", Type: "staff"}
 		userToken := login(t, s, alice, apitoken.Device{})
 		staffToken := login(t, s, staffAlice, apitoken.Device{})
@@ -432,7 +426,7 @@ func TestAccountSystems(t *testing.T) {
 func TestImpersonation(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
-		s, _ := newStore(t, driver)
+		s := newStore(t, driver)
 		staff := identity.Ref{Type: "staff", ID: "s1"}
 		asAlice := identity.Subject{ID: "alice", Type: "user", Impersonator: staff}
 		own := login(t, s, alice, apitoken.Device{})
@@ -463,7 +457,7 @@ func TestImpersonation(t *testing.T) {
 // TestRequireBearer 确认 Validate 可以直接作为 rest.RequireBearer 的校验器：
 // 权限由 Resolve 按用户加载，个人访问令牌的 scope 再加以限制。
 func TestRequireBearer(t *testing.T) {
-	s, _ := newStore(t, sqlite.Driver)
+	s := newStore(t, sqlite.Driver)
 	permissions := map[string][]string{"alice": {"articles:*"}}
 	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
 		sub.Permissions = permissions[sub.ID]

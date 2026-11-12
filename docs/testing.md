@@ -7,6 +7,8 @@
 - [页面测试](#page-tests)
 - [测试 action](#testing-actions)
     - [测试命令入口](#testing-action-commands)
+- [准备测试数据](#test-data)
+- [控制时间](#controlling-time)
 - [测试配置](#testing-configuration)
 - [数据库测试](#database-tests)
     - [创建测试数据库](#creating-test-databases)
@@ -345,6 +347,73 @@ func TestPublishCommand(t *testing.T) {
 命令入口只负责解析参数和输出，业务规则仍然在上面的 `Handle` 测试中覆盖。
 
 优先使用真实的依赖。只有在确实需要隔离某项外部能力时（例如对象存储），才在业务包中定义一个小接口，并在测试中提供简单的实现，见[依赖装配](dependencies.md#replacing-dependencies-in-tests)。
+
+<a id="test-data"></a>
+## 准备测试数据
+
+测试数据通过 action 创建，这样数据一定满足业务规则，测试不会用到线上不可能出现的数据。mygoravel 没有 Laravel 那样的模型工厂，许多测试都要用的数据，在测试文件中写一个带默认值的函数，例如 `internal/article/helpers_test.go`：
+
+```go
+// newArticle 以 author 的身份创建一篇草稿。edit 修改默认内容，不需要时传 nil。
+func newArticle(t *testing.T, db *bun.DB, author identity.Subject, edit func(*article.Changes)) *article.Article {
+    t.Helper()
+    c := article.Changes{Title: "Hello World", Slug: strings.ToLower(rand.Text()), Content: "……"}
+    if edit != nil {
+        edit(&c)
+    }
+    item, err := article.NewCreate(db).Handle(context.Background(), author, c)
+    if err != nil {
+        t.Fatal(err)
+    }
+    return item
+}
+```
+
+每个测试只写出它关心的字段：
+
+```go
+item := newArticle(t, db, alice, func(c *article.Changes) { c.Slug = "hello-world" })
+```
+
+- 内容用固定的值。只有必须唯一的字段用随机值，例如 slug，这样一个测试可以创建多篇文章。
+- 需要已发布的文章时再调用 `Publish`。「两天前发布」这类和时间有关的数据，用下一节的 `synctest` 推进时间得到，不要直接修改数据库中的时间。
+- 只有 action 产生不了的数据，例如从旧系统迁移来的文章，才用 `db.NewInsert()` 直接写入。
+- 其他包的测试也要创建文章时，把这些函数导出到 `internal/article/articletest` 包中。
+
+<a id="controlling-time"></a>
+## 控制时间
+
+和时间有关的测试使用 Go 标准库的 [testing/synctest](https://pkg.go.dev/testing/synctest)，它对应 Laravel 的 `travelTo` 和 `Carbon::setTestNow`。在 `synctest.Test` 中，`time.Now`、`time.Sleep`、定时器和 `context` 的超时都使用一个假时钟：代码执行时时钟不走，`time.Sleep` 立即把时钟拨到之后。不需要给 action 传入时钟。
+
+下面的测试检查草稿放了两天才发布时，发布时间是发布那一刻：
+
+```go
+func TestPublishRecordsTime(t *testing.T) {
+    synctest.Test(t, func(t *testing.T) {
+        ctx := context.Background()
+        db := dbtest.Open(t, postgres.Driver, migrations.FS)
+        alice := identity.Subject{Type: user.Type, ID: "alice"}
+        item := newArticle(t, db, alice, nil)
+
+        time.Sleep(48 * time.Hour)
+        published, err := article.NewPublish(db).Handle(ctx, alice, item.ID)
+        if err != nil {
+            t.Fatal(err)
+        }
+        // 时钟只在 Sleep 时移动，所以可以精确比较
+        if !published.PublishedAt.Equal(time.Now()) {
+            t.Fatalf("published at %v", published.PublishedAt)
+        }
+    })
+}
+```
+
+使用时注意：
+
+- 数据库在 `synctest.Test` 中打开。只有 Go 程序中的时钟是假的：查询用到的时间都要由 Go 算出后作为参数传入，例如 `Where("expires_at > ?", time.Now())`，不要用 `NOW()`；迁移中的时间列也不设默认值，见[时间戳](database.md#timestamps)。框架自己的 SQL 都遵守这条规则，由 `internal/checks/clocktest` 检查。
+- 由服务端计算的过期时间不受假时钟控制，例如 Redis 的 `EXPIRE`。
+- 假时钟从 2000-01-01 00:00 UTC 开始，需要某个具体时刻时用 `time.Sleep(time.Until(target))` 拨过去。
+- `synctest.Test` 中不能调用 `t.Run` 和 `t.Parallel`。要在几种情况下测试时，在每个子测试中分别调用 `synctest.Test`。
 
 <a id="testing-configuration"></a>
 ## 测试配置

@@ -75,6 +75,8 @@ go test -race -count=1 -tags=integration ./...
 
 `internal/checks/migrationstest` 检查各个包内嵌的迁移：三种数据库的迁移文件一一对应，并且能通过 `publish` 命令原样发布。新增带迁移的包时在它的 `sources` 中登记，遗漏时测试会失败。
 
+`internal/checks/clocktest` 检查框架的 SQL 和迁移不读取数据库的时钟，例如 `NOW()`、`CURRENT_TIMESTAMP`：时间都由 Go 算出后作为参数传入。这样 [testing/synctest](testing.md#controlling-time) 的假时钟对整个框架有效，测试和时间有关的行为时用 `time.Sleep` 推进时间，不要给包加可替换的时钟。
+
 <a id="doc-tests"></a>
 ### 文档用法测试
 

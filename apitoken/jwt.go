@@ -179,7 +179,7 @@ func (j *JWT) Refresh(ctx context.Context, refresh string) (Pair, error) {
 		return Pair{}, ErrInvalid.New()
 	}
 	s := j.store
-	now := s.now().UTC()
+	now := time.Now().UTC()
 	h := hash(refresh)
 	r, err := j.find(ctx, h, now)
 	if err != nil {
@@ -298,7 +298,7 @@ func (j *JWT) Validate(ctx context.Context, token string) (identity.Subject, err
 	if err := tok.Claims(key, &c); err != nil || c.Expiry == nil {
 		return identity.Subject{}, ErrInvalid.New()
 	}
-	want := jwt.Expected{Issuer: j.cfg.Issuer, Time: j.store.now()}
+	want := jwt.Expected{Issuer: j.cfg.Issuer}
 	if j.cfg.Audience != "" {
 		want.AnyAudience = jwt.Audience{j.cfg.Audience}
 	}

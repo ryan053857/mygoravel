@@ -85,7 +85,6 @@ const (
 type Store struct {
 	db  bun.IDB
 	cfg Config
-	now func() time.Time
 }
 
 type row struct {
@@ -120,7 +119,7 @@ func NewStore(db bun.IDB, cfg Config) *Store {
 	if err := cfg.Validate(); err != nil {
 		panic(errors.Wrap(err, "apitoken"))
 	}
-	return &Store{db: db, cfg: cfg, now: time.Now}
+	return &Store{db: db, cfg: cfg}
 }
 
 // Login 为 sub 签发登录 token，返回 token 明文，明文只在这里返回一次。
@@ -136,7 +135,7 @@ func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (stri
 
 // login 签发 kind 类的登录 token，返回明文和写入的行。
 func (s *Store) login(ctx context.Context, sub identity.Subject, d Device, kind Kind) (string, *row, error) {
-	now := s.now().UTC()
+	now := time.Now().UTC()
 	idle, end := s.cfg.idle(d.Remember), now.Add(s.cfg.Lifetime)
 	r := &row{
 		Kind:        kind,
@@ -167,7 +166,7 @@ type Personal struct {
 // Create 为 sub 创建个人访问令牌，返回 token 明文，明文只在这里返回一次。
 // 代为登录期间（sub.Impersonator 不为零值）创建的令牌记录 Impersonator，之后每次使用都归于这个操作者。
 func (s *Store) Create(ctx context.Context, sub identity.Subject, p Personal) (string, error) {
-	now := s.now().UTC()
+	now := time.Now().UTC()
 	name := strings.TrimSpace(p.Name)
 	if name == "" || len([]rune(name)) > maxName {
 		return "", errors.Newf("apitoken: name must be 1 to %d characters", maxName)
@@ -215,7 +214,7 @@ func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, e
 	if token == "" {
 		return identity.Subject{}, ErrInvalid.New()
 	}
-	now := s.now().UTC()
+	now := time.Now().UTC()
 	var r row
 	err := s.live(s.db.NewSelect().Model(&r), now).
 		Where("token_hash = ?", hash(token)).Where("kind <> ?", KindRefresh).Scan(ctx)
@@ -258,7 +257,7 @@ func (s *Store) touch(ctx context.Context, r *row, now time.Time) error {
 // List 返回 sub 未过期的 token，最近使用的在前；本次请求所用的 token（sub.Credential）标为 Current。
 func (s *Store) List(ctx context.Context, sub identity.Subject) ([]Token, error) {
 	var rows []row
-	err := s.live(s.db.NewSelect().Model(&rows), s.now().UTC()).
+	err := s.live(s.db.NewSelect().Model(&rows), time.Now().UTC()).
 		Where("subject_type = ? AND subject_id = ?", sub.Type, sub.ID).OrderExpr("last_used_at DESC").Scan(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "apitoken: list")
@@ -320,7 +319,7 @@ func (s *Store) Cleanup(ctx context.Context, limit int) (int, error) {
 	}
 	// 外层派生表让带 LIMIT 的子查询在 MySQL 中也能用于 IN。
 	expired := s.db.NewSelect().Model((*row)(nil)).Column("id").
-		Where("expires_at <= ?", s.now().UTC()).OrderExpr("expires_at").Limit(int64(limit))
+		Where("expires_at <= ?", time.Now().UTC()).OrderExpr("expires_at").Limit(int64(limit))
 	return affected(s.db.NewDelete().Model((*row)(nil)).
 		Where("id IN (SELECT id FROM (?) AS expired)", expired).Exec(ctx))
 }

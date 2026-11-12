@@ -67,7 +67,6 @@ type Member struct {
 type Store struct {
 	db      bun.IDB
 	catalog Catalog
-	now     func() time.Time
 }
 
 type roleRow struct {
@@ -111,7 +110,7 @@ func NewStore(db bun.IDB, catalog Catalog) *Store {
 			panic(errors.Newf("authz: invalid catalog permission %q", p.Name))
 		}
 	}
-	return &Store{db: db, catalog: slices.Clone(catalog), now: time.Now}
+	return &Store{db: db, catalog: slices.Clone(catalog)}
 }
 
 // Catalog 返回权限目录，供角色编辑界面列出可选的权限。
@@ -174,7 +173,7 @@ func (s *Store) CreateRole(ctx context.Context, r Role) (Role, error) {
 	if err != nil {
 		return Role{}, errors.Wrap(err, "authz: new id")
 	}
-	now := s.now().UTC()
+	now := time.Now().UTC()
 	row := &roleRow{ID: id, Tenant: r.Tenant, Name: r.Name, Description: r.Description, CreatedAt: now, UpdatedAt: now}
 	err = s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if err := nameTaken(ctx, tx, r.Tenant, r.Name, uuid.Nil); err != nil {
@@ -214,7 +213,7 @@ func (s *Store) UpdateRole(ctx context.Context, r Role) (Role, error) {
 			return err
 		}
 		_, err := tx.NewUpdate().Model((*roleRow)(nil)).
-			Set("name = ?", r.Name).Set("description = ?", r.Description).Set("updated_at = ?", s.now().UTC()).
+			Set("name = ?", r.Name).Set("description = ?", r.Description).Set("updated_at = ?", time.Now().UTC()).
 			Where("id = ?", id).Exec(ctx)
 		if err != nil {
 			return errors.Wrap(err, "authz: update role")
@@ -345,7 +344,7 @@ func (s *Store) Assign(ctx context.Context, ref identity.Ref, tenant, roleID str
 		if exists {
 			return nil
 		}
-		row := &assignmentRow{SubjectType: string(ref.Type), SubjectID: ref.ID, Tenant: tenant, RoleID: rid, CreatedAt: s.now().UTC()}
+		row := &assignmentRow{SubjectType: string(ref.Type), SubjectID: ref.ID, Tenant: tenant, RoleID: rid, CreatedAt: time.Now().UTC()}
 		_, err = tx.NewInsert().Model(row).Exec(ctx)
 		return errors.Wrap(err, "authz: assign")
 	})

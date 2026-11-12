@@ -177,7 +177,7 @@ crypt:
 c := crypt.New(crypt.Config{Key: crypt.GenerateKey()})
 ```
 
-测试链接过期时，用 [testing/synctest](https://pkg.go.dev/testing/synctest) 推进时间：
+测试链接过期时，用 [testing/synctest](testing.md#controlling-time) 推进时间：
 
 ```go
 synctest.Test(t, func(t *testing.T) {
