@@ -88,6 +88,7 @@ var rules = map[string]rule{
 	"authz":             {layerFeature, []string{"cachex", "database", "errorx", "identity", "logging"}},
 	"notification":      {layerFeature, []string{"errorx", "identity"}},
 	"feature":           {layerFeature, []string{"errorx", "identity"}},
+	"settings":          {layerFeature, []string{"database", "errorx"}},
 	"activity":          {layerFeature, []string{"identity", "logging"}},
 	"operation":         {layerFeature, []string{"database", "errorx", "i18n", "identity", "queue"}},
 	"webhook":           {layerFeature, []string{"errorx", "identity", "outbound", "queue"}},

@@ -148,7 +148,7 @@ blog/
 mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包分为四层，包只引用同层或更低层的包：
 
 ```text
-功能        apitoken  login  oauthserver  authz  notification  push  activity  feature  operation  webhook  search  vector  sheet/imports  sheet/exports  ai
+功能        apitoken  login  oauthserver  authz  notification  push  activity  feature  settings  operation  webhook  search  vector  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  mcpx  command
 基础设施    database  queue  schedule  cachex  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  sms  pdf  outbound  sheet  document
 基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt  acquire
@@ -252,6 +252,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `push/aliyun` | 对接阿里云移动推送，国内经厂商通道、海外经 FCM 和 APNs 送达 | [运行推送](push.md#delivering) |
 | `push/pushtest` | 记录推送的 Provider，用于测试 | [测试](push.md#testing) |
 | `feature` | 功能开关：代码中声明，按全员、租户、用户或比例开启 | [功能开关](features.md) |
+| `settings` | 运行时可修改的设置：一组设置是一个结构体，保存为一行 JSON，默认值写在代码中，可按租户保存 | [设置](settings.md) |
 | `activity` | 操作日志：在业务事务中记录谁对什么做了什么 | [操作日志](activity.md) |
 | `operation` | 后台操作的状态与进度：任务中心、断点续跑、进度推送 | [后台操作](operations.md) |
 | `webhook` | 向租户的端点推送事件，按 Standard Webhooks 签名与校验 | [Webhook](webhooks.md) |

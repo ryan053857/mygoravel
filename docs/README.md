@@ -68,6 +68,7 @@
 - [移动推送](push.md)
 - [操作日志](activity.md)
 - [功能开关](features.md)
+- [设置](settings.md)
 - [后台操作](operations.md)
 - [导入与导出](import-export.md)
 - [Webhook](webhooks.md)

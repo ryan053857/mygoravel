@@ -42,6 +42,7 @@ go get github.com/ryan053857/mygoravel@main
 | 给 App 发推送通知 | [移动推送](docs/push.md) |
 | 记录谁改了什么 | [操作日志](docs/activity.md) |
 | 逐步放量、紧急关闭新功能 | [功能开关](docs/features.md) |
+| 让管理员修改站点名称、注册开关等设置 | [设置](docs/settings.md) |
 | 导入导出 Excel 和 CSV | [导入与导出](docs/import-export.md) |
 | 批量处理并显示进度 | [后台操作](docs/operations.md) |
 | 向租户推送事件 | [Webhook](docs/webhooks.md) |
