@@ -9,6 +9,8 @@
     - [记录操作日志](#logging-changes)
 - [租户的设置](#tenant-settings)
 - [修改字段](#changing-fields)
+- [系统写入的状态](#system-state)
+    - [调用凭据](#access-tokens)
 - [后台页面与接口](#admin-pages)
 - [测试](#testing)
 
@@ -158,6 +160,93 @@ WHERE name = 'site' AND payload ? 'moderate';
 改了类型又没有迁移时，`Get` 返回错误，例如 `settings: decode "site": json: cannot unmarshal number into Go struct field ...`。
 
 一组设置不再使用时，删掉代码，再写一条迁移 `DELETE FROM settings WHERE name = 'site'`。
+
+<a id="system-state"></a>
+## 系统写入的状态
+
+有些数据不是管理员填写的，而是配置之后由系统写入、在页面上只读显示的。例如接入微信开放平台的第三方平台之后：微信每 10 分钟推送一次验证票据，平台凭据每 2 小时刷新一次，页面要显示“已连接”还是“等待推送”。
+
+全局只有一份的状态也用 `Group` 保存，但要遵守一条规则：**一组只有一个写入者**。管理员填写的配置、推送回调写入的票据、刷新的凭据分成三组，各写各的，不会互相覆盖：
+
+```go
+type Ticket struct {
+    Value      string    `json:"value"`
+    ReceivedAt time.Time `json:"received_at"` // 零值表示还没收到
+}
+
+wechat := settings.New(db, "wechat", WechatConfig{})        // 管理员填写：AppID、AppSecret、Token、EncodingAESKey
+ticket := settings.New(db, "wechat.ticket", Ticket{})       // 只有推送回调写
+token := settings.New(db, "wechat.token", ComponentToken{}) // 只有刷新凭据时写
+```
+
+推送回调收到票据后直接 `Save`：
+
+```go
+err := a.ticket.Save(ctx, Ticket{Value: ev.ComponentVerifyTicket, ReceivedAt: time.Now()})
+```
+
+**只保存事实，状态在读取时推算**。不要保存“已连接”这样的状态值，它会过时；保存收到票据的时间、凭据的到期时间、最近一次失败的时间和原因，显示时再判断：
+
+```go
+switch {
+case t.ReceivedAt.IsZero():
+    status = "等待微信推送验证票据"
+case time.Since(t.ReceivedAt) > 30*time.Minute:
+    status = "超过 30 分钟没有收到推送，检查回调地址"
+case tok.FailedAt.After(tok.RefreshedAt):
+    status = "获取平台凭据失败：" + tok.Failure
+default:
+    status = "已连接"
+}
+```
+
+状态结构体同样不能带 `omitempty`：用零值表示“还没有发生”，不要用带 `omitempty` 的指针。
+
+`Group` 只适合全局或每个租户只有一份的状态。下面两类状态不要放进 `Group`：
+
+- **每个授权方各有一份的状态**，例如每个授权的公众号的 appid、刷新令牌、权限、昵称、取消授权的时间。它们要按 appid 查找、按租户列出，是业务实体，放在业务自己的表中，例如 `wechat_authorizers`。刷新令牌丢失后只能让公众号重新授权，不能放进可能被淘汰的[缓存](cache.md)。
+- **一次授权流程中的临时数据**，例如发起授权时生成的 state。把租户和过期时间放进回跳地址，用[签名链接](encryption.md#signed-urls)签名，回跳时校验，不需要保存。
+
+<a id="access-tokens"></a>
+### 调用凭据
+
+平台凭据由所有实例共用，过期前要刷新，而且同一时刻只应该有一个实例去刷新。`Update` 在读写之间锁住这一行，正好可以用来刷新：先不加锁读取，快过期时才进入 `Update`，在锁内再检查一次：
+
+```go
+func (a *Token) Get(ctx context.Context) (string, error) {
+    t, err := a.token.Get(ctx)
+    if err != nil {
+        return "", err
+    }
+    if time.Until(t.ExpiresAt) > 5*time.Minute {
+        return t.Value, nil
+    }
+    var refreshErr error
+    err = a.token.Update(ctx, func(cur *ComponentToken) error {
+        if time.Until(cur.ExpiresAt) <= 5*time.Minute { // 等锁的时候，别的实例可能已经刷新过了
+            v, expiresIn, err := a.client.ComponentToken(ctx)
+            if err != nil {
+                cur.FailedAt, cur.Failure, refreshErr = time.Now(), err.Error(), err
+            } else {
+                cur.Value, cur.ExpiresAt, cur.RefreshedAt = v, time.Now().Add(expiresIn), time.Now()
+            }
+        }
+        t = *cur
+        return nil // 刷新失败也保存，页面显示失败原因
+    })
+    switch {
+    case err != nil:
+        return "", err
+    case time.Now().After(t.ExpiresAt):
+        return "", refreshErr // 旧凭据已经过期，刷新又失败了
+    }
+    return t.Value, nil
+}
+```
+
+刷新失败时 `fn` 仍然返回 `nil`，让失败原因和时间保存下来；旧凭据还没过期就继续使用。
+
+其他实例在 `Update` 处等待，锁释放后读到新的凭据，不会重复刷新。调用微信接口期间一直持有行锁和一个数据库连接，所以只适合这种几小时才刷新一次、每次耗时很短的场景。
 
 <a id="admin-pages"></a>
 ## 后台页面与接口
