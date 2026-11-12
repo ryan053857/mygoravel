@@ -14,6 +14,10 @@
 - [健康检查](#health-checks)
 - [平滑停止](#graceful-shutdown)
 - [反向代理与网络](#reverse-proxies)
+- [维护窗口](#maintenance-windows)
+    - [在反向代理上返回 503](#maintenance-at-the-proxy)
+    - [维护步骤](#maintenance-steps)
+    - [不必整站停服时](#without-downtime)
 - [日志](#logging)
 - [使用 SQLite 部署](#sqlite)
 - [备份与恢复](#backups)
@@ -332,6 +336,97 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 反向代理转发请求时请保留原始的 `Host` 请求头（包括端口），例如 nginx 使用 `proxy_set_header Host $http_host;`。`$host` 会丢掉端口，[跨站请求伪造](session.md#csrf)防护会因为 `Origin` 与 `Host` 不一致而拒绝所有 `POST` 等请求。使用[服务端推送](sse.md#deployment)时，还要在反向代理上启用 HTTP/2。
 
 TLS 终止和响应压缩通常在反向代理中配置；应用直接对外提供服务时，安装 [httpx.Compress](middleware.md#compression) 压缩响应。跨域请求使用内置的 [CORS](middleware.md#cors)。限流既可以在网关中配置，也可以使用内置的[限流](rate-limiting.md)；内存限流器按实例分别计数，多实例部署时请把这一点计入配置值，需要共享计数时使用数据库限流器。
+
+<a id="maintenance-windows"></a>
+## 维护窗口
+
+按[发布流程](#release-process)发布不需要停服：迁移对新旧版本都兼容，`reload` 不停机地换上新版本。所以 mygoravel 不提供 Laravel 那样的 `down`、`up` 命令。少数情况下确实要停一段时间：
+
+- 数据库本身要维护，例如升级主版本、迁移到新的实例；
+- 一次变更无法拆成[对新旧版本都兼容](migrations.md#zero-downtime-changes)的几步；
+- 出了故障，需要先挡住所有请求。
+
+这时数据库往往不可用，应用读不到“是否在维护”，甚至根本没有运行。所以维护状态放在反向代理上：由它直接返回 `503` 并放行内部人员，应用停着也照样生效。
+
+<a id="maintenance-at-the-proxy"></a>
+### 在反向代理上返回 503
+
+下面的 nginx 配置在每个请求上检查一个标记文件，文件存在就进入维护，办公网络的地址不受影响：
+
+```nginx
+geo $maintenance_bypass {
+    default        0;
+    203.0.113.0/24 1;  # 办公网络
+}
+
+server {
+    # listen、ssl 等配置略
+
+    set $maintenance 0;
+    if (-f /etc/nginx/blog.maintenance) { set $maintenance 1; }
+    if ($maintenance_bypass) { set $maintenance 0; }
+
+    error_page 503 @maintenance;
+
+    location / {
+        if ($maintenance) { return 503; }
+        proxy_pass http://blog;
+        proxy_set_header Host $http_host;
+    }
+
+    location @maintenance {
+        default_type application/problem+json;
+        add_header Retry-After 1800 always;
+        return 503 '{"title":"Service Unavailable","status":503,"code":"maintenance","detail":"系统维护中，请稍后再试"}';
+    }
+}
+```
+
+开始和结束维护就是创建和删除这个文件，不需要重新加载 nginx：
+
+```bash
+sudo touch /etc/nginx/blog.maintenance  # 开始维护
+sudo rm /etc/nginx/blog.maintenance     # 结束维护
+```
+
+- **响应格式与应用的[错误响应](errors.md#what-clients-see)相同。** 前端按 `code` 为 `maintenance` 显示维护提示，按 `Retry-After` 的秒数稍后重试。运维后台的使用者在办公网络中，不会看到这个响应。
+- **只拦截 nginx 自己返回的 `503`。** 没有开启 `proxy_intercept_errors` 时，应用返回的 `503`（例如停机时拒绝新的 [AI 回答](ai.md#deployment)）原样传给客户端。
+- **放行按客户端地址判断。** nginx 前面还有负载均衡时，先用 [realip](https://nginx.org/en/docs/http/ngx_http_realip_module.html) 模块还原客户端地址，否则所有请求都来自负载均衡的地址。
+- **有多台 nginx 时**，每一台都要创建标记文件。使用云负载均衡时，改用它自带的固定响应规则，例如 AWS ALB 的 `fixed-response` 动作。
+
+<a id="maintenance-steps"></a>
+### 维护步骤
+
+以[使用 systemd 运行](#systemd)的部署为例，维护数据库并发布一个不兼容的版本：
+
+```bash
+sudo touch /etc/nginx/blog.maintenance
+sudo systemctl stop 'blog@*'
+
+# 维护数据库；换上新二进制并执行迁移，见“发布新版本”
+
+sudo systemctl start blog@serve blog@work blog@schedule
+curl -fsS https://blog.example.com/readyz  # 在办公网络中检查
+sudo rm /etc/nginx/blog.maintenance
+```
+
+- **先挡住请求，再停止进程。** 顺序反过来时，进程停止后、标记生效前的请求会得到 `502`。
+- **worker 和调度器也要停止。** 它们不经过反向代理，数据库维护期间会不断出错，不兼容的变更期间还可能用旧代码处理新数据。停止时 worker 等待处理中的任务完成，未执行的任务留在队列中，恢复后继续执行。
+- **停止期间错过的定时任务不会补跑**，见[失败与停止](scheduling.md#failures-and-shutdown)。每天只执行一次的任务，恢复后需要[手动执行](scheduling.md#running-manually)一次。
+- **检查通过后再结束维护。** 标记文件还在时，办公网络已经能访问新版本，确认无误再删除文件。
+
+使用 Docker Compose 时，`docker compose stop` 和 `docker compose up -d` 分别对应上面的停止和启动。
+
+<a id="without-downtime"></a>
+### 不必整站停服时
+
+很多时候只需要挡住一部分功能，其余的照常服务：
+
+| 情况 | 做法 |
+| --- | --- |
+| 某个功能出了问题 | 把它的[功能开关](features.md#evaluation-order)对全员设为 `Off`，所有实例的下一次检查立即生效 |
+| 维护期间只允许读 | 安装拒绝写请求的中间件，见[全局中间件](middleware.md#chi-middleware)中的示例 |
+| 只暂停后台任务 | 分开运行时只停止 `work` 或 `schedule`，任务留在队列中，恢复后继续执行 |
 
 <a id="logging"></a>
 ## 日志
