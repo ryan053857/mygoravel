@@ -62,7 +62,7 @@ type Event struct {
 // ctx 带有任务的日志字段和链路。Observer 中的 panic 会被恢复并记录。
 type Observer func(ctx context.Context, e Event)
 
-// WithObserver 为调度器添加 Observer，可以多次使用。
+// WithObserver 为调度器添加 Observer，可以多次使用。o 为 nil 时 panic。
 func WithObserver(o Observer) SchedulerOption {
 	if o == nil {
 		panic("schedule: nil observer")

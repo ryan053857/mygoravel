@@ -140,6 +140,14 @@ sched.Add("tmp:cleanup", "@hourly", cleanTmpDir, schedule.EveryInstance())
 
 确实需要并行执行的任务，使用 `schedule.AllowOverlap()`。
 
+一个任务卡住（例如等待一个不会返回的外部请求）时，它会一直持有这把锁，之后的触发都被跳过。`schedule.Timeout` 限制每次执行的时长：
+
+```go
+sched.Add("reports:daily", "0 3 * * *", reports.Generate, schedule.Timeout(30*time.Minute))
+```
+
+超过时长时，任务的 `ctx` 以 `schedule.ErrTimeout` 取消，这次执行记为失败，锁随之释放，下一次触发照常执行。任务要把 `ctx` 传给数据库查询、HTTP 请求等调用，才能及时结束；不理会 `ctx` 的任务会一直运行到自己返回。
+
 <a id="failures-and-shutdown"></a>
 ## 失败与停止
 
@@ -172,7 +180,7 @@ schedule:
 <a id="listing-tasks"></a>
 ## 查看任务
 
-`Tasks` 返回注册的全部任务：名称、说明、表达式、时区和选项。它只读取任务的定义，不需要运行调度器，所以在任何进程中都可以调用：
+`Tasks` 返回注册的全部任务：名称、说明、表达式、时区和选项（包括 `Timeout`）。它只读取任务的定义，不需要运行调度器，所以在任何进程中都可以调用：
 
 ```go
 for _, t := range a.tasks().Tasks() {

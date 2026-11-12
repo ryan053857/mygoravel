@@ -268,3 +268,66 @@ func TestConfig(t *testing.T) {
 	}()
 	schedule.New(lock.New(locktest.NewStore()), bad, nil)
 }
+
+func TestRunWithoutTasks(t *testing.T) {
+	if err := newScheduler().Run(context.Background()); err == nil {
+		t.Fatal("Run without tasks should fail")
+	}
+}
+
+// 超过 Timeout 的执行以 ErrTimeout 取消 ctx 并记为失败，之后的触发照常执行。
+func TestTimeout(t *testing.T) {
+	var events []schedule.Event
+	var mu sync.Mutex
+	s := schedule.New(lock.New(locktest.NewStore()), schedule.DefaultConfig(), nil,
+		schedule.WithObserver(func(_ context.Context, e schedule.Event) {
+			mu.Lock()
+			events = append(events, e)
+			mu.Unlock()
+		}))
+	var cause atomic.Value
+	s.Add("waits", "@everysecond", func(ctx context.Context) error {
+		<-ctx.Done()
+		cause.Store(context.Cause(ctx))
+		return ctx.Err()
+	}, schedule.Timeout(50*time.Millisecond))
+	s.Add("ignores", "@everysecond", func(ctx context.Context) error {
+		time.Sleep(100 * time.Millisecond)
+		return nil
+	}, schedule.Timeout(50*time.Millisecond))
+	var fast atomic.Int64
+	s.Add("fast", "@everysecond", counter(&fast), schedule.Timeout(time.Second))
+
+	err := s.RunDue(context.Background(), base)
+	if !errors.Is(err, schedule.ErrTimeout) || fast.Load() != 1 {
+		t.Fatalf("err = %v, fast ran %d", err, fast.Load())
+	}
+	if c, _ := cause.Load().(error); !errors.Is(c, schedule.ErrTimeout) {
+		t.Fatalf("ctx cause = %v", c)
+	}
+	mu.Lock()
+	failed := map[string]bool{}
+	for _, e := range events {
+		if e.Kind == schedule.TaskFailed && errors.Is(e.Err, schedule.ErrTimeout) {
+			failed[e.Task] = true
+		}
+	}
+	mu.Unlock()
+	if !failed["waits"] || !failed["ignores"] || failed["fast"] {
+		t.Fatalf("timed out tasks %v", failed)
+	}
+	// 执行锁已经释放，下一次触发照常执行。
+	if err := s.RunDue(context.Background(), base.Add(time.Second)); !errors.Is(err, schedule.ErrTimeout) || fast.Load() != 2 {
+		t.Fatalf("next tick err = %v, fast ran %d", err, fast.Load())
+	}
+	if got := s.Tasks()[0].Timeout; got != 50*time.Millisecond {
+		t.Fatalf("Task.Timeout = %v", got)
+	}
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Timeout(0) did not panic")
+		}
+	}()
+	schedule.Timeout(0)
+}

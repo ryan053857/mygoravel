@@ -58,8 +58,11 @@ type Event struct {
 // 耗时会占用并发名额：耗时的工作请缓冲或异步完成。ctx 带有任务的日志字段。Observer 中的 panic 会被恢复并记录。
 type Observer func(ctx context.Context, e Event)
 
-// WithObserver 为 Worker 添加 Observer，可以多次使用。
+// WithObserver 为 Worker 添加 Observer，可以多次使用。o 为 nil 时 panic。
 func WithObserver(o Observer) WorkerOption {
+	if o == nil {
+		panic("queue: nil observer")
+	}
 	return func(w *Worker) { w.observers = append(w.observers, o) }
 }
 

@@ -52,6 +52,7 @@ type task struct {
 	loc           *time.Location
 	everyInstance bool
 	allowOverlap  bool
+	timeout       time.Duration
 
 	mu      sync.Mutex
 	running bool // 本进程中是否正在执行
@@ -68,6 +69,18 @@ func AllowOverlap() TaskOption { return func(t *task) { t.allowOverlap = true } 
 
 // In 按 loc 计算 cron 表达式，默认使用 time.Local（可用 TZ 环境变量设置）。对 @every 没有影响。
 func In(loc *time.Location) TaskOption { return func(t *task) { t.loc = loc } }
+
+// ErrTimeout 是超过 Timeout 的执行的错误，也是任务 ctx 的取消原因。
+var ErrTimeout = errors.New("schedule: task timed out")
+
+// Timeout 限制每次执行的时长：超过 d 时以 ErrTimeout 取消任务的 ctx，这次执行记为失败，错误满足 errors.Is(err, ErrTimeout)。
+// 卡住的任务因此不会一直占着执行锁、让之后的触发都被跳过。任务需要遵守 ctx 才能及时结束。d 不大于 0 时 panic。
+func Timeout(d time.Duration) TaskOption {
+	if d <= 0 {
+		panic(fmt.Sprintf("schedule: timeout must be positive, got %v", d))
+	}
+	return func(t *task) { t.timeout = d }
+}
 
 // SchedulerOption 调整 New 创建的调度器。
 type SchedulerOption func(*Scheduler)
@@ -132,7 +145,7 @@ func (s *Scheduler) Add(name, expr string, run func(ctx context.Context) error, 
 //
 // 调度落后（例如进程被暂停）不到一分钟时补算错过的触发，同一个任务只补执行一次；
 // 落后更久时跳过错过的触发。ctx 取消后不再触发新任务，等待执行中的任务结束，
-// 最多等待 Config.ShutdownTimeout，超时后取消它们的 ctx。Run 只能调用一次。
+// 最多等待 Config.ShutdownTimeout，超时后取消它们的 ctx。Run 只能调用一次；没有注册任务时返回错误。
 func (s *Scheduler) Run(ctx context.Context) error {
 	tasks, err := s.start()
 	if err != nil {
@@ -189,6 +202,9 @@ func (s *Scheduler) start() ([]*task, error) {
 		return nil, errors.New("schedule: Run called twice")
 	}
 	s.started = true
+	if len(s.tasks) == 0 {
+		return nil, errors.New("schedule: no tasks")
+	}
 	return s.tasks, nil
 }
 
@@ -210,7 +226,7 @@ func (s *Scheduler) wait(wg *sync.WaitGroup, cancel context.CancelFunc) {
 }
 
 // RunDue 执行在 t 所在的这一秒到期的任务，等它们全部结束，返回合并后的错误。
-// 去重和防止重叠的规则与 Run 相同。用于测试，或者由外部的 cron 每秒、每分钟调用。
+// 去重、防止重叠和超时的规则与 Run 相同。用于在测试中确定性地验证调度配置。
 func (s *Scheduler) RunDue(ctx context.Context, t time.Time) error {
 	s.mu.Lock()
 	tasks := s.tasks
@@ -290,7 +306,7 @@ func (s *Scheduler) runLocked(ctx context.Context, t *task, tick time.Time) (fin
 	ctx, end := s.startSpan(ctx, t.name, tick)
 	start := time.Now()
 	s.observe(ctx, Event{Kind: TaskStarted, Task: t.name, Tick: tick, Started: start})
-	err := call(ctx, t.run)
+	err := t.call(ctx)
 	elapsed := time.Since(start)
 	end(err)
 	s.logger.DebugContext(ctx, "scheduled task finished", "duration", elapsed, "error", err)
@@ -343,6 +359,23 @@ func (s *Scheduler) keep(ctx context.Context, running *lock.Lock) func() {
 			s.logger.WarnContext(ctx, "release scheduled task lock failed", "error", err)
 		}
 	}
+}
+
+// call 执行任务，设置了 Timeout 时超时取消它的 ctx，超时后返回的执行记为失败。
+func (t *task) call(ctx context.Context) error {
+	if t.timeout <= 0 {
+		return call(ctx, t.run)
+	}
+	ctx, cancel := context.WithTimeoutCause(ctx, t.timeout, ErrTimeout)
+	defer cancel()
+	err := call(ctx, t.run)
+	if !errors.Is(context.Cause(ctx), ErrTimeout) || errors.Is(err, ErrTimeout) {
+		return err
+	}
+	if err == nil {
+		return errors.Wrapf(ErrTimeout, "after %v", t.timeout)
+	}
+	return errors.Mark(errors.Wrapf(err, "after %v timeout", t.timeout), ErrTimeout)
 }
 
 // call 执行任务，把 panic 转为错误。

@@ -29,6 +29,8 @@ type Task struct {
 	Location      *time.Location
 	EveryInstance bool
 	AllowOverlap  bool
+	// Timeout 是 Timeout 选项设置的每次执行的时长上限，0 表示不限制。
+	Timeout time.Duration
 
 	when when
 }
@@ -50,7 +52,7 @@ func (s *Scheduler) Tasks() []Task {
 	for i, t := range s.tasks {
 		out[i] = Task{
 			Name: t.name, Description: t.description, Expr: t.expr, Location: t.loc,
-			EveryInstance: t.everyInstance, AllowOverlap: t.allowOverlap, when: t.when,
+			EveryInstance: t.everyInstance, AllowOverlap: t.allowOverlap, Timeout: t.timeout, when: t.when,
 		}
 	}
 	return out

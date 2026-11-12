@@ -345,6 +345,7 @@ func TestWorkerRegistration(t *testing.T) {
 	})
 	mustPanic("zero attempts", func() { queue.MaxAttempts(0) })
 	mustPanic("zero concurrency", func() { queue.Concurrency(0) })
+	mustPanic("nil observer", func() { queue.WithObserver(nil) })
 
 	w := newWorker()
 	jobs.Handle(w, noop)
