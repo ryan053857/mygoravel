@@ -41,6 +41,7 @@ var blogFiles = []docFile{
 	{"internal/article/queue_export.go", "import-export.md"},
 	{"internal/article/bulk_publish.go", "operations.md"},
 	{"internal/article/search.go", "search.md"},
+	{"internal/article/tools.go", "mcp.md"},
 	{"internal/attachment/vector.go", "vector.md"},
 	{"internal/article/article_test.go", "testing.md"},
 	{"internal/article/commands_test.go", "testing.md"},
@@ -117,6 +118,25 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ryan053857/mygoravel/vector"
+)
+`},
+	{"internal/article/publish_tool.go", "mcp.md", "type PublishArgs struct", `package article
+
+import (
+	"context"
+
+	"github.com/google/uuid"
+
+	"github.com/ryan053857/mygoravel/identity"
+)
+`},
+	{"internal/article/search_tool.go", "mcp.md", "type SearchArgs struct", `package article
+
+import (
+	"context"
+
+	"github.com/ryan053857/mygoravel/page"
+	"github.com/ryan053857/mygoravel/search"
 )
 `},
 	{"internal/bootstrap/mailer.go", "mail.md", "func newMailer(", `package bootstrap

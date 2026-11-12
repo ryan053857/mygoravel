@@ -8,6 +8,7 @@
     - [队列任务](#as-jobs)
     - [定时任务](#as-scheduled-tasks)
     - [命令行](#as-commands)
+    - [AI 工具](#as-tools)
     - [页面、其他 action 和脚本](#direct-calls)
 - [同步的后续动作](#follow-ups)
     - [声明钩子](#declaring-hooks)
@@ -301,6 +302,26 @@ func Commands() []*cobra.Command {
 ```
 
 声明时传入的 `App` 字段都是零值，所以 `Commands` 和 action 的构造函数只能保存依赖、不能使用它们，这与[生成 OpenAPI 文档](routing.md#exporting-openapi)时的约定相同。需要在执行时才能创建的对象，例如注册了任务的调度器，传入创建它的方法 `a.tasks`，而不是调用它的结果。同样的原因，`RunE` 用 `cmd.Flags().GetString` 这类方法读取选项，不要用 `StringVar` 绑定的变量：执行的是重新声明的命令的 `RunE`，选项只解析在第一次声明的命令上。`--help` 和参数个数错误不会执行 `RunE`，也就不会打开数据库。
+
+<a id="as-tools"></a>
+### AI 工具
+
+让 Claude、Cursor 这类 AI 客户端调用一个动作时，入口是 `Tool` 方法，签名是 `func(ctx, In) (Out, error)`，参数类型的标签与 REST 的请求体相同：
+
+```go
+// Tool 处理 MCP 工具 article_publish。
+func (a *Publish) Tool(ctx context.Context, in PublishArgs) (*ArticleDTO, error) {
+    subject, _ := identity.FromContext(ctx)
+    item, err := a.Handle(ctx, subject, in.ID)
+    if err != nil {
+        return nil, err
+    }
+    dto := toDTO(item)
+    return &dto, nil
+}
+```
+
+模块在 `tools.go` 中用 `mcpx.Register` 登记工具，声明名称、说明和需要的权限，见 [MCP 服务](mcp.md)。
 
 <a id="direct-calls"></a>
 ### 页面、其他 action 和脚本

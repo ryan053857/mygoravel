@@ -74,6 +74,7 @@
 ## AI
 
 - [AI 助手](ai.md)
+- [MCP 服务](mcp.md)
 - [文档转换与切分](documents.md)
 - [向量检索](vector.md)
 
