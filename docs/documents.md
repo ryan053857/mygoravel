@@ -113,7 +113,7 @@ for _, chunk := range splitter.Split(doc.Markdown) {
 
 长度按码点计算，一个汉字和一个英文字母都算 1，与模型的 token 数并不相等。中文资料的 `Size` 通常取 300 到 800。`Splitter` 不可变，可以在多个 goroutine 中共用。
 
-切分器逐行识别 Markdown 结构，而不是完整解析 CommonMark：ATX 和 setext 标题、围栏和缩进代码、GFM 表格、HTML 块、YAML front matter、列表、引用和分隔线。准确的规则和每条保证见 `document/split` 的包文档（`go doc github.com/ryan053857/mygoravel/document/split`）。
+切分器用 [goldmark](https://github.com/yuin/goldmark) 按 CommonMark 和 GFM 表格识别块结构，另外识别 YAML front matter；用 goldmark 渲染同一份 Markdown 时，两边认定的标题和表格相同。准确的规则、每条保证和病态输入的上限见 `document/split` 的包文档（`go doc github.com/ryan053857/mygoravel/document/split`）。
 
 与常见的切分器相比：langchaingo 的 `MarkdownTextSplitter` 会重新渲染 Markdown，默认的分隔符也切不开没有空格的中文段落；eino-ext 的标题切分器会去掉每行的首尾空白和空行，代码缩进因此丢失，表格分段也不带表头；两者都不记录分段在原文中的位置。
 

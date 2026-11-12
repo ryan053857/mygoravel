@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -286,13 +287,13 @@ func TestTableVariants(t *testing.T) {
 		text   string
 		header bool
 	}{
-		"no edge pipes":     {"x | y\n--|--\n" + rows, true},
-		"empty header":      {"| | |\n|---|---|\n" + rows, false},
-		"cell count":        {"x | y | z\n--|--\n" + rows, false},
-		"escaped pipe row":  {"x \\| y\n--|--\n" + rows, false},
-		"escaped backslash": {"x | y\\\\|\n--|--\n" + rows, true},
-		"backslash pipe":    {"`\\\\|` | z\n--|--\n" + rows, true},
-		"after empty item":  {"Intro\n*\nx | y\n--|--\n" + rows, true},
+		"no edge pipes":      {"x | y\n--|--\n" + rows, true},
+		"empty header":       {"| | |\n|---|---|\n" + rows, false},
+		"cell count":         {"x | y | z\n--|--\n" + rows, false},
+		"fewer header cells": {"x \\| y\n--|--\n" + rows, true}, // goldmark 用空单元格补齐表头
+		"escaped backslash":  {"x | y\\\\|\n--|--\n" + rows, true},
+		"backslash pipe":     {"`\\\\|` | z\n--|--\n" + rows, true},
+		"after empty item":   {"Intro\n*\nx | y\n--|--\n" + rows, true},
 	} {
 		chunks := s.Split(tc.text)
 		checkContract(t, s, tc.text, chunks)
@@ -331,6 +332,9 @@ func TestStructuresAreNotHeadings(t *testing.T) {
 		"front matter":   "---\ntitle: x\n# y\n---\nbody\n",
 		"code span":      "see `# x` here\n",
 		"unclosed fence": "intro\n\n```\n# code\n",
+		"html tag line":  "<custom-tag>\n# x\n",
+		"php":            "<?php\n# x\n?>\n",
+		"link reference": "[ref]: /url\n===\n",
 	} {
 		chunks := s.Split(text)
 		checkContract(t, s, text, chunks)
@@ -452,7 +456,8 @@ func TestHeadingsAreRecognised(t *testing.T) {
 		"setext dash":    {"Title\n-\n\nbody\n", []string{"Title"}},
 		"break not list": {"* * *\n\n  # Real\n", []string{"Real"}},
 		"empty item":     {"Foo\n*\n\n# H\n", []string{"H"}},
-		"leading zeros":  {"Foo\n01. item\n  # nested\n", nil},
+		"leading zeros":  {"Foo\n01. item\n  # nested\n", []string{"nested"}},
+		"lone CR":        {"intro\r\r# H\r", []string{"H"}},
 		"bom":            {"\uFEFF# H\n", []string{"H"}},
 	} {
 		var got []string
@@ -550,6 +555,17 @@ func TestCodeSpans(t *testing.T) {
 	} {
 		if got := codeSpans(tc.line); fmt.Sprint(got) != fmt.Sprint(tc.spans) {
 			t.Errorf("codeSpans(%q) = %v, want %v", tc.line, got, tc.spans)
+		}
+	}
+}
+
+func TestNestedCodeIsEnclosed(t *testing.T) {
+	text := "- item\n\n  ```\n  a. b, c\n  ```\n> ```\n> d. e\n> ```\n"
+	l := scan(text)
+	for _, after := range []string{"a. ", "b, ", "d. "} {
+		position := strings.Index(text, after) + len(after)
+		if l.ranks[position] != rankEnclosed {
+			t.Errorf("rank after %q = %d, want rankEnclosed", after, l.ranks[position])
 		}
 	}
 }
@@ -685,7 +701,15 @@ func FuzzSplit(f *testing.F) {
 			opts.MaxSize = opts.Size + int(extra%100)
 		}
 		s := mustNew(t, opts)
-		checkContract(t, s, text, s.Split(text))
+		// 内存分配与输入成线性：正常的文档每字节分配几十到几百字节，病态输入曾经超过十万。
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		chunks := s.Split(text)
+		runtime.ReadMemStats(&after)
+		if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 1024*uint64(len(text))+1<<20 {
+			t.Errorf("allocated %d bytes for %d bytes of input", allocated, len(text))
+		}
+		checkContract(t, s, text, chunks)
 	})
 }
 

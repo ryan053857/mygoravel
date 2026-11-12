@@ -2,11 +2,17 @@ package split
 
 import (
 	"math"
-	"slices"
-	"strconv"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	east "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // rank 是在某个字节位置之前切开的质量，越高越好。
@@ -28,30 +34,12 @@ const (
 type lineKind uint8
 
 const (
-	kindBlank lineKind = iota
-	kindText
-	kindHeading // ATX 标题
-	kindSetext  // setext 下划线
-	kindBreak   // 分隔线
-	kindFence   // 开始或关闭的代码围栏
-	kindCode    // 围栏代码的内容
-	kindIndented
-	kindTable
-	kindListItem
-	kindListCont
-	kindQuote
-	kindHTML
-	kindFrontMatter
+	kindBlank     lineKind = iota
+	kindText               // 顶层段落
+	kindHeading            // 顶层标题，包括 setext 标题的下划线
+	kindContainer          // 列表、引用、分隔线等其他非封闭的结构
+	kindEnclosed           // 代码、表格、HTML 块和 front matter，只提供换行边界
 )
-
-// enclosed 报告这种行是否只提供换行边界。
-func (k lineKind) enclosed() bool {
-	switch k {
-	case kindFence, kindCode, kindIndented, kindTable, kindHTML, kindFrontMatter:
-		return true
-	}
-	return false
-}
 
 // line 是输入的一行；[start, end) 不含行终止符。
 type line struct {
@@ -60,7 +48,7 @@ type line struct {
 	block      int // 结构块编号，空行为 -1
 }
 
-// headingBlock 是一行 ATX 标题，或者一个 setext 标题段落连同它的下划线。
+// headingBlock 是一个顶层标题：ATX 标题的一行，或者 setext 标题的段落连同它的下划线。
 type headingBlock struct {
 	start, end int
 	level      int
@@ -68,7 +56,7 @@ type headingBlock struct {
 	attached   bool // 忽略空行时，直接跟在另一个标题之后
 }
 
-// tableBlock 是一个 GFM 表格；表头行和分隔行占据 [headerStart, headerEnd)。
+// tableBlock 是一个顶层 GFM 表格；表头行和分隔行占据 [headerStart, headerEnd)。
 type tableBlock struct {
 	headerStart, headerEnd int
 	dataStart, end         int
@@ -90,29 +78,12 @@ type layout struct {
 	contentEnds map[int]int // contentEndBefore 的缓存
 }
 
-// htmlEnd 是未关闭的 HTML 块的结束条件。
-type htmlEnd uint8
-
-const (
-	htmlNone htmlEnd = iota
-	htmlClosingTag
-	htmlComment
-	htmlBlankLine
-)
-
-var (
-	htmlRawTags   = []string{"script", "pre", "style", "textarea"}
-	htmlBlockTags = map[string]bool{
-		"address": true, "article": true, "aside": true, "base": true, "basefont": true, "blockquote": true,
-		"body": true, "caption": true, "center": true, "col": true, "colgroup": true, "dd": true, "details": true,
-		"dialog": true, "dir": true, "div": true, "dl": true, "dt": true, "fieldset": true, "figcaption": true,
-		"figure": true, "footer": true, "form": true, "frame": true, "frameset": true, "h1": true, "h2": true,
-		"h3": true, "h4": true, "h5": true, "h6": true, "head": true, "header": true, "hr": true, "html": true,
-		"iframe": true, "legend": true, "li": true, "link": true, "main": true, "menu": true, "menuitem": true,
-		"nav": true, "noframes": true, "ol": true, "optgroup": true, "option": true, "p": true, "param": true,
-		"search": true, "section": true, "summary": true, "table": true, "tbody": true, "td": true, "tfoot": true,
-		"th": true, "thead": true, "title": true, "tr": true, "track": true, "ul": true,
-	}
+// markdown 按 CommonMark 和 GFM 表格解析块结构，可以并发使用。它不做行内解析：
+// 切分只需要块结构，行内代码由 codeSpans 逐行识别，也就避开了行内解析在病态输入上的超线性开销。
+var markdown = parser.NewParser(
+	parser.WithBlockParsers(parser.DefaultBlockParsers()...),
+	parser.WithParagraphTransformers(append(parser.DefaultParagraphTransformers(),
+		util.Prioritized(extension.NewTableParagraphTransformer(), 200))...),
 )
 
 // scan 测量文本并识别它的 Markdown 结构。
@@ -165,203 +136,177 @@ func splitLines(text string) []line {
 	for i := 0; i < len(text); i++ {
 		switch text[i] {
 		case '\n':
-			lines = append(lines, line{start: start, end: i})
+			lines = append(lines, line{start: start, end: i, block: -1})
 			start = i + 1
 		case '\r':
-			lines = append(lines, line{start: start, end: i})
+			lines = append(lines, line{start: start, end: i, block: -1})
 			if i+1 < len(text) && text[i+1] == '\n' {
 				i++
 			}
 			start = i + 1
 		}
 	}
-	return append(lines, line{start: start, end: len(text)})
+	return append(lines, line{start: start, end: len(text), block: -1})
 }
 
-// classify 为每一行确定类别和块编号，并记录标题和表格。
+// classifier 把 goldmark 的语法树映射回行。
+type classifier struct {
+	*layout
+	lines  []line
+	base   int    // source 在输入中的偏移
+	source []byte // 交给 goldmark 的输入：front matter 和 BOM 之后的部分，单独的 CR 换成 LF
+	nextID int
+}
+
+// classify 为每一行确定类别和块编号，并记录标题、表格和行内代码。
 func (l *layout) classify(lines []line) {
-	var (
-		fenceChar      byte
-		fenceLen       int
-		inFence        bool
-		html           htmlEnd
-		inList         bool
-		tableOpen      bool
-		frontMatterEnd = l.frontMatterEnd(lines)
-		blockID        = -1
-		paraStart      = -1 // 当前段落的第一行
-		lastNonBlank   = -1 // 上一个非空行的序号
-		prevKind       = kindBlank
-	)
-	newBlock := func() int {
-		blockID++
-		return blockID
+	c := &classifier{layout: l, lines: lines}
+	if end := l.frontMatterEnd(lines); end >= 0 {
+		c.mark(0, end, kindEnclosed, true)
+		if end+1 == len(lines) {
+			return
+		}
+		c.base = lines[end+1].start
+	} else if strings.HasPrefix(l.text, "\uFEFF") {
+		c.base = len("\uFEFF")
 	}
-	for i := range lines {
-		ln := &lines[i]
-		content := l.text[ln.start:ln.end]
-		if i == 0 {
-			content = strings.TrimPrefix(content, "\uFEFF")
+	// 交给 goldmark 的是一份等长的副本，语法树中的偏移因此仍然对应原文。
+	c.source = []byte(l.text[c.base:])
+	for i, b := range c.source {
+		// goldmark 不把单独的 CR 当作换行。
+		if b == '\r' && (i+1 == len(c.source) || c.source[i+1] != '\n') {
+			c.source[i] = '\n'
 		}
-		indent, rest := indentation(content)
-		blank := strings.TrimLeft(content, " \t") == ""
-		sameAsPrev := func() int {
-			if lastNonBlank < 0 {
-				return newBlock()
-			}
-			return lines[lastNonBlank].block
-		}
+	}
+	defuse(c.source)
+	c.children(markdown.Parse(text.NewReader(c.source)), c.lineAt(0), len(lines)-1, true)
+}
 
-		switch {
-		case i <= frontMatterEnd:
-			ln.kind = kindFrontMatter
-			if i == 0 {
-				ln.block = newBlock()
-			} else {
-				ln.block = lines[0].block
-			}
-		case inFence:
-			ln.kind, ln.block = kindCode, sameAsPrevLine(lines, i)
-			if indent <= 3 {
-				if run := leadingRun(rest, fenceChar); run >= fenceLen && isBlank(rest[run:]) {
-					ln.kind, inFence = kindFence, false
-				}
-			}
-		case html != htmlNone && (html != htmlBlankLine || !blank):
-			ln.kind, ln.block = kindHTML, sameAsPrevLine(lines, i)
-			if htmlEnds(html, content) {
-				html = htmlNone
-			}
-		case tableOpen && !blank && hasUnescapedPipe(rest):
-			ln.kind, ln.block = kindTable, sameAsPrevLine(lines, i)
-			l.tables[len(l.tables)-1].end = ln.end
-		default:
-			html, tableOpen = htmlNone, false
-			ln.kind, ln.block = l.classifyFresh(lines, i, indent, rest, blank, inList, prevKind, paraStart, lastNonBlank, newBlock, sameAsPrev)
-			switch ln.kind {
-			case kindFence:
-				inFence, fenceChar, fenceLen = true, rest[0], leadingRun(rest, rest[0])
-			case kindHTML:
-				html = htmlStart(rest)
-				if htmlEnds(html, rest[1:]) && html != htmlBlankLine {
-					html = htmlNone
-				}
-			case kindTable:
-				tableOpen = true
-			case kindListItem:
-				inList = true
-			case kindText:
-				if indent == 0 {
-					inList = false
-				}
-			case kindHeading, kindSetext, kindBreak, kindQuote, kindIndented:
-				if indent == 0 {
-					inList = false
-				}
+// children 依次归类 parent 的子块。子块占据从它开始的那一行到下一个子块之前的行，
+// 最后一个子块到 last 为止。top 表示 parent 是文档本身。
+func (c *classifier) children(parent ast.Node, first, last int, top bool) {
+	for node := parent.FirstChild(); node != nil; node = node.NextSibling() {
+		start, ok := c.start(node)
+		if !ok {
+			continue
+		}
+		to := last
+		for next := node.NextSibling(); next != nil; next = next.NextSibling() {
+			if nextStart, ok := c.start(next); ok {
+				to = c.lineAt(nextStart) - 1
+				break
 			}
 		}
-
-		if ln.kind == kindBlank {
-			ln.block = -1
-		}
-		if ln.kind == kindText {
-			if prevKind != kindText {
-				paraStart = i
-			}
-		} else {
-			paraStart = -1
-		}
-		if ln.kind != kindBlank {
-			lastNonBlank = i
-		}
-		prevKind = ln.kind
+		c.block(node, max(c.lineAt(start), first), min(to, last), top)
 	}
 }
 
-// classifyFresh 归类一个不在围栏、HTML 块、表格或 front matter 延续中的行。
-func (l *layout) classifyFresh(lines []line, i, indent int, rest string, blank, inList bool, prevKind lineKind,
-	paraStart, lastNonBlank int, newBlock, sameAsPrev func() int) (lineKind, int) {
-	ln := &lines[i]
-	block := indent <= 3
-	switch {
-	case blank:
-		return kindBlank, -1
-	case block && isFenceOpen(rest):
-		return kindFence, newBlock()
-	case block && htmlStart(rest) != htmlNone:
-		return kindHTML, newBlock()
-	case block && prevKind == kindText && isSetextUnderline(rest):
-		level := 1
-		if rest[0] == '-' {
-			level = 2
-		}
-		id := newBlock()
-		parts := make([]string, 0, i-paraStart)
-		for j := paraStart; j < i; j++ {
-			lines[j].kind, lines[j].block = kindHeading, id
-			parts = append(parts, strings.TrimSpace(l.text[lines[j].start:lines[j].end]))
-		}
-		previous := paraStart - 1
-		for previous >= 0 && lines[previous].kind == kindBlank {
-			previous--
-		}
-		l.addHeading(lines, paraStart, i, level, strings.Join(parts, " "), previous)
-		return kindSetext, id
-	case block && isThematicBreak(rest):
-		return kindBreak, newBlock()
-	case block && isListItem(rest) && (prevKind != kindText || interruptsParagraph(rest)):
-		return kindListItem, newBlock()
-	case inList && indent >= 1:
-		return kindListCont, sameAsPrev()
-	case block && atxLevel(rest) > 0:
-		level := atxLevel(rest)
-		l.addHeading(lines, i, i, level, atxText(rest[level:]), lastNonBlank)
-		return kindHeading, newBlock()
-	case block && prevKind == kindText && isDelimiterRow(rest):
-		header := l.text[lines[i-1].start:lines[i-1].end]
-		headerCells := tableCells(header)
-		if hasUnescapedPipe(header) && len(headerCells) == len(tableCells(rest)) {
-			id := newBlock()
-			lines[i-1].kind, lines[i-1].block = kindTable, id
-			table := tableBlock{headerStart: lines[i-1].start, headerEnd: ln.end, dataStart: ln.end, end: ln.end}
-			if i+1 < len(lines) {
-				table.dataStart = lines[i+1].start
-			}
-			table.hasHeader = slices.ContainsFunc(headerCells, func(cell string) bool { return cell != "" })
-			l.tables = append(l.tables, table)
-			return kindTable, id
-		}
-	case block && rest[0] == '>':
-		if prevKind == kindQuote {
-			return kindQuote, sameAsPrev()
-		}
-		return kindQuote, newBlock()
-	case indent >= 4 && !inList && prevKind != kindText && prevKind != kindQuote && prevKind != kindListCont:
-		if lastNonBlank >= 0 && lines[lastNonBlank].kind == kindIndented {
-			return kindIndented, sameAsPrev()
-		}
-		return kindIndented, newBlock()
+// block 归类占据 from 到 to 行的一个块。容器中的段落、标题和分隔线沿用容器的类别；
+// 任何深度的代码、表格和 HTML 块都是封闭区域，每个列表项是一个结构块。
+func (c *classifier) block(node ast.Node, from, to int, top bool) {
+	for to >= from && c.blank(to) {
+		to--
 	}
-	if inList && prevKind != kindBlank {
-		return kindListCont, sameAsPrev()
+	if to < from {
+		return
 	}
-	if prevKind == kindText {
-		return kindText, sameAsPrev()
+	switch node := node.(type) {
+	case *ast.FencedCodeBlock, *ast.CodeBlock, *ast.HTMLBlock:
+		c.mark(from, to, kindEnclosed, true)
+	case *east.Table:
+		c.mark(from, to, kindEnclosed, true)
+		if top {
+			c.addTable(node, to)
+		}
+	case *ast.List:
+		c.children(node, from, to, false)
+	case *ast.ListItem, *ast.Blockquote:
+		c.mark(from, to, kindContainer, false)
+		c.children(node, from, to, false)
+	case *ast.Heading:
+		if top {
+			c.addHeading(node, from, to)
+			c.mark(from, to, kindHeading, false)
+		}
+	case *ast.Paragraph:
+		if top {
+			c.mark(from, to, kindText, false)
+		}
+	default:
+		if top {
+			c.mark(from, to, kindContainer, false)
+		}
 	}
-	return kindText, newBlock()
 }
 
-// addHeading 记录占据 first 到 last 行的标题；previous 是它之前的最后一个非空行。
-func (l *layout) addHeading(lines []line, first, last, level int, text string, previous int) {
-	attached := previous >= 0 && (lines[previous].kind == kindHeading || lines[previous].kind == kindSetext)
-	l.headings = append(l.headings, headingBlock{
-		start: lines[first].start, end: lines[last].end, level: level, text: text, attached: attached,
+// mark 把 from 到 to 行归入一个新的结构块；blanks 为 false 时空行保持为空行。
+func (c *classifier) mark(from, to int, kind lineKind, blanks bool) {
+	id := c.nextID
+	c.nextID++
+	for i := from; i <= to; i++ {
+		if blanks || !c.blank(i) {
+			c.lines[i].kind, c.lines[i].block = kind, id
+		}
+	}
+}
+
+// addHeading 记录占据 from 到 to 行的顶层标题。
+func (c *classifier) addHeading(node *ast.Heading, from, to int) {
+	parts := make([]string, 0, node.Lines().Len())
+	for i := range node.Lines().Len() {
+		segment := node.Lines().At(i)
+		parts = append(parts, strings.TrimSpace(string(segment.Value(c.source))))
+	}
+	previous := from - 1
+	for previous >= 0 && c.lines[previous].kind == kindBlank {
+		previous--
+	}
+	c.headings = append(c.headings, headingBlock{
+		start:    c.lines[from].start,
+		end:      c.lines[to].end,
+		level:    node.Level,
+		text:     strings.Join(parts, " "),
+		attached: previous >= 0 && c.lines[previous].kind == kindHeading,
 	})
 }
 
-// sameAsPrevLine 返回第 i 行之前那一行的块编号。
-func sameAsPrevLine(lines []line, i int) int {
-	return lines[i-1].block
+// addTable 记录到第 to 行结束的顶层表格。
+func (c *classifier) addTable(node *east.Table, to int) {
+	header, ok := node.FirstChild().(*east.TableHeader)
+	if !ok {
+		return
+	}
+	h := c.lineAt(header.Pos())
+	if h+1 > to {
+		return
+	}
+	table := tableBlock{headerStart: c.lines[h].start, headerEnd: c.lines[h+1].end, dataStart: c.lines[h+1].end, end: c.lines[to].end}
+	if h+2 < len(c.lines) {
+		table.dataStart = c.lines[h+2].start
+	}
+	for cell := header.FirstChild(); cell != nil; cell = cell.NextSibling() {
+		table.hasHeader = table.hasHeader || cell.HasChildren()
+	}
+	c.tables = append(c.tables, table)
+}
+
+// start 返回块在 source 中的开始位置。表格的位置是它所在段落的位置，所以取表头行。
+func (c *classifier) start(node ast.Node) (int, bool) {
+	if table, ok := node.(*east.Table); ok && table.FirstChild() != nil {
+		node = table.FirstChild()
+	}
+	return node.Pos(), node.Pos() >= 0
+}
+
+// lineAt 返回包含 source 中位置 position 的行。
+func (c *classifier) lineAt(position int) int {
+	position += c.base
+	return sort.Search(len(c.lines), func(i int) bool { return c.lines[i].start > position }) - 1
+}
+
+// blank 报告第 i 行是否只含空格和制表符。
+func (c *classifier) blank(i int) bool {
+	return strings.TrimLeft(c.text[c.lines[i].start:c.lines[i].end], " \t") == ""
 }
 
 // frontMatterEnd 返回 front matter 结束行的序号，没有时返回 -1。
@@ -417,10 +362,6 @@ func mappingKey(text string) bool {
 
 // rankLines 给行首和行内的位置定级。
 func (l *layout) rankLines(lines []line) {
-	headingLine := make([]bool, len(lines))
-	for i := range lines {
-		headingLine[i] = lines[i].kind == kindHeading || lines[i].kind == kindSetext
-	}
 	lastNonBlank := -1
 	for i := range lines {
 		ln := lines[i]
@@ -431,7 +372,7 @@ func (l *layout) rankLines(lines []line) {
 				switch {
 				case ln.block != prev.block:
 					value = rankBlock
-				case lines[i-1].kind == kindBlank && !ln.kind.enclosed():
+				case lines[i-1].kind == kindBlank && ln.kind != kindEnclosed:
 					value = rankBlock
 				case ln.kind == kindText && lines[i-1].kind == kindText && softWrap(l.text[lines[i-1].start:lines[i-1].end], l.text[ln.start:ln.end]):
 					value = rankSpace
@@ -441,17 +382,17 @@ func (l *layout) rankLines(lines []line) {
 				l.ranks[ln.start] = value
 			}
 		}
-		l.rankWithin(ln, headingLine[i])
+		l.rankWithin(ln)
 		if ln.kind != kindBlank {
 			lastNonBlank = i
 		}
 	}
 	// 标题和它正文的开头放在一起：它们之间、以及标题块内部都不切开。
 	for i := range lines {
-		if !headingLine[i] {
+		if lines[i].kind != kindHeading {
 			continue
 		}
-		if i+1 < len(lines) && !headingLine[i+1] {
+		if i+1 < len(lines) && lines[i+1].kind != kindHeading {
 			l.headingEnds = append(l.headingEnds, lines[i+1].start)
 		}
 		for j := i + 1; j < len(lines); j++ {
@@ -472,9 +413,9 @@ func (l *layout) rankLines(lines []line) {
 }
 
 // rankWithin 给一行中每个字符之后的位置定级。
-func (l *layout) rankWithin(ln line, heading bool) {
+func (l *layout) rankWithin(ln line) {
 	text := l.text
-	enclosed := ln.kind.enclosed()
+	heading, enclosed := ln.kind == kindHeading, ln.kind == kindEnclosed
 	var spans [][2]int
 	if !enclosed && !heading {
 		spans = codeSpans(text[ln.start:ln.end])
@@ -517,7 +458,7 @@ func (l *layout) rankWithin(ln line, heading bool) {
 }
 
 // zeroWidthJoiner 把表情符号连接成一个字素簇。
-const zeroWidthJoiner = '\u200D'
+const zeroWidthJoiner = '‍'
 
 // joined 报告在 previous 与以 rest 开头的字符之间切开是否会切开一个字素簇：位于组合字符、连接符、
 // 变体选择符、表情修饰符或标签字符之前，位于连接符之后，或者在国旗的两个区域指示符之间。
@@ -613,27 +554,6 @@ func codeSpans(content string) [][2]int {
 	return spans
 }
 
-// indentation 返回缩进宽度（制表符补齐到 4 的倍数）和这一行的其余部分。
-func indentation(content string) (int, string) {
-	width := 0
-	for i := 0; i < len(content); i++ {
-		switch content[i] {
-		case ' ':
-			width++
-		case '\t':
-			width += 4 - width%4
-		default:
-			return width, content[i:]
-		}
-	}
-	return width, ""
-}
-
-// isBlank 报告 s 是否只含空格和制表符。
-func isBlank(s string) bool {
-	return strings.TrimLeft(s, " \t") == ""
-}
-
 // leadingRun 统计开头等于 c 的字节数。
 func leadingRun(s string, c byte) int {
 	n := 0
@@ -641,187 +561,4 @@ func leadingRun(s string, c byte) int {
 		n++
 	}
 	return n
-}
-
-// isFenceOpen 报告 rest 是否开始一个围栏代码块。
-func isFenceOpen(rest string) bool {
-	if rest == "" || rest[0] != '`' && rest[0] != '~' {
-		return false
-	}
-	run := leadingRun(rest, rest[0])
-	return run >= 3 && (rest[0] == '~' || !strings.Contains(rest[run:], "`"))
-}
-
-// atxLevel 返回 ATX 标题的级别，不是标题时返回 0。
-func atxLevel(rest string) int {
-	level := leadingRun(rest, '#')
-	if level < 1 || level > 6 {
-		return 0
-	}
-	if level < len(rest) && rest[level] != ' ' && rest[level] != '\t' {
-		return 0
-	}
-	return level
-}
-
-// atxText 返回去掉可选的结尾 # 串之后的标题内容。
-func atxText(after string) string {
-	text := strings.TrimSpace(after)
-	trimmed := strings.TrimRight(text, "#")
-	switch {
-	case trimmed == "":
-		return ""
-	case len(trimmed) < len(text) && (strings.HasSuffix(trimmed, " ") || strings.HasSuffix(trimmed, "\t")):
-		return strings.TrimSpace(trimmed)
-	}
-	return text
-}
-
-// isSetextUnderline 报告 rest 是否是一串 '=' 或 '-'，后面可以有空格。
-func isSetextUnderline(rest string) bool {
-	trimmed := strings.TrimRight(rest, " \t")
-	if trimmed == "" || trimmed[0] != '=' && trimmed[0] != '-' {
-		return false
-	}
-	return leadingRun(trimmed, trimmed[0]) == len(trimmed)
-}
-
-// isThematicBreak 报告 rest 是否是三个或更多 '*'、'-' 或 '_'，可以夹空格。
-func isThematicBreak(rest string) bool {
-	if rest == "" || !strings.ContainsRune("*-_", rune(rest[0])) {
-		return false
-	}
-	count := 0
-	for i := 0; i < len(rest); i++ {
-		switch rest[i] {
-		case rest[0]:
-			count++
-		case ' ', '\t':
-		default:
-			return false
-		}
-	}
-	return count >= 3
-}
-
-// isListItem 报告 rest 是否以无序或有序列表标记开头。
-func isListItem(rest string) bool {
-	marker := 0
-	switch {
-	case rest == "":
-		return false
-	case strings.ContainsRune("-*+", rune(rest[0])):
-		marker = 1
-	default:
-		digits := 0
-		for digits < len(rest) && digits < 10 && rest[digits] >= '0' && rest[digits] <= '9' {
-			digits++
-		}
-		if digits == 0 || digits > 9 || digits == len(rest) || rest[digits] != '.' && rest[digits] != ')' {
-			return false
-		}
-		marker = digits + 1
-	}
-	return marker == len(rest) || rest[marker] == ' ' || rest[marker] == '\t'
-}
-
-// interruptsParagraph 报告一个列表项能否打断段落：它有内容，有序列表时还要从 1 开始。
-func interruptsParagraph(rest string) bool {
-	marker := strings.IndexAny(rest, " \t")
-	if marker < 0 || isBlank(rest[marker:]) {
-		return false
-	}
-	if strings.ContainsRune("-*+", rune(rest[0])) {
-		return true
-	}
-	number, err := strconv.Atoi(rest[:marker-1])
-	return err == nil && number == 1
-}
-
-// htmlStart 返回从 rest 开始的 HTML 块的结束条件。
-func htmlStart(rest string) htmlEnd {
-	if !strings.HasPrefix(rest, "<") {
-		return htmlNone
-	}
-	if strings.HasPrefix(rest, "<!--") {
-		return htmlComment
-	}
-	lower := strings.ToLower(rest)
-	for _, tag := range htmlRawTags {
-		if after, ok := strings.CutPrefix(lower, "<"+tag); ok && (after == "" || strings.ContainsRune(" \t>", rune(after[0]))) {
-			return htmlClosingTag
-		}
-	}
-	name := strings.TrimPrefix(lower[1:], "/")
-	end := 0
-	for end < len(name) && (name[end] >= 'a' && name[end] <= 'z' || name[end] >= '0' && name[end] <= '9') {
-		end++
-	}
-	if !htmlBlockTags[name[:end]] {
-		return htmlNone
-	}
-	after := name[end:]
-	if after == "" || strings.ContainsRune(" \t>", rune(after[0])) || strings.HasPrefix(after, "/>") {
-		return htmlBlankLine
-	}
-	return htmlNone
-}
-
-// htmlEnds 报告 content 是否满足未关闭的 HTML 块的结束条件。
-func htmlEnds(end htmlEnd, content string) bool {
-	switch end {
-	case htmlComment:
-		return strings.Contains(content, "-->")
-	case htmlClosingTag:
-		lower := strings.ToLower(content)
-		for _, tag := range htmlRawTags {
-			if strings.Contains(lower, "</"+tag+">") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// hasUnescapedPipe 报告 s 中是否有前面不紧挨反斜杠的 '|'；与 GFM 一样，无论反斜杠之前是什么，
-// 它都转义后面的竖线。
-func hasUnescapedPipe(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '|' && (i == 0 || s[i-1] != '\\') {
-			return true
-		}
-	}
-	return false
-}
-
-// tableCells 在前面不紧挨反斜杠的竖线处把表格行切成单元格并去掉两侧空白，忽略可选的两侧竖线。
-func tableCells(row string) []string {
-	row = strings.TrimSpace(row)
-	row = strings.TrimPrefix(row, "|")
-	if strings.HasSuffix(row, "|") && !strings.HasSuffix(row, "\\|") {
-		row = row[:len(row)-1]
-	}
-	var cells []string
-	start := 0
-	for i := 0; i < len(row); i++ {
-		if row[i] == '|' && (i == 0 || row[i-1] != '\\') {
-			cells = append(cells, strings.TrimSpace(row[start:i]))
-			start = i + 1
-		}
-	}
-	return append(cells, strings.TrimSpace(row[start:]))
-}
-
-// isDelimiterRow 报告 rest 是否是 GFM 表格的分隔行。
-func isDelimiterRow(rest string) bool {
-	if !strings.Contains(rest, "|") {
-		return false
-	}
-	for _, cell := range tableCells(rest) {
-		cell = strings.TrimSuffix(strings.TrimPrefix(cell, ":"), ":")
-		if cell == "" || leadingRun(cell, '-') != len(cell) {
-			return false
-		}
-	}
-	return true
 }
