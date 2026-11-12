@@ -1,17 +1,20 @@
 -- +goose Up
 -- API token；只存 token 的 SHA-256；过期行由 apitoken.Store.Cleanup 删除。
--- kind：login 登录时签发，按配置滑动过期；personal 个人访问令牌，过期时间由创建者指定。
+-- kind：login 登录时签发，按配置滑动过期；refresh 是 JWT 模式的登录，token 是 refresh token，刷新时轮换并滑动过期；personal 个人访问令牌，过期时间由创建者指定。
+-- previous_hash、rotated_at 是 refresh 轮换前的上一个 token 的 SHA-256 和最近一次轮换的时间，用于识别重复使用；其余为空。
 -- tenant 是 token 绑定的租户，空字符串表示不绑定。impersonator_type、impersonator_id 是代为登录时的实际操作者，空字符串表示用户本人。scopes 是个人访问令牌的权限限制，空格分隔；登录 token 为空字符串，表示不限制。idle_timeout（秒）和 ends_at 是登录 token 签发时确定的空闲时长和最长期限，个人访问令牌为 0 和空。expires_at 是实际截止时间：login 在使用时滑动为“使用时间 + idle_timeout”，不超过 ends_at；personal 为空表示不过期。
 -- id 是 UUID 文本，时间是 Bun 写入的 UTC 文本。
 CREATE TABLE api_tokens (
     id TEXT PRIMARY KEY,
     token_hash TEXT NOT NULL,
+    previous_hash TEXT,
+    rotated_at TEXT,
     subject_type TEXT NOT NULL,
     subject_id TEXT NOT NULL,
     tenant TEXT NOT NULL,
     impersonator_type TEXT NOT NULL,
     impersonator_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('login', 'personal')),
+    kind TEXT NOT NULL CHECK (kind IN ('login', 'refresh', 'personal')),
     name TEXT NOT NULL,
     scopes TEXT NOT NULL,
     idle_timeout INTEGER NOT NULL,
@@ -24,6 +27,7 @@ CREATE TABLE api_tokens (
     CONSTRAINT api_tokens_token_hash_unique UNIQUE (token_hash)
 );
 CREATE INDEX api_tokens_subject ON api_tokens (subject_type, subject_id);
+CREATE INDEX api_tokens_previous_hash ON api_tokens (previous_hash) WHERE previous_hash IS NOT NULL;
 CREATE INDEX api_tokens_expires_at ON api_tokens (expires_at) WHERE expires_at IS NOT NULL;
 
 -- +goose Down

@@ -69,6 +69,7 @@ type Crypt struct {
 	// aeads 与 macKeys 的第一项来自当前密钥，其余来自 PreviousKeys。
 	aeads   []cipher.AEAD
 	macKeys [][]byte
+	masters [][]byte
 }
 
 // New 创建 Crypt。cfg 无效时 panic。
@@ -89,6 +90,7 @@ func New(cfg Config) *Crypt {
 		}
 		c.aeads = append(c.aeads, aead)
 		c.macKeys = append(c.macKeys, derive(master, "mygoravel crypt sign v1"))
+		c.masters = append(c.masters, master)
 	}
 	return c
 }
@@ -100,6 +102,17 @@ func derive(master []byte, info string) []byte {
 		panic("crypt: " + err.Error())
 	}
 	return key
+}
+
+// Derive 为 purpose 用途从应用密钥派生 32 字节的子密钥，供其他包签名或加密自己的数据，例如 apitoken 签名 JWT。
+// 返回值的第一项来自当前密钥，其余依次来自 PreviousKeys：用第一项签名，校验时全部尝试，轮换应用密钥后旧数据仍然有效。
+// 不同的 purpose 得到互不相关的密钥；purpose 应包含包名和版本，例如 "mygoravel apitoken jwt v1"。
+func (c *Crypt) Derive(purpose string) [][]byte {
+	keys := make([][]byte, len(c.masters))
+	for i, master := range c.masters {
+		keys[i] = derive(master, purpose)
+	}
+	return keys
 }
 
 // Encrypt 用当前密钥加密 plaintext，返回 URL 安全的 base64 文本。nonce 每次随机生成，

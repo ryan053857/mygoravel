@@ -118,3 +118,20 @@ func TestConfigValidate(t *testing.T) {
 		crypt.New(crypt.Config{})
 	})
 }
+
+func TestDerive(t *testing.T) {
+	oldKey, newKey := crypt.GenerateKey(), crypt.GenerateKey()
+	old := newCrypt(t, oldKey)
+	rotated := newCrypt(t, newKey, oldKey)
+
+	keys := rotated.Derive("test jwt v1")
+	require.Len(t, keys, 2)
+	assert.Len(t, keys[0], 32)
+	// 第二项来自旧密钥，与轮换前派生的相同。
+	assert.Equal(t, old.Derive("test jwt v1")[0], keys[1])
+	assert.NotEqual(t, keys[0], keys[1])
+	// 同一个密钥、不同用途得到不同的子密钥，也不同于原密钥。
+	assert.NotEqual(t, keys[0], rotated.Derive("test other v1")[0])
+	raw, _ := base64.StdEncoding.DecodeString(newKey)
+	assert.NotEqual(t, raw, keys[0])
+}

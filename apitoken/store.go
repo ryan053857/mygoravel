@@ -32,6 +32,9 @@ type Kind string
 const (
 	// KindLogin 是 SPA、App 登录时签发的 token，按 Config 滑动过期，代表一台设备。
 	KindLogin Kind = "login"
+	// KindRefresh 是 JWT 模式的登录（见 JWT），同样按 Config 滑动过期、代表一台设备；
+	// 客户端持有的是 refresh token，每次刷新时轮换，请求使用短期的 access token。
+	KindRefresh Kind = "refresh"
 	// KindPersonal 是个人访问令牌，供脚本和第三方集成使用，过期时间由创建者指定。
 	KindPersonal Kind = "personal"
 )
@@ -90,6 +93,8 @@ type row struct {
 
 	ID               uuid.UUID `bun:"id,pk,type:uuid"`
 	TokenHash        string    `bun:"token_hash,notnull"`
+	PreviousHash     string    `bun:"previous_hash,nullzero"` // refresh 轮换前的上一个 token
+	RotatedAt        time.Time `bun:"rotated_at,nullzero"`    // refresh 最近一次轮换的时间
 	SubjectType      string    `bun:"subject_type,notnull"`
 	SubjectID        string    `bun:"subject_id,notnull"`
 	Tenant           string    `bun:"tenant,notnull"`
@@ -125,10 +130,16 @@ func NewStore(db bun.IDB, cfg Config) *Store {
 // sub.Tenant 不为空时，token 只能在这个租户中使用，例如只属于某个租户的终端客户账号。
 // sub.Impersonator 不为零值时签发的是代为登录的 token，校验得到的主体带有同样的 Impersonator。
 func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (string, error) {
+	plain, _, err := s.login(ctx, sub, d, KindLogin)
+	return plain, err
+}
+
+// login 签发 kind 类的登录 token，返回明文和写入的行。
+func (s *Store) login(ctx context.Context, sub identity.Subject, d Device, kind Kind) (string, *row, error) {
 	now := s.now().UTC()
 	idle, end := s.cfg.idle(d.Remember), now.Add(s.cfg.Lifetime)
 	r := &row{
-		Kind:        KindLogin,
+		Kind:        kind,
 		Tenant:      sub.Tenant,
 		IdleTimeout: int64(idle / time.Second),
 		EndsAt:      end,
@@ -136,7 +147,8 @@ func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (stri
 		UserAgent:   truncate(d.UserAgent, maxUserAgent),
 		ExpiresAt:   deadline(end, idle, now),
 	}
-	return s.issue(ctx, sub, r, now)
+	plain, err := s.issue(ctx, sub, r, now)
+	return plain, r, err
 }
 
 // Personal 描述一个个人访问令牌。
@@ -182,11 +194,7 @@ func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now tim
 	if err != nil {
 		return "", errors.Wrap(err, "apitoken: new id")
 	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", errors.Wrap(err, "apitoken: random")
-	}
-	plain := base64.RawURLEncoding.EncodeToString(b)
+	plain := secret()
 	r.ID, r.TokenHash = id, hash(plain)
 	r.SubjectType, r.SubjectID = string(sub.Type), sub.ID
 	r.ImpersonatorType, r.ImpersonatorID = string(sub.Impersonator.Type), sub.Impersonator.ID
@@ -197,18 +205,20 @@ func (s *Store) issue(ctx context.Context, sub identity.Subject, r *row, now tim
 	return plain, nil
 }
 
-// Validate 实现 rest.TokenValidator：返回 token 代表的主体，Method 为 bearer，Credential 为 token 的 ID，
+// Validate 实现 rest.TokenValidator，校验登录 token 和个人访问令牌：返回 token 代表的主体，Method 为 bearer，Credential 为 token 的 ID，
 // Tenant 为 token 绑定的租户，Impersonator 为签发时的代为登录者。登录 token 的 Scopes 为 nil，个人访问令牌的 Scopes 是创建时的限制；
 // 两者的 Permissions 都为空，由 Resolve 加载。token 不存在、已撤销或已过期时返回 ErrInvalid。
 //
 // 距上次记录使用超过一分钟时，更新最近使用时间，并延长登录 token 的有效期。
+// JWT 模式的 refresh token 不能直接作为 Bearer 凭据，校验返回 ErrInvalid。
 func (s *Store) Validate(ctx context.Context, token string) (identity.Subject, error) {
 	if token == "" {
 		return identity.Subject{}, ErrInvalid.New()
 	}
 	now := s.now().UTC()
 	var r row
-	err := s.live(s.db.NewSelect().Model(&r), now).Where("token_hash = ?", hash(token)).Scan(ctx)
+	err := s.live(s.db.NewSelect().Model(&r), now).
+		Where("token_hash = ?", hash(token)).Where("kind <> ?", KindRefresh).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return identity.Subject{}, ErrInvalid.New()
 	}
@@ -255,20 +265,9 @@ func (s *Store) List(ctx context.Context, sub identity.Subject) ([]Token, error)
 	}
 	out := make([]Token, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, Token{
-			ID:           r.ID.String(),
-			Kind:         r.Kind,
-			Name:         r.Name,
-			Scopes:       strings.Fields(r.Scopes),
-			Tenant:       r.Tenant,
-			Impersonator: r.impersonator(),
-			IP:           r.IP,
-			UserAgent:    r.UserAgent,
-			CreatedAt:    r.CreatedAt,
-			LastUsedAt:   r.LastUsedAt,
-			ExpiresAt:    r.ExpiresAt,
-			Current:      r.ID.String() == sub.Credential,
-		})
+		t := r.token()
+		t.Current = t.ID == sub.Credential
+		out = append(out, t)
 	}
 	return out, nil
 }
@@ -291,14 +290,14 @@ func (s *Store) Revoke(ctx context.Context, sub identity.Subject, id string) err
 	return nil
 }
 
-// RevokeOthers 撤销 sub 除本次请求所用 token（sub.Credential）以外的全部登录 token，返回撤销的个数，
+// RevokeOthers 撤销 sub 除本次请求所用 token（sub.Credential）以外的全部登录 token（包括 JWT 模式的登录），返回撤销的个数，
 // 例如“退出其他设备”。个人访问令牌不受影响。sub 来自会话等其他凭据时，撤销它的全部登录 token。
 func (s *Store) RevokeOthers(ctx context.Context, sub identity.Subject) (int, error) {
 	if sub.ID == "" {
 		return 0, errors.New("apitoken: subject ID is required")
 	}
 	q := s.db.NewDelete().Model((*row)(nil)).
-		Where("subject_type = ? AND subject_id = ?", sub.Type, sub.ID).Where("kind = ?", KindLogin)
+		Where("subject_type = ? AND subject_id = ?", sub.Type, sub.ID).Where("kind IN (?)", bun.List([]Kind{KindLogin, KindRefresh}))
 	if current, err := uuid.Parse(sub.Credential); err == nil {
 		q = q.Where("id <> ?", current)
 	}
@@ -326,6 +325,22 @@ func (s *Store) Cleanup(ctx context.Context, limit int) (int, error) {
 		Where("id IN (SELECT id FROM (?) AS expired)", expired).Exec(ctx))
 }
 
+func (r *row) token() Token {
+	return Token{
+		ID:           r.ID.String(),
+		Kind:         r.Kind,
+		Name:         r.Name,
+		Scopes:       strings.Fields(r.Scopes),
+		Tenant:       r.Tenant,
+		Impersonator: r.impersonator(),
+		IP:           r.IP,
+		UserAgent:    r.UserAgent,
+		CreatedAt:    r.CreatedAt,
+		LastUsedAt:   r.LastUsedAt,
+		ExpiresAt:    r.ExpiresAt,
+	}
+}
+
 func (r *row) impersonator() identity.Ref {
 	return identity.Ref{Type: identity.SubjectType(r.ImpersonatorType), ID: r.ImpersonatorID}
 }
@@ -333,6 +348,13 @@ func (r *row) impersonator() identity.Ref {
 // live 把查询限定在未过期的 token。
 func (s *Store) live(q *bun.SelectQuery, now time.Time) *bun.SelectQuery {
 	return q.Where("(expires_at IS NULL OR expires_at > ?)", now)
+}
+
+// secret 生成 token 明文：32 字节随机数的 URL 安全 base64。
+func secret() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func hash(token string) string {

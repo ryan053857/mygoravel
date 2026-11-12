@@ -7,7 +7,13 @@
 // 表中只保存 token 的 SHA-256，明文只在签发时返回一次。不同账号体系需要不同的有效期时，
 // 各用自己的 Config 创建 Store 签发，校验用其中任何一个都可以。
 //
+// JWT 是登录 token 的另一种形式：请求带短期的 access token，校验只验签名、不访问数据库，
+// 过期后用 refresh token（每次刷新时轮换）换一对新的。
+//
 //	tokens := apitoken.NewStore(db, cfg.APIToken)
 //	requireUser := rest.RequireBearer(api, tokens.Validate)
 //	plain, err := tokens.Login(ctx, sub, apitoken.Device{IP: ip, UserAgent: ua})
+//
+//	jwt := apitoken.NewJWT(tokens, apitoken.JWTConfig{Keys: apitoken.HMACKeys(crypt)})
+//	pair, err := jwt.Login(ctx, sub, device)
 package apitoken

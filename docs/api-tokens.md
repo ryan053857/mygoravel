@@ -8,6 +8,7 @@
 - [设备与令牌列表](#listing-tokens)
 - [撤销令牌](#revoking-tokens)
 - [加载权限](#loading-permissions)
+- [JWT 模式](#jwt)
 - [过期清理](#cleanup)
 - [单页应用](#single-page-applications)
 
@@ -24,6 +25,8 @@ token 分为两类：
 | 个人访问令牌 | `Create`，用户在“API 令牌”页面手动创建 | 由创建者指定，可以不过期 | 脚本、CI 和第三方集成 |
 
 表中只保存 token 的 SHA-256，明文只在签发时返回一次。
+
+登录 token 默认是不透明的：每个请求都按 token 查一次表，撤销立即生效。也可以改用 [JWT 模式](#jwt)：请求带短期的 access token，校验只验签名，过期后用 refresh token 换新的。
 
 <a id="configuration"></a>
 ## 配置
@@ -44,7 +47,7 @@ api_token:
   remember_idle_timeout: 168h # 登录时选择“记住我”的空闲时长
 ```
 
-上面是默认值。登录 token 的截止时间是“签发时间 + `lifetime`”与“最近使用时间 + 空闲时长”中较早的一个，与[会话](session.md#configuration)的 `lifetime`、`idle_timeout` 含义相同。客户端不需要刷新 token：每次使用都会延长它的有效期，收到 `401` 时让用户重新登录即可。
+上面是默认值。登录 token 的截止时间是“签发时间 + `lifetime`”与“最近使用时间 + 空闲时长”中较早的一个，与[会话](session.md#configuration)的 `lifetime`、`idle_timeout` 含义相同。不透明的登录 token 不需要刷新：每次使用都会延长它的有效期，收到 `401` 时让用户重新登录即可。[JWT 模式](#jwt)按同样的规则计算，只是在刷新时延长。
 
 有效期在签发时写入 token：修改配置只影响之后签发的 token，已经签发的 token 仍然按签发时的有效期滑动。
 
@@ -212,10 +215,10 @@ for _, t := range list {
 | 方法 | 撤销范围 | 常见用途 |
 | --- | --- | --- |
 | `Revoke(ctx, sub, id)` | `sub` 的一个 token；`id` 为 `sub.Credential` 时即登出 | 登出、在列表中移除某台设备或某个令牌 |
-| `RevokeOthers(ctx, sub)` | `sub` 除本次请求所用 token 以外的全部**登录 token** | “退出其他设备” |
+| `RevokeOthers(ctx, sub)` | `sub` 除本次请求所用 token 以外的全部**登录 token**，包括 JWT 模式的登录 | “退出其他设备” |
 | `RevokeSubject(ctx, ref)` | 主体 `ref`（`identity.Ref`）的全部 token，包括个人访问令牌 | 封禁账号、修改密码 |
 
-撤销立即生效，被撤销的 token 在下一次请求时返回 `401`；用它建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)。撤销后调用 `RecheckCredential` 或 `RecheckSubject`，连接会立即结束，见[立即断开](sse.md#immediate-revocation)。
+撤销立即生效，被撤销的 token 在下一次请求时返回 `401`（[JWT 模式](#jwt)中已签发的 access token 要等到过期）；用它建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)。撤销后调用 `RecheckCredential` 或 `RecheckSubject`，连接会立即结束，见[立即断开](sse.md#immediate-revocation)。
 
 同一个用户可能还在浏览器中通过[会话](session.md)登录了页面。让用户在所有地方下线时，两边都要撤销。下面是用户模块的 `SignOutEverywhere` action 的 `Handle`，会话存储和 token 存储由构造函数传入：
 
@@ -268,6 +271,82 @@ api := rest.New(rest.Options{
 ```
 
 个人访问令牌的 `Scopes` 由 `Validate` 填入，Resolver 不需要处理：`sub.Can` 同时检查两者。
+
+<a id="jwt"></a>
+## JWT 模式
+
+不透明的登录 token 每个请求都要查一次表。JWT 模式改为签发一对凭据：请求带短期的 access token（JWT），校验只验签名和有效期，不访问数据库；access token 过期后，用 refresh token 换一对新的。适合请求量大、或者有其他服务也要校验 token 的场景。
+
+每次登录仍然是 `api_tokens` 中的一行，[设备列表](#listing-tokens)、[撤销](#revoking-tokens)、[过期清理](#cleanup)都照常使用。区别在于撤销的效果：refresh token 立即失效，已经签发的 access token 在有效期（默认 10 分钟）内仍然可用。撤销需要立即生效的账号体系继续用不透明 token。两种方式可以在同一个应用中并存，例如运营人员用不透明 token，客户 App 用 JWT。
+
+用 `Store` 创建 `apitoken.JWT`。`HMACKeys` 从[应用密钥](encryption.md#configuration)派生签名密钥，不需要另外配置：
+
+```go
+customerTokens := apitoken.NewStore(a.db, a.cfg.CustomerToken)
+customerJWT := apitoken.NewJWT(customerTokens, apitoken.JWTConfig{Keys: apitoken.HMACKeys(a.crypt)})
+requireCustomer := rest.RequireBearer(api, customerJWT.Validate)
+```
+
+`JWT.Validate` 也是 `rest.TokenValidator`。不是 JWT 的 token 交给 `Store.Validate`，所以同一个 API 仍然接受[个人访问令牌](#personal-access-tokens)。
+
+登录时用 `customerJWT.Login` 代替 `Store.Login`，返回 `Pair`；刷新接口是公开的，客户端提交 refresh token：
+
+```go
+pair, err := customerJWT.Login(ctx, sub, device)
+// 返回 pair.Access、pair.Refresh 和 pair.ExpiresAt（access token 的过期时间）
+
+pair, err := customerJWT.Refresh(ctx, in.Body.RefreshToken)
+```
+
+客户端的规则：
+
+- 请求带 `Authorization: Bearer <access token>`；access token 过期或收到 `401` 时，用 refresh token 刷新，再重试请求。
+- 刷新返回新的 refresh token 时替换保存的那一个；返回的 refresh token 为空时，继续使用已保存的。
+- 刷新返回 `401` 时让用户重新登录。
+
+登录的有效期按[配置](#configuration)计算，只在刷新时延长，所以 `idle_timeout` 必须长于 access token 的有效期，否则 `NewJWT` 会 panic。
+
+### 轮换与被盗识别
+
+refresh token 每次刷新都会更换。上一个 token 在轮换后的 30 秒内（`JWTConfig.Grace`）仍然可以刷新，但只得到新的 access token，这样客户端同时发起的几次刷新不会互相作废。超过宽限期还有人用上一个 token 刷新，说明它被另一方持有：框架撤销这次登录，双方都需要重新登录，然后调用 `OnReuse`：
+
+```go
+customerJWT := apitoken.NewJWT(customerTokens, apitoken.JWTConfig{
+    Keys: apitoken.HMACKeys(a.crypt),
+    OnReuse: func(ctx context.Context, t apitoken.Token) {
+        slog.WarnContext(ctx, "refresh token reused", "token", t.ID, "ip", t.IP)
+    },
+})
+```
+
+### access token 的内容
+
+access token 只包含签发时确定、之后不会变化的信息，**不包含权限**；权限仍由 `rest.Options.Accounts` 中的 Resolver 在每个请求中[加载](#loading-permissions)。Resolver 查库时，请求仍会访问数据库；不需要权限的入口可以把 Resolver 设为 `nil`。
+
+| claim | 内容 | 校验后的主体 |
+| --- | --- | --- |
+| `sub` | 主体，如 `customer:42`（`identity.Ref` 的字符串形式） | `Type`、`ID` |
+| `sid` | 登录的 ID，即 `api_tokens` 的行 ID | `Credential` |
+| `tid` | 绑定的租户 | `Tenant` |
+| `act` | [代为登录](authentication.md#impersonation)的实际操作者（RFC 8693） | `Impersonator` |
+| `iat`、`exp` | 签发与过期时间，过期时间不晚于登录本身 | — |
+| `iss`、`aud` | `JWTConfig.Issuer`、`Audience`，设置时才写入并校验 | — |
+
+`Credential` 与不透明 token 的含义相同，所以登出仍然是 `Store.Revoke(ctx, sub, sub.Credential)`。
+
+### 密钥
+
+`HMACKeys` 签名和校验用同一把密钥，只有持有应用密钥的服务能校验。[轮换应用密钥](encryption.md#rotating-keys)后，旧密钥签发的 access token 在过期前仍然有效。
+
+其他服务（网关、另一个语言写的服务）也要校验 access token 时，改用 Ed25519：私钥签名，公钥通过 JWKS 公开。轮换时把旧公钥放在后面，保留到旧 access token 全部过期：
+
+```go
+keys := apitoken.Ed25519Keys(a.cfg.JWTKey, a.cfg.PreviousJWTKey)
+customerJWT := apitoken.NewJWT(customerTokens, apitoken.JWTConfig{Keys: keys, Issuer: "https://shop.example.com"})
+router.Method(http.MethodGet, "/.well-known/jwks.json", customerJWT.JWKS())
+```
+
+`a.cfg.JWTKey` 是应用配置中的 `ed25519.PrivateKey`，用 `ed25519.GenerateKey` 生成，按应用保管密钥的方式存放。
 
 <a id="cleanup"></a>
 ## 过期清理

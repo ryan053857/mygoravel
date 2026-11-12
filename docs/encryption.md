@@ -164,6 +164,8 @@ crypt:
 
 之后新加密的数据和新发出的链接都使用新密钥；`Decrypt` 和 `VerifyURL` 依次尝试 `key` 和 `previous_keys`，旧数据和旧链接仍然有效。
 
+[API 令牌的 JWT 模式](api-tokens.md#jwt)用 `HMACKeys` 时，签名密钥也由应用密钥派生，轮换后旧密钥签发的 access token 在过期前仍然有效。其他包需要自己的密钥时调用 `Derive(purpose)`：它返回从 `key` 和 `previous_keys` 派生的子密钥，第一个用于签名，全部用于校验。
+
 旧密钥要一直保留，直到用它加密的数据都换成了新密钥。框架不提供重新加密的命令：需要时写一个一次性的[命令](commands.md#custom-commands)，逐行 `Decrypt` 再 `Encrypt`。密钥确实泄露时，换完数据后从 `previous_keys` 中删除旧密钥，旧链接也随之失效。
 
 <a id="testing"></a>

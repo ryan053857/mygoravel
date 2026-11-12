@@ -69,7 +69,7 @@ var rules = map[string]rule{
 	"command/httpcmd":    {layerEntry, []string{"command", "httpx"}},
 	"command/migratecmd": {layerEntry, []string{"command", "database"}},
 
-	"apitoken":         {layerFeature, []string{"errorx", "identity"}},
+	"apitoken":         {layerFeature, []string{"crypt", "errorx", "identity"}},
 	"authz":            {layerFeature, []string{"errorx", "identity"}},
 	"notification":     {layerFeature, []string{"errorx", "identity"}},
 	"feature":          {layerFeature, []string{"errorx", "identity"}},
