@@ -76,6 +76,10 @@ type Options struct {
 	Account func(ctx context.Context, sub identity.Subject) string
 	// Consent 渲染同意页，nil 时使用 ui.ConsentPage。表单的提交方式见 ui.ConsentPage。
 	Consent func(r *http.Request, p ui.ConsentProps) templ.Component
+	// DynamicRegistration 开启动态客户端注册（RFC 7591）：客户端在 POST /oauth/register 登记自己，得到 client_id。
+	// MCP 规范已把它标为过时，claude.ai 和 ChatGPT 都优先使用 Client ID Metadata Document，只在授权服务器不支持时才注册；
+	// 需要兼容只支持注册的客户端时开启。注册接口不需要认证，应当为它限流，并定时调用 CleanupClients。
+	DynamicRegistration bool
 	// TokenLifetime 是令牌的最长有效期，TokenIdleTimeout 是最长空闲时间，到期后客户端重新授权。
 	// 不大于 0 时分别为 DefaultTokenLifetime、DefaultTokenIdleTimeout。
 	TokenLifetime    time.Duration
@@ -159,7 +163,7 @@ func validate(opts Options) error {
 		seen[sc.Name] = true
 	}
 	for _, c := range opts.Clients {
-		if c.ID == "" || metadataURL(c.ID) || len(c.RedirectURIs) == 0 {
+		if c.ID == "" || metadataURL(c.ID) || strings.HasPrefix(c.ID, registeredPrefix) || len(c.RedirectURIs) == 0 {
 			return errors.Newf("pre-registered client %q needs a non-URL ID and redirect URIs", c.ID)
 		}
 	}
@@ -174,6 +178,7 @@ func validate(opts Options) error {
 //	POST /oauth/authorize                         用户同意或拒绝
 //	POST /oauth/token                             授权码换令牌
 //	POST /oauth/revoke                            撤销令牌（RFC 7009）
+//	POST /oauth/register                          动态客户端注册（RFC 7591），Options.DynamicRegistration 为 true 时
 func (s *Server) Routes(r chi.Router, pages *web.Pages) {
 	cors := httpx.CORS(httpx.DefaultCORSConfig())
 	r.With(cors).Get(MetadataPath, s.serveMetadata)
@@ -183,6 +188,10 @@ func (s *Server) Routes(r chi.Router, pages *web.Pages) {
 	r.With(cors).Post(RevokePath, s.revoke)
 	r.With(cors).Options(TokenPath, func(http.ResponseWriter, *http.Request) {})
 	r.With(cors).Options(RevokePath, func(http.ResponseWriter, *http.Request) {})
+	if s.opts.DynamicRegistration {
+		r.With(cors).Post(RegisterPath, s.register)
+		r.With(cors).Options(RegisterPath, func(http.ResponseWriter, *http.Request) {})
+	}
 }
 
 // Resource 返回 resource 作为受保护资源的信息，交给 mcpx.HandlerOptions.Resource 和 mcpx.ResourceMetadata。
@@ -205,7 +214,7 @@ func (s *Server) scopeNames() []string {
 }
 
 func (s *Server) encodeMetadata() []byte {
-	data, err := json.Marshal(map[string]any{
+	meta := map[string]any{
 		"issuer":                                         s.issuer,
 		"authorization_endpoint":                         s.issuer + AuthorizePath,
 		"token_endpoint":                                 s.issuer + TokenPath,
@@ -219,7 +228,11 @@ func (s *Server) encodeMetadata() []byte {
 		"revocation_endpoint_auth_methods_supported":     []string{"none"},
 		"client_id_metadata_document_supported":          true,
 		"authorization_response_iss_parameter_supported": true,
-	})
+	}
+	if s.opts.DynamicRegistration {
+		meta["registration_endpoint"] = s.issuer + RegisterPath
+	}
+	data, err := json.Marshal(meta)
 	if err != nil {
 		panic(errors.Wrap(err, "oauthserver: encode metadata"))
 	}
@@ -249,7 +262,7 @@ func (s *Server) Cleanup(ctx context.Context, limit int) (int, error) {
 //go:embed migrations
 var migrationFiles embed.FS
 
-// Migrations 返回授权码表 oauth_codes 的迁移，供应用发布。令牌保存在 apitoken 的表中。
+// Migrations 返回授权码表 oauth_codes 和动态注册客户端表 oauth_clients 的迁移，供应用发布。令牌保存在 apitoken 的表中。
 func Migrations() fs.FS {
 	f, err := fs.Sub(migrationFiles, "migrations")
 	if err != nil {

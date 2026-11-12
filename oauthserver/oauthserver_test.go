@@ -86,9 +86,15 @@ type env struct {
 	pages   *web.Pages
 	router  chi.Router
 	browser *webtest.Client
+	srv     *oauthserver.Server
 }
 
 func setup(t *testing.T) *env {
+	t.Helper()
+	return setupWith(t, nil)
+}
+
+func setupWith(t *testing.T, edit func(*oauthserver.Options)) *env {
 	t.Helper()
 	db := dbtest.Open(t, migrations(t))
 	tokens := apitoken.NewStore(db, apitoken.Config{Lifetime: time.Hour})
@@ -110,7 +116,7 @@ func setup(t *testing.T) *env {
 		Login:     "/login",
 		ErrorPage: func(status int, msg string) templ.Component { return textComponent("error %d %s", status, msg) },
 	})
-	srv := oauthserver.New(db, tokens, oauthserver.Options{
+	opts := oauthserver.Options{
 		Issuer:     issuer,
 		Resources:  []string{resource},
 		Scopes:     []oauthserver.Scope{{Name: "articles:read", Description: "查看文章"}, {Name: "articles:write", Description: "修改文章"}},
@@ -119,7 +125,11 @@ func setup(t *testing.T) *env {
 		Account:    func(_ context.Context, sub identity.Subject) string { return sub.ID + "@example.com" },
 		HTTPClient: fake.Client(),
 		Logger:     slog.New(slog.DiscardHandler),
-	})
+	}
+	if edit != nil {
+		edit(&opts)
+	}
+	srv := oauthserver.New(db, tokens, opts)
 	router := chi.NewRouter()
 	srv.Routes(router, pages)
 
@@ -134,7 +144,7 @@ func setup(t *testing.T) *env {
 	router.Handle("/mcp", mcpx.Handler(tools, mcpx.HandlerOptions{
 		Validate: tokens.ValidateFor(res.URL), Accounts: identity.Accounts{"editor": editors}, Resource: &res,
 	}))
-	return &env{db: db, tokens: tokens, fake: fake, pages: pages, router: router, browser: webtest.New(t, router)}
+	return &env{db: db, tokens: tokens, fake: fake, pages: pages, router: router, browser: webtest.New(t, router), srv: srv}
 }
 
 func authorizeQuery(edit func(url.Values)) url.Values {

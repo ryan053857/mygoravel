@@ -45,6 +45,13 @@ func (s *Server) resolve(ctx context.Context, id string) (*client, error) {
 	if c, ok := s.clients[id]; ok {
 		return &client{id: c.ID, name: c.Name, redirectURIs: c.RedirectURIs}, nil
 	}
+	if s.opts.DynamicRegistration && strings.HasPrefix(id, registeredPrefix) {
+		c, err := s.registered(ctx, id)
+		if err != nil || c != nil {
+			return c, err
+		}
+		return nil, errors.Newf("unknown client %q", id)
+	}
 	if !metadataURL(id) {
 		return nil, errors.Newf("unknown client %q", id)
 	}

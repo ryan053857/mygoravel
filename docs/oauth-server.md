@@ -7,6 +7,7 @@
     - [挂到 MCP 服务](#mcp)
 - [授权流程](#flow)
 - [客户端](#clients)
+    - [动态客户端注册](#dynamic-registration)
 - [令牌](#tokens)
 - [同意页](#consent-page)
 - [部署](#deployment)
@@ -60,6 +61,7 @@ oauth.Routes(router, pages)
 | `Resources` | 令牌可以用于的 MCP 服务地址，与用户在客户端中填写的完全相同 |
 | `Scopes` | 客户端可以申请的范围，见下一节 |
 | `Clients` | 预先登记的客户端，见[客户端](#clients) |
+| `DynamicRegistration` | 开启动态客户端注册，默认关闭，见[动态客户端注册](#dynamic-registration) |
 | `Brand`、`Account` | 同意页上方的名称和当前账号 |
 | `Consent` | 换成自己的同意页，见[同意页](#consent-page) |
 | `TokenLifetime`、`TokenIdleTimeout` | 令牌的最长有效期和最长空闲时间，默认 1 年和 30 天 |
@@ -121,6 +123,28 @@ router.Handle("/mcp", mcpx.Handler(tools, mcpx.HandlerOptions{
 - **预先登记的客户端**：自研的 agent 在 `Options.Clients` 中登记 ID、名称和回调地址。
 
 只支持公开客户端（不用客户端密钥，靠 PKCE 保证安全）。回调地址按完整地址匹配；本机地址（`localhost`、`127.0.0.1`）忽略端口，Claude Code 每次用不同的端口接收回调。
+
+<a id="dynamic-registration"></a>
+### 动态客户端注册
+
+有的客户端不提供 Client ID Metadata Document，只会先注册自己（RFC 7591）。MCP 规范已经把这种方式标为过时，claude.ai 和 ChatGPT 只在授权服务器不支持 Client ID Metadata Document 时才用它，所以默认关闭。需要兼容这类客户端时开启：
+
+```go
+oauthserver.Options{
+    // ……
+    DynamicRegistration: true,
+}
+```
+
+开启后元数据中有 `registration_endpoint`，客户端 `POST /oauth/register` 提交名称和回调地址，得到 `dcr_` 开头的 client_id，之后的授权与其他客户端相同。只登记公开客户端，回调地址必须是 https 地址或本机的 http 地址，最多 10 个。
+
+注册接口不需要认证，任何人都能调用：用[限流](rate-limiting.md)按 IP 限制它，并定时删除长期没有用于授权的注册：
+
+```go
+sched.Add("oauth:cleanup-clients", "@daily", schedule.Cleanup(oauth.CleanupClients(90*24*time.Hour), 1000))
+```
+
+删除注册不影响已经签发的令牌，客户端下次连接时重新注册。
 
 <a id="tokens"></a>
 ## 令牌
