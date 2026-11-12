@@ -6,6 +6,8 @@ pdf.unavailable: PDF 生成服务暂时不可用，请稍后再试
 feature.invalid: 开关设置不合法
 page.invalid_cursor: 分页游标无效
 rate_limit.exceeded: 请求过于频繁，请稍后再试
+captcha.failed: 人机验证未通过，请重试
+captcha.unavailable: 人机验证服务暂时不可用，请稍后再试
 ai.busy: 对话正在进行，请稍后再试
 ai.awaiting_approval: 对话正在等待审批，请先处理待审批的操作
 ai.not_pending: 没有这个待审批的操作

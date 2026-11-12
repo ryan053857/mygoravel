@@ -6,6 +6,8 @@ pdf.unavailable: PDF service is temporarily unavailable, please try again later
 feature.invalid: Invalid feature flag setting
 page.invalid_cursor: Invalid pagination cursor
 rate_limit.exceeded: Too many requests, please try again later
+captcha.failed: Human verification failed, please try again
+captcha.unavailable: Human verification is temporarily unavailable, please try again later
 ai.busy: The conversation is in progress, please try again later
 ai.awaiting_approval: The conversation is waiting for approval
 ai.not_pending: No such pending action

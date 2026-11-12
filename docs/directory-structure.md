@@ -148,7 +148,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 ```text
 功能        apitoken  login  authz  notification  activity  feature  operation  webhook  search  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  command
-基础设施    database  queue  schedule  monitor  lock  ratelimit  broadcast  filesystem  imgproxy  mail  pdf  outbound  sheet  document
+基础设施    database  queue  schedule  monitor  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  pdf  outbound  sheet  document
 基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt
 ```
 
@@ -188,6 +188,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
 | `ratelimit` | 按 key 限制操作频率，数据库与内存限流器，`Observe` 报告指标；`ratelimit/redislimit` 是 Redis 限流器 | [限流](rate-limiting.md)、[Redis 限流器](rate-limiting.md#redis-limiter) |
+| `captcha` | 在服务端校验 Turnstile、hCaptcha 的人机验证结果，挡住批量注册和提交表单的机器人 | [人机验证](login.md#captcha) |
 | `document/split` | 把 Markdown 切分为可追溯到原文的分段，供检索和计算向量使用 | [文档转换与切分](documents.md#splitting) |
 | `document/convert` | 把 PDF、Word、PowerPoint、Excel、CSV、HTML 等转换为 Markdown；各格式在子包中，`convert/all` 注册全部 | [文档转换与切分](documents.md#converting) |
 | `pdf` | 把 templ 页面生成为 PDF 的接口 | [生成 PDF](pdf.md) |

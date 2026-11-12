@@ -13,6 +13,7 @@
 - [后台创建账号](#admin-accounts)
 - [注销账号](#forget)
 - [限流与防探测](#limits)
+    - [人机验证](#captcha)
 - [清理](#cleanup)
 
 <a id="introduction"></a>
@@ -378,6 +379,63 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 默认限流器存在数据库中，多个实例共享计数。已经在用 Redis 时可以换成 [`redislimit`](rate-limiting.md#redis-limiter)。按 IP 的限流不在 `login` 中，需要时在登录接口上安装 [`httpx.RateLimit`](rate-limiting.md#http-middleware)。
 
 为了不暴露哪些邮箱注册过：密码登录对“邮箱不存在”和“密码错误”返回同一个错误，耗时相同；找回密码和不开放注册时的验证码不发给未注册的邮箱，但同样返回请求 ID。验证码在库中只保存由应用密钥派生的 HMAC，数据库泄露也不能在有效期内穷举出验证码；完成凭证只保存 SHA-256。
+
+<a id="captcha"></a>
+### 人机验证
+
+`Sends` 按标识计数。机器人每次换一个邮箱或手机号，这个限制就不起作用；换用代理池，按 IP 的限流也挡不住。验证码用短信发送时，被批量刷一晚就是一笔短信费。开放自助注册时，在发送验证码的接口前加上人机验证。`captcha` 包在服务端校验 [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/) 的结果：
+
+```yaml
+captcha:
+  secret: ${TURNSTILE_SECRET}
+  hostnames: [blog.example.com]
+```
+
+```go
+bots, err := captcha.New(cfg.Captcha, nil)
+```
+
+前端用 site key 渲染 Turnstile 组件，`data-action` 设为 `signup`，把组件得到的 token 和邮箱一起提交。接口先校验 token，再发送验证码：
+
+```go
+type RequestCodeInput struct {
+    Body struct {
+        Email   string `json:"email" format:"email"`
+        Captcha string `json:"captcha" doc:"Turnstile 组件得到的 token"`
+    }
+    ip string
+}
+
+// Resolve 记录客户端地址，见 Huma 的 Resolver。
+func (in *RequestCodeInput) Resolve(ctx huma.Context) []error {
+    in.ip, _, _ = net.SplitHostPort(ctx.RemoteAddr())
+    return nil
+}
+
+func requestCode(users *login.Realm, bots *captcha.Verifier) func(context.Context, *RequestCodeInput) (*RequestCodeOutput, error) {
+    return func(ctx context.Context, in *RequestCodeInput) (*RequestCodeOutput, error) {
+        if err := bots.Verify(ctx, in.Body.Captcha, "signup", in.ip); err != nil {
+            return nil, err
+        }
+        requestID, err := users.SendCode(ctx, login.SignIn, login.Email(in.Body.Email))
+        // ……
+    }
+}
+```
+
+没有通过时返回 `captcha.ErrFailed`（`422`），前端重置组件，让用户重新验证。token 只能校验一次，重复提交同一个 token 也会得到这个错误。Turnstile 连不上时返回 `captcha.ErrUnavailable`（`503`），请求不会被放行。
+
+`hostnames` 和 action 保证 token 来自自己的站点和这张表单：在注册页得到的 token，不能拿来提交联系表单。评论、联系表单等其他公开表单的做法相同，只是各用自己的 action。密码登录已经按账号限流，不需要人机验证。
+
+使用 hCaptcha 时把 `endpoint` 设为 `https://api.hcaptcha.com/siteverify`，action 传空字符串，因为 hCaptcha 不返回它。本地开发可以使用 Cloudflare 提供的[测试密钥](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)。测试中把 [`outboundtest`](outbound.md#testing) 的客户端传给 `captcha.New`，按需登记 `captcha.Turnstile` 地址的响应：
+
+```go
+fake := outboundtest.New(t)
+fake.On("POST " + captcha.Turnstile).Reply(outboundtest.JSON(200, map[string]any{
+    "success": true, "hostname": "blog.example.com", "action": "signup",
+}))
+bots, err := captcha.New(captcha.Config{Secret: "test"}, fake.Client())
+```
 
 <a id="cleanup"></a>
 ## 清理
