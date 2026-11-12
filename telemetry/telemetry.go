@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -82,6 +83,7 @@ type Providers struct {
 
 // Open 按 cfg 创建推送日志、指标和链路的 Provider，三者共用一个 resource：
 // service.name、service.version、service.instance.id（每个进程不同）、主机名和进程号。
+// 指标中还有 Go 运行时的内存、GC、goroutine 等指标（go.memory.used、go.goroutine.count 等）。
 // 用完后调用 Shutdown 发出缓冲中的数据。
 //
 // cfg.Endpoint 为空时返回不记录也不推送的 Provider，调用方不需要区分。
@@ -136,6 +138,9 @@ func Open(ctx context.Context, cfg Config) (*Providers, error) {
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metrics)),
 	)
+	if err := runtime.Start(runtime.WithMeterProvider(mp)); err != nil {
+		return nil, fmt.Errorf("telemetry: runtime metrics: %w", err)
+	}
 	lp := sdklog.NewLoggerProvider(
 		sdklog.WithResource(res),
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(logs)),

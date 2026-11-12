@@ -194,6 +194,7 @@ func DocRouter() chi.Routes {
 // HTTP 安装中间件、注册路由并取得监听端口，返回的函数运行 HTTP 服务，直到 ctx 被取消。
 func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
     router := chi.NewRouter()
+    router.Use(httpx.Telemetry(a.meters, a.tracers))
     router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
     router.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
     opts := API

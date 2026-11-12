@@ -90,7 +90,7 @@ func (a *Publish) Handle(ctx context.Context, subject identity.Subject, id uuid.
 - **不会丢通知**：文章发布成功，通知任务就一定在库里；邮件服务器暂时不可用时任务会自动重试。
 - **不会发错通知**：事务回滚时任务一起回滚，不会出现「邮件发出去了，文章没发布」。
 
-每个任务有一个 UUIDv7 作为 ID。`ctx` 中的 `request_id` 和 OpenTelemetry 链路会随任务保存，处理任务时还原到处理函数的 `ctx` 中，见[日志](#logging)和[链路追踪](telemetry.md#queue-tracing)。
+每个任务有一个 UUIDv7 作为 ID。`ctx` 中的 `request_id` 和 OpenTelemetry 链路会随任务保存，处理任务时还原到处理函数的 `ctx` 中，见[日志](#logging)和[链路追踪](telemetry.md#queue)。
 
 <a id="delayed-jobs"></a>
 ### 延迟执行
@@ -194,7 +194,7 @@ func (a *App) Worker(*command.Daemon) (func(context.Context) error, error) {
         return nil, err
     }
 
-    sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil)
+    sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil, queue.WithTelemetry(a.meters, a.tracers))
     router := queue.NewRouter(nil)
     queue.Handle(router, sub, "mail.send", mailer.Send)
     return func(ctx context.Context) error {
@@ -346,7 +346,7 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 
 队列的日志带有 `component=queue` 字段，可以[单独设置级别](logging.md#component-levels)。任务失败后等待重试记录为 `warn`，转入失败任务表记录为 `error`，日志中包含 topic、错误和下次重试的等待时间。
 
-处理函数的 `ctx` 中带有 `message_id`（任务 ID）、`attempt`（第几次执行），以及发布时的 `request_id`。使用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它们，可以把一个请求和它产生的任务串起来。使用链路追踪时，任务的执行还会出现在发布它的请求的链路中，见[链路追踪](telemetry.md#queue-tracing)。
+处理函数的 `ctx` 中带有 `message_id`（任务 ID）、`attempt`（第几次执行），以及发布时的 `request_id`。使用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它们，可以把一个请求和它产生的任务串起来。使用链路追踪时，任务的执行还会出现在发布它的请求的链路中，见[链路追踪](telemetry.md#queue)。
 
 <a id="observability"></a>
 ## 观测
@@ -356,21 +356,14 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 <a id="metrics"></a>
 ### 指标
 
-指标使用 OpenTelemetry 的接口，`a.meters` 是入口中创建的 `MeterProvider`，见[推送](telemetry.md#setup)。`Worker` 创建订阅者时传入它，记录每个任务的等待时长和处理耗时：
-
-```go
-sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil, queue.WithMeterProvider(a.meters))
-```
+指标使用 OpenTelemetry 的接口，`a.meters`、`a.tracers` 是入口中创建的 Provider，见[推送](telemetry.md#setup)。[`Worker`](#running-workers) 创建订阅者时用 `queue.WithTelemetry` 传入它们，记录每个任务的等待时长和处理耗时，并为每次执行创建 span，见[队列的链路](telemetry.md#queue)。
 
 队列中的任务数在采集时读取队列状态，每个注册了它的进程都会定期统计一次 `queue_jobs` 表。只在实例最少的那种进程中注册，通常是调度器：
 
 ```go
 func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
-    reg, err := queue.ObserveJobs(a.meters, queue.Database(a.db), queue.NewFailedJobs(a.db))
-    if err != nil {
-        return nil, err
-    }
-    sched := a.tasks()
+    reg := queue.ObserveJobs(a.meters, queue.Database(a.db), queue.NewFailedJobs(a.db))
+    sched := a.tasks(schedule.WithTelemetry(a.meters, a.tracers))
     return func(ctx context.Context) error {
         defer reg.Unregister()
         return sched.Run(ctx)
@@ -385,12 +378,12 @@ func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
 | `queue.jobs` | gauge | `queue.job.state` | 各状态的任务数：`ready`、`delayed`、`retrying`、`running`、`failed` |
 | `queue.job.oldest_ready_age` | gauge，秒 | | 积压最久的任务已经等了多久，没有积压时为 0 |
 
-所有指标都带有 `queue.driver` 和 `queue.topic` 属性。`queue.job.outcome` 是 `succeeded`、`retrying`、`failed`、`released`、`lease_lost`，与[任务事件](#job-events)对应。导出到 Prometheus 后，点换成下划线，单位成为后缀，例如 `queue_job_wait_seconds`。
+所有指标都带有 `messaging.system`（驱动名）和 `messaging.destination.name`（topic）属性，与队列的 span 相同。`queue.job.outcome` 是 `succeeded`、`retrying`、`failed`、`released`、`lease_lost`，与[任务事件](#job-events)对应。导出到 Prometheus 后，点换成下划线，单位成为后缀，例如 `queue_job_wait_seconds`。
 
 前两个由订阅者在处理任务时记录。后两个在采集时读取[队列状态](#queue-stats)和失败任务数，5 秒内的多次采集复用同一次读取；出现过的 topic 在任务清空后报告 0，而不是消失。调度器部署了多个实例时，每个实例读到的都是同一份全局数据，所以汇总时取最大值，不要求和。例如积压超过 5 分钟时告警：
 
 ```promql
-max by (queue_topic) (queue_job_oldest_ready_age_seconds) > 300
+max by (messaging_destination_name) (queue_job_oldest_ready_age_seconds) > 300
 ```
 
 HTTP 请求和定时任务的指标见[可观测性](telemetry.md)。

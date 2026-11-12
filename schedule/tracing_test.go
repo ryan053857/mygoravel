@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel/codes"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -20,7 +21,7 @@ func TestTracing(t *testing.T) {
 	spans := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
 	s := schedule.New(lock.New(locktest.NewStore()), schedule.DefaultConfig(), slog.New(slog.DiscardHandler),
-		schedule.WithTracerProvider(tp))
+		schedule.WithTelemetry(metricnoop.NewMeterProvider(), tp))
 	var inTask trace.SpanContext
 	s.Add("ok", "@everysecond", func(ctx context.Context) error {
 		inTask = trace.SpanContextFromContext(ctx)

@@ -109,6 +109,16 @@ func TestOpenPushesAllSignals(t *testing.T) {
 		}
 	}
 
+	names := map[string]bool{}
+	for _, sm := range metrics.GetResourceMetrics()[0].GetScopeMetrics() {
+		for _, m := range sm.GetMetrics() {
+			names[m.GetName()] = true
+		}
+	}
+	if !names["articles.published"] || !names["go.goroutine.count"] {
+		t.Errorf("metrics %v", names)
+	}
+
 	record := logs.GetResourceLogs()[0].GetScopeLogs()[0].GetLogRecords()[0]
 	if record.GetBody().GetStringValue() != "published" || string(record.GetTraceId()) != string(traces.GetResourceSpans()[0].GetScopeSpans()[0].GetSpans()[0].GetTraceId()) {
 		t.Errorf("log record %v not linked to the span", record)

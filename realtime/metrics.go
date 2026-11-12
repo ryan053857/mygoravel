@@ -7,12 +7,12 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// meterName 是实时频道指标的 instrumentation scope。
-const meterName = "github.com/ryan053857/mygoravel/realtime"
+// scopeName 是实时频道指标的 instrumentation scope。
+const scopeName = "github.com/ryan053857/mygoravel/realtime"
 
 // observe 登记两个指标：realtime.connections 是本实例当前的连接数，realtime.subscriptions 是这些连接的订阅数。
 func (rt *Realtime) observe(mp metric.MeterProvider) (metric.Registration, error) {
-	meter := mp.Meter(meterName)
+	meter := mp.Meter(scopeName)
 	connections, err := meter.Int64ObservableGauge("realtime.connections", metric.WithUnit("{connection}"),
 		metric.WithDescription("Client connections on this instance."))
 	if err != nil {

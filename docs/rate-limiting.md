@@ -177,7 +177,7 @@ router.Use(httpx.RateLimit(redislimit.New(a.rdb, "blog:http", a.cfg.HTTP.RateLim
 <a id="metrics"></a>
 ## 指标
 
-被拒绝的请求返回 `429`，已经出现在 [HTTP 请求的指标](telemetry.md#http-metrics)中，按路由就能看出哪个接口被限流。还看不出来的是：被哪个限流器拒绝、拒绝占全部调用的比例、存储是否出错，以及 HTTP 之外的调用。用 `ratelimit.Observe` 包装限流器，`a.meters` 是入口中[创建](telemetry.md#setup)的 `MeterProvider`：
+被拒绝的请求返回 `429`，已经出现在 [HTTP 请求的指标](telemetry.md#http)中，按路由就能看出哪个接口被限流。还看不出来的是：被哪个限流器拒绝、拒绝占全部调用的比例、存储是否出错，以及 HTTP 之外的调用。用 `ratelimit.Observe` 包装限流器，`a.meters` 是入口中[创建](telemetry.md#setup)的 `MeterProvider`：
 
 ```go
 logins := ratelimit.NewDatabase(a.db, "login", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})

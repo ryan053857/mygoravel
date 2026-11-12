@@ -212,7 +212,7 @@ http:
 | `request_header`、`response_header` | 记录请求头、响应头 | `false` |
 | `request_body`、`response_body` | 记录请求体、响应体，各最多 64 KiB | `false` |
 
-安装了 [`httpx.Tracing`](telemetry.md#http-tracing) 时，访问日志和其他日志一样自动带有 `trace_id` 和 `span_id`。
+安装了 [`httpx.Telemetry`](telemetry.md#http) 时，访问日志和其他日志一样自动带有 `trace_id` 和 `span_id`。
 
 记录请求头时，`Authorization`、`Cookie`、`X-Auth-Token`、`X-CSRF-Token`、`X-XSRF-Token` 始终隐藏，记录响应头时 `Set-Cookie` 始终隐藏。还需要隐藏其他字段时，见[敏感信息脱敏](logging.md#redacting-sensitive-data)。
 
@@ -286,14 +286,14 @@ router.Use(httpx.Compress())
 <a id="metrics"></a>
 ## 指标
 
-`httpx.Metrics` 把每个请求的耗时记录为 OpenTelemetry 指标 `http.server.request.duration`，按方法、状态码和路由模板区分。它安装在 `httpx.Defaults` 之前，才能记录 panic 转换成的 `500`：
+`httpx.Telemetry` 为每个请求创建 OpenTelemetry span，并把耗时记录为指标 `http.server.request.duration`，按方法、状态码和路由模板区分。它安装在 `httpx.Defaults` 之前，访问日志才能带上 `trace_id`，panic 转换成的 `500` 也会被记录：
 
 ```go
-router.Use(httpx.Metrics(a.meters))
+router.Use(httpx.Telemetry(a.meters, a.tracers))
 router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 ```
 
-`a.meters` 的创建和指标的属性见[可观测性](telemetry.md#http-metrics)。为每个请求创建链路的 `httpx.Tracing` 也在那里介绍。
+`a.meters`、`a.tracers` 的创建和指标的属性见[可观测性](telemetry.md#http)。
 
 <a id="custom-stack"></a>
 ## 自行组装

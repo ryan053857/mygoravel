@@ -34,7 +34,7 @@ func gauges(t *testing.T, reader *sdkmetric.ManualReader) map[string]float64 {
 	}
 	out := map[string]float64{}
 	key := func(name string, attrs attribute.Set) string {
-		topic, _ := attrs.Value("queue.topic")
+		topic, _ := attrs.Value("messaging.destination.name")
 		state, _ := attrs.Value("queue.job.state")
 		return name + " " + topic.AsString() + " " + state.AsString()
 	}
@@ -63,10 +63,7 @@ func TestObserveJobs(t *testing.T) {
 		{Topic: "full", Jobs: map[State]int{StateReady: 2, StateDelayed: 1, StateRetrying: 0, StateRunning: 3}, OldestReadyAt: now.Add(-time.Minute)},
 		{Topic: "partial", Jobs: map[State]int{StateReady: 4, StateRunning: 0}},
 	}}
-	reg, err := ObserveJobs(mp, d, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reg := ObserveJobs(mp, d, nil)
 	defer reg.Unregister()
 
 	got := gauges(t, reader)

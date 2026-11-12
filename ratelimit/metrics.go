@@ -8,8 +8,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// meterName 是限流指标的 instrumentation scope。
-const meterName = "github.com/ryan053857/mygoravel/ratelimit"
+// scopeName 是限流指标的 instrumentation scope。
+const scopeName = "github.com/ryan053857/mygoravel/ratelimit"
 
 // 指标的属性名。
 const (
@@ -40,7 +40,7 @@ func Observe(mp metric.MeterProvider, name string, l Limiter) Limiter {
 	case l == nil:
 		panic("ratelimit: nil limiter")
 	}
-	requests, err := mp.Meter(meterName).Int64Counter("ratelimit.requests", metric.WithUnit("{request}"),
+	requests, err := mp.Meter(scopeName).Int64Counter("ratelimit.requests", metric.WithUnit("{request}"),
 		metric.WithDescription("Rate limiter decisions, by result."))
 	if err != nil {
 		panic(errors.Wrap(err, "ratelimit: create ratelimit.requests"))

@@ -21,11 +21,13 @@ import (
 	"github.com/uptrace/bun"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/queue"
@@ -822,7 +824,7 @@ func metrics(t *testing.T, s *setup) {
 			}
 			return nil
 		})
-	}, queue.WithMeterProvider(mp), queue.WithObserver(rec.observe))
+	}, queue.WithTelemetry(mp, tracenoop.NewTracerProvider()), queue.WithObserver(rec.observe))
 	s.publish(t, "jobs", 1)
 	s.publish(t, "jobs", 2)
 	eventually(t, 5*time.Second, func() bool {
@@ -830,7 +832,7 @@ func metrics(t *testing.T, s *setup) {
 	})
 	stop()
 
-	topic := attribute.NewSet(attribute.String("queue.driver", s.driver.Name()), attribute.String("queue.topic", "jobs"))
+	topic := attribute.NewSet(attribute.String("messaging.system", s.driver.Name()), attribute.String("messaging.destination.name", "jobs"))
 	got := collect(t, reader)
 	if n := histogramCount(t, got["queue.job.wait"], topic); n != 2 {
 		t.Fatalf("queue.job.wait count %d", n)
@@ -845,10 +847,7 @@ func metrics(t *testing.T, s *setup) {
 	// 队列中留一个到期的任务，失败任务表中有一个。
 	s.publish(t, "jobs", 3)
 	eventually(t, 5*time.Second, func() bool {
-		reg, err := queue.ObserveJobs(mp, s.driver, s.failed)
-		if err != nil {
-			t.Fatal(err)
-		}
+		reg := queue.ObserveJobs(mp, s.driver, s.failed)
 		defer func() { _ = reg.Unregister() }()
 		got := collect(t, reader)
 		state := func(st queue.State) attribute.Set {
@@ -877,7 +876,7 @@ func tracing(t *testing.T, s *setup) {
 			}
 			return nil
 		})
-	}, queue.WithTracerProvider(tp))
+	}, queue.WithTelemetry(metricnoop.NewMeterProvider(), tp))
 
 	ctx, request := tp.Tracer("test").Start(context.Background(), "request")
 	if err := queue.Publish(ctx, s.driver, "jobs", payload{N: 1}); err != nil {

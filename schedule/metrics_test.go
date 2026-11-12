@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/lock/locktest"
@@ -33,7 +34,7 @@ func TestMetrics(t *testing.T) {
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	quiet := slog.New(slog.DiscardHandler)
 	newScheduler := func(store lock.Store) *schedule.Scheduler {
-		return schedule.New(lock.New(store), schedule.DefaultConfig(), quiet, schedule.WithMeterProvider(mp))
+		return schedule.New(lock.New(store), schedule.DefaultConfig(), quiet, schedule.WithTelemetry(mp, tracenoop.NewTracerProvider()))
 	}
 
 	s := newScheduler(locktest.NewStore())

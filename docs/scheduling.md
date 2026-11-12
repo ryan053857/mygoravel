@@ -101,7 +101,7 @@ func (a *App) tasks(opts ...schedule.SchedulerOption) *schedule.Scheduler {
 
 // Scheduler 装配调度器，返回的函数按时执行定时任务，直到 ctx 被取消。
 func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
-    return a.tasks().Run, nil
+    return a.tasks(schedule.WithTelemetry(a.meters, a.tracers)).Run, nil
 }
 
 // Schedule 只运行调度器，schedule 命令调用它。
@@ -153,7 +153,7 @@ sched.Add("reports:daily", "0 3 * * *", func(ctx context.Context) error {
 
 队列负责重试、记录失败，耗时的工作也不会占用调度器所在的进程。
 
-调度器的日志带有 `component=schedule` 字段，任务的 `ctx` 中带有 `task` 字段，用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它。传入 `schedule.WithMeterProvider(a.meters)` 时，调度器还会报告每次执行的耗时、结果和被跳过的次数，用来发现长时间没有成功执行的任务，见[定时任务的指标](telemetry.md#schedule-metrics)；传入 `schedule.WithTracerProvider(a.tracers)` 时，每次执行是一条链路的起点。
+调度器的日志带有 `component=schedule` 字段，任务的 `ctx` 中带有 `task` 字段，用 `slog.InfoContext(ctx, ...)` 记录的日志会自动带上它。`schedule.WithTelemetry` 让调度器报告每次执行的耗时、结果和被跳过的次数，用来发现长时间没有成功执行的任务；每次执行还是一条链路的起点，见[定时任务的指标和链路](telemetry.md#schedule)。
 
 调度器不补跑错过的触发：进程暂停或调度落后不到一分钟时，错过的触发会补上，同一个任务只补一次；部署、重启期间错过的触发直接跳过。收到停止信号后，调度器不再触发新任务，等待执行中的任务结束，最多等待 `shutdown_timeout`，超时后取消它们的 `ctx`。这个时间在应用配置的调度段中设置：
 
@@ -258,7 +258,7 @@ queue:prune-failed          @daily        2026-11-12 00:00:00  6h59m   no       
 
 ```go
 func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
-    return a.tasks(schedule.WithObserver(a.recordRun)).Run, nil
+    return a.tasks(schedule.WithTelemetry(a.meters, a.tracers), schedule.WithObserver(a.recordRun)).Run, nil
 }
 
 func (a *App) recordRun(ctx context.Context, e schedule.Event) {

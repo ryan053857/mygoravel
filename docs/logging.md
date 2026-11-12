@@ -170,7 +170,7 @@ api := rest.New(rest.Options{Router: router})
 
 这样，同一个请求的访问日志、错误诊断和业务日志都可以通过 `request_id` 关联起来。部署在反向代理之后时，还可以沿用代理生成的请求 ID，把代理日志也关联进来。
 
-`ctx` 中有 OpenTelemetry 的 span 时，日志还会自动带上 `trace_id` 和 `span_id`，在链路追踪系统中可以从一个 span 直接找到它的日志，见[链路追踪](telemetry.md#tracing)。
+`ctx` 中有 OpenTelemetry 的 span 时，日志还会自动带上 `trace_id` 和 `span_id`，在链路追踪系统中可以从一个 span 直接找到它的日志，见[链路与日志](telemetry.md#trace-logs)。
 
 <a id="custom-context-fields"></a>
 ### 添加自定义字段
