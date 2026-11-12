@@ -27,6 +27,9 @@ import (
 	"github.com/klippa-app/go-pdfium/references"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/webassembly"
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 
 	"github.com/ryan053857/mygoravel/document/convert"
 	"github.com/ryan053857/mygoravel/document/internal/mdwrite"
@@ -73,6 +76,16 @@ type Converter struct {
 	closeErr error
 	pool     pdfium.Pool
 	inFlight sync.WaitGroup
+}
+
+// compiled 让进程中的所有转换器共用编译好的 PDFium 模块：编译需要几秒，只在第一个转换器启动时进行一次。
+var compiled = wazero.NewCompilationCache()
+
+// runtimeConfig 与 go-pdfium 的默认配置相同（PDFium 用 WebAssembly 的异常处理实现 setjmp/longjmp），只是加上共用的编译缓存。
+func runtimeConfig() wazero.RuntimeConfig {
+	return wazero.NewRuntimeConfig().
+		WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling).
+		WithCompilationCache(compiled)
 }
 
 // New 返回 PDF 转换器。PDFium 在第一次使用时启动。
@@ -122,7 +135,7 @@ func (c *Converter) acquire(ctx context.Context) (pdfium.Pool, error) {
 		return nil, convert.ErrClosed
 	}
 	if c.pool == nil {
-		pool, err := webassembly.Init(webassembly.Config{MaxTotal: c.opts.Workers})
+		pool, err := webassembly.Init(webassembly.Config{MaxTotal: c.opts.Workers, RuntimeConfig: runtimeConfig()})
 		if err != nil {
 			<-c.slots
 			return nil, fmt.Errorf("pdf: start PDFium: %w", err)

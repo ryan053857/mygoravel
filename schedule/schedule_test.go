@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -192,30 +193,33 @@ func TestFailuresAndPanics(t *testing.T) {
 	}
 }
 
+// 假时钟从整秒开始，2.5 秒中恰好有两个整秒。
 func TestRun(t *testing.T) {
-	var n atomic.Int64
-	s := newScheduler()
-	s.Add("tick", "@everysecond", counter(&n))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- s.Run(ctx) }()
-	time.Sleep(2500 * time.Millisecond)
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if got := n.Load(); got < 2 || got > 3 {
-		t.Fatalf("ran %d times in 2.5s", got)
-	}
-	if err := s.Run(context.Background()); err == nil {
-		t.Fatal("second Run should fail")
-	}
-	defer func() {
-		if recover() == nil {
-			t.Fatal("Add after Run did not panic")
+	synctest.Test(t, func(t *testing.T) {
+		var n atomic.Int64
+		s := newScheduler()
+		s.Add("tick", "@everysecond", counter(&n))
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- s.Run(ctx) }()
+		time.Sleep(2500 * time.Millisecond)
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
 		}
-	}()
-	s.Add("late", "@hourly", counter(&n))
+		if got := n.Load(); got != 2 {
+			t.Fatalf("ran %d times in 2.5s", got)
+		}
+		if err := s.Run(context.Background()); err == nil {
+			t.Fatal("second Run should fail")
+		}
+		defer func() {
+			if recover() == nil {
+				t.Fatal("Add after Run did not panic")
+			}
+		}()
+		s.Add("late", "@hourly", counter(&n))
+	})
 }
 
 func TestCleanup(t *testing.T) {

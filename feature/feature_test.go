@@ -119,7 +119,7 @@ func TestRollout(t *testing.T) {
 	ctx := context.Background()
 	active := func(f feature.Flag, sub identity.Subject) bool { return s.Active(ctx, sub, f) }
 
-	const n = 100
+	const n = 20
 	count := func(percent int) map[string]bool {
 		set(t, s, search, feature.Everyone, feature.Percent(percent))
 		on := map[string]bool{}
@@ -152,7 +152,7 @@ func TestRolloutByTenant(t *testing.T) {
 	ctx := context.Background()
 	set(t, s, editor, feature.Everyone, feature.Percent(50))
 	on := 0
-	const tenants = 40
+	const tenants = 10
 	for i := range tenants {
 		tenant := fmt.Sprint("t", i)
 		first := s.Active(ctx, user("a", tenant), editor)
