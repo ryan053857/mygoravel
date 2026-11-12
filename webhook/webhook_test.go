@@ -82,6 +82,7 @@ func jobCount(t *testing.T, db bun.IDB) int {
 }
 
 func TestEndpoints(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 
@@ -153,6 +154,7 @@ func TestEndpoints(t *testing.T) {
 }
 
 func TestSend(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	send := func(sub identity.Subject, typ string) {
@@ -340,6 +342,7 @@ func waitFor(t *testing.T, db bun.IDB, tenant string, id uuid.UUID, status webho
 }
 
 func TestDeliver(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	ok := newReceiver(t)
@@ -403,6 +406,7 @@ func TestDeliver(t *testing.T) {
 
 // 默认客户端拒绝内网地址：投递直接标记为失败，不再重试，接收方收不到请求。
 func TestDeliverRefusesPrivateAddresses(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	rcv := newReceiver(t)
@@ -419,6 +423,7 @@ func TestDeliverRefusesPrivateAddresses(t *testing.T) {
 }
 
 func TestDeliverRotatedAndDisabled(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	rcv := newReceiver(t)
@@ -460,6 +465,7 @@ func TestDeliverRotatedAndDisabled(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	create(t, db, "acme", "https://a.example", "*")

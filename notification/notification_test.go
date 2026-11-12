@@ -57,6 +57,7 @@ func unread(t *testing.T, db bun.IDB, r notification.Recipient) int {
 }
 
 func TestSendWritesOneRowPerRecipient(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	ctx := context.Background()
 	before := time.Now().UTC().Add(-time.Second)
@@ -93,6 +94,7 @@ func TestSendWritesOneRowPerRecipient(t *testing.T) {
 }
 
 func TestSendWithoutRecipientsOrData(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	if sent := send(t, db, "nobody"); sent != nil {
 		t.Fatalf("sent=%+v", sent)
@@ -105,6 +107,7 @@ func TestSendWithoutRecipientsOrData(t *testing.T) {
 }
 
 func TestSendRollsBackWithTransaction(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	ctx := context.Background()
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -120,6 +123,7 @@ func TestSendRollsBackWithTransaction(t *testing.T) {
 }
 
 func TestSendRejectsInvalid(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	long := strings.Repeat("x", 192)
 	for name, c := range map[string]struct {
@@ -139,6 +143,7 @@ func TestSendRejectsInvalid(t *testing.T) {
 }
 
 func TestListFiltersAndPages(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	ctx := context.Background()
 	first := send(t, db, "e1", alice, bob)
@@ -181,6 +186,7 @@ func TestListFiltersAndPages(t *testing.T) {
 }
 
 func TestGetOnlyReturnsOwnNotification(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	ctx := context.Background()
 	sent := send(t, db, "e1", alice)
@@ -199,6 +205,7 @@ func TestGetOnlyReturnsOwnNotification(t *testing.T) {
 }
 
 func TestMarkReadOnlyAffectsOwnUnreadNotifications(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	ctx := context.Background()
 	forAlice := send(t, db, "e1", alice)
@@ -238,6 +245,7 @@ func TestMarkReadOnlyAffectsOwnUnreadNotifications(t *testing.T) {
 }
 
 func TestDeleteOnlyAffectsOwnNotifications(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	ctx := context.Background()
 	forAlice := send(t, db, "e1", alice)
@@ -258,6 +266,7 @@ func TestDeleteOnlyAffectsOwnNotifications(t *testing.T) {
 }
 
 func TestCleanupDeletesOldNotifications(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, notification.Migrations())
 	ctx := context.Background()
 	for range 3 {

@@ -23,6 +23,7 @@ func grant() apitoken.Grant {
 }
 
 func TestOAuthToken(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
 	acme := alice
@@ -98,6 +99,7 @@ func TestOAuthToken(t *testing.T) {
 }
 
 func TestOAuthTokenSlidingExpiry(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
 		s := newStore(t)
@@ -122,6 +124,7 @@ func TestOAuthTokenSlidingExpiry(t *testing.T) {
 }
 
 func TestAuthorizeValidation(t *testing.T) {
+	t.Parallel()
 	s := newStore(t)
 	for name, edit := range map[string]func(*apitoken.Grant){
 		"no client":   func(g *apitoken.Grant) { g.ClientID = "" },

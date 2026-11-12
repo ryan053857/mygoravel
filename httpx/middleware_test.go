@@ -21,6 +21,7 @@ import (
 )
 
 func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {
+	t.Parallel()
 	var seen string
 	handler := httpx.AssignRequestID(httpx.DefaultRequestIDConfig())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = httpx.RequestID(r.Context())
@@ -48,6 +49,7 @@ func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {
 }
 
 func TestAssignRequestIDReadsConfiguredHeader(t *testing.T) {
+	t.Parallel()
 	var seen string
 	handler := httpx.AssignRequestID(httpx.RequestIDConfig{Header: "X-Amzn-Trace-Id"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = httpx.RequestID(r.Context())
@@ -63,6 +65,7 @@ func TestAssignRequestIDReadsConfiguredHeader(t *testing.T) {
 }
 
 func TestInvalidParametersPanicInsteadOfDisabling(t *testing.T) {
+	t.Parallel()
 	for name, build := range map[string]func(){
 		"RequestID": func() { httpx.AssignRequestID(httpx.RequestIDConfig{Header: "bad header"}) },
 		"AccessLog": func() { httpx.AccessLog(httpx.AccessLogConfig{IgnorePaths: []string{"healthz"}}, nil) },
@@ -86,6 +89,7 @@ func TestInvalidParametersPanicInsteadOfDisabling(t *testing.T) {
 }
 
 func TestDefaultsLogPanicAsServerError(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	router := chi.NewRouter()
 	router.Use(httpx.Defaults(httpx.DefaultConfig(), slog.New(slog.NewJSONHandler(&logs, nil)), nil)...)
@@ -114,6 +118,7 @@ func TestDefaultsLogPanicAsServerError(t *testing.T) {
 }
 
 func TestBodyLimitRejectsStreamedOverflow(t *testing.T) {
+	t.Parallel()
 	handler := httpx.BodyLimit(httpx.BodyLimitConfig{MaxBytes: 3})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.ReadAll(r.Body); err == nil {
 			t.Fatal("overflow accepted")
@@ -146,6 +151,7 @@ func TestNilLoggerFallsBackToSlogDefault(t *testing.T) {
 }
 
 func TestDefaultsNegotiateBuiltinLocale(t *testing.T) {
+	t.Parallel()
 	var got string
 	router := chi.NewRouter()
 	router.Use(httpx.Defaults(httpx.DefaultConfig(), slog.New(slog.DiscardHandler), nil)...)
@@ -165,6 +171,7 @@ func TestDefaultsNegotiateBuiltinLocale(t *testing.T) {
 
 // Defaults 不设置请求超时：Timeout 按路由组安装，流式路由不能有超时。
 func TestDefaultsSetNoDeadline(t *testing.T) {
+	t.Parallel()
 	handler := chi.Chain(httpx.Defaults(httpx.DefaultConfig(), slog.New(slog.DiscardHandler), nil)...).
 		HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, ok := r.Context().Deadline(); ok {

@@ -160,6 +160,7 @@ func (s *tokens) setDown(down bool) {
 }
 
 func TestHubPublishReachesClientsAndSubscribers(t *testing.T) {
+	t.Parallel()
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{}, nil)
 	n.rt.Channel("articles", realtime.Public())
 	c := mustConnect(t, n.url, "", nil)
@@ -184,6 +185,7 @@ func TestHubPublishReachesClientsAndSubscribers(t *testing.T) {
 }
 
 func TestAcrossInstances(t *testing.T) {
+	t.Parallel()
 	b := &bus{}
 	a := start(t, b.backend(), realtime.Options{}, nil)
 	other := start(t, b.backend(), realtime.Options{}, nil)
@@ -227,6 +229,7 @@ func TestAcrossInstances(t *testing.T) {
 }
 
 func TestUnsubscribeAcrossInstances(t *testing.T) {
+	t.Parallel()
 	b := &bus{}
 	store := &tokens{}
 	a := start(t, b.backend(), realtime.Options{Authenticate: store.validate}, nil)
@@ -261,6 +264,7 @@ func TestUnsubscribeAcrossInstances(t *testing.T) {
 }
 
 func TestChannelRules(t *testing.T) {
+	t.Parallel()
 	store := &tokens{}
 	var down atomic.Bool
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate}, nil)
@@ -308,6 +312,7 @@ func TestChannelRules(t *testing.T) {
 }
 
 func TestClientPublishNeedsRuleAndSubscription(t *testing.T) {
+	t.Parallel()
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{}, nil)
 	n.rt.Channel("articles", realtime.Public())
 	n.rt.Channel("typing:{room}", realtime.Public().ClientPublish())
@@ -327,6 +332,7 @@ func TestClientPublishNeedsRuleAndSubscription(t *testing.T) {
 
 // Options.Accounts 之外的账号体系的 token 被拒绝，与无效 token 相同。
 func TestTokenAccounts(t *testing.T) {
+	t.Parallel()
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{
 		Authenticate: (&tokens{}).validate, // 给出 user 类型的主体
 		Accounts:     identity.Accounts{"customer": nil},
@@ -337,6 +343,7 @@ func TestTokenAccounts(t *testing.T) {
 }
 
 func TestAccountsRequired(t *testing.T) {
+	t.Parallel()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	t.Cleanup(func() { _ = hub.Close() })
 	defer func() {
@@ -348,6 +355,7 @@ func TestAccountsRequired(t *testing.T) {
 }
 
 func TestTokenAuthentication(t *testing.T) {
+	t.Parallel()
 	store := &tokens{}
 	store.revoke("revoked")
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate}, nil)
@@ -376,6 +384,7 @@ func TestTokenAuthentication(t *testing.T) {
 }
 
 func TestTokenBoundToAnotherTenantIsRejected(t *testing.T) {
+	t.Parallel()
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{
 		Authenticate: func(context.Context, string) (identity.Subject, error) {
 			return identity.Subject{Type: "user", ID: "alice", Tenant: "acme"}, nil
@@ -394,6 +403,7 @@ func TestTokenBoundToAnotherTenantIsRejected(t *testing.T) {
 // Resolve 加载 token 连接的权限：频道的授权函数看到的是 Resolve 之后的主体，凭据字段仍然取自 token；
 // Resolve 拒绝时连接不成立，暂时故障时客户端稍后重连。
 func TestResolveTokenSubject(t *testing.T) {
+	t.Parallel()
 	var (
 		mu    sync.Mutex
 		state = "member"
@@ -470,6 +480,7 @@ func TestResolveRecheckDisconnects(t *testing.T) {
 // Options.Tenant 把连接所在的租户写入 context：Resolve 按它加载权限，租户频道的授权函数看到的主体带着这个租户，
 // 绑定了其他租户的 token 被拒绝。
 func TestTenantOption(t *testing.T) {
+	t.Parallel()
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{
 		Authenticate: func(_ context.Context, token string) (identity.Subject, error) {
 			bound, _ := strings.CutPrefix(token, "bound-to-")
@@ -500,6 +511,7 @@ func TestTenantOption(t *testing.T) {
 }
 
 func TestRevokedTokenDisconnects(t *testing.T) {
+	t.Parallel()
 	store := &tokens{}
 	// 复查信号经由另一个 Hub 传递也可以：Credentials 只负责提醒。
 	signals := broadcast.New(broadcasttest.NewBackend(), nil)
@@ -603,6 +615,7 @@ func TestBehindMiddleware(t *testing.T) {
 }
 
 func TestOrigin(t *testing.T) {
+	t.Parallel()
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{TrustedOrigins: []string{"https://app.example.com"}}, nil)
 	if _, resp, err := dial(t, n.url, http.Header{"Origin": {"https://evil.example.com"}}); err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("cross-origin connection: err=%v resp=%v", err, resp)
@@ -619,6 +632,7 @@ func TestOrigin(t *testing.T) {
 }
 
 func TestLostMessagesDisconnectClients(t *testing.T) {
+	t.Parallel()
 	b := &bus{}
 	backend := b.backend()
 	n := start(t, backend, realtime.Options{}, nil)
@@ -638,6 +652,7 @@ func TestLostMessagesDisconnectClients(t *testing.T) {
 }
 
 func TestShutdownDisconnectsClients(t *testing.T) {
+	t.Parallel()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer hub.Close()
 	rt, err := realtime.New(hub, realtime.Options{})
@@ -661,6 +676,7 @@ func TestShutdownDisconnectsClients(t *testing.T) {
 }
 
 func TestChannelPatterns(t *testing.T) {
+	t.Parallel()
 	match, err := realtime.Compile("t:{tenant}:chat.{conversation}")
 	if err != nil {
 		t.Fatal(err)
@@ -684,6 +700,7 @@ func TestChannelPatterns(t *testing.T) {
 }
 
 func TestAcrossInstancesOnRedis(t *testing.T) {
+	t.Parallel()
 	rdb, channel := redistest.Standalone.Open(t), "test:realtime:"+rand.Text()
 	a := start(t, redisbroadcast.New(rdb, channel), realtime.Options{}, nil)
 	b := start(t, redisbroadcast.New(rdb, channel), realtime.Options{}, nil)
@@ -713,6 +730,7 @@ func TestAcrossInstancesOnRedis(t *testing.T) {
 }
 
 func TestMetrics(t *testing.T) {
+	t.Parallel()
 	reader := sdkmetric.NewManualReader()
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{MeterProvider: sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))}, nil)
 	n.rt.Channel("room:{id}", realtime.Public())

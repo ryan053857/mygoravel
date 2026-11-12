@@ -13,6 +13,7 @@ import (
 )
 
 func TestDefaultConfigIsValid(t *testing.T) {
+	t.Parallel()
 	if err := httpx.DefaultConfig().Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +35,7 @@ func TestDefaultConfigIsValid(t *testing.T) {
 }
 
 func TestListenAndServeStopsOnCancel(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -52,6 +54,7 @@ func TestListenAndServeStopsOnCancel(t *testing.T) {
 }
 
 func TestListenAndServeReportsListenError(t *testing.T) {
+	t.Parallel()
 	busy, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +67,7 @@ func TestListenAndServeReportsListenError(t *testing.T) {
 }
 
 func TestServeRejectsInvalidConfig(t *testing.T) {
+	t.Parallel()
 	err := httpx.ListenAndServe(context.Background(), httpx.Config{Addr: "127.0.0.1:0"}, http.NotFoundHandler(), httpx.ServeOptions{})
 	if err == nil || !strings.Contains(err.Error(), "must be positive") {
 		t.Fatal("zero timeouts must be rejected, not defaulted", err)
@@ -71,6 +75,7 @@ func TestServeRejectsInvalidConfig(t *testing.T) {
 }
 
 func TestServeClosesListenerOnInvalidConfig(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +89,7 @@ func TestServeClosesListenerOnInvalidConfig(t *testing.T) {
 }
 
 func TestMiddlewareConfigsValidate(t *testing.T) {
+	t.Parallel()
 	if err := httpx.DefaultConfig().RateLimit.Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -17,6 +17,7 @@ func texts(tokens []search.Token) []string {
 }
 
 func TestTokenizer(t *testing.T) {
+	t.Parallel()
 	text := "我们用搜索引擎做全文搜索，Go语言"
 	query := texts(gse.Tokenizer.Query(text))
 	index := texts(gse.Tokenizer.Index(text))

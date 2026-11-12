@@ -77,6 +77,7 @@ func collect(lines <-chan string, n int, d time.Duration) []string {
 }
 
 func TestSSEJSON(t *testing.T) {
+	t.Parallel()
 	url, _ := startServer(t, httpx.DefaultConfig(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = httpx.SSE(w, r, func(s *httpx.Stream) error {
 			_ = s.Send(httpx.Event{}, "line1\nline2")
@@ -113,6 +114,7 @@ func TestSSESurvivesWriteTimeoutAndSendsHeartbeats(t *testing.T) {
 }
 
 func TestSSEEndsWhenServerDrains(t *testing.T) {
+	t.Parallel()
 	cfg := httpx.DefaultConfig()
 	cfg.ShutdownTimeout = 5 * time.Second
 	ended := make(chan struct{})
@@ -133,6 +135,7 @@ func TestSSEEndsWhenServerDrains(t *testing.T) {
 }
 
 func TestSSESendAfterReturnFails(t *testing.T) {
+	t.Parallel()
 	escaped := make(chan *httpx.Stream, 1)
 	url, _ := startServer(t, httpx.DefaultConfig(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = httpx.SSE(w, r, func(s *httpx.Stream) error {
@@ -150,6 +153,7 @@ func TestSSESendAfterReturnFails(t *testing.T) {
 type valueKey struct{}
 
 func TestSSEOutlivesTimeoutButEndsOnDisconnect(t *testing.T) {
+	t.Parallel()
 	timeout := httpx.Timeout(httpx.TimeoutConfig{Duration: 100 * time.Millisecond})
 	ended := make(chan struct{})
 	h := timeout(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -12,6 +12,7 @@ import (
 )
 
 func TestConstraintErrors(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, nil)
 	ctx := context.Background()
 	for _, q := range []string{
@@ -47,6 +48,7 @@ func TestConstraintErrors(t *testing.T) {
 }
 
 func TestDeadlock(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, nil)
 	if _, err := db.ExecContext(context.Background(), "CREATE TABLE t (id integer PRIMARY KEY, n integer NOT NULL); INSERT INTO t VALUES (1, 0), (2, 0)"); err != nil {
 		t.Fatal(err)

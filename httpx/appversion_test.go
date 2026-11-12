@@ -19,6 +19,7 @@ func appVersionConfig() httpx.AppVersionConfig {
 }
 
 func TestAppVersionComparesPerPlatform(t *testing.T) {
+	t.Parallel()
 	h := httpx.AppVersion(appVersionConfig())(&marker{})
 	for _, tc := range []struct {
 		header string
@@ -59,6 +60,7 @@ func TestAppVersionComparesPerPlatform(t *testing.T) {
 }
 
 func TestAppVersionRejectionIsLocalizedLoggedAndReadableCrossOrigin(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	cfg := httpx.DefaultConfig()
 	cfg.AppVersion = appVersionConfig()
@@ -111,6 +113,7 @@ func TestAppVersionRejectionIsLocalizedLoggedAndReadableCrossOrigin(t *testing.T
 }
 
 func TestAppVersionWithoutLocaleUsesStatusText(t *testing.T) {
+	t.Parallel()
 	h := httpx.AppVersion(appVersionConfig())(&marker{})
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set(httpx.AppVersionHeader, "ios/1.0.0")
@@ -122,6 +125,7 @@ func TestAppVersionWithoutLocaleUsesStatusText(t *testing.T) {
 }
 
 func TestAppVersionConfigValidate(t *testing.T) {
+	t.Parallel()
 	if err := httpx.DefaultConfig().AppVersion.Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ import (
 )
 
 func TestServeDrainsBeforeCleanup(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +86,7 @@ func TestServeDrainsBeforeCleanup(t *testing.T) {
 
 // 长连接监听 DrainStarted 主动结束后，Serve 不必等满 ShutdownTimeout。
 func TestDrainStartedEndsLongRequests(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +124,7 @@ func TestDrainStartedEndsLongRequests(t *testing.T) {
 // 连接在排空之前已经被接收、请求在排空开始之后才到：请求照常处理，而不是被 net/http 直接关闭。
 // 不停机升级时旧进程直到交接那一刻都在接收连接。
 func TestServeAnswersRequestsOnAcceptedConns(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

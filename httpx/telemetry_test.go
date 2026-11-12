@@ -24,6 +24,7 @@ import (
 )
 
 func TestTelemetryMetrics(t *testing.T) {
+	t.Parallel()
 	reader := sdkmetric.NewManualReader()
 	router := chi.NewRouter()
 	router.Use(httpx.Telemetry(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), tracenoop.NewTracerProvider()))
@@ -82,6 +83,7 @@ func TestTelemetryMetrics(t *testing.T) {
 }
 
 func TestTelemetryTracing(t *testing.T) {
+	t.Parallel()
 	spans := tracetest.NewSpanRecorder()
 	var logs bytes.Buffer
 	logger := slog.New(logging.NewContextHandler(slog.NewJSONHandler(&logs, nil)))
@@ -121,6 +123,7 @@ func TestTelemetryTracing(t *testing.T) {
 }
 
 func TestTelemetryLinksMetricsToSpan(t *testing.T) {
+	t.Parallel()
 	reader := sdkmetric.NewManualReader()
 	spans := tracetest.NewSpanRecorder()
 	router := chi.NewRouter()

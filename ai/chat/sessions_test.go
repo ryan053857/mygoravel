@@ -30,6 +30,7 @@ func newSessions(t *testing.T, db *bun.DB, initSchema bool) session.Service {
 
 // TestSessionMigrationsMatchTrpc 确保迁移建出的表与 trpc-agent-go 自己建的完全一致，升级 trpc-agent-go 时发现表结构的变化。
 func TestSessionMigrationsMatchTrpc(t *testing.T) {
+	t.Parallel()
 	auto := dbtest.Open(t, nil)
 	s := newSessions(t, auto, true)
 	_ = s.Close()
@@ -74,6 +75,7 @@ func schema(t *testing.T, db *bun.DB) []string {
 
 // TestSessionsAcrossRestart 在迁移建出的表上运行到等待审批，再用新的 Runs（相当于新进程）批准并继续。
 func TestSessionsAcrossRestart(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, chat.Migrations())
 	ctx := context.Background()
 	var refunded refunds

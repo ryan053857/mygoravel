@@ -54,6 +54,7 @@ func perms(t *testing.T, s *authz.Store, ref identity.Ref, tenant string) string
 
 // 权限读取一次后来自缓存；同一个命名空间的另一个 Store（另一个实例）修改之后，缓存失效。
 func TestCacheSharedAcrossInstances(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, mc := dbtest.Open(t, authz.Migrations()), openMemcached(t)
 	opt := cached(t, mc)
@@ -91,6 +92,7 @@ func TestCacheSharedAcrossInstances(t *testing.T) {
 
 // Store 建在 database.Tx 上时，缓存在事务提交之后失效；回滚时不变。
 func TestCacheInTransaction(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := dbtest.Open(t, authz.Migrations())
 	opt := cached(t, openMemcached(t))
@@ -135,6 +137,7 @@ func TestCacheInTransaction(t *testing.T) {
 
 // 不能确定何时提交的事务不能与缓存一起使用。
 func TestCacheRejectsPlainTx(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, authz.Migrations())
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -157,6 +160,7 @@ func TestCacheRejectsPlainTx(t *testing.T) {
 
 // Memcached 不可用时直接查询数据库，修改照常成功。
 func TestCacheDown(t *testing.T) {
+	t.Parallel()
 	mc := memcache.New("127.0.0.1:1")
 	mc.Timeout = 50 * time.Millisecond
 	s := authz.NewStore(dbtest.Open(t, authz.Migrations()), catalog, cached(t, mc))

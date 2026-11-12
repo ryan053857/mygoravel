@@ -34,6 +34,7 @@ func events(list []activity.Activity) string {
 }
 
 func TestRecordFillsActorTenantAndRequestID(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, activity.Migrations())
 	ctx := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "req-1"))
 	before := time.Now().UTC().Add(-time.Second)
@@ -68,6 +69,7 @@ func TestRecordFillsActorTenantAndRequestID(t *testing.T) {
 
 // 代为登录时，操作人是被代为登录的用户，Impersonator 记下实际操作的人。
 func TestRecordImpersonation(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, activity.Migrations())
 	asAlice := alice
 	staff := identity.Ref{Type: "staff", ID: "s1"}
@@ -83,6 +85,7 @@ func TestRecordImpersonation(t *testing.T) {
 }
 
 func TestRecordWithoutActorAndProperties(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, activity.Migrations())
 	record(t, db, identity.Subject{Tenant: "acme"}, activity.Activity{Event: "articles.scheduled_published"})
 	list, err := activity.List(context.Background(), db, activity.Query{Tenant: "acme"})
@@ -95,6 +98,7 @@ func TestRecordWithoutActorAndProperties(t *testing.T) {
 }
 
 func TestRecordRollsBackWithTransaction(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, activity.Migrations())
 	ctx := context.Background()
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -113,6 +117,7 @@ func TestRecordRollsBackWithTransaction(t *testing.T) {
 }
 
 func TestRecordRejectsInvalid(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, activity.Migrations())
 	for name, c := range map[string]struct {
 		actor identity.Subject
@@ -129,6 +134,7 @@ func TestRecordRejectsInvalid(t *testing.T) {
 }
 
 func TestListFiltersAndPages(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, activity.Migrations())
 	bob := identity.Subject{ID: "u2", Type: "user", Tenant: "acme"}
 	record(t, db, alice, activity.Activity{Event: "article.created", TargetType: "article", TargetID: "a1"})
@@ -191,6 +197,7 @@ func TestListFiltersAndPages(t *testing.T) {
 }
 
 func TestCleanupDeletesOldRecords(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, activity.Migrations())
 	ctx := context.Background()
 	for range 3 {

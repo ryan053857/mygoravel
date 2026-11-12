@@ -61,6 +61,7 @@ func names(roles []authz.Role) string {
 }
 
 func TestNewStorePanics(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, authz.Migrations())
 	for name, build := range map[string]func(){
 		"nil db":            func() { authz.NewStore(nil, catalog) },
@@ -80,6 +81,7 @@ func TestNewStorePanics(t *testing.T) {
 }
 
 func TestRoles(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
 	editor := mustRole(t, s, authz.Role{Name: "editor", Description: "编辑", Permissions: []string{"articles:*", "articles:read", "comments:delete"}})
@@ -144,6 +146,7 @@ func TestRoles(t *testing.T) {
 
 // 不缓存和缓存的 Store 结果相同：每次修改之后的读取都得到新的权限。
 func TestAssignAndResolve(t *testing.T) {
+	t.Parallel()
 	for name, open := range map[string]func(t *testing.T) *authz.Store{"database": newStore, "cached": newCachedStore} {
 		t.Run(name, func(t *testing.T) { testAssignAndResolve(t, open(t)) })
 	}
@@ -261,6 +264,7 @@ func testAssignAndResolve(t *testing.T, s *authz.Store) {
 }
 
 func TestCatalog(t *testing.T) {
+	t.Parallel()
 	s := newStore(t)
 	got := s.Catalog()
 	got[0].Name = "changed"

@@ -10,6 +10,7 @@ import (
 )
 
 func TestStatusOf(t *testing.T) {
+	t.Parallel()
 	for kind, want := range map[errorx.Kind]int{
 		errorx.InvalidArgument:   http.StatusUnprocessableEntity,
 		errorx.Unauthenticated:   http.StatusUnauthorized,

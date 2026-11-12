@@ -25,6 +25,7 @@ func html(s string) templ.Component {
 }
 
 func TestRenderer(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	r := pdftest.New()
 	_, ok := r.Last()
@@ -59,6 +60,7 @@ func TestRenderer(t *testing.T) {
 }
 
 func TestBlankIsValidPDF(t *testing.T) {
+	t.Parallel()
 	c := convertpdf.New(convertpdf.Options{})
 	t.Cleanup(func() { c.Close() })
 	doc, err := c.Convert(context.Background(), convert.Input{Reader: bytes.NewReader(pdftest.Blank)})

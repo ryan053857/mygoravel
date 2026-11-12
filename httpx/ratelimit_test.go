@@ -32,6 +32,7 @@ func memory(rate int, interval time.Duration, burst int) ratelimit.Limiter {
 }
 
 func TestRateLimitBurstThenRejectsPerKey(t *testing.T) {
+	t.Parallel()
 	h := httpx.RateLimit(memory(1, time.Hour, 2), httpx.KeyByIP)(&marker{})
 	for i, want := range []int{200, 200, 429} {
 		if rr := send(h, "192.0.2.1:1000"); rr.Code != want {
@@ -49,6 +50,7 @@ func TestRateLimitBurstThenRejectsPerKey(t *testing.T) {
 }
 
 func TestRateLimitCustomKey(t *testing.T) {
+	t.Parallel()
 	byTenant := func(r *http.Request) string { return r.Header.Get("X-Tenant") }
 	h := httpx.RateLimit(memory(1, time.Hour, 1), byTenant)(&marker{})
 	req := func(tenant string) int {
@@ -76,6 +78,7 @@ func (failingLimiter) Allow(context.Context, string) error { return errors.New("
 func (failingLimiter) Reset(context.Context, string) error { return nil }
 
 func TestRateLimitBackendFailureAndProxyResolvedClient(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	cfg := httpx.DefaultConfig()
 	cfg.ClientIP.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}

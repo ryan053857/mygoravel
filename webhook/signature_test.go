@@ -13,6 +13,7 @@ import (
 
 // Standard Webhooks 规范附带的测试向量。
 func TestSignMatchesSpecVector(t *testing.T) {
+	t.Parallel()
 	sig, err := webhook.Sign("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", "msg_p5jXN8AQM9LWM0D4loKWxJek",
 		time.Unix(1614265330, 0), []byte(`{"test": 2432232314}`))
 	if err != nil {
@@ -40,6 +41,7 @@ func signed(t *testing.T, secret string, ts time.Time, body string, extra ...str
 }
 
 func TestVerify(t *testing.T) {
+	t.Parallel()
 	const secret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 	const other = "whsec_dGhpcyBpcyBhbm90aGVyIHNlY3JldCE="
 	body := `{"type":"x"}`

@@ -107,6 +107,7 @@ func (r *recorder) progress() []string {
 }
 
 func TestStartGetList(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	if _, err := e.ops.Start(ctx, e.db, alice, ""); err == nil {
@@ -153,6 +154,7 @@ func TestStartGetList(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	op := e.start(t, alice, "articles.reindex")
@@ -207,6 +209,7 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunRetryResumesFromSavedProgress(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	op := e.start(t, alice, "articles.reindex")
@@ -243,6 +246,7 @@ func TestRunRetryResumesFromSavedProgress(t *testing.T) {
 }
 
 func TestRunRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	op := e.start(t, alice, "articles.export")
@@ -271,6 +275,7 @@ func TestRunRestart(t *testing.T) {
 }
 
 func TestComplete(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	op := e.start(t, alice, "articles.export")
@@ -302,6 +307,7 @@ func TestComplete(t *testing.T) {
 }
 
 func TestRunBusinessErrorFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	op := e.start(t, alice, "articles.import")
@@ -323,6 +329,7 @@ func TestRunBusinessErrorFails(t *testing.T) {
 }
 
 func TestSaveRollsBackWithWrite(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	op := e.start(t, alice, "articles.import")
@@ -340,6 +347,7 @@ func TestSaveRollsBackWithWrite(t *testing.T) {
 }
 
 func TestSaveDetectsAnotherRun(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	op := e.start(t, alice, "articles.import")
@@ -403,6 +411,7 @@ func runQueue(t *testing.T, e env, fn func(ctx context.Context, id uuid.UUID) er
 }
 
 func TestFinalAttemptFailsOperation(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	var mu sync.Mutex
 	attempts := 0
@@ -422,6 +431,7 @@ func TestFinalAttemptFailsOperation(t *testing.T) {
 }
 
 func TestPermanentErrorFailsOperation(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	runQueue(t, e, func(ctx context.Context, id uuid.UUID) error {
 		return e.ops.Run(ctx, id, func(context.Context, *operation.Run) error {
@@ -431,6 +441,7 @@ func TestPermanentErrorFailsOperation(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	old := e.start(t, alice, "articles.import")

@@ -18,6 +18,7 @@ type publishedHook struct {
 }
 
 func TestDocument(t *testing.T) {
+	t.Parallel()
 	doc := huma.DefaultConfig("t", "1").OpenAPI
 	webhook.Document(doc,
 		webhook.Event[publishedHook]{Name: "article.published", Summary: "文章发布后推送"},
@@ -72,6 +73,7 @@ func TestDocument(t *testing.T) {
 }
 
 func TestDocumentRejectsInvalidAndDuplicateEvents(t *testing.T) {
+	t.Parallel()
 	for _, events := range [][]webhook.Documented{
 		{webhook.Event[any]{Name: ""}},
 		{webhook.Event[any]{Name: "article.*"}},

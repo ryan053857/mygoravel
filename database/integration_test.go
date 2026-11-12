@@ -15,6 +15,7 @@ import (
 )
 
 func TestNonTransactionalMigrationRequiresManualRecovery(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, nil)
 	ctx := context.Background()
 	source := fstest.MapFS{"00001_partial.sql": &fstest.MapFile{Data: []byte("-- +goose NO TRANSACTION\n-- +goose Up\nCREATE TABLE partial (id int);\nINSERT INTO missing_table VALUES (1);\n-- +goose Down\nDROP TABLE partial;\n")}}

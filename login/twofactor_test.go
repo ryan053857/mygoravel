@@ -16,6 +16,7 @@ import (
 
 // RFC 6238 附录 B 中 SHA1 的测试向量，取后 6 位。
 func TestTOTPVectors(t *testing.T) {
+	t.Parallel()
 	key := []byte("12345678901234567890")
 	for unix, want := range map[int64]string{59: "287082", 1111111109: "081804", 1234567890: "005924", 2000000000: "279037"} {
 		if got := login.TOTP(key, unix/30); got != want {
@@ -64,6 +65,7 @@ func (e *env) pending(t *testing.T, ctx context.Context, email, password string)
 }
 
 func TestTOTPSetup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Issuer: "Blog"})
 	e.account(t, ctx, "c1", "c1@example.com", "correct horse")
@@ -105,6 +107,7 @@ func TestTOTPSetup(t *testing.T) {
 }
 
 func TestTwoFactorLogin(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{
 		Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
@@ -188,6 +191,7 @@ func TestTwoFactorLogin(t *testing.T) {
 
 // 找回密码不会绕过二次验证：它不登录，用新密码登录时仍要二次验证。
 func TestResetKeepsTwoFactor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	e.account(t, ctx, "c1", "c1@example.com", "correct horse")
@@ -209,6 +213,7 @@ func TestResetKeepsTwoFactor(t *testing.T) {
 
 // 并发提交同一个 TOTP 验证码，只有一次通过。
 func TestTOTPReplay(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	e.account(t, ctx, "c1", "c1@example.com", "")

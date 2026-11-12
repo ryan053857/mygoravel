@@ -73,6 +73,7 @@ func devices(t *testing.T, db bun.IDB) map[string]push.Device {
 }
 
 func TestRegister(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	ctx := context.Background()
 
@@ -114,6 +115,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestUnregister(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	ctx := context.Background()
 
@@ -166,6 +168,7 @@ func TestUnregister(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	ctx := context.Background()
 	register(t, db, alice, push.Android, "old1")
@@ -196,6 +199,7 @@ func msg() push.Message {
 }
 
 func TestSend(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	ctx := context.Background()
 	a, b := notification.RecipientOf(alice), notification.RecipientOf(bob)
@@ -245,6 +249,7 @@ func TestSend(t *testing.T) {
 }
 
 func TestSendSplitsRecipients(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	to := make([]notification.Recipient, push.MaxBatch+1)
 	for i := range to {
@@ -260,6 +265,7 @@ func TestSendSplitsRecipients(t *testing.T) {
 }
 
 func TestDeliver(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	ctx := context.Background()
 	fake := &pushtest.Provider{}
@@ -314,6 +320,7 @@ func TestDeliver(t *testing.T) {
 }
 
 func TestDeliverTTL(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	ctx := context.Background()
 	fake := &pushtest.Provider{}
@@ -341,6 +348,7 @@ func TestDeliverTTL(t *testing.T) {
 }
 
 func TestDeliverErrors(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	ctx := context.Background()
 	register(t, db, alice, push.Android, "a-android")
@@ -384,6 +392,7 @@ func TestDeliverErrors(t *testing.T) {
 }
 
 func TestDeliverThroughQueue(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	ctx := context.Background()
 	register(t, db, alice, push.Android, "a-android")

@@ -23,6 +23,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestSetLogger(t *testing.T) {
+	t.Parallel()
 	log.Warnf("model %s slow", "x")
 	log.Debug("hidden by handler level")
 	got := trpcLog.String()

@@ -21,6 +21,7 @@ func blocking(stopped *atomic.Int64, result error) func(context.Context) error {
 }
 
 func TestConcurrentlyStopsAllOnCancel(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	var stopped atomic.Int64
 	done := make(chan error, 1)
@@ -43,6 +44,7 @@ func TestConcurrentlyStopsAllOnCancel(t *testing.T) {
 }
 
 func TestConcurrentlyErrorStopsOthers(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("listen: address in use")
 	var stopped atomic.Int64
 	err := command.Concurrently(context.Background(),
@@ -59,6 +61,7 @@ func TestConcurrentlyErrorStopsOthers(t *testing.T) {
 }
 
 func TestConcurrentlyEarlyReturnIsError(t *testing.T) {
+	t.Parallel()
 	var stopped atomic.Int64
 	err := command.Concurrently(context.Background(),
 		blocking(&stopped, nil),
@@ -73,6 +76,7 @@ func TestConcurrentlyEarlyReturnIsError(t *testing.T) {
 }
 
 func TestConcurrentlyJoinsErrors(t *testing.T) {
+	t.Parallel()
 	a, b := errors.New("a"), errors.New("b")
 	release := make(chan struct{})
 	err := command.Concurrently(context.Background(),
@@ -90,6 +94,7 @@ func TestConcurrentlyJoinsErrors(t *testing.T) {
 }
 
 func TestConcurrentlyWithoutRuns(t *testing.T) {
+	t.Parallel()
 	if err := command.Concurrently(context.Background()); err != nil {
 		t.Fatalf("err = %v", err)
 	}

@@ -153,6 +153,7 @@ func tail(msgs []model.Message) []model.Message {
 var group = chat.Conversation{UserID: "", ID: "g1"}
 
 func TestHistoryNotify(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Text("明天 上午 十点"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
@@ -180,6 +181,7 @@ func TestHistoryNotify(t *testing.T) {
 
 // 回答期间到达的消息不被拒绝：运行结束后再运行一轮，多次通知合并为一轮。
 func TestHistoryNotifyWhileRunningCoalesces(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "第一轮", Delay: 300 * time.Millisecond}, chattest.Text("第二轮"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
@@ -212,6 +214,7 @@ func TestHistoryNotifyWhileRunningCoalesces(t *testing.T) {
 }
 
 func TestHistoryStartSavesUserMessage(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Text("你好"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
@@ -227,6 +230,7 @@ func TestHistoryStartSavesUserMessage(t *testing.T) {
 }
 
 func TestHistoryApproval(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
 		chattest.Text("已退款"),
@@ -265,6 +269,7 @@ func TestHistoryApproval(t *testing.T) {
 }
 
 func TestHistorySteerIsSaved(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Calls(chattest.Call{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}),
 		chattest.Text("都查好了"),
@@ -292,6 +297,7 @@ func TestHistorySteerIsSaved(t *testing.T) {
 }
 
 func TestHistorySaveFailureStopsRun(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Text("回答"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
@@ -308,6 +314,7 @@ func TestHistorySaveFailureStopsRun(t *testing.T) {
 }
 
 func TestHistoryNothingToAnswer(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel()
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
@@ -324,6 +331,7 @@ func TestHistoryNothingToAnswer(t *testing.T) {
 }
 
 func TestHistoryModeAPIs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rs := newHistoryRuns(t, chattest.NewModel(), nil, newMessageTable())
 	if _, err := rs.UIMessages(ctx, "u1", "c1"); !errors.Is(err, chat.ErrNeedsSessions) {
@@ -356,6 +364,7 @@ func TestHistoryModeAPIs(t *testing.T) {
 
 // 消息在回答保存之前写入、通知在运行结束之后才到达：新的运行仍然回应它。
 func TestHistoryLateNotify(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "第一轮", Delay: 200 * time.Millisecond}, chattest.Text("第二轮"))
 	table := newMessageTable()
 	rs := newHistoryRuns(t, m, nil, table)
@@ -383,6 +392,7 @@ func TestHistoryLateNotify(t *testing.T) {
 
 // 多实例：通知落在另一个实例上时转发给运行所在的实例，运行结束后再运行一轮。
 func TestClusterHistoryNotifyForwarded(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "第一轮", Delay: 300 * time.Millisecond}, chattest.Text("第二轮"))
 	table := newMessageTable()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)

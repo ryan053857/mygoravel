@@ -87,6 +87,7 @@ func version(t *testing.T, db bun.IDB) int {
 }
 
 func TestReindexSwitchesModel(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := setup(t)
 	shared := newShared(t, f.db)
@@ -152,6 +153,7 @@ func TestReindexSwitchesModel(t *testing.T) {
 }
 
 func TestReindexSuperseded(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	f.put(t, "a", chunkDoc{Text: "一"})
 	f.put(t, "b", chunkDoc{Text: "二"})
@@ -174,6 +176,7 @@ func TestReindexSuperseded(t *testing.T) {
 }
 
 func TestReindexInvalidDocument(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	f.put(t, "a", chunkDoc{Text: "一"})
 	f.src.set("bad", chunkDoc{File: "没有文本"})
@@ -188,6 +191,7 @@ func TestReindexInvalidDocument(t *testing.T) {
 }
 
 func TestReindexChangesDimensions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := setup(t)
 	shared := newShared(t, f.db)

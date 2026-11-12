@@ -20,6 +20,7 @@ import (
 )
 
 func TestFormats(t *testing.T) {
+	t.Parallel()
 	r := all.New(all.Options{})
 	defer func() { _ = r.Close() }()
 	want := []convert.Format{"csv", "docx", "html", "json", "md", "pdf", "pptx", "txt", "xlsx"}
@@ -32,6 +33,7 @@ func TestFormats(t *testing.T) {
 }
 
 func TestDefaults(t *testing.T) {
+	t.Parallel()
 	gbk, err := simplifiedchinese.GB18030.NewEncoder().String("名称,数量\n苹果,3\n")
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +62,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	t.Parallel()
 	r := all.New(all.Options{})
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
@@ -86,6 +89,7 @@ func pages(doc convert.Document, c split.Chunk) []int {
 }
 
 func TestPDFChunksMapToPages(t *testing.T) {
+	t.Parallel()
 	sentence := "Every region reported steady growth this quarter."
 	var pagesIn [][]pdftest.Text
 	for range 3 {
@@ -130,6 +134,7 @@ func TestPDFChunksMapToPages(t *testing.T) {
 }
 
 func TestXLSXChunksMapToSheets(t *testing.T) {
+	t.Parallel()
 	f := excelize.NewFile()
 	must := func(err error) {
 		t.Helper()

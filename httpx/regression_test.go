@@ -19,6 +19,7 @@ import (
 )
 
 func TestUnexpectedListenerExitDrainsRequests(t *testing.T) {
+	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +69,7 @@ func TestUnexpectedListenerExitDrainsRequests(t *testing.T) {
 	<-requestDone
 }
 func TestShutdownBudgetCancelsActiveRequest(t *testing.T) {
+	t.Parallel()
 	for _, budget := range []time.Duration{time.Nanosecond, 20 * time.Millisecond} {
 		t.Run(budget.String(), func(t *testing.T) {
 			ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -112,6 +114,7 @@ func TestShutdownBudgetCancelsActiveRequest(t *testing.T) {
 	}
 }
 func TestBoundaryRecoveryLimitsAndProxyTrust(t *testing.T) {
+	t.Parallel()
 	for _, trusted := range []bool{false, true} {
 		cfg := httpx.DefaultConfig()
 		cfg.BodyLimit.MaxBytes = 3
@@ -144,6 +147,7 @@ func TestBoundaryRecoveryLimitsAndProxyTrust(t *testing.T) {
 }
 
 func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
+	t.Parallel()
 	handler := defaults(httpx.DefaultConfig())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		_, _ = io.WriteString(w, "partial")
@@ -157,6 +161,7 @@ func TestPanicAfterResponseStartedAbortsConnection(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 }
 func TestRequestTimeoutReachesHandler(t *testing.T) {
+	t.Parallel()
 	cfg := httpx.DefaultConfig()
 	cfg.Timeout.Duration = 10 * time.Millisecond
 	handler := httpx.Timeout(cfg.Timeout)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

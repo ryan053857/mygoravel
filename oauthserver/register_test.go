@@ -31,6 +31,7 @@ func (e *env) register(t *testing.T, body string) (int, map[string]any) {
 }
 
 func TestDynamicRegistration(t *testing.T) {
+	t.Parallel()
 	e := setupWith(t, withDCR)
 	var meta map[string]any
 	_ = json.Unmarshal(e.browser.Get(oauthserver.MetadataPath).Body.Bytes(), &meta)
@@ -91,6 +92,7 @@ func TestDynamicRegistration(t *testing.T) {
 }
 
 func TestDynamicRegistrationDisabled(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	var meta map[string]any
 	_ = json.Unmarshal(e.browser.Get(oauthserver.MetadataPath).Body.Bytes(), &meta)
@@ -104,6 +106,7 @@ func TestDynamicRegistrationDisabled(t *testing.T) {
 
 // TestOfficialSDKClientWithDCR 用官方 SDK 的客户端走动态注册：它不提供 Client ID Metadata Document，只能注册。
 func TestOfficialSDKClientWithDCR(t *testing.T) {
+	t.Parallel()
 	e := setupWith(t, withDCR)
 	e.browser.Login(e.pages, editor)
 	client := &http.Client{Transport: handlerTransport{e.router}}

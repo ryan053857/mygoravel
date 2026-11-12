@@ -14,6 +14,7 @@ import (
 )
 
 func TestConfigValidate(t *testing.T) {
+	t.Parallel()
 	cfg := database.DefaultConfig()
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("empty dsn should fail")
@@ -21,6 +22,7 @@ func TestConfigValidate(t *testing.T) {
 }
 
 func TestCheckPublishedDetectsModification(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	base := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "00001_a.sql"), []byte("v1"), 0o644); err != nil {
@@ -42,6 +44,7 @@ func TestCheckPublishedDetectsModification(t *testing.T) {
 }
 
 func TestPublishedMigrationsIncludeNestedFiles(t *testing.T) {
+	t.Parallel()
 	live, baseline := t.TempDir(), t.TempDir()
 	for _, dir := range []string{live, baseline} {
 		if err := os.MkdirAll(filepath.Join(dir, "schema"), 0755); err != nil {
@@ -73,6 +76,7 @@ func TestPublishedMigrationsIncludeNestedFiles(t *testing.T) {
 }
 
 func TestOpenRunsConfigurationChecks(t *testing.T) {
+	t.Parallel()
 	valid := database.DefaultConfig()
 	valid.DSN = "postgres://localhost/db"
 	with := func(change func(*database.Config)) database.Config {
@@ -97,6 +101,7 @@ func TestOpenRunsConfigurationChecks(t *testing.T) {
 }
 
 func TestOpenReportsUnreachableDatabaseAsUnavailable(t *testing.T) {
+	t.Parallel()
 	// 端口 1 上没有 PostgreSQL，连接会立即被拒绝
 	cfg := database.DefaultConfig()
 	cfg.DSN = "postgres://postgres@127.0.0.1:1/blog?sslmode=disable&connect_timeout=2"
@@ -110,6 +115,7 @@ func TestOpenReportsUnreachableDatabaseAsUnavailable(t *testing.T) {
 }
 
 func TestOpenRejectsInvalidDSN(t *testing.T) {
+	t.Parallel()
 	db, err := database.Open(context.Background(), database.Config{DSN: "postgres://user:pass@host:not-a-port/db"})
 	if db != nil || err == nil || !strings.HasPrefix(err.Error(), "database: invalid dsn: ") {
 		t.Errorf("db=%v err=%v", db, err)
@@ -117,6 +123,7 @@ func TestOpenRejectsInvalidDSN(t *testing.T) {
 }
 
 func TestPublishedMigrationsRequireCurrentDirectory(t *testing.T) {
+	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "missing")
 	if err := migrate.CheckPublished(missing, t.TempDir()); err == nil {
 		t.Fatal("missing current directory accepted")

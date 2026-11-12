@@ -40,6 +40,7 @@ func gauges(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {
 }
 
 func TestRelayMetrics(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	cfg := queuetest.Config(t)
 	cfg.MaxDefer = time.Second

@@ -38,6 +38,7 @@ func preflight(h http.Handler, origin string) *httptest.ResponseRecorder {
 }
 
 func TestCORSPreflight(t *testing.T) {
+	t.Parallel()
 	h, calls := corsHandler(t, "https://app.example.com")
 	rr := preflight(h, "https://app.example.com")
 	hd := rr.Header()
@@ -62,6 +63,7 @@ func TestCORSPreflight(t *testing.T) {
 }
 
 func TestCORSRequests(t *testing.T) {
+	t.Parallel()
 	h, calls := corsHandler(t, "https://*.example.com", "capacitor://localhost")
 	for _, tc := range []struct {
 		origin, path string
@@ -97,6 +99,7 @@ func TestCORSRequests(t *testing.T) {
 }
 
 func TestCORSAnyOrigin(t *testing.T) {
+	t.Parallel()
 	h, _ := corsHandler(t, "*")
 	rr := preflight(h, "https://anywhere.example.org")
 	if rr.Header().Get("Access-Control-Allow-Origin") != "*" || rr.Header().Get("Access-Control-Allow-Credentials") != "" {
@@ -105,6 +108,7 @@ func TestCORSAnyOrigin(t *testing.T) {
 }
 
 func TestCORSConfigValidate(t *testing.T) {
+	t.Parallel()
 	if err := httpx.DefaultCORSConfig().Validate(); err != nil {
 		t.Fatalf("default: %v", err)
 	}

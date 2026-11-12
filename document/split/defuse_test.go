@@ -60,6 +60,7 @@ func cost(text string) (perByte time.Duration, allocated float64) {
 
 // TestPathologicalInputsStayLinear 确保已知的病态输入在扩大 16 倍时，每字节的耗时和内存分配基本不变；
 // n^1.5 的增长会让它们变为 4 倍，平方级的增长变为 16 倍。
+// 它不并行运行：同一个包中并行的测试会让计时和 runtime.MemStats 中的分配量都失真。
 func TestPathologicalInputsStayLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("timing")
@@ -77,6 +78,7 @@ func TestPathologicalInputsStayLinear(t *testing.T) {
 }
 
 func TestDefuseKeepsLength(t *testing.T) {
+	t.Parallel()
 	for name, generate := range pathological {
 		text := generate(4 << 10)
 		source := []byte(text)
@@ -88,6 +90,7 @@ func TestDefuseKeepsLength(t *testing.T) {
 }
 
 func TestDefuseLeavesOrdinaryMarkdown(t *testing.T) {
+	t.Parallel()
 	for _, text := range []string{
 		"# 标题\n\n> 引用\n> - 列表\n>   1. 编号\n\n" + strings.Repeat("- - - ", 40) + "\n",
 		"| a | b |\n| - | - |\n| 1 |\n| 1 | 2 |\n",

@@ -67,6 +67,7 @@ func recheck(j *apitoken.JWT, was identity.Subject, token string) error {
 }
 
 func TestJWTLoginAndValidate(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
 		j, s := newJWT(t, apitoken.JWTConfig{})
@@ -124,6 +125,7 @@ func TestJWTLoginAndValidate(t *testing.T) {
 }
 
 func TestJWTRefresh(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
 		var reused []apitoken.Token
@@ -187,6 +189,7 @@ func TestJWTRefresh(t *testing.T) {
 
 // access token 的过期时间不晚于登录本身。
 func TestJWTAccessCappedByLogin(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		short := apitoken.NewStore(dbtest.Open(t, apitoken.Migrations()), apitoken.Config{Lifetime: 15 * time.Minute})
 		j := apitoken.NewJWT(short, apitoken.JWTConfig{Keys: hmacKeys(appKey)})
@@ -201,6 +204,7 @@ func TestJWTAccessCappedByLogin(t *testing.T) {
 
 // 并发刷新同一个 refresh token：只有一个得到新的 refresh token，其余在宽限期内只得到 access token。
 func TestJWTConcurrentRefresh(t *testing.T) {
+	t.Parallel()
 	j, _ := newJWT(t, apitoken.JWTConfig{})
 	p := jwtLogin(t, j, alice, apitoken.Device{})
 	const n = 8
@@ -232,6 +236,7 @@ func TestJWTConcurrentRefresh(t *testing.T) {
 }
 
 func TestJWTRevoke(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	j, s := newJWT(t, apitoken.JWTConfig{})
 	a := jwtLogin(t, j, alice, apitoken.Device{})
@@ -269,6 +274,7 @@ func TestJWTRevoke(t *testing.T) {
 }
 
 func TestJWTKeys(t *testing.T) {
+	t.Parallel()
 	oldKey, newKey := crypt.GenerateKey(), crypt.GenerateKey()
 	s := newStore(t)
 	old := apitoken.NewJWT(s, apitoken.JWTConfig{Keys: hmacKeys(oldKey)})
@@ -327,6 +333,7 @@ func TestJWTKeys(t *testing.T) {
 }
 
 func TestNewJWTPanics(t *testing.T) {
+	t.Parallel()
 	s := newStore(t)
 	keys := hmacKeys(appKey)
 	for name, build := range map[string]func(){
@@ -350,6 +357,7 @@ func TestNewJWTPanics(t *testing.T) {
 
 // TestJWTRequireBearer 确认 JWT.Validate 可以直接作为 rest.RequireBearer 的校验器，权限仍由 Resolver 加载。
 func TestJWTRequireBearer(t *testing.T) {
+	t.Parallel()
 	j, _ := newJWT(t, apitoken.JWTConfig{})
 	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
 		if sub.ID == "alice" {
@@ -377,6 +385,7 @@ func TestJWTRequireBearer(t *testing.T) {
 
 // 通过 RequireBearer 建立的长连接：撤销登录后复查失败，连接应当结束。
 func TestJWTRequireBearerRecheck(t *testing.T) {
+	t.Parallel()
 	j, s := newJWT(t, apitoken.JWTConfig{})
 	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}})
 	op := huma.Operation{OperationID: "events", Method: http.MethodGet, Path: "/events"}

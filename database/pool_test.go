@@ -57,6 +57,7 @@ func hold(t *testing.T, db *bun.DB, n int) (release func()) {
 
 // 连接用满时，设置了 WithAcquireTimeout 的语句在时限后返回 ErrBusy；没有设置的等到有连接为止。
 func TestAcquireTimeout(t *testing.T) {
+	t.Parallel()
 	db, reader := openPool(t, 2)
 	release := hold(t, db, 2)
 
@@ -110,6 +111,7 @@ func TestAcquireTimeout(t *testing.T) {
 }
 
 func TestPoolMetrics(t *testing.T) {
+	t.Parallel()
 	db, reader := openPool(t, 3, database.Name("analytics"))
 	release := hold(t, db, 2)
 	defer release()
@@ -139,6 +141,7 @@ func TestPoolMetrics(t *testing.T) {
 
 // ReadOnly 的连接池拒绝写入，读取照常。
 func TestReadOnly(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, nil)
 	if _, err := db.ExecContext(context.Background(), "CREATE TABLE notes (body text)"); err != nil {
 		t.Fatal(err)

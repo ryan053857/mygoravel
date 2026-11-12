@@ -66,6 +66,7 @@ func valid(t *testing.T, s *apitoken.Store, token string) (identity.Subject, boo
 }
 
 func TestConfig(t *testing.T) {
+	t.Parallel()
 	var cfg apitoken.Config
 	cfg.SetDefaults()
 	if err := cfg.Validate(); err != nil {
@@ -96,6 +97,7 @@ func TestConfig(t *testing.T) {
 }
 
 func TestLoginAndValidate(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
 		s := newStore(t)
@@ -133,6 +135,7 @@ func TestLoginAndValidate(t *testing.T) {
 }
 
 func TestLoginSlidingExpiry(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		s := newStore(t)
 
@@ -181,6 +184,7 @@ func TestLoginSlidingExpiry(t *testing.T) {
 // 有效期在签发时写入 token：校验用的 Store 配置不同、或配置之后被修改，都不改变已签发 token 的有效期。
 // 不同账号体系可以各用自己的 Config 签发，共用一个校验器。
 func TestLifetimeFixedAtIssue(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		db := dbtest.Open(t, apitoken.Migrations())
 		staff := apitoken.NewStore(db, apitoken.Config{Lifetime: 2 * time.Hour, IdleTimeout: 10 * time.Minute})
@@ -217,6 +221,7 @@ func TestLifetimeFixedAtIssue(t *testing.T) {
 }
 
 func TestCreatePersonal(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
 		s := newStore(t)
@@ -272,6 +277,7 @@ func TestCreatePersonal(t *testing.T) {
 }
 
 func TestRevoke(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
 	laptop := login(t, s, alice, apitoken.Device{})
@@ -333,6 +339,7 @@ func TestRevoke(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
 		s := newStore(t)
@@ -361,6 +368,7 @@ func TestCleanup(t *testing.T) {
 }
 
 func TestTenantBinding(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
 	customer := identity.Subject{ID: "carol", Type: "user", Tenant: "acme"}
@@ -380,6 +388,7 @@ func TestTenantBinding(t *testing.T) {
 
 // 不同账号体系中 ID 相同的主体互不影响：列表、撤销都按类型和 ID 一起区分。
 func TestAccountSystems(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
 	staffAlice := identity.Subject{ID: "alice", Type: "staff"}
@@ -406,6 +415,7 @@ func TestAccountSystems(t *testing.T) {
 }
 
 func TestImpersonation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := newStore(t)
 	staff := identity.Ref{Type: "staff", ID: "s1"}
@@ -437,6 +447,7 @@ func TestImpersonation(t *testing.T) {
 // TestRequireBearer 确认 Validate 可以直接作为 rest.RequireBearer 的校验器：
 // 权限由 Resolve 按用户加载，个人访问令牌的 scope 再加以限制。
 func TestRequireBearer(t *testing.T) {
+	t.Parallel()
 	s := newStore(t)
 	permissions := map[string][]string{"alice": {"articles:*"}}
 	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": func(_ context.Context, sub identity.Subject) (identity.Subject, error) {

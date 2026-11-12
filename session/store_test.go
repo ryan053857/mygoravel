@@ -57,6 +57,7 @@ func note(t *testing.T, b []byte) string {
 }
 
 func TestStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := session.NewStore(dbtest.Open(t, session.Migrations()))
 	now := time.Now()
@@ -123,6 +124,7 @@ func TestStore(t *testing.T) {
 }
 
 func TestStoreRevokeSubject(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := dbtest.Open(t, session.Migrations())
 	store := session.NewStore(db)
@@ -173,6 +175,7 @@ func TestStoreRevokeSubject(t *testing.T) {
 }
 
 func TestStoreRevokeOthers(t *testing.T) {
+	t.Parallel()
 	store := session.NewStore(dbtest.Open(t, session.Migrations()))
 	srv := newApp(t, store)
 	laptop, phone, bob := newClient(t), newClient(t), newClient(t)
@@ -209,6 +212,7 @@ func TestStoreRevokeOthers(t *testing.T) {
 
 // 登录时记录设备；List 列出主体的会话并标出当前会话，Revoke 只能撤销自己的会话。
 func TestStoreListAndRevoke(t *testing.T) {
+	t.Parallel()
 	store := session.NewStore(dbtest.Open(t, session.Migrations()))
 	srv := newApp(t, store)
 	laptop, phone, bob := newClient(t), newClient(t), newClient(t)
@@ -263,6 +267,7 @@ func TestStoreListAndRevoke(t *testing.T) {
 }
 
 func TestStoreCleanup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := dbtest.Open(t, session.Migrations())
 	store := session.NewStore(db)
@@ -299,6 +304,7 @@ func TestStoreCleanup(t *testing.T) {
 }
 
 func TestStoreWithSessionManager(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, session.Migrations())
 	srv := newApp(t, session.NewStore(db))
 	c := newClient(t)

@@ -25,6 +25,7 @@ func editors(_ context.Context, sub identity.Subject, p realtime.Params) (any, b
 }
 
 func TestPresenceChannel(t *testing.T) {
+	t.Parallel()
 	store := &tokens{}
 	// 不保留在线记录，离开事件立即发出；宽限期见 TestPresenceGrace。
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, Presence: realtimetest.NewPresence(), PresenceGrace: -1}, nil)
@@ -103,6 +104,7 @@ func TestPresenceChannel(t *testing.T) {
 // 在另一个实例上取消订阅时立即发出 leave，而且只发一次。
 // 取消订阅的控制消息在 Hub 的投递中到达，离开事件又要发布到 Hub，这里确认两者不会互相等待。
 func TestPresenceAcrossInstancesOnRedis(t *testing.T) {
+	t.Parallel()
 	rdb := redistest.Standalone.Open(t)
 	prefix := "test:realtime:" + rand.Text()
 	presence := redispresence.New(rdb, prefix+":presence:")
@@ -161,6 +163,7 @@ func TestPresenceAcrossInstancesOnRedis(t *testing.T) {
 
 // 连接离开后在线记录保留一个宽限期：期间主体重新加入时没有事件，期满仍然没有连接才发出 leave。
 func TestPresenceGrace(t *testing.T) {
+	t.Parallel()
 	const grace = 300 * time.Millisecond
 	store := &tokens{}
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, Presence: realtimetest.NewPresence(), PresenceGrace: grace}, nil)
@@ -229,6 +232,7 @@ func TestPresenceGrace(t *testing.T) {
 
 // 实例停止时不发离开事件：它上面的成员会重连到其他实例，在线记录保留到自行过期。
 func TestShutdownDoesNotAnnounceLeaves(t *testing.T) {
+	t.Parallel()
 	b := &bus{}
 	presence := realtimetest.NewPresence()
 	store := &tokens{}
@@ -265,6 +269,7 @@ func TestShutdownDoesNotAnnounceLeaves(t *testing.T) {
 
 // Unsubscribe 把主体移出频道：离开事件立即发出，不等宽限期，之后也不重复。
 func TestUnsubscribeAnnouncesLeaveImmediately(t *testing.T) {
+	t.Parallel()
 	const grace = 1500 * time.Millisecond
 	store := &tokens{}
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{Authenticate: store.validate, Presence: realtimetest.NewPresence(), PresenceGrace: grace}, nil)
@@ -303,6 +308,7 @@ func TestUnsubscribeAnnouncesLeaveImmediately(t *testing.T) {
 }
 
 func TestPresenceGraceIsCapped(t *testing.T) {
+	t.Parallel()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer hub.Close()
 	defer func() {
@@ -314,6 +320,7 @@ func TestPresenceGraceIsCapped(t *testing.T) {
 }
 
 func TestPresenceChannelNeedsStore(t *testing.T) {
+	t.Parallel()
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{}, nil)
 	// 没有 presence 频道时不需要存储：没有在线成员，Unsubscribe 照常工作。
 	if m, err := n.rt.Members(context.Background(), "editing:7"); err != nil || len(m) != 0 {

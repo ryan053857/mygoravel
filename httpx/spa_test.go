@@ -44,6 +44,7 @@ func spaGet(h http.Handler, method, path, accept string) *httptest.ResponseRecor
 const htmlAccept = "text/html,application/xhtml+xml,*/*;q=0.8"
 
 func TestSPAServe(t *testing.T) {
+	t.Parallel()
 	s := newSPA(t, httpx.SPAOptions{})
 	cases := []struct {
 		name, path, accept string
@@ -83,6 +84,7 @@ func TestSPAServe(t *testing.T) {
 }
 
 func TestSPAConditionalAndMethods(t *testing.T) {
+	t.Parallel()
 	s := newSPA(t, httpx.SPAOptions{})
 	etag := spaGet(s, http.MethodGet, "/", htmlAccept).Header().Get("ETag")
 	if etag == "" {
@@ -105,6 +107,7 @@ func TestSPAConditionalAndMethods(t *testing.T) {
 }
 
 func TestSPABase(t *testing.T) {
+	t.Parallel()
 	s := newSPA(t, httpx.SPAOptions{Base: "/app/"})
 	for path, want := range map[string]int{
 		"/app/":                         200,
@@ -120,6 +123,7 @@ func TestSPABase(t *testing.T) {
 }
 
 func TestNewSPAErrors(t *testing.T) {
+	t.Parallel()
 	for name, c := range map[string]struct {
 		fsys fs.FS
 		opts httpx.SPAOptions
@@ -137,6 +141,7 @@ func TestNewSPAErrors(t *testing.T) {
 }
 
 func TestSPADevServer(t *testing.T) {
+	t.Parallel()
 	vite := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "vite "+r.Method+" "+r.URL.Path)
 	}))

@@ -48,6 +48,7 @@ func items(n int) fs.FS {
 }
 
 func TestMigrateEmptyAndUpgrade(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, nil)
 	ctx := context.Background()
 	for want, migrations := range []fs.FS{items(1), items(2)} {
@@ -66,6 +67,7 @@ func TestMigrateEmptyAndUpgrade(t *testing.T) {
 
 // 多个实例同时迁移时由数据库锁串行执行。
 func TestConcurrentMigrate(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, nil)
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -97,6 +99,7 @@ func TestConcurrentMigrate(t *testing.T) {
 }
 
 func TestTxRollbackUniqueAndCancel(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, nil)
 	ctx := context.Background()
 	p, err := migrate.NewProvider(db, items(2))
@@ -150,6 +153,7 @@ func TestTxRollbackUniqueAndCancel(t *testing.T) {
 
 // 迁移失败时回滚整个迁移，已执行的建表不会留下。
 func TestFailedMigrationRollsBack(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, nil)
 	ctx := context.Background()
 	source := fstest.MapFS{"00001_partial.sql": {Data: []byte("-- +goose Up\nCREATE TABLE partial (id INT);\nINSERT INTO missing_table VALUES (1);\n-- +goose Down\nDROP TABLE partial;\n")}}
@@ -179,6 +183,7 @@ func TestFailedMigrationRollsBack(t *testing.T) {
 }
 
 func TestPublishedBaseline(t *testing.T) {
+	t.Parallel()
 	live, err := migrate.Sub(migrationsRoot, "testdata/migrations")
 	if err != nil {
 		t.Fatal(err)

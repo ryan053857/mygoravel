@@ -183,6 +183,7 @@ func registerFileRoutes(api *rest.API, auth func(*huma.Operation), files *filesy
 }
 
 func TestRESTUploadAndConfirm(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	api := rest.New(rest.Options{Accounts: identity.Accounts{"user": nil}, Title: "test"})
 	users := map[string]identity.Subject{"alice": alice, "bob": bob}

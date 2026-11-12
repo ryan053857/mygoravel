@@ -71,6 +71,7 @@ func answer(t *testing.T, r *chat.Run) string {
 }
 
 func TestAgentForChoosesPerConversation(t *testing.T) {
+	t.Parallel()
 	a, b := chattest.NewModel(chattest.Text("我是小A")), chattest.NewModel(chattest.Text("我是小B"))
 	e := &employees{agents: map[string]agent.Agent{"c1": employee("xiaoa", a), "c2": employee("xiaob", b)}}
 	rs := newAgentForRuns(t, e)
@@ -91,6 +92,7 @@ func TestAgentForChoosesPerConversation(t *testing.T) {
 
 // 每一轮重新选择：修改 AI 员工的配置后，下一次运行就使用新的 agent。
 func TestAgentForChangeTakesEffectNextRun(t *testing.T) {
+	t.Parallel()
 	old, updated := chattest.NewModel(chattest.Text("旧配置")), chattest.NewModel(chattest.Text("新配置"))
 	e := &employees{agents: map[string]agent.Agent{"c1": employee("xiaoa", old)}}
 	rs := newAgentForRuns(t, e, chat.KeepFinished(0))
@@ -117,6 +119,7 @@ func TestAgentForChangeTakesEffectNextRun(t *testing.T) {
 }
 
 func TestAgentForChooseError(t *testing.T) {
+	t.Parallel()
 	rs := newAgentForRuns(t, &employees{agents: map[string]agent.Agent{}})
 	r, err := rs.Start(context.Background(), "u1", "nobody", model.NewUserMessage("hi"))
 	if err != nil {
@@ -129,6 +132,7 @@ func TestAgentForChooseError(t *testing.T) {
 
 // 工具由各个 AI 员工自己提供：按名称要求审批，批准后执行这个对话的 agent 上的工具。
 func TestAgentForApprovalUsesEmployeeTool(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
 		chattest.Text("已退款"),
@@ -159,6 +163,7 @@ func TestAgentForApprovalUsesEmployeeTool(t *testing.T) {
 
 // 群聊：应用的消息表加按会话选择的 AI 员工。
 func TestAgentForWithHistory(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Text("十点"))
 	e := &employees{agents: map[string]agent.Agent{group.ID: employee("xiaoa", m)}}
 	table := newMessageTable()
@@ -176,6 +181,7 @@ func TestAgentForWithHistory(t *testing.T) {
 }
 
 func TestAgentForNewRunsChecks(t *testing.T) {
+	t.Parallel()
 	e := &employees{agents: map[string]agent.Agent{}}
 	sessions := inmemory.NewSessionService()
 	defer sessions.Close()

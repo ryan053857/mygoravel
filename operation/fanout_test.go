@@ -69,6 +69,7 @@ func (e env) wait(t *testing.T, id uuid.UUID, done func(op *operation.Operation)
 }
 
 func TestFanout(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	rec := &recorder{}
 	var mu sync.Mutex
@@ -108,6 +109,7 @@ func TestFanout(t *testing.T) {
 }
 
 func TestHandleUnitSkipsSettledUnits(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	var calls []string
@@ -161,6 +163,7 @@ func (e env) claimNew(t *testing.T, seen *int) []operation.Unit[string] {
 }
 
 func TestRetryFailedUnit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	rec := &recorder{}

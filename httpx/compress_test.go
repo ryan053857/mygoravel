@@ -40,6 +40,7 @@ func respond(contentType, body string) http.Handler {
 }
 
 func TestCompressEncodings(t *testing.T) {
+	t.Parallel()
 	h := respond("application/json", bigJSON)
 	for accept, want := range map[string]string{
 		"gzip":            "gzip",
@@ -79,6 +80,7 @@ func TestCompressEncodings(t *testing.T) {
 }
 
 func TestCompressSkips(t *testing.T) {
+	t.Parallel()
 	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("x", 4096)
 	brotli := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css")
@@ -104,6 +106,7 @@ func TestCompressSkips(t *testing.T) {
 }
 
 func TestCompressContentTypes(t *testing.T) {
+	t.Parallel()
 	for ct, want := range map[string]bool{
 		"text/html; charset=utf-8":  true,
 		"text/css":                  true,
@@ -134,6 +137,7 @@ func TestCompressContentTypes(t *testing.T) {
 
 // ServeContent 的条件请求、HEAD 和 Range 在压缩下照常工作。
 func TestCompressServeContent(t *testing.T) {
+	t.Parallel()
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"v1"`)
 		http.ServeContent(w, r, "app.css", time.Time{}, strings.NewReader(bigJSON))
@@ -164,6 +168,7 @@ func TestCompressServeContent(t *testing.T) {
 
 // SSE 的响应头立即送达，每条事件随即送达，不经过压缩缓冲。
 func TestCompressSSE(t *testing.T) {
+	t.Parallel()
 	send := make(chan string)
 	h := httpx.Compress()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		httpx.SSE(w, r, func(s *httpx.Stream) error {
@@ -230,6 +235,7 @@ func TestCompressSSE(t *testing.T) {
 
 // WebSocket 握手原样交给下一个处理器，可以接管连接。
 func TestCompressUpgrade(t *testing.T) {
+	t.Parallel()
 	h := httpx.Compress()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if w.Header().Get("Vary") != "" {
 			t.Errorf("Vary = %q", w.Header().Get("Vary"))
@@ -263,6 +269,7 @@ func TestCompressUpgrade(t *testing.T) {
 
 // 处理器只写响应头时，状态码照常送出。
 func TestCompressStatusOnly(t *testing.T) {
+	t.Parallel()
 	rec := compressed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}), "DELETE", "gzip", nil)

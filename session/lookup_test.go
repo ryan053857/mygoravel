@@ -13,6 +13,7 @@ import (
 
 // Lookup 直接读取存储：撤销后立即发现，不受请求中已加载的会话数据影响。
 func TestLookup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := session.NewStore(dbtest.Open(t, session.Migrations()))
 	sm := session.New(defaults(), store)

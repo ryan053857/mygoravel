@@ -216,6 +216,7 @@ func (e *env) callTool(t *testing.T, token string) (int, string, string) {
 }
 
 func TestFlow(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 
 	// 客户端先访问 MCP：401 告诉它受保护资源元数据的地址，元数据指向授权服务器。
@@ -300,6 +301,7 @@ func TestFlow(t *testing.T) {
 }
 
 func TestTokenErrors(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	e.browser.Login(e.pages, editor)
 	issue := func() string {
@@ -335,6 +337,7 @@ func TestTokenErrors(t *testing.T) {
 }
 
 func TestAuthorizeErrors(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	e.browser.Login(e.pages, editor)
 
@@ -385,6 +388,7 @@ func TestAuthorizeErrors(t *testing.T) {
 }
 
 func TestPreRegisteredLoopbackClient(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	e.browser.Login(e.pages, editor)
 	// 本机回调地址忽略端口；不传 scope 时申请全部范围，不传 resource 时用唯一的资源。
@@ -415,6 +419,7 @@ func TestPreRegisteredLoopbackClient(t *testing.T) {
 }
 
 func TestNewPanics(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	tokens := apitoken.NewStore(db, apitoken.Config{Lifetime: time.Hour})
 	ok := oauthserver.Options{Issuer: issuer, Resources: []string{resource}, Scopes: []oauthserver.Scope{{Name: "articles:read"}}}
@@ -446,6 +451,7 @@ func TestNewPanics(t *testing.T) {
 
 // 客户端换一种认证方式重试时，同一个授权码仍然可以使用，例如 golang.org/x/oauth2 先用 Basic 认证、失败后改放表单。
 func TestTokenRetry(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	e.browser.Login(e.pages, editor)
 	c := e.approve(t, authorizeQuery(nil), "allow").Query().Get("code")

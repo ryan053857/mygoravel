@@ -56,6 +56,7 @@ func bindFixture(events *[]string, openErr error) []*cobra.Command {
 }
 
 func TestBindAssemblesDependenciesOnExecution(t *testing.T) {
+	t.Parallel()
 	var events []string
 	root := newRoot(bindFixture(&events, nil)...)
 	if want := []string{`declare ""`}; !slices.Equal(events, want) {
@@ -76,6 +77,7 @@ func TestBindAssemblesDependenciesOnExecution(t *testing.T) {
 }
 
 func TestBindHelpDoesNotOpen(t *testing.T) {
+	t.Parallel()
 	var events []string
 	root := newRoot(bindFixture(&events, nil)...)
 	if _, _, err := execute(root, "greet", "hello", "--help"); err != nil {
@@ -87,6 +89,7 @@ func TestBindHelpDoesNotOpen(t *testing.T) {
 }
 
 func TestBindReportsErrors(t *testing.T) {
+	t.Parallel()
 	t.Run("args", func(t *testing.T) {
 		var events []string
 		_, _, err := execute(newRoot(bindFixture(&events, nil)...), "greet", "hello")

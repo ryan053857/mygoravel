@@ -24,6 +24,7 @@ func defaults() session.Config {
 }
 
 func TestConfigValidate(t *testing.T) {
+	t.Parallel()
 	if err := defaults().Validate(); err != nil {
 		t.Fatalf("defaults invalid: %v", err)
 	}
@@ -46,6 +47,7 @@ func TestConfigValidate(t *testing.T) {
 }
 
 func TestNewPanicsOnInvalidInput(t *testing.T) {
+	t.Parallel()
 	for name, build := range map[string]func(){
 		"invalid config": func() { session.New(session.Config{}, memstore.New()) },
 		"nil store":      func() { session.New(defaults(), nil) },
@@ -62,6 +64,7 @@ func TestNewPanicsOnInvalidInput(t *testing.T) {
 }
 
 func TestNewAppliesCookieConfig(t *testing.T) {
+	t.Parallel()
 	cfg := defaults()
 	cfg.Cookie.Name = "sid"
 	cfg.Cookie.SameSite = "strict"
@@ -190,6 +193,7 @@ func sessionCookie(resp *http.Response) *http.Cookie {
 }
 
 func TestLoginSubjectLogout(t *testing.T) {
+	t.Parallel()
 	srv := newApp(t, memstore.New())
 	c := newClient(t)
 
@@ -239,6 +243,7 @@ func TestLoginSubjectLogout(t *testing.T) {
 }
 
 func TestLoginRenewsToken(t *testing.T) {
+	t.Parallel()
 	srv := newApp(t, memstore.New())
 	c := newClient(t)
 	first := sessionCookie(do(t, c, http.MethodPost, srv.URL+"/login", `{"user":"alice"}`))
@@ -252,6 +257,7 @@ func TestLoginRenewsToken(t *testing.T) {
 }
 
 func TestLoginRequiresSubjectID(t *testing.T) {
+	t.Parallel()
 	srv := newApp(t, memstore.New())
 	if resp := do(t, newClient(t), http.MethodPost, srv.URL+"/login", `{"user":""}`); resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status=%d", resp.StatusCode)

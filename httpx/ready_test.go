@@ -37,6 +37,7 @@ func probe(t *testing.T, h http.Handler) (int, readyBody) {
 }
 
 func TestReady(t *testing.T) {
+	t.Parallel()
 	var dbDown, cacheDown atomic.Bool
 	check := func(down *atomic.Bool) func(context.Context) error {
 		return func(context.Context) error {
@@ -111,6 +112,7 @@ func TestReady(t *testing.T) {
 }
 
 func TestReadyTimeoutAndPanic(t *testing.T) {
+	t.Parallel()
 	block := make(chan struct{})
 	defer close(block)
 	h := httpx.Ready(httpx.ReadyOptions{
@@ -136,6 +138,7 @@ func TestReadyTimeoutAndPanic(t *testing.T) {
 }
 
 func TestReadyWithoutChecks(t *testing.T) {
+	t.Parallel()
 	h := httpx.Ready(httpx.ReadyOptions{})
 	if code, body := probe(t, h); code != http.StatusOK || body.Status != "ready" {
 		t.Fatalf("%d %+v", code, body)
@@ -148,6 +151,7 @@ func TestReadyWithoutChecks(t *testing.T) {
 }
 
 func TestReadyPanicsOnBadChecks(t *testing.T) {
+	t.Parallel()
 	ok := func(context.Context) error { return nil }
 	for name, checks := range map[string][]httpx.Check{
 		"no name":   {{Ping: ok}},

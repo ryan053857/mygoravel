@@ -192,6 +192,7 @@ func csv(lines int) string {
 }
 
 func TestProcessResumesAndRecordsFailures(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	imp := e.start(t, alice, "articles.csv", csv(250))
@@ -284,6 +285,7 @@ func TestProcessResumesAndRecordsFailures(t *testing.T) {
 }
 
 func TestProcessRejectsFile(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	imp := e.start(t, alice, "articles.csv", "备注\nx\n")
@@ -302,6 +304,7 @@ func TestProcessRejectsFile(t *testing.T) {
 }
 
 func TestStartAndGet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	f, err := e.files.Upload(ctx, alice, filesystem.FileInput{Filename: "a.txt", ContentType: "text/plain", Size: 1}, strings.NewReader("x"))
@@ -329,6 +332,7 @@ func TestStartAndGet(t *testing.T) {
 }
 
 func TestFinalAttemptFailsImport(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	imp := e.start(t, alice, "a.csv", csv(3))
 	rec := newRecorder()
@@ -372,6 +376,7 @@ func TestFinalAttemptFailsImport(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	old := e.start(t, alice, "old.csv", csv(12))

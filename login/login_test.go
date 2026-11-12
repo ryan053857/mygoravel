@@ -156,6 +156,7 @@ func is(t *testing.T, err, want error) {
 }
 
 func TestIdentifierNormalize(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[login.Identifier]login.Identifier{
 		login.Email("  Alice@Example.COM "): login.Email("alice@example.com"),
 		login.Phone("+8613800138000"):       login.Phone("+8613800138000"),
@@ -180,6 +181,7 @@ func TestIdentifierNormalize(t *testing.T) {
 }
 
 func TestPassword(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var resolved []identity.Subject
 	e := newRealm(t, login.Options{
@@ -231,6 +233,7 @@ func TestPassword(t *testing.T) {
 
 // 每次尝试消耗配额，成功后清零：只有连续的失败受到限制。
 func TestAttemptsLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 3, Interval: time.Hour, Burst: 3})})
 	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
@@ -257,6 +260,7 @@ func TestAttemptsLimit(t *testing.T) {
 
 // 哈希参数过时时，登录成功后按当前配置重新哈希。
 func TestRehash(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Hasher: hasher(4)})
 	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
@@ -280,6 +284,7 @@ func TestRehash(t *testing.T) {
 }
 
 func TestSignInWithCode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Phone("+8613800138000"), false); err != nil {
@@ -337,6 +342,7 @@ func TestSignInWithCode(t *testing.T) {
 
 // 没有密码的账号用发给自己的验证码确认身份。
 func TestConfirmCode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	phone := login.Phone("+8613800138000")
@@ -415,6 +421,7 @@ func TestConfirmCode(t *testing.T) {
 
 // 并发提交同一个验证码，只有一次成功。
 func TestConcurrentVerify(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{CodeAttempts: 20})
 	e.account(t, ctx, "c1", "alice@example.com", "")
@@ -446,6 +453,7 @@ func TestConcurrentVerify(t *testing.T) {
 }
 
 func TestRegister(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Register: true})
 	email := login.Email("new@example.com")
@@ -516,6 +524,7 @@ func TestRegister(t *testing.T) {
 
 // 不开放注册、或者找回密码时，未注册的标识不发送验证码，但仍返回请求 ID。
 func TestUnregisteredGetsNoCode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	for _, purpose := range []login.Purpose{login.SignIn, login.Reset} {
@@ -540,6 +549,7 @@ func TestUnregisteredGetsNoCode(t *testing.T) {
 }
 
 func TestSendFailure(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Register: true})
 	e.mail.fail = errors.New("smtp down")
@@ -555,6 +565,7 @@ func TestSendFailure(t *testing.T) {
 }
 
 func TestSendLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Register: true, Sends: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
 	for range 2 {
@@ -566,6 +577,7 @@ func TestSendLimit(t *testing.T) {
 }
 
 func TestResetPassword(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
 	e.account(t, ctx, "c1", "alice@example.com", "")
@@ -607,6 +619,7 @@ func TestResetPassword(t *testing.T) {
 }
 
 func TestLink(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	e.account(t, ctx, "c1", "alice@example.com", "")
@@ -660,6 +673,7 @@ func TestLink(t *testing.T) {
 
 // PerTenant：标识在租户内唯一，验证码和凭证只能在发送时的租户中使用，主体带有租户。
 func TestPerTenant(t *testing.T) {
+	t.Parallel()
 	acme := identity.WithTenant(context.Background(), "acme")
 	globex := identity.WithTenant(context.Background(), "globex")
 	e := newRealm(t, login.Options{PerTenant: true, Register: true})
@@ -699,6 +713,7 @@ func TestPerTenant(t *testing.T) {
 }
 
 func TestDetachAndForget(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Register: true})
 	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
@@ -731,6 +746,7 @@ func TestDetachAndForget(t *testing.T) {
 }
 
 func TestPasswordManagement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Attempts: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
 	e.account(t, ctx, "c1", "alice@example.com", "")
@@ -764,6 +780,7 @@ func TestPasswordManagement(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Register: true})
 	e.account(t, ctx, "c1", "alice@example.com", "")
@@ -786,6 +803,7 @@ func TestCleanup(t *testing.T) {
 
 // 轮换应用密钥后，之前发出的验证码仍然有效。
 func TestCodeSurvivesKeyRotation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{Register: true})
 	requestID, c := e.code(t, ctx, login.SignIn, login.Email("a@example.com"))
@@ -798,6 +816,7 @@ func TestCodeSurvivesKeyRotation(t *testing.T) {
 }
 
 func TestNewPanics(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, login.Migrations())
 	c := crypt.New(crypt.Config{Key: appKey})
 	l := ratelimit.NewMemory(ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})

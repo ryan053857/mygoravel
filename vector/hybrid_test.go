@@ -33,6 +33,7 @@ func (f *fixture) searchHybrid(t *testing.T, q vector.Query) []vector.Hit[chunkD
 }
 
 func TestHybridKeywords(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	f.putHybrid(t, "a", chunkDoc{File: "a", Text: "型号 X-2000 的保修期是两年"})
 	f.putHybrid(t, "b", chunkDoc{File: "b", Text: "退货需要在七天内申请"}, chunkDoc{File: "b", Text: "发票随货寄出"})
@@ -62,6 +63,7 @@ func TestHybridKeywords(t *testing.T) {
 }
 
 func TestHybridReusesVectors(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	f.putHybrid(t, "a", chunkDoc{Text: "一段文字"}, chunkDoc{Text: "另一段"})
 	before := len(f.emb.Requests())
@@ -75,6 +77,7 @@ func TestHybridReusesVectors(t *testing.T) {
 }
 
 func TestHybridReindex(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := setup(t)
 	plain := vector.Define[chunkDoc]("mixed")

@@ -23,6 +23,7 @@ func serve(h http.Handler, method, path string) *httptest.ResponseRecorder {
 }
 
 func TestAccessLogRecordsRouteLevelAndAttrs(t *testing.T) {
+	t.Parallel()
 	rec := logtest.New()
 	cfg := httpx.DefaultConfig()
 	cfg.AccessLog.IgnorePaths = []string{"/healthz"}
@@ -63,6 +64,7 @@ func TestAccessLogRecordsRouteLevelAndAttrs(t *testing.T) {
 }
 
 func TestAccessLogOutsideChiAndImplicitOK(t *testing.T) {
+	t.Parallel()
 	rec := logtest.New()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(http.ResponseWriter, *http.Request) {}) // 不写任何响应
@@ -78,6 +80,7 @@ func TestAccessLogOutsideChiAndImplicitOK(t *testing.T) {
 }
 
 func TestAccessLogHeadersCanBeRedactedByKey(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	logger := logging.New(logging.Config{Writer: &buf}, logging.Format(
 		slogformatter.FormatByKey("X-Api-Key", func(slog.Value) slog.Value { return slog.StringValue("hidden") }),
@@ -93,6 +96,7 @@ func TestAccessLogHeadersCanBeRedactedByKey(t *testing.T) {
 }
 
 func TestHTTPComponentLevel(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	logger := logging.New(logging.Config{Writer: &buf, Levels: map[string]slog.Level{"http": slog.LevelWarn}})
 	router := chi.NewRouter()

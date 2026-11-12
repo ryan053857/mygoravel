@@ -6,6 +6,7 @@ import (
 )
 
 func TestSanitize(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		`SELECT "a"."id", "a"."title" FROM "articles" AS "a" WHERE ("a"."id" = 42) LIMIT 1`: `SELECT "a"."id", "a"."title" FROM "articles" AS "a" WHERE ("a"."id" = ?) LIMIT ?`,
 		`INSERT INTO "users" ("email", "hash") VALUES ('a@b.com', 'it''s secret')`:          `INSERT INTO "users" ("email", "hash") VALUES (?, ?)`,
@@ -28,6 +29,7 @@ func TestSanitize(t *testing.T) {
 }
 
 func TestSanitizeTruncates(t *testing.T) {
+	t.Parallel()
 	long := "SELECT " + strings.Repeat("col, ", 1000) + "x FROM t"
 	got := sanitize(long)
 	if len(got) != maxQueryText+3 || !strings.HasSuffix(got, "...") || !strings.HasPrefix(got, "SELECT col, ") {

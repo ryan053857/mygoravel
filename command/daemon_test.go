@@ -113,6 +113,7 @@ func TestDaemonListenError(t *testing.T) {
 // TestDaemonUpgrade 模拟 systemd：接收 sd_notify，向主进程发送 SIGHUP，同时持续请求，
 // 确认升级期间没有失败的请求、旧进程排空时的升级会等它退出、新版本失败时旧版本继续服务。
 func TestDaemonUpgrade(t *testing.T) {
+	t.Parallel()
 	h := startHelper(t, true)
 	load := startLoad(h.addr)
 
@@ -154,6 +155,7 @@ func TestDaemonUpgrade(t *testing.T) {
 
 // TestDaemonWithoutRuntimeDirectory：只报告就绪，reload 时在状态中说明需要 RuntimeDirectory=。
 func TestDaemonWithoutRuntimeDirectory(t *testing.T) {
+	t.Parallel()
 	h := startHelper(t, false)
 	h.cmd.Process.Signal(syscall.SIGHUP)
 	h.notify.expectPrefix(t, "RELOADING=1\nMONOTONIC_USEC=")

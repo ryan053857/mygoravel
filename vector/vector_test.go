@@ -147,6 +147,7 @@ func sorted(s []string) []string {
 }
 
 func TestSearch(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	if hits := f.search(t, vector.Query{Text: "还没有同步"}); len(hits) != 0 {
 		t.Fatalf("hits before any sync = %v", hits)
@@ -174,6 +175,7 @@ func TestSearch(t *testing.T) {
 }
 
 func TestReplaceAndReuse(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	f.put(t, "a", chunkDoc{Text: "一"}, chunkDoc{Text: "二"}, chunkDoc{Text: "三"})
 	if got := f.emb.Requests(); len(got) != 1 || !slices.Equal(got[0], []string{"一", "二", "三"}) {
@@ -207,6 +209,7 @@ func TestReplaceAndReuse(t *testing.T) {
 }
 
 func TestFilters(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	day := func(d int) *time.Time {
 		v := time.Date(2026, 11, d, 0, 0, 0, 0, time.UTC)
@@ -262,6 +265,7 @@ func TestFilters(t *testing.T) {
 }
 
 func TestTenant(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	f.put(t, "a", chunkDoc{Tenant: "t1", Text: "同一段话"})
 	f.put(t, "b", chunkDoc{Tenant: "t2", Text: "同一段话"})
@@ -282,6 +286,7 @@ func TestTenant(t *testing.T) {
 }
 
 func TestModelMismatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := setup(t)
 	shared := newShared(t, f.db)
@@ -356,6 +361,7 @@ func newShared(t *testing.T, db *bun.DB) *shared {
 }
 
 func TestInvalidDocuments(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	f.src.set("empty", chunkDoc{File: "x"})
 	if err := chunks.Refresh(context.Background(), f.store, f.src.load, "empty"); err == nil {
@@ -372,6 +378,7 @@ func TestInvalidDocuments(t *testing.T) {
 }
 
 func TestSyncThroughQueue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := setup(t)
 	f.src.set("1", chunkDoc{Text: "队列同步"})
@@ -409,6 +416,7 @@ func TestSyncThroughQueue(t *testing.T) {
 }
 
 func TestConcurrentRefresh(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	var wg sync.WaitGroup
 	errs := make(chan error, 16)
@@ -439,6 +447,7 @@ func TestConcurrentRefresh(t *testing.T) {
 }
 
 func TestDuplicateModels(t *testing.T) {
+	t.Parallel()
 	f := setup(t)
 	m := vector.Model{Name: "m", Dims: dims, Embedder: f.emb}
 	defer func() {
@@ -450,6 +459,7 @@ func TestDuplicateModels(t *testing.T) {
 }
 
 func TestConcurrentFirstSync(t *testing.T) {
+	t.Parallel()
 	// 索引还没有 collection 时多个进程（这里是共用前缀的 4 个 Store）的同步同时开始：
 	// 一个创建，其余的等它就绪后照常写入
 	for round := range 5 {

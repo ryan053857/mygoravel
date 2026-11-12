@@ -9,6 +9,7 @@ import (
 )
 
 func TestExternal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	google := login.External{Provider: "google", Subject: "g-1", Email: "Alice@Gmail.com", EmailVerified: true, Name: "Alice"}
@@ -51,6 +52,7 @@ func TestExternal(t *testing.T) {
 
 // 邮箱已属于其他账号：不自动关联，注册返回 ErrTaken；用户登录原账号后绑定，之后用第三方账号登录原账号。
 func TestExternalDoesNotMergeByEmail(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
@@ -83,6 +85,7 @@ func TestExternalDoesNotMergeByEmail(t *testing.T) {
 
 // 第三方账号登录不要求二次验证；PerTenant 时第三方账号同样按租户隔离。
 func TestExternalTwoFactorAndTenants(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{PerTenant: true})
 	acme := identity.WithTenant(ctx, "acme")
@@ -105,6 +108,7 @@ func TestExternalTwoFactorAndTenants(t *testing.T) {
 }
 
 func TestExternalProviderNames(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newRealm(t, login.Options{})
 	for _, ext := range []login.External{

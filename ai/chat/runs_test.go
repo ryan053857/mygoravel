@@ -101,6 +101,7 @@ func messagesOf(req []model.Message) string {
 }
 
 func TestStartStreamsAnswer(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Reasoning: "想一想", Text: "你好 世界"})
 	rs := newRuns(t, m, nil)
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
@@ -126,6 +127,7 @@ func TestStartStreamsAnswer(t *testing.T) {
 }
 
 func TestToolCallsAndBusy(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		// 只有思考过程、没有正文的回复：流式发出的思考过程不应从完整消息中重复发送。
 		chattest.Reply{Reasoning: "查一下", Calls: []chattest.Call{{Name: "get_order", Args: orderArgs{"A1"}}}},
@@ -149,6 +151,7 @@ func TestToolCallsAndBusy(t *testing.T) {
 }
 
 func TestSteerDuringToolCall(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Calls(chattest.Call{Name: "get_order", Args: orderArgs{"A1"}}),
 		chattest.Text("都查好了"),
@@ -172,6 +175,7 @@ func TestSteerDuringToolCall(t *testing.T) {
 }
 
 func TestSteerDuringFinalAnswerContinues(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Reply{Text: "第一个回答", Delay: 300 * time.Millisecond},
 		chattest.Text("第二个回答"),
@@ -198,6 +202,7 @@ func TestSteerDuringFinalAnswerContinues(t *testing.T) {
 }
 
 func TestApprovalAcrossRuns(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Calls(
 			chattest.Call{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}},
@@ -266,6 +271,7 @@ func TestApprovalAcrossRuns(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "slow", Delay: 5 * time.Second})
 	rs := newRuns(t, m, nil)
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
@@ -281,6 +287,7 @@ func TestCancel(t *testing.T) {
 }
 
 func TestSendStartsOrSteers(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Calls(chattest.Call{Name: "get_order", Args: orderArgs{"A1"}}),
 		chattest.Text("好的"),
@@ -303,6 +310,7 @@ func TestSendStartsOrSteers(t *testing.T) {
 }
 
 func TestSteerBeforeApprovalIsDeliveredAfterIt(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}, Delay: 300 * time.Millisecond},
 		chattest.Text("已退款，B2 也查好了"),
@@ -339,6 +347,7 @@ func TestSteerBeforeApprovalIsDeliveredAfterIt(t *testing.T) {
 }
 
 func TestShutdownWaitsForRuns(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "说完", Delay: 300 * time.Millisecond})
 	rs := newRuns(t, m, nil)
 	ctx := context.Background()
@@ -375,6 +384,7 @@ func TestShutdownWaitsForRuns(t *testing.T) {
 }
 
 func TestShutdownCancelsAfterDeadline(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "很慢", Delay: 5 * time.Second})
 	rs := newRuns(t, m, nil)
 	r, err := rs.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))

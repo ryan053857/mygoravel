@@ -106,6 +106,7 @@ func userMessage(text string) map[string]any {
 }
 
 func TestUIStreamWithApproval(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Reply{Reasoning: "先查", Text: "好的", Calls: []chattest.Call{
 			{ID: "g1", Name: "get_order", Args: orderArgs{"C3"}},
@@ -166,6 +167,7 @@ func TestUIStreamWithApproval(t *testing.T) {
 }
 
 func TestUIStreamRejectAndSteer(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Calls(chattest.Call{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}),
 		chattest.Calls(chattest.Call{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}),
@@ -214,6 +216,7 @@ func TestUIStreamRejectAndSteer(t *testing.T) {
 }
 
 func TestUIResume(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "慢 回答", Delay: 300 * time.Millisecond})
 	rs := newRuns(t, m, nil)
 	url := chatServer(t, rs)
@@ -245,6 +248,7 @@ func TestUIResume(t *testing.T) {
 }
 
 func TestSubmitRejectsBadRequests(t *testing.T) {
+	t.Parallel()
 	rs := newRuns(t, chattest.NewModel(), nil)
 	url := chatServer(t, rs)
 	for _, body := range []any{

@@ -52,6 +52,7 @@ func twoInstancesOn(t *testing.T, m *chattest.Model, tools []tool.Tool, backend 
 }
 
 func TestClusterMirrorsRunOnOtherInstance(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []chattest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
 		chattest.Text("都 查好了"),
@@ -62,6 +63,7 @@ func TestClusterMirrorsRunOnOtherInstance(t *testing.T) {
 
 // TestClusterOnRedis 用 Redis 广播和 Redis 锁运行同一个场景。
 func TestClusterOnRedis(t *testing.T) {
+	t.Parallel()
 	rdb := redistest.Standalone.Open(t)
 	m := chattest.NewModel(
 		chattest.Reply{Reasoning: "先查", Text: "我查 一下", Calls: []chattest.Call{{ID: "g1", Name: "get_order", Args: orderArgs{"A1"}}}},
@@ -125,6 +127,7 @@ func joined(events []string) string {
 }
 
 func TestClusterResumeAndCancelFromOtherInstance(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "很慢", Delay: 5 * time.Second})
 	a, b := twoInstances(t, m, nil)
 	url := chatServer(t, b)
@@ -181,6 +184,7 @@ func TestClusterMirrorDetectsSilentInstance(t *testing.T) {
 
 // 一个实例停止时，进行中的运行继续直到结束，其他实例照常镜像它。
 func TestClusterShutdownFinishesRunsMirroredElsewhere(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "说 完 了", Delay: 400 * time.Millisecond})
 	a, b := twoInstances(t, m, nil)
 	ctx := context.Background()
@@ -212,6 +216,7 @@ func TestClusterShutdownFinishesRunsMirroredElsewhere(t *testing.T) {
 
 // 对话在其他实例上回答时，Append 返回 ErrBusy。
 func TestClusterAppendWhileRunningElsewhere(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "慢", Delay: 300 * time.Millisecond})
 	a, b := twoInstances(t, m, nil)
 	ctx := context.Background()
@@ -239,6 +244,7 @@ func TestClusterAppendWhileRunningElsewhere(t *testing.T) {
 
 // 同一个对话在保留期内再次运行：上一次运行的 owner 关闭，其他实例镜像到的是这一次运行。
 func TestClusterRerunWithinKeepMirrorsLatest(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Text("第一次"), chattest.Reply{Text: "第二次", Delay: 500 * time.Millisecond})
 	a, b := twoInstances(t, m, nil)
 	ctx := context.Background()

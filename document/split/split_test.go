@@ -135,6 +135,7 @@ func checkContract(t testing.TB, s *Splitter, text string, chunks []Chunk) {
 }
 
 func TestNewValidates(t *testing.T) {
+	t.Parallel()
 	for _, opts := range []Options{
 		{Size: 0},
 		{Size: 10, Overlap: 10},
@@ -153,6 +154,7 @@ func TestNewValidates(t *testing.T) {
 }
 
 func TestWhitespaceOnly(t *testing.T) {
+	t.Parallel()
 	s := mustNew(t, Options{Size: 10})
 	for _, text := range []string{"", " ", "\n\r\n\t", "　"} {
 		if chunks := s.Split(text); chunks != nil {
@@ -171,6 +173,7 @@ func headingTexts(c Chunk) []string {
 }
 
 func TestHeadingPaths(t *testing.T) {
+	t.Parallel()
 	text := "# A\n\nintro\n\n## B\n\nbody b\n\n### C\n\nbody c\n\n## D\n\nbody d\n"
 	s := mustNew(t, Options{Size: 1000})
 	chunks := s.Split(text)
@@ -201,6 +204,7 @@ func TestHeadingPaths(t *testing.T) {
 }
 
 func TestConsecutiveHeadingsStayTogether(t *testing.T) {
+	t.Parallel()
 	text := "# A\n\n## B\nbody\n"
 	s := mustNew(t, Options{Size: 100})
 	chunks := s.Split(text)
@@ -211,6 +215,7 @@ func TestConsecutiveHeadingsStayTogether(t *testing.T) {
 }
 
 func TestLongHeadingIsCutInside(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("标题", 80)
 	text := "# Root\n\n## " + long + "\n\n" + strings.Repeat("正文内容。", 30) + "\n"
 	s := mustNew(t, Options{Size: 60, Overlap: 5})
@@ -238,6 +243,7 @@ func TestLongHeadingIsCutInside(t *testing.T) {
 }
 
 func TestCJKSplitsAtSentences(t *testing.T) {
+	t.Parallel()
 	text := strings.Repeat("退款申请需在签收后七天内提交，客服会在两个工作日内审核。", 10)
 	s := mustNew(t, Options{Size: 60, Overlap: 16})
 	chunks := s.Split(text)
@@ -256,6 +262,7 @@ func TestCJKSplitsAtSentences(t *testing.T) {
 }
 
 func TestTableHeaderContext(t *testing.T) {
+	t.Parallel()
 	header := "| 地区 | 首重 |\n| --- | --- |"
 	text := "## 运费\n\n" + header + "\n" + strings.Repeat("| 华东 | 8 元 |\n", 40)
 	s := mustNew(t, Options{Size: 80})
@@ -281,6 +288,7 @@ func TestTableHeaderContext(t *testing.T) {
 }
 
 func TestTableVariants(t *testing.T) {
+	t.Parallel()
 	s := mustNew(t, Options{Size: 40})
 	rows := strings.Repeat("a | b\n", 20)
 	for name, tc := range map[string]struct {
@@ -304,6 +312,7 @@ func TestTableVariants(t *testing.T) {
 }
 
 func TestCRLF(t *testing.T) {
+	t.Parallel()
 	text := "# 标题\r\n\r\n" + strings.Repeat("第一句话。第二句话，", 20) + "\r\n"
 	s := mustNew(t, Options{Size: 30, Overlap: 5})
 	chunks := s.Split(text)
@@ -319,6 +328,7 @@ func TestCRLF(t *testing.T) {
 }
 
 func TestStructuresAreNotHeadings(t *testing.T) {
+	t.Parallel()
 	s := mustNew(t, Options{Size: 1000})
 	for name, text := range map[string]string{
 		"fence":          "intro\n\n```sh\n# comment\n```\n\nafter\n",
@@ -345,6 +355,7 @@ func TestStructuresAreNotHeadings(t *testing.T) {
 }
 
 func TestFrontMatterNeedsYAML(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		text        string
 		frontMatter bool
@@ -393,6 +404,7 @@ func TestFrontMatterNeedsYAML(t *testing.T) {
 }
 
 func TestGraphemeClustersStayWhole(t *testing.T) {
+	t.Parallel()
 	for name, text := range map[string]string{
 		"family emoji": strings.Repeat("👨‍👩‍👧‍👦", 100),
 		"flags":        strings.Repeat("🇨🇳", 300),
@@ -444,6 +456,7 @@ func TestGraphemeClustersStayWhole(t *testing.T) {
 }
 
 func TestHeadingsAreRecognised(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		text  string
 		texts []string
@@ -471,6 +484,7 @@ func TestHeadingsAreRecognised(t *testing.T) {
 }
 
 func TestSetextHeadingRange(t *testing.T) {
+	t.Parallel()
 	text := "Two\nlines\n===\n\n" + strings.Repeat("word ", 20)
 	s := mustNew(t, Options{Size: 30})
 	chunks := s.Split(text)
@@ -488,6 +502,7 @@ func TestSetextHeadingRange(t *testing.T) {
 }
 
 func TestStructuresFittingMaxSizeStayWhole(t *testing.T) {
+	t.Parallel()
 	s := mustNew(t, Options{Size: 20, MaxSize: 24})
 	heading := "# abcdefghijklmnopqrs\nx\n" + strings.Repeat("y", 60)
 	chunks := s.Split(heading)
@@ -514,6 +529,7 @@ func TestStructuresFittingMaxSizeStayWhole(t *testing.T) {
 }
 
 func TestNoWhitespaceChunks(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		text string
 		opts Options
@@ -528,6 +544,7 @@ func TestNoWhitespaceChunks(t *testing.T) {
 }
 
 func TestMaxSizeEqualsSize(t *testing.T) {
+	t.Parallel()
 	text := strings.Repeat("一二三四五。六七八九十，", 20)
 	s := mustNew(t, Options{Size: 30, MaxSize: 30, Overlap: 5})
 	chunks := s.Split(text)
@@ -540,6 +557,7 @@ func TestMaxSizeEqualsSize(t *testing.T) {
 }
 
 func TestCodeSpans(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		line  string
 		spans [][2]int
@@ -560,6 +578,7 @@ func TestCodeSpans(t *testing.T) {
 }
 
 func TestNestedCodeIsEnclosed(t *testing.T) {
+	t.Parallel()
 	text := "- item\n\n  ```\n  a. b, c\n  ```\n> ```\n> d. e\n> ```\n"
 	l := scan(text)
 	for _, after := range []string{"a. ", "b, ", "d. "} {
@@ -571,6 +590,7 @@ func TestNestedCodeIsEnclosed(t *testing.T) {
 }
 
 func TestContextFormat(t *testing.T) {
+	t.Parallel()
 	headings := []Heading{{Level: 1, Text: "A"}, {Level: 2, Text: "B > C"}}
 	table := &TableHeader{Text: "| x |\n| - |"}
 	for _, tc := range []struct {
@@ -596,6 +616,7 @@ func TestContextFormat(t *testing.T) {
 }
 
 func TestLatinOverlap(t *testing.T) {
+	t.Parallel()
 	text := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 30)
 	s := mustNew(t, Options{Size: 120, Overlap: 50})
 	chunks := s.Split(text)
@@ -615,6 +636,7 @@ func TestLatinOverlap(t *testing.T) {
 }
 
 func TestNoOverlapAcrossHeadings(t *testing.T) {
+	t.Parallel()
 	text := "# A\n\n" + strings.Repeat("word ", 40) + "\n\n# B\n\nend\n"
 	s := mustNew(t, Options{Size: 50, Overlap: 20})
 	chunks := s.Split(text)
@@ -626,6 +648,7 @@ func TestNoOverlapAcrossHeadings(t *testing.T) {
 }
 
 func TestInvalidUTF8(t *testing.T) {
+	t.Parallel()
 	text := "abc\xff\xfe def。\xe4\xb8 tail" + strings.Repeat("x", 50)
 	s := mustNew(t, Options{Size: 10, Overlap: 2})
 	checkContract(t, s, text, s.Split(text))
@@ -639,6 +662,7 @@ type goldenChunk struct {
 }
 
 func TestGolden(t *testing.T) {
+	t.Parallel()
 	s := mustNew(t, Options{Size: 200, Overlap: 30})
 	files, err := filepath.Glob("testdata/*.md")
 	if err != nil || len(files) == 0 {

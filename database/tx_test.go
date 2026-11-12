@@ -51,6 +51,7 @@ func (r *recorder) hook(name string) func(context.Context) error {
 }
 
 func TestRunInTxRunsHooksAfterCommit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := openItems(t)
 	var r recorder
@@ -81,6 +82,7 @@ func TestRunInTxRunsHooksAfterCommit(t *testing.T) {
 }
 
 func TestRunInTxDiscardsHooksOnRollback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := openItems(t)
 	var r recorder
@@ -101,6 +103,7 @@ func TestRunInTxDiscardsHooksOnRollback(t *testing.T) {
 }
 
 func TestRunInTxSavepoints(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := openItems(t)
 	var r recorder
@@ -142,6 +145,7 @@ func TestRunInTxSavepoints(t *testing.T) {
 }
 
 func TestRunInTxOuterRollbackDiscardsSavepointHooks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := openItems(t)
 	var r recorder
@@ -167,6 +171,7 @@ func TestRunInTxOuterRollbackDiscardsSavepointHooks(t *testing.T) {
 type ctxKey struct{}
 
 func TestRunInTxContext(t *testing.T) {
+	t.Parallel()
 	db := openItems(t)
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKey{}, "outer"))
 	defer cancel()
@@ -202,6 +207,7 @@ func TestRunInTxContext(t *testing.T) {
 }
 
 func TestRunInTxLogsHookFailures(t *testing.T) {
+	t.Parallel()
 	logs := logtest.Capture(t)
 	db := openItems(t)
 	var r recorder
@@ -228,6 +234,7 @@ func TestRunInTxLogsHookFailures(t *testing.T) {
 }
 
 func TestRunInTxMisuse(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := openItems(t)
 	noop := func(context.Context, database.Tx) error { return nil }

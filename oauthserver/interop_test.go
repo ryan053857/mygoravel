@@ -24,6 +24,7 @@ func (t handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // TestOfficialSDKClient 用 MCP 官方 Go SDK 的 OAuth 客户端走完整个流程：401 → 受保护资源元数据 → 授权服务器元数据 →
 // 按 Client ID Metadata Document 授权（浏览器中的同意由已登录的 webtest 客户端完成）→ 换取令牌 → 调用工具。
 func TestOfficialSDKClient(t *testing.T) {
+	t.Parallel()
 	e := setup(t)
 	e.browser.Login(e.pages, editor)
 	client := &http.Client{Transport: handlerTransport{e.router}}

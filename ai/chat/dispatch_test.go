@@ -63,6 +63,7 @@ func newDeployment(t *testing.T, workerModel *chattest.Model, tools []tool.Tool,
 }
 
 func TestWorkersRunConversation(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Text("你好 世界"))
 	d := newDeployment(t, m, nil, 2)
 	ctx := context.Background()
@@ -85,6 +86,7 @@ func TestWorkersRunConversation(t *testing.T) {
 }
 
 func TestWorkersBusyAndOptions(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "慢", Delay: 300 * time.Millisecond})
 	d := newDeployment(t, m, nil, 1)
 	ctx := context.Background()
@@ -103,6 +105,7 @@ func TestWorkersBusyAndOptions(t *testing.T) {
 }
 
 func TestWorkersCancelFromWeb(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Reply{Text: "很慢", Delay: 5 * time.Second})
 	d := newDeployment(t, m, nil, 1)
 	r, err := d.web.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
@@ -118,6 +121,7 @@ func TestWorkersCancelFromWeb(t *testing.T) {
 }
 
 func TestWorkersApproval(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(
 		chattest.Reply{Calls: []chattest.Call{{ID: "r1", Name: "refund_order", Args: orderArgs{"A1"}}}},
 		chattest.Text("已退款"),
@@ -205,6 +209,7 @@ func TestWorkersUnavailable(t *testing.T) {
 }
 
 func TestWorkersNotifyWithHistory(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Text("十点"))
 	table := newMessageTable()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)

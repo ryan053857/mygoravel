@@ -12,6 +12,7 @@ import (
 )
 
 func TestByteSize(t *testing.T) {
+	t.Parallel()
 	for text, want := range map[string]filesystem.ByteSize{
 		"0": 0, "1048576": filesystem.MiB, "512KiB": 512 * filesystem.KiB, "16 MiB": 16 * filesystem.MiB,
 		"1GiB": filesystem.GiB, "2TiB": 2 * filesystem.TiB, "10B": 10,
@@ -37,6 +38,7 @@ type appConfig struct {
 }
 
 func TestConfigLoad(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	write := func(name, body string) string {
 		p := filepath.Join(dir, name)
@@ -93,6 +95,7 @@ func TestConfigLoad(t *testing.T) {
 }
 
 func TestDiskConfigValidate(t *testing.T) {
+	t.Parallel()
 	for _, u := range []string{"/storage", "https://cdn.example.com/files", "http://localhost:8080/storage/"} {
 		if err := (filesystem.LocalConfig{Root: "x", PublicURL: u}).Validate(); err != nil {
 			t.Errorf("local %s: %v", u, err)
@@ -120,6 +123,7 @@ func TestDiskConfigValidate(t *testing.T) {
 }
 
 func TestPartSize(t *testing.T) {
+	t.Parallel()
 	for size, want := range map[int64]int64{
 		1:                         16 << 20,
 		1 << 30:                   16 << 20,

@@ -19,6 +19,7 @@ var (
 )
 
 func TestCheckCredential(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	if err := httpx.CheckCredential(ctx); err != nil {
 		t.Fatalf("no checks: %v", err)
@@ -96,6 +97,7 @@ func (w *fakeWatcher) Watch(_ context.Context, sub identity.Subject) <-chan stru
 
 // 安装了 CredentialWatcher 时，收到信号立即复查，不等定期校验。
 func TestSSERechecksOnSignal(t *testing.T) {
+	t.Parallel()
 	var revoked atomic.Bool
 	var checks atomic.Int32
 	w := &fakeWatcher{ch: make(chan struct{}, 1), watched: make(chan identity.Subject, 1)}
@@ -149,6 +151,7 @@ func TestSSERechecksOnSignal(t *testing.T) {
 
 // Watch 返回的通道被关闭时不会空转，连接照常保持。
 func TestSSEIgnoresClosedWatchChannel(t *testing.T) {
+	t.Parallel()
 	var checks atomic.Int32
 	w := &fakeWatcher{ch: make(chan struct{}), watched: make(chan identity.Subject, 1)}
 	close(w.ch)

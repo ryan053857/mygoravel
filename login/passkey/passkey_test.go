@@ -238,6 +238,7 @@ func is(t *testing.T, err, want error) {
 }
 
 func TestPasskey(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t, false)
 
@@ -297,6 +298,7 @@ func TestPasskey(t *testing.T) {
 }
 
 func TestPasskeyRejects(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t, false)
 	d := newDevice(t)
@@ -351,6 +353,7 @@ func TestPasskeyRejects(t *testing.T) {
 
 // PerTenant：passkey 只能在注册时的租户中登录。
 func TestPasskeyTenants(t *testing.T) {
+	t.Parallel()
 	acme := identity.WithTenant(context.Background(), "acme")
 	globex := identity.WithTenant(context.Background(), "globex")
 	e := newEnv(t, true)
@@ -368,6 +371,7 @@ func TestPasskeyTenants(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
+	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	c := crypt.New(crypt.Config{Key: appKey})
 	if _, err := passkey.New(db, nil, c, passkey.Config{RPID: rpID, Origins: []string{origin}}); err == nil {

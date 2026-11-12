@@ -91,10 +91,11 @@ jobs:
         run: docker run -d --name nsqd -p 4150:4150 -p 4151:4151 nsqio/nsq:v1.3.0 /nsqd --mem-queue-size=0
 
       # 队列用逻辑复制转发任务；每个测试数据库一个复制槽，并行测试需要很多个。
+      # 包内的测试并行运行，每个测试有自己的库和连接池，连接数上限也要调高。
       - name: Start PostgreSQL
         run: |
           docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:18 \
-            -c wal_level=logical -c max_replication_slots=256 -c max_wal_senders=64
+            -c wal_level=logical -c max_replication_slots=256 -c max_wal_senders=64 -c max_connections=500
           for i in $(seq 1 60); do docker exec postgres pg_isready -U postgres -h 127.0.0.1 && exit 0; sleep 1; done
           docker logs postgres
           exit 1

@@ -53,6 +53,7 @@ func text(t *testing.T, data []byte) (string, int) {
 }
 
 func TestGotenbergPagedMedia(t *testing.T) {
+	t.Parallel()
 	r := openGotenberg(t)
 	var rows strings.Builder
 	for range 80 {
@@ -83,6 +84,7 @@ func TestGotenbergPagedMedia(t *testing.T) {
 }
 
 func TestGotenbergDefaultsToA4(t *testing.T) {
+	t.Parallel()
 	r := openGotenberg(t)
 	data, err := r.Render(context.Background(), pdf.Document{HTML: html(`<!doctype html><meta charset="utf-8"><p>你好</p>`)})
 	require.NoError(t, err)
@@ -92,6 +94,7 @@ func TestGotenbergDefaultsToA4(t *testing.T) {
 }
 
 func TestGotenbergMissingAsset(t *testing.T) {
+	t.Parallel()
 	r := openGotenberg(t)
 	_, err := r.Render(context.Background(), pdf.Document{
 		HTML: html(`<!doctype html><link rel="stylesheet" href="missing.css"><p>x</p>`),

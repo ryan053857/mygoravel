@@ -112,6 +112,7 @@ func attr(ctx context.Context, key string) string {
 }
 
 func TestConfig(t *testing.T) {
+	t.Parallel()
 	if err := queue.DefaultConfig().Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +135,7 @@ func TestConfig(t *testing.T) {
 
 // 事务中发布的任务随事务提交，回滚时不留下；处理函数的 context 带着发布方的 request_id 和执行次数。
 func TestPublishInTransaction(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	type seen struct {
 		n                         int
@@ -187,6 +189,7 @@ func TestPublishInTransaction(t *testing.T) {
 }
 
 func TestPublishAll(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	var mu sync.Mutex
 	var seen []int
@@ -228,6 +231,7 @@ func TestPublishAll(t *testing.T) {
 
 // 不超过 MaxDefer 的延迟由 NSQ 完成；更晚的任务先存入 queue_scheduled，快到时间再写回 WAL。
 func TestDelay(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	cfg := queuetest.Config(t)
 	cfg.MaxDefer = time.Second
@@ -259,6 +263,7 @@ func TestDelay(t *testing.T) {
 
 // 失败的任务按 RetryAfter 重试：不超过 MaxDefer 时由 NSQ 延迟投递，更长的经由 queue_scheduled，执行次数接着计算。
 func TestRetry(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	cfg := queuetest.Config(t)
 	cfg.MaxDefer = time.Second
@@ -334,6 +339,7 @@ func TestRetry(t *testing.T) {
 
 // 次数用完或 Permanent 的错误转入失败任务表；Retry 重新发布，执行次数从头计算。
 func TestFailedJobs(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	cfg := queuetest.Config(t)
 	cfg.MaxAttempts = 2
@@ -385,6 +391,7 @@ func TestFailedJobs(t *testing.T) {
 
 // 同一个应用的多个 Worker 共同消费，每个任务只处理一次。
 func TestCompetingWorkers(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	cfg := queuetest.Config(t)
 	var mu sync.Mutex
@@ -423,6 +430,7 @@ func TestCompetingWorkers(t *testing.T) {
 
 // 处理时间超过租约时自动延长，任务不会被重新投递。
 func TestLeaseIsExtended(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	cfg := queuetest.Config(t)
 	cfg.Lease = time.Second
@@ -445,6 +453,7 @@ func TestLeaseIsExtended(t *testing.T) {
 // 停止时等待处理中的任务完成；超过 ShutdownTimeout 的任务放回，处理函数的 context 以 ErrShuttingDown 取消，
 // 下一个 Worker 重新处理它。
 func TestShutdown(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	cfg := queuetest.Config(t)
 	cfg.ShutdownTimeout = 300 * time.Millisecond
@@ -506,6 +515,7 @@ func TestShutdown(t *testing.T) {
 // Handle 的选项覆盖 Config：MaxAttempts 决定转入失败表之前的次数，也决定 AttemptFromContext 的 final；
 // Concurrency 限制同时处理的任务数。
 func TestHandleOptions(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	var finals atomic.Int64
 	var running, peak, done atomic.Int64
@@ -542,6 +552,7 @@ func TestHandleOptions(t *testing.T) {
 }
 
 func TestWorkerRegistration(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	newWorker := func() *queue.Worker { return queue.NewWorker(db, queuetest.Config(t), nil) }
 	noop := func(context.Context, payload) error { return nil }
@@ -585,6 +596,7 @@ func TestWorkerRegistration(t *testing.T) {
 }
 
 func TestPermanent(t *testing.T) {
+	t.Parallel()
 	base := errors.New("bad input")
 	err := queue.Permanent(base)
 	if !queue.IsPermanent(err) || !errors.Is(err, base) || queue.Permanent(nil) != nil {
@@ -596,6 +608,7 @@ func TestPermanent(t *testing.T) {
 }
 
 func TestAttemptFromContextOutsideJob(t *testing.T) {
+	t.Parallel()
 	if n, final := queue.AttemptFromContext(context.Background()); n != 0 || final {
 		t.Fatalf("attempt %d final %v", n, final)
 	}

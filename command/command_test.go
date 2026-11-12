@@ -55,6 +55,7 @@ func newRoot(cmds ...*cobra.Command) *cobra.Command {
 }
 
 func TestRootHasNoCommandsByDefault(t *testing.T) {
+	t.Parallel()
 	root := command.Root("api", "test")
 	if len(root.Commands()) != 0 {
 		t.Fatalf("commands = %v", root.Commands())
@@ -66,6 +67,7 @@ func TestRootHasNoCommandsByDefault(t *testing.T) {
 }
 
 func TestRunReceivesConfigAndContext(t *testing.T) {
+	t.Parallel()
 	path := writeConfig(t, minimalConfig)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -87,6 +89,7 @@ func TestRunReceivesConfigAndContext(t *testing.T) {
 }
 
 func TestConfigErrorsExitWithConfigCode(t *testing.T) {
+	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
 	invalid := writeConfig(t, "name: ''\n")
 	for _, args := range [][]string{
@@ -109,6 +112,7 @@ func TestConfigErrorsExitWithConfigCode(t *testing.T) {
 }
 
 func TestConfigCheckAndShow(t *testing.T) {
+	t.Parallel()
 	path := writeConfig(t, minimalConfig)
 	root := func() *cobra.Command { return newRoot(command.Config[settings]()) }
 
@@ -129,6 +133,7 @@ func TestConfigCheckAndShow(t *testing.T) {
 }
 
 func TestLoadConfigInCustomCommand(t *testing.T) {
+	t.Parallel()
 	path := writeConfig(t, minimalConfig)
 	root := newRoot(&cobra.Command{Use: "hello", RunE: func(cmd *cobra.Command, _ []string) error {
 		cfg, err := command.LoadConfig[settings](cmd)
@@ -150,6 +155,7 @@ func TestLoadConfigInCustomCommand(t *testing.T) {
 }
 
 func TestUsageErrors(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"unknown"},
 		{"--unknown"},
@@ -177,6 +183,7 @@ func TestUsageErrors(t *testing.T) {
 }
 
 func TestExitCode(t *testing.T) {
+	t.Parallel()
 	unavailable := errorx.Define(errorx.Unavailable, "demo.db")
 	for _, tc := range []struct {
 		err  error

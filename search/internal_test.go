@@ -18,6 +18,7 @@ func texts(tokens []Token) []string {
 }
 
 func TestBigram(t *testing.T) {
+	t.Parallel()
 	for text, want := range map[string][]string{
 		"全文搜索":           {"全文", "文搜", "搜索"},
 		"搜":              {"搜"},
@@ -42,6 +43,7 @@ func TestBigram(t *testing.T) {
 }
 
 func TestParseQuery(t *testing.T) {
+	t.Parallel()
 	for text, want := range map[string]queryTerms{
 		"datab":                 {terms: []string{"datab"}, prefix: true},
 		"datab ":                {terms: []string{"datab"}},
@@ -61,6 +63,7 @@ func TestParseQuery(t *testing.T) {
 }
 
 func TestTermTruncatesOnRuneBoundary(t *testing.T) {
+	t.Parallel()
 	s := term(strings.Repeat("中", 20)) // 60 字节
 	if len(s) != 30 || s != strings.Repeat("中", 10) {
 		t.Fatalf("term = %q (%d bytes)", s, len(s))
@@ -69,6 +72,7 @@ func TestTermTruncatesOnRuneBoundary(t *testing.T) {
 
 // TestEncodingOrder 确保编码后的值按字节比较的顺序与值的大小顺序一致。
 func TestEncodingOrder(t *testing.T) {
+	t.Parallel()
 	type doc struct {
 		I int64     `search:"filter"`
 		U uint      `search:"filter"`
@@ -125,6 +129,7 @@ func mustEncode(t *testing.T, f *field, v any) string {
 }
 
 func TestHighlight(t *testing.T) {
+	t.Parallel()
 	q := parseQuery(Bigram, "搜索引擎")
 	s, ok := highlight(Bigram, q, "用搜索引擎和引擎盖")
 	want := Snippet{{Text: "用"}, {Text: "搜索引擎", Mark: true}, {Text: "和"}, {Text: "引擎", Mark: true}, {Text: "盖"}}
@@ -148,6 +153,7 @@ func TestHighlight(t *testing.T) {
 }
 
 func TestMaxTerms(t *testing.T) {
+	t.Parallel()
 	type doc struct {
 		Title string `search:"text,boost"`
 		Body  string `search:"text"`

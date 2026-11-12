@@ -61,6 +61,8 @@ go test -race -count=1 ./...
 
 Redis 的锁、限流、在线成员和广播的测试对单机 Redis 和集群各运行一遍。集群由 `internal/redistest/cluster.sh` 在一个容器里启动，包含三个主节点。
 
+框架的测试默认并行运行：顶层测试的第一行调用 `t.Parallel()`。修改全局状态的测试不调用它，例如使用 `t.Setenv`、`slog.SetDefault` 或包内 `export_test.go` 中缩短间隔的 `Set*` 函数的测试，以及比较耗时和内存分配量的测试。Go 先依次运行这些测试，再运行并行的测试，两者不会同时进行。
+
 没有设置这些环境变量时，集成测试会失败而不是跳过。每个数据库测试使用自己的临时库，Redis 测试给每个键加随机前缀，队列测试给每个 topic、向量测试给每个 collection 加随机前缀并在结束时删除，所以服务可以一直开着反复运行测试。数据放在 tmpfs 中，测试完成后执行 `docker compose -f compose.test.yml down -v` 清理，不会留下任何数据。
 
 依赖数据库的测试用 `database/dbtest` 的 `Open` 为每个测试建一个临时库。

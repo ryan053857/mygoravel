@@ -49,6 +49,7 @@ func findMetric(t *testing.T, rm metricdata.ResourceMetrics, name string) metric
 }
 
 func TestTelemetry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	reader := sdkmetric.NewManualReader()
 	spans := tracetest.NewSpanRecorder()
@@ -132,6 +133,7 @@ func TestTelemetry(t *testing.T) {
 }
 
 func TestTransactionSpans(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	spans := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
@@ -162,6 +164,7 @@ func TestTransactionSpans(t *testing.T) {
 }
 
 func TestSlowQueryLog(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rec := logtest.New()
 	cfg := database.Config{DSN: dbtest.URL(t), SlowQuery: 20 * time.Millisecond}
@@ -208,6 +211,7 @@ func TestSlowQueryLog(t *testing.T) {
 }
 
 func TestOpenOptions(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if recover() == nil {
 			t.Fatal("nil provider accepted")

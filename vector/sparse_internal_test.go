@@ -8,6 +8,7 @@ import (
 )
 
 func TestDocumentSparse(t *testing.T) {
+	t.Parallel()
 	s := documentSparse(search.Bigram, "保修 保修 保修 期限")
 	if !slices.IsSorted(s.indices) || len(s.indices) != 2 || len(s.values) != 2 {
 		t.Fatalf("sparse = %+v", s)
@@ -28,6 +29,7 @@ func TestDocumentSparse(t *testing.T) {
 }
 
 func TestQuerySparse(t *testing.T) {
+	t.Parallel()
 	q := querySparse(search.Bigram, "保修 保修 X-2000")
 	if len(q.indices) != 3 || !slices.IsSorted(q.indices) {
 		t.Fatalf("query sparse = %+v", q)

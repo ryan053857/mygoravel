@@ -27,6 +27,7 @@ func failingServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
 }
 
 func TestModelRetries(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		maxRetries int
 		requests   int32

@@ -139,6 +139,7 @@ func expectKeys(t *testing.T, res *search.Result[articleDoc], want ...string) {
 }
 
 func TestText(t *testing.T) {
+	t.Parallel()
 	db, _ := fixture(t,
 		articleDoc{ID: "1", Title: "全文搜索的设计方案", Body: "用 PostgreSQL 实现"},
 		articleDoc{ID: "2", Title: "数据库设计", Body: "Database indexes and query plans"},
@@ -171,6 +172,7 @@ func TestText(t *testing.T) {
 }
 
 func TestBoostAndHighlights(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("前面的内容很长。", 30) + "这里提到了搜索引擎。" + strings.Repeat("后面的内容。", 30)
 	db, _ := fixture(t,
 		articleDoc{ID: "body", Title: "一篇文章", Body: long},
@@ -211,6 +213,7 @@ func TestBoostAndHighlights(t *testing.T) {
 }
 
 func TestFiltersSortAndFacets(t *testing.T) {
+	t.Parallel()
 	day := func(d int) *time.Time {
 		t := time.Date(2026, 11, d, 8, 0, 0, 0, time.UTC)
 		return &t
@@ -297,6 +300,7 @@ func TestFiltersSortAndFacets(t *testing.T) {
 }
 
 func TestTenants(t *testing.T) {
+	t.Parallel()
 	db, _ := fixture(t,
 		articleDoc{ID: "1", Tenant: "acme", Title: "季度报告"},
 		articleDoc{ID: "2", Tenant: "globex", Title: "季度报告"},
@@ -316,6 +320,7 @@ func TestTenants(t *testing.T) {
 }
 
 func TestUpdateDeleteAndChunks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, src := fixture(t, articleDoc{ID: "1", Title: "旧标题", Tags: []string{"old"}})
 	other := search.Define[articleDoc]("other")
@@ -362,6 +367,7 @@ func TestUpdateDeleteAndChunks(t *testing.T) {
 }
 
 func TestInvalidDocuments(t *testing.T) {
+	t.Parallel()
 	db, src := fixture(t)
 	if err := articles.Refresh(context.Background(), db, src.load, ""); err == nil {
 		t.Fatal("refresh of an empty key succeeded")
@@ -385,6 +391,7 @@ func runWorker(t *testing.T, db *bun.DB, register func(w *queue.Worker)) {
 }
 
 func TestSyncThroughQueue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, src := fixture(t)
 	src.set("1", articleDoc{ID: "1", Title: "队列同步"})
@@ -421,6 +428,7 @@ func TestSyncThroughQueue(t *testing.T) {
 }
 
 func TestConcurrentRefresh(t *testing.T) {
+	t.Parallel()
 	db, src := fixture(t)
 	src.set("1", articleDoc{ID: "1", Title: "并发", Tags: []string{"a", "b"}}, articleDoc{ID: "1", Title: "同步"})
 	var wg sync.WaitGroup
@@ -450,6 +458,7 @@ func TestConcurrentRefresh(t *testing.T) {
 }
 
 func TestDefinePanics(t *testing.T) {
+	t.Parallel()
 	for name, define := range map[string]func(){
 		"bad name": func() { search.Define[articleDoc]("Bad Name") },
 		"no text": func() {

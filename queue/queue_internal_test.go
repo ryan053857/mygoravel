@@ -9,6 +9,7 @@ import (
 )
 
 func TestBackoff(t *testing.T) {
+	t.Parallel()
 	for attempts, want := range map[int]time.Duration{1: time.Second, 2: 16 * time.Second, 5: 625 * time.Second} {
 		for range 100 {
 			got := backoff(attempts)
@@ -25,6 +26,7 @@ func TestBackoff(t *testing.T) {
 }
 
 func TestRetryDelay(t *testing.T) {
+	t.Parallel()
 	base := errors.New("rate limited")
 	if got := retryDelay(errors.Wrap(RetryAfter(base, 30*time.Second), "send"), 1); got != 30*time.Second {
 		t.Fatalf("wrapped RetryAfter = %v", got)

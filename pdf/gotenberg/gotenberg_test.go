@@ -65,6 +65,7 @@ func server(t *testing.T, status int, body string) (*gotenberg.Renderer, *reques
 }
 
 func TestRender(t *testing.T) {
+	t.Parallel()
 	r, got := server(t, http.StatusOK, "%PDF-1.4 fake")
 	data, err := r.Render(context.Background(), pdf.Document{
 		HTML: html(`<link rel="stylesheet" href="invoice.css"><h1>发票</h1>`),
@@ -92,6 +93,7 @@ func TestRender(t *testing.T) {
 }
 
 func TestRenderWithoutAssets(t *testing.T) {
+	t.Parallel()
 	r, got := server(t, http.StatusOK, "%PDF")
 	_, err := r.Render(context.Background(), pdf.Document{HTML: html("<p>hi</p>")})
 	require.NoError(t, err)
@@ -99,6 +101,7 @@ func TestRenderWithoutAssets(t *testing.T) {
 }
 
 func TestBasicAuth(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if u, p, ok := r.BasicAuth(); !ok || u != "pdf" || p != "secret" {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -114,6 +117,7 @@ func TestBasicAuth(t *testing.T) {
 }
 
 func TestRenderErrors(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		status      int
 		unavailable bool
@@ -133,6 +137,7 @@ func TestRenderErrors(t *testing.T) {
 }
 
 func TestRenderUnreachable(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.NotFoundHandler())
 	srv.Close()
 	r, err := gotenberg.New(gotenberg.Config{URL: srv.URL})
@@ -142,6 +147,7 @@ func TestRenderUnreachable(t *testing.T) {
 }
 
 func TestRenderCanceled(t *testing.T) {
+	t.Parallel()
 	// 处理器一直不响应，直到测试结束。不能只等 r.Context()：请求体还没读完时，
 	// net/http 发现不了客户端已经断开，处理器会一直阻塞，srv.Close 也就等不到它返回。
 	release := make(chan struct{})
@@ -163,6 +169,7 @@ func TestRenderCanceled(t *testing.T) {
 }
 
 func TestInvalidDocument(t *testing.T) {
+	t.Parallel()
 	r, got := server(t, http.StatusOK, "%PDF")
 	for name, doc := range map[string]pdf.Document{
 		"no html":  {},
@@ -177,6 +184,7 @@ func TestInvalidDocument(t *testing.T) {
 }
 
 func TestConfig(t *testing.T) {
+	t.Parallel()
 	assert.NoError(t, gotenberg.Config{URL: "http://gotenberg:3000"}.Validate())
 	assert.NoError(t, gotenberg.Config{URL: "https://pdf.internal"}.Validate())
 	for _, u := range []string{"", "gotenberg:3000", "ftp://x", "http://"} {

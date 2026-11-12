@@ -114,6 +114,7 @@ func findV2(t *testing.T, db bun.IDB, q search.Query) []string {
 }
 
 func TestReindex(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, src := fixture(t,
 		articleDoc{ID: "1", Title: "全文搜索"},
@@ -164,6 +165,7 @@ func TestReindex(t *testing.T) {
 }
 
 func TestReindexSuperseded(t *testing.T) {
+	t.Parallel()
 	db, src := fixture(t, articleDoc{ID: "1", Title: "一"}, articleDoc{ID: "2", Title: "二"})
 	first := startReindex(t, db)
 	second := startReindex(t, db)
@@ -182,6 +184,7 @@ func TestReindexSuperseded(t *testing.T) {
 }
 
 func TestReindexResumes(t *testing.T) {
+	t.Parallel()
 	db, src := fixture(t)
 	for _, key := range []string{"1", "2", "3", "4", "5"} {
 		src.set(key, articleDoc{ID: key, Title: "文章" + key})
@@ -215,6 +218,7 @@ func TestReindexResumes(t *testing.T) {
 }
 
 func TestReindexWithConcurrentSyncs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, src := fixture(t)
 	load := loadV2(src)

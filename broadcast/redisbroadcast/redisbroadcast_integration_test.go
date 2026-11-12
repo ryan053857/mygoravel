@@ -20,6 +20,7 @@ import (
 )
 
 func TestBackend(t *testing.T) {
+	t.Parallel()
 	for _, srv := range redistest.Servers {
 		t.Run(srv.Name, func(t *testing.T) {
 			broadcasttest.TestBackend(t, func(t *testing.T) (broadcast.Backend, broadcast.Backend) {
@@ -52,6 +53,7 @@ func TestConnectionLossEndsSubscriptions(t *testing.T) {
 
 // 频道所在的槽迁移到别的节点后，原节点结束分片订阅：订阅以 ErrLost 结束，Backend 到新节点重新订阅。
 func TestSlotMigrationEndsSubscriptions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rdb := redistest.Cluster.Open(t)
 	channel := "test:broadcast:" + rand.Text()
@@ -143,6 +145,7 @@ func slotOwner(ctx context.Context, rdb rueidis.Client, slot int64) (string, err
 }
 
 func TestNewPanics(t *testing.T) {
+	t.Parallel()
 	for name, f := range map[string]func(){
 		"nil client":    func() { redisbroadcast.New(nil, "c") },
 		"empty channel": func() { redisbroadcast.New(redistest.Standalone.Open(t), "") },

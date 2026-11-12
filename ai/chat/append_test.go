@@ -17,6 +17,7 @@ import (
 )
 
 func TestAppend(t *testing.T) {
+	t.Parallel()
 	m := chattest.NewModel(chattest.Text("你好，我是助手"), chattest.Text("不客气"))
 	ag := llmagent.New("support", llmagent.WithModel(m), llmagent.WithAddContextPrefix(true),
 		llmagent.WithGenerationConfig(model.GenerationConfig{Stream: true}))
@@ -84,6 +85,7 @@ func TestAppend(t *testing.T) {
 }
 
 func TestAppendCreatesConversation(t *testing.T) {
+	t.Parallel()
 	rs := newRuns(t, chattest.NewModel(), nil)
 	ctx := context.Background()
 	// trpc-agent-go 丢弃第一条用户消息之前的内容：拒绝，而不是悄悄丢掉。
@@ -100,6 +102,7 @@ func TestAppendCreatesConversation(t *testing.T) {
 }
 
 func TestAppendRejects(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t.Run("invalid", func(t *testing.T) {
 		rs := newRuns(t, chattest.NewModel(), nil)

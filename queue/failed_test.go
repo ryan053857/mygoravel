@@ -26,6 +26,7 @@ func insertFailed(t *testing.T, db bun.IDB, topic string, age time.Duration) uui
 }
 
 func TestCleanupFailedJobs(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	for _, age := range []time.Duration{72 * time.Hour, 48 * time.Hour, 30 * time.Hour, time.Hour} {
@@ -47,6 +48,7 @@ func TestCleanupFailedJobs(t *testing.T) {
 }
 
 func TestFailedJobsQueries(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	ids := []uuid.UUID{insertFailed(t, db, "mail", 3*time.Minute), insertFailed(t, db, "mail", 2*time.Minute), insertFailed(t, db, "report", time.Minute)}
@@ -79,6 +81,7 @@ func TestFailedJobsQueries(t *testing.T) {
 
 // RetryAll 分批重新发布 before 之前失败的任务；DeleteAll 分批删除。
 func TestFailedJobsBulk(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC()

@@ -98,6 +98,7 @@ func upload(t *testing.T, svc *filesystem.Service, owner identity.Subject, body 
 }
 
 func TestUploadConfirmGetOpen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	r := upload(t, e.svc, alice, "hello")
@@ -136,6 +137,7 @@ func TestUploadConfirmGetOpen(t *testing.T) {
 }
 
 func TestUploadValidation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	cases := map[string]struct {
@@ -164,6 +166,7 @@ func TestUploadValidation(t *testing.T) {
 }
 
 func TestConfirmRequiresUploadedObject(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	r, err := e.svc.Prepare(ctx, alice, filesystem.FileInput{Filename: "a.txt", Size: 3})
@@ -189,6 +192,7 @@ func TestConfirmRequiresUploadedObject(t *testing.T) {
 }
 
 func TestConcurrentConfirm(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	r := upload(t, e.svc, alice, "data")
@@ -213,6 +217,7 @@ func TestConcurrentConfirm(t *testing.T) {
 }
 
 func TestDeleteAndCleanup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 
@@ -267,6 +272,7 @@ func TestDeleteAndCleanup(t *testing.T) {
 }
 
 func TestDeleteInTransaction(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	kept := upload(t, e.svc, alice, "kept")
@@ -330,6 +336,7 @@ func sendSigned(t *testing.T, req filesystem.SignedRequest, body []byte) string 
 }
 
 func TestS3DirectPut(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	r, err := e.svc.Prepare(ctx, alice, filesystem.FileInput{Disk: "s3", Filename: "a.txt", ContentType: "text/plain", Size: 5})
@@ -356,6 +363,7 @@ func TestS3DirectPut(t *testing.T) {
 }
 
 func TestS3Multipart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	data := bytes.Repeat([]byte("x"), 16<<20+100)
@@ -400,6 +408,7 @@ func TestS3Multipart(t *testing.T) {
 }
 
 func TestS3CleanupAbortsMultipart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e := newEnv(t)
 	r, err := e.svc.Prepare(ctx, alice, filesystem.FileInput{Disk: "s3", Filename: "big.bin", Size: 20 << 20})
@@ -425,6 +434,7 @@ func TestS3CleanupAbortsMultipart(t *testing.T) {
 // Accept 按文件内容识别真实类型：它必须被允许，并与声明的类型和扩展名一致；大小不超过 MaxSize。
 // 不符合时文件保持 temporary；已确认的文件再次确认时同样检查。
 func TestConfirmAccept(t *testing.T) {
+	t.Parallel()
 	const png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
 	const html = "<!DOCTYPE html><script>alert(1)</script>"
 	images := filesystem.Accept{Types: []string{"image/*"}, MaxSize: 1 << 20}

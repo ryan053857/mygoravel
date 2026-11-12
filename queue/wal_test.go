@@ -18,6 +18,7 @@ import (
 
 // 只有提交的任务被发布：事务回滚、保存点回滚中的任务都不会出现；不在事务中发布时立即生效。
 func TestPendingCommittedOnly(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	publish(t, db, 1)
@@ -104,6 +105,7 @@ func TestRelayFailover(t *testing.T) {
 
 // 复制槽不存在（没有执行迁移或被删除）时 Run 返回错误，不会悄悄丢失任务。
 func TestRunWithoutSlot(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE database = current_database()"); err != nil {
@@ -117,6 +119,7 @@ func TestRunWithoutSlot(t *testing.T) {
 }
 
 func TestSlotName(t *testing.T) {
+	t.Parallel()
 	db := openDB(t)
 	var database string
 	if err := db.NewRaw("SELECT current_database()").Scan(context.Background(), &database); err != nil {

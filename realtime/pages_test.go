@@ -27,6 +27,7 @@ import (
 // 同源页面的连接放在页面路由之后：经过框架的基础中间件、请求超时和会话，使用登录的主体；
 // 会话被撤销并发出提醒后连接立即断开。
 func TestBehindPageRoutes(t *testing.T) {
+	t.Parallel()
 	hub := broadcast.New(broadcasttest.NewBackend(), nil)
 	defer hub.Close()
 	creds := broadcast.NewCredentials(hub)
