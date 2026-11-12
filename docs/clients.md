@@ -9,6 +9,7 @@
     - [事件流](#event-streams)
     - [上传文件](#uploading-files)
 - [其他语言](#other-languages)
+- [App 版本](#app-version)
 - [检查接口变更](#checking-changes)
 
 <a id="introduction"></a>
@@ -178,6 +179,19 @@ const { data } = await api.POST("/files", {
 | Python 脚本 | [openapi-python-client](https://github.com/openapi-generators/openapi-python-client) |
 
 生成的客户端同样需要处理认证：请求带 `Authorization: Bearer`，JWT 模式按[客户端的规则](api-tokens.md#jwt)刷新，错误按 `code` 区分。
+
+<a id="app-version"></a>
+## App 版本
+
+安装在手机和电脑上的 App，每个请求都带上平台和版本，服务端才能在需要时[停止支持旧版本](middleware.md#app-version)：
+
+```http
+X-App-Version: android/2.3.1
+```
+
+从第一个发布的版本就开始发送。没有带它的版本，服务端无法拦截，只能等它们自然消失。平台名自己决定，常用 `ios`、`android`、`macos`、`windows`、`linux`；版本就是商店中显示的版本号，例如 `2.3.1`。浏览器中的单页应用总是最新的，不用发送。
+
+收到 `426`、`code` 为 `app.upgrade_required` 时，App 停在升级页面，打开应用商店或开始自动更新，不再重试请求。`detail` 是可以展示给用户的提示。
 
 <a id="checking-changes"></a>
 ## 检查接口变更

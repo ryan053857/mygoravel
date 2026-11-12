@@ -9,6 +9,7 @@
     - [访问日志](#access-log)
 - [限流](#rate-limiting)
 - [跨域请求](#cors)
+- [App 最低版本](#app-version)
 - [响应压缩](#compression)
 - [指标](#metrics)
 - [自行组装](#custom-stack)
@@ -118,6 +119,7 @@ http:
 | `body_limit.max_bytes` | `BodyLimit` | 请求体的最大字节数 | 1 MiB |
 | `rate_limit.*` | `RateLimit` | 见[限流](rate-limiting.md) | 每秒 10 个，突发 20 个 |
 | `cors.*` | `CORS` | 见[跨域请求](#cors) | 允许任何来源，预检结果缓存 2 小时 |
+| `app_version.minimum` | `AppVersion` | 见[App 最低版本](#app-version) | 不限制 |
 
 没有写出的字段使用默认值。所有超时和数值都必须为正数，写 `0` 或负数会在加载配置时报错；不需要某个中间件时，不安装它即可。
 
@@ -262,6 +264,52 @@ http:
 API 只用 [Bearer token](api-tokens.md) 认证，不使用 cookie，所以 `CORS` 从不允许携带凭据：其他网站的网页拿不到用户的 token，允许任何来源也是安全的。请求头按预检请求声明的原样允许，`Authorization` 不需要单独配置。
 
 预检请求（`OPTIONS`）直接以 `204` 应答，不进入路由、认证和限流，所以要把 `CORS` 安装在它们之前。`401`、`429` 等错误响应同样带有 CORS 头，前端能读到错误内容。
+
+<a id="app-version"></a>
+## App 最低版本
+
+装在手机和电脑上的 App 不会全部及时升级。接口做了旧版本处理不了的变更，或者旧版本有安全问题时，要让它们停止调用接口，提示用户升级。`httpx.AppVersion` 读取 App 在每个请求中带的版本：
+
+```http
+X-App-Version: ios/1.4.2
+```
+
+版本低于该平台的最低版本时返回 `426`：
+
+```http
+HTTP/1.1 426 Upgrade Required
+Content-Type: application/problem+json
+
+{"title": "Upgrade Required", "status": 426, "detail": "当前版本过低，请升级到 1.4.0 或更高版本", "code": "app.upgrade_required"}
+```
+
+App 收到 `app.upgrade_required` 时显示升级页面，打开应用商店或开始自动更新。请求头格式错误时返回 `400`。没有这个请求头的请求放行，例如浏览器、单页应用和用 [API token](api-tokens.md) 调用的第三方；没有设置最低版本的平台也放行。
+
+`AppVersion` 只安装在 API 的路由组上，放在 `CORS` 之后，WebView 中的页面才能读到 `426` 的内容：
+
+```go
+router.Route("/api", func(r chi.Router) {
+    r.Use(httpx.CORS(a.cfg.HTTP.CORS))
+    r.Use(httpx.AppVersion(a.cfg.HTTP.AppVersion))
+    // ...
+})
+```
+
+最低版本按平台写在 `http.app_version` 段，平台名由 App 自己决定，不区分大小写：
+
+```yaml
+http:
+  app_version:
+    minimum:
+      ios: 1.4.0
+      android: 1.3.0
+```
+
+版本按[语义化版本](https://semver.org/lang/zh-CN/)比较：`1.4` 等于 `1.4.0`，`1.10.0` 高于 `1.9.0`，`1.4.0-beta.1` 低于 `1.4.0`，`+` 之后的构建号不参与比较。修改最低版本后[不停机升级](deployment.md#zero-downtime-upgrades)即可生效。
+
+带这个请求头的请求，访问日志中有 `app` 字段，例如 `"app":"ios/1.4.2"`。提高最低版本之前，先按它统计还有多少用户在用旧版本。
+
+**这个请求头要从 App 的第一个版本就开始发送。** 没有带它的旧版本无法被拦截，只能等用户自己升级，见[客户端代码](clients.md#app-version)。
 
 <a id="compression"></a>
 ## 响应压缩

@@ -6,6 +6,7 @@ pdf.unavailable: PDF service is temporarily unavailable, please try again later
 feature.invalid: Invalid feature flag setting
 page.invalid_cursor: Invalid pagination cursor
 rate_limit.exceeded: Too many requests, please try again later
+app.upgrade_required: This version is no longer supported, please update to {{.minimum}} or later
 captcha.failed: Human verification failed, please try again
 captcha.unavailable: Human verification is temporarily unavailable, please try again later
 ai.busy: The conversation is in progress, please try again later
