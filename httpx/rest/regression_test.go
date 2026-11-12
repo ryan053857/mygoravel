@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -290,5 +292,46 @@ func TestNewInstallsNoMiddleware(t *testing.T) {
 	api.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/ping", nil))
 	if rr.Code != 200 || rr.Header().Get("X-Request-ID") != "" {
 		t.Fatal(rr.Code, rr.Header())
+	}
+}
+
+func TestOperationIDMustBeKebabCase(t *testing.T) {
+	for _, id := range []string{"", "publishArticle", "publish_article", "publish article", "publish--article", "-publish", "1-publish"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("operation ID %q accepted", id)
+				}
+			}()
+			op := huma.Operation{OperationID: id, Method: "GET", Path: "/x"}
+			rest.Public()(&op)
+			rest.Register(rest.New(rest.Options{Mode: rest.ModeOpenAPI}), op, func(context.Context, *pingIn) (*pingOut, error) { return nil, nil })
+		}()
+	}
+	op := huma.Operation{OperationID: "publish-article-v2", Method: "GET", Path: "/x"}
+	rest.Public()(&op)
+	rest.Register(rest.New(rest.Options{Mode: rest.ModeOpenAPI}), op, func(context.Context, *pingIn) (*pingOut, error) { return nil, nil })
+}
+
+// Source 与 log/slog.Source 同名。
+type Source struct {
+	Path string `json:"path"`
+}
+
+func TestSchemaNamesFromDifferentPackagesDoNotCollide(t *testing.T) {
+	api := rest.New(rest.Options{Mode: rest.ModeOpenAPI})
+	type slogOut struct{ Body slog.Source }
+	type localOut struct{ Body Source }
+	a := huma.Operation{OperationID: "slog-source", Method: "GET", Path: "/slog"}
+	rest.Public()(&a)
+	rest.Register(api, a, func(context.Context, *pingIn) (*slogOut, error) { return nil, nil })
+	b := huma.Operation{OperationID: "local-source", Method: "GET", Path: "/local"}
+	rest.Public()(&b)
+	rest.Register(api, b, func(context.Context, *pingIn) (*localOut, error) { return nil, nil })
+	schemas := api.OpenAPI().Components.Schemas.Map()
+	for _, name := range []string{"SlogSource", "Source", "ErrorModel"} {
+		if schemas[name] == nil {
+			t.Errorf("missing schema %s in %v", name, slices.Collect(maps.Keys(schemas)))
+		}
 	}
 }

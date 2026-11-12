@@ -185,7 +185,10 @@ func Start(ctx context.Context, cfg settings.Config) error {
 
 ```bash
 ./bin/api openapi > openapi.json
+./bin/api openapi --spec 3.0 > openapi-3.0.json
 ```
+
+默认输出 OpenAPI 3.1；有的客户端生成器只支持 3.0，例如 oapi-codegen，这时加上 `--spec 3.0`。
 
 博客应用的 `bootstrap.API` 和 `bootstrap.DocRoutes` 定义在 `internal/bootstrap` 中，与 `serve` 共用同一份 API 选项和路由注册（见[依赖装配](dependencies.md#assembling-the-application)），因此导出的文档与实际运行的接口始终一致。文档模式不会调用处理器，也不会调用 token 校验器，所以这个命令不读取配置文件，也不连接数据库。
 

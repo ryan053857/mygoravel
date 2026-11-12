@@ -91,6 +91,8 @@ func New(opts Options) *API {
 	cfg := huma.DefaultConfig(opts.Title, opts.Version)
 	// 默认的唯一创建钩子会在响应体加入 $schema 字段并设置 Link 响应头，对 API 使用者价值不大，不启用。
 	cfg.CreateHooks = nil
+	// schema 名带包名，不同包的同名类型（例如 article.Changes 和 comment.Changes）不会冲突，见 schemaName。
+	cfg.OpenAPI.Components.Schemas = huma.NewMapRegistry("#/components/schemas/", schemaName)
 	// huma.ErrorModel 的 JSON 是 ErrorModel 的合法实例，因此文档统一描述为 ErrorModel；
 	// 不覆盖全局 huma.NewError，避免影响同一进程中的其他 Huma API。
 	cfg.OpenAPI.Components.Schemas.RegisterTypeAlias(reflect.TypeOf(huma.ErrorModel{}), reflect.TypeOf(ErrorModel{}))

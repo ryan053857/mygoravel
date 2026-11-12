@@ -2,6 +2,7 @@ package form_test
 
 import (
 	"context"
+	"log/slog"
 	"reflect"
 	"testing"
 
@@ -52,5 +53,19 @@ func TestSchemaRequired(t *testing.T) {
 	s := form.Schema(reflect.TypeFor[input]())
 	if !reflect.DeepEqual(s.Required, []string{"title", "active"}) {
 		t.Fatalf("required: %v", s.Required)
+	}
+}
+
+// Source 与 log/slog.Source 同名，两者都能取得各自的 schema。
+type Source struct {
+	Path string `json:"path" minLength:"1"`
+}
+
+func TestSchemaSameNameDifferentPackages(t *testing.T) {
+	if s := form.Schema(reflect.TypeFor[slog.Source]()); s.Properties["function"] == nil {
+		t.Fatalf("slog.Source: %v", s.Properties)
+	}
+	if s := form.Schema(reflect.TypeFor[Source]()); !reflect.DeepEqual(s.Required, []string{"path"}) {
+		t.Fatalf("form_test.Source required: %v", s.Required)
 	}
 }

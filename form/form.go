@@ -89,7 +89,7 @@ func Decode[T any](ctx context.Context, values map[string][]string) (T, map[stri
 }
 
 var (
-	registry = huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
+	registry = huma.NewMapRegistry("#/components/schemas/", qualifiedName)
 	regMu    sync.Mutex
 	schemas  sync.Map // reflect.Type -> *huma.Schema
 )
@@ -105,6 +105,18 @@ func Schema(t reflect.Type) *huma.Schema {
 	s := resolve(registry.Schema(t, false, ""))
 	schemas.Store(t, s)
 	return s
+}
+
+// qualifiedName 用完整导入路径命名 schema，不同包的同名类型（例如 article.Changes 和 comment.Changes）不会冲突。
+// 这些名称只在本包内部使用，不出现在 OpenAPI 文档中。
+func qualifiedName(t reflect.Type, hint string) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Name() == "" {
+		return hint
+	}
+	return t.PkgPath() + "." + t.Name()
 }
 
 func resolve(s *huma.Schema) *huma.Schema {

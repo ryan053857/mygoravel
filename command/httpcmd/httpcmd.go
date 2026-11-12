@@ -17,15 +17,27 @@ import (
 
 // OpenAPI 构造 openapi 命令：以文档模式创建 API、调用 register 注册路由，
 // 把 OpenAPI 文档输出到标准输出。不读取配置，不调用处理器。
+//
+// 默认输出 OpenAPI 3.1；--spec 3.0 输出转换后的 3.0.3，供只支持 3.0 的客户端生成器使用，例如 oapi-codegen。
 func OpenAPI(opts rest.Options, register func(api *rest.API)) *cobra.Command {
-	return leaf("openapi", "输出 OpenAPI 文档", func(cmd *cobra.Command) error {
-		data, err := docAPI(opts, register).OpenAPIJSON()
+	var spec string
+	cmd := leaf("openapi", "输出 OpenAPI 文档", func(cmd *cobra.Command) error {
+		if spec != "3.1" && spec != "3.0" {
+			return command.AsExitError(command.ExitUsage, fmt.Errorf("--spec must be 3.1 or 3.0, got %q", spec))
+		}
+		api := docAPI(opts, register)
+		data, err := api.OpenAPIJSON()
+		if spec == "3.0" {
+			data, err = api.OpenAPI().Downgrade()
+		}
 		if err != nil {
 			return err
 		}
 		_, err = cmd.OutOrStdout().Write(append(data, '\n'))
 		return err
 	})
+	cmd.Flags().StringVar(&spec, "spec", "3.1", "OpenAPI 版本：3.1 或 3.0")
+	return cmd
 }
 
 // Routes 构造 routes 命令：调用 router 构造应用的完整路由，用 httpx.Routes 输出路由表。

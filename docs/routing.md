@@ -68,7 +68,7 @@ api := rest.New(rest.Options{
 
 | 声明 | 作用 |
 | --- | --- |
-| `OperationID` | 路由的唯一标识，会出现在 OpenAPI 文档中，例如 `article-create` |
+| `OperationID` | 路由的唯一标识，kebab-case，例如 `article-create`；客户端生成器用它命名函数 |
 | `Method`、`Path` | HTTP 方法与路径 |
 | `Summary` | 路由的简短描述，显示在接口文档中 |
 | 输入类型 | 路径参数、查询参数、请求头和请求体的来源、类型及验证规则 |
@@ -102,6 +102,7 @@ API 有两种运行模式：
 `rest.Register` 会在注册时检查以下问题，一旦发现就直接 panic，让错误在应用启动时立刻暴露：
 
 - 路由没有声明访问策略（没有调用 `Public` 或 `RequireBearer`）；
+- `OperationID` 为空或不是 kebab-case，例如 `articleCreate`；
 - `OperationID` 与已注册的路由重复；
 - 与已注册的路由方法相同且路径形状冲突，例如 `/articles/{id}` 与 `/articles/{articleID}`。
 
@@ -314,6 +315,8 @@ func toDTO(a *Article) ArticleDTO {
 ```
 
 `ArticleDTO` 决定了 API 返回哪些字段。不要把模型 `Article` 直接作为响应体：给模型加一个内部字段，就会意外地把它暴露给客户端。请求和响应类型的详细写法分别见[请求](requests.md)和[响应](responses.md)。
+
+请求和响应中的具名类型在 OpenAPI 文档中以包名加类型名命名，类型名已经以包名开头时不重复：`article.Changes` 为 `ArticleChanges`，`comment.Changes` 为 `CommentChanges`，`article.ArticleDTO` 仍为 `ArticleDTO`。所以每个包都可以用 `Changes` 这样的短名，前端[生成的类型](#exporting-openapi)也不会重名。
 
 <a id="listing-routes"></a>
 ### 查看全部路由

@@ -93,6 +93,19 @@ func TestOpenAPI(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpec30(t *testing.T) {
+	root := newRoot(httpcmd.OpenAPI(rest.Options{Title: "Blog API", Version: "1.0.0"}, registerRoutes(t)))
+	out, _, err := execute(root, "openapi", "--spec", "3.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"openapi":"3.0.3"`, `"article-create"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in %s", want, out)
+		}
+	}
+}
+
 func TestRoutes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -142,6 +155,7 @@ func TestUsageErrors(t *testing.T) {
 		{"routes", "--unknown"},
 		{"routes", "--path"},
 		{"openapi", "extra"},
+		{"openapi", "--spec", "2.0"},
 	} {
 		mustNotRegister := func(*rest.API) { t.Fatal("invalid arguments built the API") }
 		mustNotBuild := func() chi.Routes { t.Fatal("invalid arguments built the router"); return nil }
