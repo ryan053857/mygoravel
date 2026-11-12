@@ -194,7 +194,6 @@ func withJitter(ttl time.Duration) time.Duration {
 }
 
 // throttle 限制缓存故障日志的频率：缓存后端不可用时每个请求都会出错，每分钟只记录一条，附上期间省略的条数。
-// 出错的次数由 cachemon 的运行统计给出。
 type throttle struct {
 	mu         sync.Mutex
 	next       time.Time

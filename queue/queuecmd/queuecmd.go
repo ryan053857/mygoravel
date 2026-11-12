@@ -2,52 +2,41 @@
 package queuecmd
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"maps"
-	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 	"unicode/utf8"
 
-	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/monitor"
 	"github.com/ryan053857/mygoravel/queue"
 )
 
 // errorWidth 是 queue failed 显示的错误信息的最大长度（字符）。
 const errorWidth = 80
 
-// New 返回 queue 命令。failed 是失败任务表，m 是 queue.WithMonitor 记录运行统计的 Monitor，drivers 是要统计的驱动：
+// New 返回 queue 命令。failed 是失败任务表，drivers 是要统计的驱动：
 //
-//	queue stats [--since 1h]             每个 topic 当前各状态的任务数、积压最久的任务已经等了多久，
-//	                                     以及最近一段时间的处理次数、耗时和等待时长
+//	queue stats                          每个 topic 当前各状态的任务数、积压最久的任务已经等了多久
 //	queue failed [--topic t] [--limit n] 从新到旧列出失败任务
 //
-// 驱动给不出的数显示为 -。传入多个驱动时，当前状态多一列驱动名；处理情况与驱动无关，按 topic 汇总。
-// m 在执行时为 nil 表示没有记录运行统计，只显示当前状态。
+// 驱动给不出的数显示为 -。传入多个驱动时多一列驱动名。
 // 和其他需要数据库的命令一样，在 command.Bind 中声明：New 只保存参数，命令执行时才使用它们。
 // 没有传入驱动时 panic。
-func New(failed *queue.FailedJobs, m *monitor.Monitor, drivers ...queue.Driver) *cobra.Command {
+func New(failed *queue.FailedJobs, drivers ...queue.Driver) *cobra.Command {
 	if len(drivers) == 0 {
 		panic("queuecmd: no drivers")
 	}
 	multi := len(drivers) > 1
 	current := &cobra.Command{
 		Use:   "stats",
-		Short: "查看队列中的任务数和最近的处理情况",
+		Short: "查看队列中的任务数",
 		Args:  command.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			since, err := sinceFlag(cmd)
-			if err != nil {
-				return err
-			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			header(w, multi, "TOPIC\tREADY\tDELAYED\tRETRYING\tRUNNING\tFAILED\tWAITING")
 			for _, d := range drivers {
@@ -60,13 +49,9 @@ func New(failed *queue.FailedJobs, m *monitor.Monitor, drivers ...queue.Driver) 
 						count(s, queue.StateRetrying), count(s, queue.StateRunning), count(s, queue.StateFailed), waiting(s))
 				}
 			}
-			if err := w.Flush(); err != nil || m == nil {
-				return err
-			}
-			return activity(cmd.Context(), cmd.OutOrStdout(), m, since)
+			return w.Flush()
 		},
 	}
-	current.Flags().Duration("since", time.Hour, "统计最近多长时间的处理情况")
 
 	list := &cobra.Command{
 		Use:   "failed",
@@ -95,55 +80,6 @@ func New(failed *queue.FailedJobs, m *monitor.Monitor, drivers ...queue.Driver) 
 	root := &cobra.Command{Use: "queue", Short: "队列"}
 	root.AddCommand(current, list)
 	return root
-}
-
-// activity 输出每个 topic 最近 since 内的处理情况。
-func activity(ctx context.Context, out io.Writer, m *monitor.Monitor, since time.Duration) error {
-	now := time.Now()
-	topics, err := queue.Activity(ctx, m, now.Add(-since), now)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "\n最近 %s\n", shortDuration(since))
-	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "TOPIC\tSUCCEEDED\tRETRIED\tFAILED\tAVG TIME\tMAX TIME\tAVG WAIT\tMAX WAIT")
-	for _, topic := range slices.Sorted(maps.Keys(topics)) {
-		a := topics[topic]
-		runs := a.Executions()
-		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n", topic, a.Succeeded.Count, a.Retried.Count, a.Failed.Count,
-			duration(runs, runs.MeanDuration()), duration(runs, runs.MaxDuration()),
-			duration(a.Wait, a.Wait.MeanDuration()), duration(a.Wait, a.Wait.MaxDuration()))
-	}
-	return errors.Wrap(w.Flush(), "queuecmd: write")
-}
-
-// sinceFlag 读取 --since，它必须为正。
-func sinceFlag(cmd *cobra.Command) (time.Duration, error) {
-	since, _ := cmd.Flags().GetDuration("since")
-	if since <= 0 {
-		return 0, command.AsExitError(command.ExitUsage, errors.New("queuecmd: --since must be positive"))
-	}
-	return since, nil
-}
-
-// shortDuration 去掉时长末尾为 0 的分和秒，例如 24h0m0s 显示为 24h。
-func shortDuration(d time.Duration) string {
-	s := d.String()
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
-}
-
-// duration 以毫秒精度显示从 a 中算出的时长 d，a 没有记录时显示为 -。
-func duration(a monitor.Aggregate, d time.Duration) string {
-	if a.Count == 0 {
-		return "-"
-	}
-	return d.Round(time.Millisecond).String()
 }
 
 // header 输出表头，多个驱动时以 DRIVER 列开头。

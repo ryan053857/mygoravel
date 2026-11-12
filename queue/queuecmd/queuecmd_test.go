@@ -10,9 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/command"
 	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/monitor"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/queue/queuecmd"
 )
@@ -20,9 +18,9 @@ import (
 var mail = queue.Topic[int]("mail")
 
 // run 执行命令，返回每行按空白分隔的字段。
-func run(t *testing.T, failed *queue.FailedJobs, mon *monitor.Monitor, drivers []queue.Driver, args ...string) [][]string {
+func run(t *testing.T, failed *queue.FailedJobs, drivers []queue.Driver, args ...string) [][]string {
 	t.Helper()
-	cmd := queuecmd.New(failed, mon, drivers...)
+	cmd := queuecmd.New(failed, drivers...)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs(args)
@@ -61,7 +59,7 @@ func TestStats(t *testing.T) {
 	}
 	insertFailed(t, db, "report", "boom", time.Now())
 
-	rows := run(t, failed, nil, []queue.Driver{d}, "stats")
+	rows := run(t, failed, []queue.Driver{d}, "stats")
 	want := [][]string{
 		{"TOPIC", "READY", "DELAYED", "RETRYING", "RUNNING", "FAILED", "WAITING"},
 		{"mail", "2", "1", "0", "0", "0"},
@@ -87,7 +85,7 @@ func (partial) Stats(context.Context) ([]queue.TopicStats, error) {
 
 func TestStatsMultipleDrivers(t *testing.T) {
 	db := dbtest.Open(t, queue.Migrations())
-	rows := run(t, queue.NewFailedJobs(db), nil, []queue.Driver{queue.Database(db), partial{}}, "stats")
+	rows := run(t, queue.NewFailedJobs(db), []queue.Driver{queue.Database(db), partial{}}, "stats")
 	want := "DRIVER TOPIC READY DELAYED RETRYING RUNNING FAILED WAITING | partial events 4 - - 1 0 -"
 	got := make([]string, len(rows))
 	for i, r := range rows {
@@ -107,7 +105,7 @@ func TestFailed(t *testing.T) {
 	failed := queue.NewFailedJobs(db)
 	drivers := []queue.Driver{queue.Database(db)}
 
-	rows := run(t, failed, nil, drivers, "failed", "--topic", "mail")
+	rows := run(t, failed, drivers, "failed", "--topic", "mail")
 	if len(rows) != 3 || rows[0][0] != "ID" || rows[1][0] != recent.String() || rows[2][0] != old.String() {
 		t.Fatalf("rows %q", rows)
 	}
@@ -117,47 +115,7 @@ func TestFailed(t *testing.T) {
 	if e := strings.Join(rows[2][5:], " "); e != "smtp down" {
 		t.Fatalf("first line %q", e)
 	}
-	if rows := run(t, failed, nil, drivers, "failed", "--limit", "1"); len(rows) != 2 || rows[1][0] != recent.String() {
+	if rows := run(t, failed, drivers, "failed", "--limit", "1"); len(rows) != 2 || rows[1][0] != recent.String() {
 		t.Fatalf("limited rows %q", rows)
-	}
-}
-
-func TestStatsActivity(t *testing.T) {
-	ctx := context.Background()
-	db := dbtest.Open(t, queue.Migrations())
-	mon := monitor.New(dbtest.Open(t, monitor.Migrations()), nil)
-	t.Cleanup(func() { _ = mon.Close(ctx) })
-	mon.RecordDuration(queue.MetricSucceeded, "mail", 200*time.Millisecond)
-	mon.RecordDuration(queue.MetricSucceeded, "mail", 400*time.Millisecond)
-	mon.RecordDuration(queue.MetricFailed, "mail", 600*time.Millisecond)
-	mon.RecordDuration(queue.MetricWait, "mail", 1500*time.Millisecond)
-	mon.RecordDuration(queue.MetricSucceeded, "report", 2*time.Second)
-	if err := mon.Flush(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	rows := run(t, queue.NewFailedJobs(db), mon, []queue.Driver{queue.Database(db)}, "stats", "--since", "30m")
-	got := make([]string, len(rows))
-	for i, r := range rows {
-		got[i] = strings.Join(r, " ")
-	}
-	want := []string{
-		"TOPIC READY DELAYED RETRYING RUNNING FAILED WAITING", // 队列中没有任务
-		"",
-		"最近 30m",
-		"TOPIC SUCCEEDED RETRIED FAILED AVG TIME MAX TIME AVG WAIT MAX WAIT",
-		"mail 2 0 1 400ms 600ms 1.5s 1.5s",
-		"report 1 0 0 2s 2s - -", // 没有等待时长的记录
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("got\n%s", strings.Join(got, "\n"))
-	}
-
-	cmd := queuecmd.New(queue.NewFailedJobs(db), mon, queue.Database(db))
-	cmd.SetArgs([]string{"stats", "--since", "0s"})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	if err := cmd.ExecuteContext(ctx); command.ExitCode(err) != command.ExitUsage {
-		t.Fatalf("--since 0s: %v", err)
 	}
 }

@@ -10,7 +10,6 @@
     - [热点、集中过期与不存在的数据](#hot-keys)
     - [失效：提交后删除](#invalidation)
 - [缓存键与序列化](#keys-and-serialization)
-- [命中率](#hit-rate)
 - [测试](#testing)
 - [使用 Redis](#redis)
 
@@ -190,7 +189,7 @@ func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID
 | 加载函数返回错误 | 原样返回；除了 `Missing` 声明的错误，都不写缓存 |
 | 写回失败 | 记录 `warn` 日志，照常返回加载的结果 |
 
-缓存后端不可用时每个请求都会出错，所以这些日志每个 `Cache` 每分钟最多一条，附上期间省略的条数。出错的次数见[命中率](#hit-rate)。
+缓存后端不可用时每个请求都会出错，所以这些日志每个 `Cache` 每分钟最多一条，附上期间省略的条数。出错的次数用[指标](telemetry.md)观察。
 
 这套降级策略只适用于可丢弃的查询缓存。如果用缓存保存会话或限流计数，需要根据用途单独设计故障时的行为。
 
@@ -234,29 +233,6 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 - 多租户应用中键还要带上租户，例如传入 `<tenant>:<id>`，得到 `blog:article:v1:<tenant>:<id>`，见[缓存、广播与其他资源](tenancy.md#other-resources)。
 
 `cachex` 把值编码为 JSON 字符串存进 `cache.New[string]`。内存缓存其实可以直接保存结构体，但这样切换到 Redis 时业务代码就要改：Redis store 读出的总是字符串，如果声明为 `cache.New[Article]`，`Get` 会返回零值和 `nil` 错误，而不是报错。统一存 JSON 字符串，两种后端可以无缝替换。
-
-<a id="hit-rate"></a>
-## 命中率
-
-缓存有没有起作用，要看命中率。`cachemon.Wrap` 包装一个缓存，把每次读取命中、未命中还是出错记录为[运行统计](monitor.md)。包装后仍是 `cache.CacheInterface`，`cachex` 和 action 都不用修改：
-
-```go
-articleCache := cachemon.Wrap("articles", cache.New[string](gocachestore.NewGoCache(memoryClient)), mon)
-articles := cachex.New[*article.Article](articleCache, "blog:article:v1:", cfg.Cache.DefaultTTL,
-    cachex.Missing(article.ErrNotFound.New))
-```
-
-第一个参数是缓存名，`mon` 是 `open` 中创建的 [Monitor](dependencies.md#assembling-the-application)。键不存在或已过期记为未命中，其他错误记为出错：Redis 断线表现为出错次数增加，而不是命中率下降。
-
-`cachecmd.New(a.monitor)` 返回 `cache stats` 命令，和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明。它列出每个缓存最近一段时间的情况，`AVG GET` 是读取的平均耗时，`--since` 默认一小时：
-
-```text
-最近 1h
-CACHE     HITS   MISSES  ERRORS  HIT RATE  AVG GET
-articles  18342  1204    0       93.8%     41µs
-```
-
-后台页面用 `cachemon.Activity(ctx, a.monitor, from, to)` 查询同样的数据。
 
 <a id="testing"></a>
 ## 测试

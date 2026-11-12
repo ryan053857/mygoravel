@@ -24,7 +24,6 @@ import (
 	"github.com/ryan053857/mygoravel/lock"
 	"github.com/ryan053857/mygoravel/login"
 	"github.com/ryan053857/mygoravel/login/passkey"
-	"github.com/ryan053857/mygoravel/monitor"
 	"github.com/ryan053857/mygoravel/notification"
 	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
@@ -52,7 +51,6 @@ var sources = map[string]migrate.Source{
 	"lock":          {Name: "lock", FS: lock.Migrations()},
 	"login":         {Name: "login", FS: login.Migrations()},
 	"login/passkey": {Name: "passkey", FS: passkey.Migrations()},
-	"monitor":       {Name: "monitor", FS: monitor.Migrations()},
 	"notification":  {Name: "notification", FS: notification.Migrations()},
 	"operation":     {Name: "operation", FS: operation.Migrations()},
 	"queue":         {Name: "queue", FS: queue.Migrations()},

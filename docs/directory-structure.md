@@ -148,7 +148,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 ```text
 功能        apitoken  login  authz  notification  activity  feature  operation  webhook  search  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  command
-基础设施    database  queue  schedule  monitor  cachex  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  pdf  outbound  sheet  document
+基础设施    database  queue  schedule  cachex  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  pdf  outbound  sheet  document
 基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt
 ```
 
@@ -199,8 +199,6 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `queue/redisqueue`、`queue/natsqueue` | Redis 与 NATS JetStream 队列驱动 | [Redis 驱动](queue.md#redis-driver)、[NATS 驱动](queue.md#nats-driver) |
 | `queue/queuetest` | 队列驱动的契约测试 | [实现自己的驱动](queue.md#custom-drivers) |
 | `schedule` | 按 cron 表达式定时执行任务，多个实例之间去重 | [定时任务](scheduling.md) |
-| `monitor` | 把运行统计按分钟汇总、保存最新值，存在应用数据库中供命令和后台页面查询 | [运行统计](monitor.md) |
-| `monitor/cachemon` | 包装 gocache 缓存，记录命中、未命中和出错次数 | [命中率](cache.md#hit-rate) |
 | `cachex` | 在 gocache 之上的 cache-aside 读取：合并并发加载、过期时间抖动、缓存空结果，缓存出错时直接加载 | [为文章详情加缓存](cache.md#caching-articles) |
 | `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端，`broadcast/broadcasttest` 是测试用的内存后端与后端的契约测试 | [广播](broadcasting.md) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |
@@ -229,7 +227,6 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
 | `queue/queuecmd` | `queue stats`、`queue failed` 命令：查看队列中的任务数、最近的处理情况和失败任务 | [查看队列的命令](queue.md#stats-command) |
 | `schedule/schedulecmd` | `schedules` 命令：列出定时任务、下一次执行的时间、是否正在执行和上一次的结果 | [列出任务的命令](scheduling.md#schedules-command) |
-| `monitor/cachemon/cachecmd` | `cache stats` 命令：查看缓存的命中率 | [命中率](cache.md#hit-rate) |
 
 <a id="features"></a>
 ### 功能

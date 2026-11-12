@@ -67,7 +67,7 @@ sched.Add("reports:daily", "0 3 * * *", reports.Generate, schedule.In(shanghai))
 <a id="running-the-scheduler"></a>
 ## 运行调度器
 
-调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[数据库锁](locks.md#database-store)。注册任务单独写在 `tasks` 中，调度器运行它，[查看任务](#listing-tasks)的命令和后台页面也用它，任务只定义一次。指标、链路和[执行记录](#run-history)的选项也在这里设置，查看任务时不执行任务，它们不起作用：
+调度器是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。下面是博客应用完整的 `internal/bootstrap/scheduler.go`，`a.locker` 是 `open` 中创建的[数据库锁](locks.md#database-store)。注册任务单独写在 `tasks` 中，调度器运行它，[查看任务](#listing-tasks)的命令和后台页面也用它，任务只定义一次。指标和链路的选项也在这里设置，查看任务时不执行任务，它们不起作用：
 
 ```go
 package bootstrap
@@ -87,7 +87,7 @@ import (
 // tasks 创建调度器并注册全部定时任务。
 func (a *App) tasks() *schedule.Scheduler {
     sched := schedule.New(a.locker, a.cfg.Schedule, nil,
-        schedule.WithTelemetry(a.meters, a.tracers), schedule.WithMonitor(a.monitor))
+        schedule.WithTelemetry(a.meters, a.tracers))
     sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(a.db).Handle,
         schedule.Describe("发布到了预定时间的文章"))
     sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000),
@@ -96,8 +96,6 @@ func (a *App) tasks() *schedule.Scheduler {
         schedule.Describe("删除过期的锁"))
     sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(a.failed.Cleanup(30*24*time.Hour), 1000),
         schedule.Describe("删除 30 天前的失败任务"))
-    sched.Add("monitor:cleanup", "@hourly", schedule.Cleanup(a.monitor.Cleanup(7*24*time.Hour), 1000),
-        schedule.Describe("删除 7 天前的运行统计"))
     return sched
 }
 
@@ -206,45 +204,28 @@ running["reports:daily"]
 <a id="schedules-command"></a>
 ### 列出任务的命令
 
-`schedulecmd.New` 返回 `schedules` 命令，列出全部任务和它们上一次的[执行记录](#run-history)。它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明，传入的是注册任务的方法 `a.tasks`：声明命令时 `App` 还没有装配，执行时才调用它：
+`schedulecmd.New` 返回 `schedules` 命令，列出全部任务。它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明，传入的是注册任务的方法 `a.tasks`：声明命令时 `App` 还没有装配，执行时才调用它：
 
 ```go
-schedulecmd.New(a.tasks, a.monitor),
+schedulecmd.New(a.tasks),
 ```
 
 执行 `./bin/api schedules`：
 
 ```text
-TASK                        EXPRESSION    NEXT RUN             IN        RUNNING  LAST RUN             RESULT  TOOK     DESCRIPTION
-articles:publish-scheduled  * * * * *     2026-11-11 17:01:00  42s       no       2026-11-11 17:00:00  ok      31ms     发布到了预定时间的文章
-sessions:cleanup            */10 * * * *  2026-11-11 17:10:00  9m42s     no       2026-11-11 17:00:00  ok      12ms     删除过期的会话
-locks:cleanup               @hourly       2026-11-11 18:00:00  59m42s    yes      2026-11-11 16:00:00  ok      8ms      删除过期的锁
-queue:prune-failed          @daily        2026-11-12 00:00:00  6h59m42s  no       2026-11-11 00:00:00  failed  10.002s  删除 30 天前的失败任务
-monitor:cleanup             @hourly       2026-11-11 18:00:00  59m42s    no       -                    -       -        删除 7 天前的运行统计
+TASK                        EXPRESSION    NEXT RUN             IN        RUNNING  DESCRIPTION
+articles:publish-scheduled  * * * * *     2026-11-11 17:01:00  42s       no       发布到了预定时间的文章
+sessions:cleanup            */10 * * * *  2026-11-11 17:10:00  9m42s     no       删除过期的会话
+locks:cleanup               @hourly       2026-11-11 18:00:00  59m42s    yes      删除过期的锁
+queue:prune-failed          @daily        2026-11-12 00:00:00  6h59m42s  no       删除 30 天前的失败任务
 ```
 
-`RUNNING` 是任务此刻是否在任何一个实例上执行；使用 `EveryInstance` 或 `AllowOverlap` 的任务不登记执行状态，显示为 `-`。`LAST RUN` 是上一次开始执行的时间，正在执行的这一次结束后才更新；从未执行过的任务显示为 `-`。`a.monitor` 在执行时为 `nil` 时不显示上一次执行的三列。
+`RUNNING` 是任务此刻是否在任何一个实例上执行；使用 `EveryInstance` 或 `AllowOverlap` 的任务不登记执行状态，显示为 `-`。
 
 <a id="run-history"></a>
 ### 执行记录
 
-上一次什么时候执行、结果如何，是运行时的数据：部署多个实例时，每次触发在哪个实例上执行并不确定。上面 `tasks` 中的 `schedule.WithMonitor` 把每次执行记录为[运行统计](monitor.md)，保存在数据库中，所有进程都能查询：
-
-```go
-last, err := schedule.LastRuns(ctx, a.monitor) // 每个任务上一次执行的 schedule.Run
-r := last["reports:daily"]
-// r.Tick、r.Started、r.Duration；r.Failed() 和 r.Error 是失败的原因
-
-now := time.Now()
-tasks, err := schedule.Activity(ctx, a.monitor, now.Add(-24*time.Hour), now)
-reports := tasks["reports:daily"]
-// reports.Succeeded.Count、reports.Failed.Count、reports.Skipped：执行完成、失败、被跳过的次数
-// reports.Executions().MeanDuration()、MaxDuration()：全部执行的平均和最长耗时
-```
-
-`LastRuns` 只记录执行完成或失败的那一次，被跳过的触发计入 `Activity` 的 `Skipped`。由其他实例执行的触发由那个实例记录。
-
-需要保存每一次执行的完整历史时，用 `schedule.WithObserver` 接收执行事件，写进自己的表，`WithTelemetry` 和 `WithMonitor` 都建立在它之上：
+上一次什么时候执行、结果如何，是运行时的数据：部署多个实例时，每次触发在哪个实例上执行并不确定。需要执行记录时，用 `schedule.WithObserver` 接收执行事件，写进自己的表，`WithTelemetry` 也建立在它之上：
 
 | 事件 | 时机 |
 | --- | --- |
@@ -258,16 +239,14 @@ reports := tasks["reports:daily"]
 <a id="admin-pages"></a>
 ### 后台页面
 
-后台页面由 HTTP 进程提供，它同样调用 `a.tasks()` 拿到任务的定义，再查询执行记录：
+后台页面由 HTTP 进程提供，它同样调用 `a.tasks()` 拿到任务的定义，再从[执行记录](#run-history)中读取每个任务上一次的结果，例如应用自己的表中每个任务最新的一行（`r`、`ok`）：
 
 ```go
 sched := a.tasks()
 running, err := sched.Running(ctx)
 // ...
-last, err := schedule.LastRuns(ctx, a.monitor)
-// ...
 for _, t := range sched.Tasks() {
-    r, ok := last[t.Name]
+    r, ok := lastRuns[t.Name] // 应用从自己的执行记录中查出
 
     // 应当执行的时间过去了一分钟，这次触发却没有执行记录，也没有正在执行：这次触发丢了，
     // 例如调度器停止或部署期间。
@@ -318,7 +297,6 @@ article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) erro
 | [后台操作](operations.md#cleanup)（包括导入和导出） | `operation.New(db)` 的 `Cleanup(保留期)` | 每天 |
 | [Webhook 投递记录](webhooks.md#retention) | `webhook.Cleanup(db, 保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(保留期)` | 每天 |
-| [运行统计](monitor.md#cleanup) | `monitor.New(db, nil)` 的 `Cleanup(保留期)` | 每小时 |
 
 使用 Redis 存储时过期的数据由 Redis 自动删除，不需要注册清理任务。
 
