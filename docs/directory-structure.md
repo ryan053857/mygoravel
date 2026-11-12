@@ -183,7 +183,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `lock` | 带过期时间的原子锁；`lock/redislock` 是 Redis 存储，`lock/locktest` 是测试用的内存存储与存储的契约测试 | [原子锁](locks.md)、[Redis 存储](locks.md#redis-store) |
 | `outbound` | 只能访问公网地址的 HTTP 客户端，防止服务端请求伪造；临时失败时重试可以安全重复的请求 | [出站请求](outbound.md) |
 | `outbound/outboundtest` | 不连接网络的 HTTP 传输层：登记响应、记录请求，用于测试 | [测试](outbound.md#testing) |
-| `database` | 打开 PostgreSQL 连接池，`RunInTx` 与提交后回调，约束错误判断 | [数据库](database.md) |
+| `database` | 打开 PostgreSQL 连接池，`RunInTx` 与提交后回调，约束错误判断，慢查询日志与语句的指标和链路 | [数据库](database.md)、[数据库的指标与链路](telemetry.md#database) |
 | `database/migrate` | 构造 goose 迁移器、新建迁移、发布功能包迁移、检查历史迁移 | [迁移](migrations.md) |
 | `database/dbtest` | 为测试创建隔离的真实数据库 | [测试](testing.md#database-tests) |
 | `ratelimit` | 按 key 限制操作频率，内存限流器，`Observe` 报告指标；`ratelimit/redislimit` 是 Redis 限流器 | [限流](rate-limiting.md)、[Redis 限流器](rate-limiting.md#redis-limiter) |

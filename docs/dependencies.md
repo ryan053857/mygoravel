@@ -99,7 +99,7 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
     stack.MustAdd("telemetry", tel.Shutdown)
     slog.SetDefault(logging.New(cfg.Logs, logging.Export(tel.Logs)))
 
-    db, err := database.Open(ctx, cfg.Database)
+    db, err := database.Open(ctx, cfg.Database, database.WithTelemetry(tel.Meters, tel.Tracers))
     if err != nil {
         return nil, err
     }

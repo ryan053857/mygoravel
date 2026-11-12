@@ -3,6 +3,7 @@
 - [简介](#introduction)
 - [配置](#configuration)
 - [连接数据库](#connecting)
+    - [慢查询](#slow-queries)
 - [定义模型](#defining-models)
     - [主键](#primary-keys)
     - [自动维护时间戳](#timestamps)
@@ -38,6 +39,7 @@ database:
   max_idle_conns: 10
   conn_max_lifetime: 1h
   conn_max_idle_time: 30m
+  slow_query: 1s
 ```
 
 | 字段 | 说明 | `DefaultConfig` 中的默认值 |
@@ -47,6 +49,7 @@ database:
 | `max_idle_conns` | 最大空闲连接数；`0` 表示不保留空闲连接 | 4 × `GOMAXPROCS` |
 | `conn_max_lifetime` | 连接的最长存活时间 | `1h` |
 | `conn_max_idle_time` | 空闲连接的最长保留时间 | `30m` |
+| `slow_query` | 执行时间达到它的语句记为[慢查询](#slow-queries)；`0` 表示不记录 | `1s` |
 
 这些字段对应 `database.Config` 结构体。把它放进应用的根配置结构体，`config.Load` 会自动填充上表中的默认值：
 
@@ -94,7 +97,18 @@ func Check(ctx context.Context, dsn string) error {
 
 `database.Open` 使用你传入的配置值，包括显式设置的零值。为 `ctx` 设置一个截止时间，可以避免数据库不可达时启动过程无限等待。
 
-在应用中，连接池应当在入口打开**一次**，然后传给所有需要它的 [action](actions.md)，在应用退出时关闭，见[依赖装配](dependencies.md)。
+在应用中，连接池应当在入口打开**一次**，然后传给所有需要它的 [action](actions.md)，在应用退出时关闭，见[依赖装配](dependencies.md)。报告每条语句的耗时指标和链路用 `database.WithTelemetry`，见[可观测性](telemetry.md#database)。
+
+<a id="slow-queries"></a>
+### 慢查询
+
+执行时间达到 `slow_query`（默认 1 秒）的语句记录一条 `Warn` 日志：
+
+```text
+WARN slow query component=database duration=1.284s db.operation.name=SELECT db.collection.name=articles query="SELECT \"a\".\"id\", … FROM \"articles\" AS \"a\" WHERE (\"a\".\"author_id\" = ?) ORDER BY \"a\".\"id\" DESC LIMIT ?"
+```
+
+`query` 中的字符串、数字等字面量都换成了 `?`，日志不会带出参数的值，同一条语句不同参数的执行看起来一样，便于汇总。日志在执行语句的 `ctx` 中记录，带着请求 ID 和 `trace_id`，可以找到是哪个请求或任务执行的。日志器默认是 `slog.Default()`，用 `database.WithLogger` 指定其他的。
 
 <a id="defining-models"></a>
 ## 定义模型

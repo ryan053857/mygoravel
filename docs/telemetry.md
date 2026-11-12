@@ -5,6 +5,7 @@
     - [自己创建 Provider](#custom-providers)
 - [框架组件](#components)
     - [HTTP 请求](#http)
+    - [数据库](#database)
     - [队列](#queue)
     - [定时任务](#schedule)
     - [限流](#ratelimit)
@@ -16,9 +17,9 @@
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、队列、调度器、限流器和实时频道都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，前三者还报告链路。`telemetry` 包把这些指标、链路和应用的日志一起推送到一个 OTLP 接收端，例如 [OpenObserve](https://openobserve.ai/)，不需要另外部署收集器。
+框架的 HTTP 服务、数据库连接池、队列、调度器、限流器和实时频道都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，前四者还报告链路。`telemetry` 包把这些指标、链路和应用的日志一起推送到一个 OTLP 接收端，例如 [OpenObserve](https://openobserve.ai/)，不需要另外部署收集器。
 
-这里只有框架自己的组件。数据库、Redis 这些依赖由各自的生态报告，例如 Bun 的 [bunotel](https://pkg.go.dev/github.com/uptrace/bun/extra/bunotel)、rueidis 的 [rueidisotel](https://pkg.go.dev/github.com/redis/rueidis/rueidisotel)，或者服务器一侧的 exporter，把同一个 Provider 交给它们即可。
+这里只有框架自己的组件，数据库连接池由 `database.Open` 打开，也在其中。Redis、Memcached 这些依赖由各自的生态报告，例如 rueidis 的 [rueidisotel](https://pkg.go.dev/github.com/redis/rueidis/rueidisotel)，或者服务器一侧的 exporter，把同一个 Provider 交给它们即可。
 
 和其他功能一样，指标和链路都需要显式开启：把 `MeterProvider`、`TracerProvider` 交给需要报告的组件，没有传入的组件不报告。
 
@@ -90,6 +91,23 @@ router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 
 每个请求还是一个服务端 span，名称是方法和路由模板，例如 `GET /articles/{id}`。请求头带有 `traceparent` 时（例如来自前端或另一个服务），span 接在调用方的链路之后；`5xx` 的请求标记为错误。处理器从请求的 `ctx` 中拿到这个 span，自己创建的 span 都接在它下面。耗时指标也用这个 `ctx` 记录，日志平台可以从一个慢请求的数据点跳到它的链路。
 
+<a id="database"></a>
+### 数据库
+
+```go
+db, err := database.Open(ctx, cfg.Database, database.WithTelemetry(tel.Meters, tel.Tracers))
+```
+
+| 指标 | 类型 | 属性 |
+| --- | --- | --- |
+| `db.client.operation.duration` | 直方图，秒 | `db.system.name`（`postgresql`）、`db.namespace`（数据库名）、`db.operation.name`（`SELECT`、`INSERT`、`BEGIN` 等）、`db.collection.name`（表）、`server.address`、`server.port`；出错时还有 `error.type` 和 `db.response.status_code` |
+
+属性遵循 OpenTelemetry 的[数据库语义约定](https://opentelemetry.io/docs/specs/semconv/database/database-metrics/)。`db.collection.name` 是 Bun 查询的表，`NewRaw` 写的原始 SQL 没有这个属性。出错时 `error.type` 是 PostgreSQL 的 SQLSTATE，例如唯一约束冲突是 `23505`、死锁是 `40P01`；超时和取消分别是 `timeout`、`canceled`。没有查到行（`sql.ErrNoRows`）不算出错。
+
+`ctx` 中有 span 时，每条语句是它之下的一个 span，名称是操作和表，例如 `SELECT articles`：一个慢请求的链路里能看到它执行了哪些语句、各用了多久，事务的 `BEGIN`、`COMMIT` 也在其中。队列转发任务、调度器加锁这类后台查询不属于任何请求，只计入指标，不产生链路。
+
+span 的 `db.query.text` 是把字面量换成 `?` 之后的 SQL，例如 `SELECT … WHERE ("a"."id" = ?)`。Bun 把参数直接写进 SQL，换掉之后手机号、token 这类值不会发往链路平台。超过[慢查询](database.md#slow-queries)阈值的语句同样以这种形式记录到日志。
+
 <a id="queue"></a>
 ### 队列
 
@@ -155,6 +173,9 @@ attempts := ratelimit.Observe(a.meters, "login", redislimit.New(a.rdb, "blog:log
 导出到 Prometheus 后，指标名和属性名中的点换成下划线，单位成为后缀，例如 `http_server_request_duration_seconds`：
 
 ```promql
+# 5 分钟内数据库语句的 p95 耗时超过 100 毫秒
+histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket[5m]))) > 0.1
+
 # 5 分钟内 5xx 的比例超过 1%
 sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
   / sum(rate(http_server_request_duration_seconds_count[5m])) > 0.01
