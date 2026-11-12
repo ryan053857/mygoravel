@@ -9,6 +9,10 @@
     - [定时任务](#as-scheduled-tasks)
     - [命令行](#as-commands)
     - [页面、其他 action 和脚本](#direct-calls)
+- [同步的后续动作](#follow-ups)
+    - [声明钩子](#declaring-hooks)
+    - [在 bootstrap 中连接](#wiring-hooks)
+    - [钩子里做什么](#what-hooks-do)
 - [数据对象](#data-objects)
 - [约定](#conventions)
 
@@ -320,6 +324,95 @@ func NewImport(create *Create) *Import {
     return &Import{create: create}
 }
 ```
+
+<a id="follow-ups"></a>
+## 同步的后续动作
+
+一个动作完成后，其他模块常常要跟着做点什么，例如文章发布后，积分模块给作者加积分。Laravel 用事件和监听器解耦它们，mygoravel 没有事件分发器：action 声明一个钩子类型，bootstrap 把其他模块的函数传进来。`article` 不导入 `points`，发布文章会触发什么都写在装配代码里，不需要到处查找监听器。
+
+<a id="declaring-hooks"></a>
+### 声明钩子
+
+在 `publish.go` 中声明钩子类型，构造函数接收一组钩子：
+
+```go
+// PublishedHook 在发布文章的事务中执行，此时文章已经更新。返回错误时整个发布回滚。
+type PublishedHook func(ctx context.Context, tx database.Tx, item *Article) error
+
+type Publish struct {
+    db          *bun.DB
+    onPublished []PublishedHook
+}
+
+func NewPublish(db *bun.DB, onPublished ...PublishedHook) *Publish {
+    return &Publish{db: db, onPublished: onPublished}
+}
+```
+
+`Handle` 在更新文章之后依次调用它们：
+
+```go
+        _, err = tx.NewUpdate().Model(item).Column("status", "published_at", "updated_at").WherePK().Exec(ctx)
+        if err != nil {
+            return errors.Wrap(err, "publish article")
+        }
+        for _, hook := range a.onPublished {
+            if err := hook(ctx, tx, item); err != nil {
+                return err
+            }
+        }
+        return nil
+```
+
+钩子和文章的更新在同一个事务中，一起提交，一起回滚。钩子返回的业务错误原样传给调用者，HTTP 接口照常把它转换为状态码。
+
+钩子由下游模块提供，例如 `internal/points/article.go`：
+
+```go
+package points
+
+// ArticlePublished 给发布文章的作者加 10 积分。
+func ArticlePublished(ctx context.Context, tx database.Tx, item *article.Article) error {
+    return add(ctx, tx, item.AuthorID, 10, "article.published")
+}
+```
+
+`points` 导入 `article`，`article` 不导入 `points`，所以不会循环导入。钩子需要依赖时，写成某个类型的方法，传入方法值，与 `HTTP`、`Job` 这些入口方法一样。
+
+发布之前必须先通过另一个模块的检查时，例如内容审核，这个检查是 `Publish` 的依赖，而不是后续动作：在 `article` 中声明一个小接口，由构造函数接收，见[构造函数注入](dependencies.md#constructor-injection)。
+
+<a id="wiring-hooks"></a>
+### 在 bootstrap 中连接
+
+`Publish` 在路由、worker 和命令中都会构造，每一处都要传入同样的钩子，否则通过[定时发布](#as-jobs)的文章就不会加积分。在 bootstrap 中给钩子列表起一个名字，各处都使用它：
+
+```go
+// onPublished 是发布文章时在同一个事务中执行的钩子，构造 article.Publish 的地方都传入它。
+var onPublished = []article.PublishedHook{points.ArticlePublished}
+```
+
+```go
+article.Register(api, rest.RequireBearer(api, validate, "articles"), db, onPublished)
+article.PublishAt.Handle(w, article.NewPublish(a.db, onPublished...).Job)
+article.Commands(a.db, onPublished)
+```
+
+`article.Register` 和 `article.Commands` 各多一个参数，用来构造 `Publish`。这里的钩子没有依赖，所以是一个变量；钩子需要依赖时，在 `open` 中构造这个列表，保存在 `App` 中。
+
+测试 `Publish` 时不传钩子，或者传一个记录调用的函数；测试 `points.ArticlePublished` 时，在测试事务中直接调用它，见[测试](testing.md#testing-actions)。
+
+<a id="what-hooks-do"></a>
+### 钩子里做什么
+
+钩子执行时，事务还持有文章的行锁，所以钩子里只做必须和发布一起成功的写入。其他后续动作按能否等待、能否回滚选择写法：
+
+| 后续动作 | 写法 |
+| --- | --- |
+| 必须和发布一起成功，例如加积分 | 在钩子中用 `tx` 写入 |
+| 可以稍后执行、失败要重试，例如通知关注者 | 在钩子中用 `tx` 发布[队列任务](queue.md)：`Topic.Publish(ctx, tx, …)`，事务提交后才投递 |
+| 不能回滚的副作用，例如广播、删除缓存 | 在钩子中用 [`tx.AfterCommit`](database.md#after-commit) 登记 |
+
+不要在钩子中用 `*bun.DB` 开启另一个事务：它看不到还没提交的文章，发布回滚时它的写入也不会撤销。
 
 <a id="data-objects"></a>
 ## 数据对象
