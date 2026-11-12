@@ -125,7 +125,7 @@ func (r *Realm) SendCode(ctx context.Context, purpose Purpose, id Identifier) (s
 // VerifyCode 校验 SendCode 发出的验证码。不正确、已过期、已用过、尝试次数已用完，
 // 或者不是在发送时的租户中验证时返回 ErrInvalidCode。
 //
-// SignIn 且标识已注册时直接登录，返回 Outcome.Subject，并把标识标为已验证；
+// SignIn 且标识已注册时直接登录，返回 Outcome.Subject（启用了二次验证时为 Outcome.Pending），并把标识标为已验证；
 // 其余情况返回 Outcome.Proof，交给 Register、ResetPassword 或 Link 完成。
 func (r *Realm) VerifyCode(ctx context.Context, requestID, code string) (Outcome, error) {
 	rid, err := uuid.Parse(requestID)
@@ -190,7 +190,7 @@ func (r *Realm) signInWithCode(ctx context.Context, c *challengeRow, now time.Ti
 	if err != nil {
 		return Outcome{}, err
 	}
-	return r.signedIn(ctx, c.SubjectID, c.Tenant)
+	return r.authenticated(ctx, c.SubjectID, c.Tenant)
 }
 
 // proof 返回完成凭证对应的验证记录。凭证无效、已过期、已用过、用途不在 purposes 中，
@@ -283,10 +283,11 @@ func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref iden
 }
 
 // ResetPassword 用 Reset 的完成凭证设置新密码，按 Options.PasswordPolicy 检查；接收验证码的标识同时标为已验证，
-// 它的密码登录失败计数清零。返回密码所属的主体，应用通常接着撤销它的其他会话和 token，也可以直接为它登录。
-func (r *Realm) ResetPassword(ctx context.Context, proof, password string) (identity.Subject, error) {
+// 它的密码登录失败计数清零。返回密码所属的主体，应用通常接着撤销它的全部会话和 token。
+// 它不登录：用户接着用新密码登录，启用了二次验证的账号仍然需要二次验证。
+func (r *Realm) ResetPassword(ctx context.Context, proof, password string) (identity.Ref, error) {
 	if err := r.opts.PasswordPolicy(password); err != nil {
-		return identity.Subject{}, err
+		return identity.Ref{}, err
 	}
 	var c *challengeRow
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -311,12 +312,12 @@ func (r *Realm) ResetPassword(ctx context.Context, proof, password string) (iden
 		return r.storePassword(ctx, tx, c.SubjectID, password, false)
 	})
 	if err != nil {
-		return identity.Subject{}, err
+		return identity.Ref{}, err
 	}
 	if err := r.opts.Attempts.Reset(ctx, r.limitKey(c.Tenant, c.identifier())); err != nil {
-		return identity.Subject{}, err
+		return identity.Ref{}, err
 	}
-	return identity.Subject{Type: r.opts.Type, ID: c.SubjectID, Tenant: c.Tenant}, nil
+	return identity.Ref{Type: r.opts.Type, ID: c.SubjectID}, nil
 }
 
 // Link 用 Verify 或 SignIn 的完成凭证，把已验证的标识绑定到已登录的主体 ref，例如添加邮箱、更换手机号；

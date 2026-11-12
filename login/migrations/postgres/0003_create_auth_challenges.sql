@@ -17,7 +17,7 @@ CREATE TABLE auth_challenges (
 CREATE INDEX auth_challenges_subject ON auth_challenges (subject_type, subject_id);
 CREATE INDEX auth_challenges_expires_at ON auth_challenges (expires_at);
 COMMENT ON TABLE auth_challenges IS '验证码与完成凭证；过期行由 login.Realm.Cleanup 删除';
-COMMENT ON COLUMN auth_challenges.purpose IS 'sign_in、reset 或 verify';
+COMMENT ON COLUMN auth_challenges.purpose IS 'sign_in、reset、verify，或 two_factor（密码等验证通过、等待二次验证的登录）';
 COMMENT ON COLUMN auth_challenges.subject_id IS '发送验证码时标识所属的主体；空字符串表示标识尚未注册';
 COMMENT ON COLUMN auth_challenges.code_hash IS '验证码的 HMAC-SHA256，密钥由应用密钥派生';
 COMMENT ON COLUMN auth_challenges.attempts IS '已尝试的次数';

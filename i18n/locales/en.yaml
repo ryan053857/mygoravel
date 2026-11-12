@@ -19,6 +19,8 @@ login.weak_password: The password must be 8 to 128 characters without leading or
 login.identifier_taken: Already used by another account
 login.last_identifier: The last way to sign in cannot be removed
 login.not_found: Account not found
+login.two_factor_enabled: Two-factor authentication is already enabled
+login.two_factor_disabled: Two-factor authentication is not enabled
 authz.not_member: Not found or no access
 authz.role_not_found: Role not found
 authz.role_exists: A role with this name already exists

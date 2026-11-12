@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/alexedwards/scs/v2"
@@ -55,6 +56,9 @@ type Options struct {
 	// Login 是登录页地址。Require 的路由把未登录的请求带到这里，并在 next 参数中附上原地址。
 	// 可以包含路径参数的占位，按当前请求的同名参数替换，例如租户在路径中时写 /t/{tenant}/login。
 	Login string
+	// Confirm 是确认身份页的地址，web.Require(...).Confirmed 的路由在主体太久没有确认身份时把请求带到这里，
+	// 并在 next 参数中附上原地址；路径参数的占位与 Login 相同。注册 Confirmed 的路由时必须设置。
+	Confirm string
 	// Tenant 从请求中取出本次请求所在的租户，例如路径参数 chi.URLParam(r, "tenant")、子域名或自定义域名；
 	// 结果在每条页面路由（包括公开路由）开始时写入 identity.WithTenant。nil 表示始终是平台本身（""）。
 	Tenant func(r *http.Request) string
@@ -144,6 +148,10 @@ func (p *Pages) authorize(access Access, next http.Handler) http.Handler {
 			Redirect(w, r, loginURL(r, p.opts.Login)+"?next="+url.QueryEscape(returnTo(r)))
 			return
 		}
+		if access.confirmed > 0 && time.Since(session.ConfirmedAt(r.Context(), p.opts.Sessions)) > access.confirmed {
+			Redirect(w, r, loginURL(r, p.opts.Confirm)+"?next="+url.QueryEscape(returnTo(r)))
+			return
+		}
 		token := p.opts.Sessions.Token(r.Context())
 		ctx := identity.WithSubject(r.Context(), sub)
 		ctx = httpx.WithCredentialCheck(ctx, func(c context.Context) error { return p.recheck(c, token, sub, access) })
@@ -172,6 +180,12 @@ func (p *Pages) Login(r *http.Request, sub identity.Subject) error {
 		ip = r.RemoteAddr
 	}
 	return session.Login(r.Context(), p.opts.Sessions, sub, session.Device{IP: ip, UserAgent: r.UserAgent()})
+}
+
+// Confirm 记录当前会话的主体此刻再次确认了身份，通常在确认页校验密码（login.Realm.Confirm）或二次验证码之后调用，
+// 之后 web.Require(...).Confirmed 的路由在有效期内放行。见 session.Confirm。
+func (p *Pages) Confirm(ctx context.Context) {
+	session.Confirm(ctx, p.opts.Sessions)
 }
 
 // Sessions 返回 Options.Sessions，供测试等需要直接操作会话的场景使用，见 webtest.Client.Login。

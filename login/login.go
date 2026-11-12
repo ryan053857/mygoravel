@@ -35,6 +35,10 @@ var (
 	ErrLastIdentifier = errorx.Define(errorx.Conflict, "login.last_identifier")
 	// ErrNotFound 表示登录标识不存在。
 	ErrNotFound = errorx.Define(errorx.NotFound, "login.not_found")
+	// ErrTwoFactorEnabled 表示已经启用了二次验证。
+	ErrTwoFactorEnabled = errorx.Define(errorx.Conflict, "login.two_factor_enabled")
+	// ErrTwoFactorDisabled 表示没有启用二次验证。
+	ErrTwoFactorDisabled = errorx.Define(errorx.Conflict, "login.two_factor_disabled")
 )
 
 // Options 是一套账号体系的登录配置。Type、Hasher、Crypt 必填，其余有默认值。
@@ -54,6 +58,8 @@ type Options struct {
 	Crypt *crypt.Crypt
 	// Send 发送验证码，例如发邮件或短信，内容和通道由应用决定。调用 SendCode 时必须设置。
 	Send func(ctx context.Context, c Code) error
+	// Issuer 是 TOTP 验证器中显示的发行者，通常是应用的名称，见 SetupTOTP。
+	Issuer string
 	// Resolve 在登录成功、签发凭据之前调用一次，通常与入口的 identity.Accounts 中这套账号的 Resolver 相同：
 	// 返回错误（例如账号已停用）时登录失败，返回的 Permissions 等字段带入 Outcome.Subject。
 	// Type、ID、Tenant 不能被它修改。为 nil 时不调用。
@@ -82,11 +88,12 @@ type Options struct {
 // Realm 管理一套账号体系的登录凭据：登录标识、密码、验证码与完成凭证，数据保存在框架的 auth_* 表中，
 // 按 identity.Ref 引用主体。账号本身（例如 staff、customers 表）由应用管理。可以并发使用。
 type Realm struct {
-	db       bun.IDB
-	opts     Options
-	codeKeys [][]byte
-	dummy    func() string // 标识不存在时用于校验的密码哈希，使耗时与存在时一致
-	now      func() time.Time
+	db           bun.IDB
+	opts         Options
+	codeKeys     [][]byte
+	recoveryKeys [][]byte
+	dummy        func() string // 标识不存在时用于校验的密码哈希，使耗时与存在时一致
+	now          func() time.Time
 }
 
 // New 创建 Realm。db 必须已执行 login 的迁移；使用默认限流器时还需要 ratelimit 的迁移。
@@ -125,9 +132,10 @@ func New(db bun.IDB, opts Options) *Realm {
 	}
 	hasher := opts.Hasher
 	return &Realm{
-		db:       db,
-		opts:     opts,
-		codeKeys: opts.Crypt.Derive("mygoravel login code v1"),
+		db:           db,
+		opts:         opts,
+		codeKeys:     opts.Crypt.Derive("mygoravel login code v1"),
+		recoveryKeys: opts.Crypt.Derive("mygoravel login recovery v1"),
 		dummy: sync.OnceValue(func() string {
 			h, _ := hasher.Make("mygoravel login dummy password")
 			return h
@@ -152,11 +160,14 @@ func defaultPolicy(password string) error {
 	return nil
 }
 
-// Outcome 是一次身份证明的结果，二者只有一个不为零值。
+// Outcome 是一次身份证明的结果，三者只有一个不为零值。
 type Outcome struct {
 	// Subject 是登录成功的主体：Type、ID，PerTenant 时还有 Tenant，以及 Options.Resolve 加载的字段。
 	// 交给 pages.Login 或 tokens.Login 签发凭据。
 	Subject identity.Subject
+	// Pending 表示第一步验证已通过，但账号启用了二次验证：把它交给客户端，
+	// 客户端连同 TOTP 验证码或恢复码提交给 TwoFactor 完成登录。
+	Pending string
 	// Proof 是需要应用继续完成的一次性完成凭证：标识未注册时交给 Register，找回密码时交给 ResetPassword，
 	// 绑定标识时交给 Link。
 	Proof string

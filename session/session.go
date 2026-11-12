@@ -17,6 +17,8 @@ const (
 	subjectKey = "mygoravel.subject"
 	// loginKey 是会话中保存登录设备的键，Store 把它写入设备信息列。
 	loginKey = "mygoravel.login"
+	// confirmedKey 是会话中保存最近一次确认身份的时间（Unix 毫秒）的键。
+	confirmedKey = "mygoravel.confirmed_at"
 )
 
 // maxUserAgent 是保存的 User-Agent 的最大字符数，与 MySQL 迁移中的列宽一致。
@@ -91,8 +93,25 @@ func Login(ctx context.Context, sm *scs.SessionManager, sub identity.Subject, d 
 	}
 	sub.Method, sub.Credential = "session", id.String()
 	sm.Put(ctx, subjectKey, sub)
-	sm.Put(ctx, loginKey, login{IP: d.IP, UserAgent: truncate(d.UserAgent, maxUserAgent), At: time.Now().UTC()})
+	now := time.Now().UTC()
+	sm.Put(ctx, loginKey, login{IP: d.IP, UserAgent: truncate(d.UserAgent, maxUserAgent), At: now})
+	sm.Put(ctx, confirmedKey, now.UnixMilli())
 	return nil
+}
+
+// Confirm 记录当前会话的主体此刻再次确认了身份，例如在修改邮箱、关闭二次验证之前重新输入了密码。
+// 登录本身也算一次确认。见 ConfirmedAt。
+func Confirm(ctx context.Context, sm *scs.SessionManager) {
+	sm.Put(ctx, confirmedKey, time.Now().UnixMilli())
+}
+
+// ConfirmedAt 返回当前会话最近一次确认身份的时间（登录或 Confirm）；未登录时返回零值。
+func ConfirmedAt(ctx context.Context, sm *scs.SessionManager) time.Time {
+	ms, ok := sm.Get(ctx, confirmedKey).(int64)
+	if !ok {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms)
 }
 
 func truncate(s string, n int) string {

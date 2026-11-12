@@ -25,7 +25,7 @@ type passwordRow struct {
 //
 // 同一个标识每次尝试都消耗 Options.Attempts 的一次配额，成功后清零，所以只有连续的失败受到限制；
 // 超出时返回 ratelimit.ErrExceeded。标识不存在、没有密码或密码不正确都返回 ErrInvalidCredentials，耗时相同。
-// 成功后如果哈希参数已过时，按当前配置重新哈希。
+// 成功后如果哈希参数已过时，按当前配置重新哈希。账号启用了二次验证时返回 Outcome.Pending，交给 TwoFactor 完成登录。
 func (r *Realm) Password(ctx context.Context, id Identifier, password string) (Outcome, error) {
 	id, err := id.Normalize()
 	if err != nil || !containsKind(r.opts.PasswordKinds, id.Kind) {
@@ -61,7 +61,7 @@ func (r *Realm) Password(ctx context.Context, id Identifier, password string) (O
 			return Outcome{}, err
 		}
 	}
-	return r.signedIn(ctx, owner, tenant)
+	return r.authenticated(ctx, owner, tenant)
 }
 
 // limitKey 是标识在限流器中的 key。

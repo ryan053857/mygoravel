@@ -7,6 +7,8 @@
 - [验证码登录与注册](#codes)
 - [找回密码](#reset)
 - [管理登录方式](#managing)
+- [二次验证](#two-factor)
+- [确认身份](#confirming)
 - [后台创建账号](#admin-accounts)
 - [注销账号](#forget)
 - [限流与防探测](#limits)
@@ -163,16 +165,16 @@ requestID, err := users.SendCode(ctx, login.Reset, login.Email(in.Body.Email))
 验证码只发给已注册的邮箱，未注册的同样返回一个请求 ID。`VerifyCode` 通过后得到 `out.Proof`，客户端连同新密码交给 `ResetPassword`：
 
 ```go
-sub, err := users.ResetPassword(ctx, in.Body.Proof, in.Body.Password)
+who, err := users.ResetPassword(ctx, in.Body.Proof, in.Body.Password)
 if err != nil {
     return nil, err
 }
-if _, err := tokens.RevokeSubject(ctx, sub.Ref()); err != nil {
+if _, err := tokens.RevokeSubject(ctx, who); err != nil {
     return nil, err
 }
 ```
 
-新密码按 `Options.PasswordPolicy` 检查，默认要求 8 到 128 个字符、首尾没有空白，不符合时返回 `login.ErrWeakPassword`。接收验证码的邮箱同时标为已验证，它的登录失败计数清零。找回密码后通常撤销这个账号的全部会话和 token，见[撤销令牌](api-tokens.md#revoking-tokens)；也可以接着用 `sub` 直接登录。没有设置过密码的账号同样可以用这个流程设置密码。
+新密码按 `Options.PasswordPolicy` 检查，默认要求 8 到 128 个字符、首尾没有空白，不符合时返回 `login.ErrWeakPassword`。接收验证码的邮箱同时标为已验证，它的登录失败计数清零。找回密码后通常撤销这个账号的全部会话和 token，见[撤销令牌](api-tokens.md#revoking-tokens)。`ResetPassword` 不登录，用户接着用新密码登录，启用了[二次验证](#two-factor)的账号仍然要通过二次验证，所以只拿到邮箱不能绕过它。没有设置过密码的账号同样可以用这个流程设置密码。
 
 <a id="managing"></a>
 ## 管理登录方式
@@ -196,10 +198,86 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 | --- | --- |
 | `SetPassword(ctx, db, ref, password)` | 设置或修改密码，按密码策略检查 |
 | `RemovePassword(ctx, db, ref)` | 删除密码，之后只能用验证码等方式登录 |
-| `Confirm(ctx, ref, password)` | 修改邮箱、删除账号等敏感操作前再次确认密码 |
 | `Lookup(ctx, id)` | 管理后台按邮箱或手机号查找账号 |
 
 修改密码后，用 `RevokeOthers` 让其他设备下线，见[撤销令牌](api-tokens.md#revoking-tokens)。
+
+<a id="two-factor"></a>
+## 二次验证
+
+账号可以启用 TOTP 二次验证：用户在 Google Authenticator、1Password 等验证器 App 中添加账号，登录时除了密码还要输入验证器上的 6 位数字。`Options.Issuer` 是验证器中显示的应用名称。
+
+启用分两步。`SetupTOTP` 生成密钥，`setup.URI` 渲染成二维码让用户扫描，`setup.Secret` 供无法扫码时手动输入：
+
+```go
+setup, err := users.SetupTOTP(ctx, a.db, sub.Ref(), email)
+```
+
+用户输入验证器上的数字后，`ConfirmTOTP` 校验并启用，返回 8 个恢复码：
+
+```go
+codes, err := users.ConfirmTOTP(ctx, a.db, sub.Ref(), in.Code)
+```
+
+恢复码在手机丢失时代替验证器，每个只能用一次。它们只在这里和 `RegenerateRecoveryCodes` 返回明文，页面要提示用户保存下来；`RecoveryCodesLeft` 返回剩余个数，用完之前提醒用户重新生成。
+
+启用后，`Password` 和验证码登录不再直接返回 `out.Subject`，而是返回 `out.Pending`：第一步已经通过，等待二次验证。客户端带着它和验证器上的数字（或一个恢复码）调用登录的第二步：
+
+```go
+out, err := users.Password(ctx, login.Email(in.Body.Email), in.Body.Password)
+if err != nil {
+    return nil, err
+}
+if out.Pending != "" {
+    resp.Body.Pending = out.Pending // 客户端显示输入验证码的界面
+    return resp, nil
+}
+// 未启用二次验证：直接签发 token
+```
+
+```go
+out, err := users.TwoFactor(ctx, in.Body.Pending, in.Body.Code)
+if err != nil {
+    return nil, err // 验证码不正确：login.ErrInvalidCode
+}
+plain, err := tokens.Login(ctx, out.Subject, device)
+```
+
+`Pending` 15 分钟内有效，最多输错 5 次，之后要重新登录。同一个验证码不能用两次；验证器与服务器的时钟允许相差 30 秒。`DisableTwoFactor` 关闭二次验证，之前先[确认身份](#confirming)。
+
+运营后台通常要求员工都启用二次验证。这由应用决定：员工登录后，`TwoFactorEnabled` 为 `false` 时只允许访问启用二次验证的页面。
+
+<a id="confirming"></a>
+## 确认身份
+
+修改邮箱、关闭二次验证、删除账号之前，再次确认操作的就是账号本人。`Confirm(ctx, ref, password)` 校验密码，`CheckTwoFactor(ctx, ref, code)` 校验验证器上的数字或恢复码，失败次数都有限制。
+
+JSON API 让客户端在这类请求中带上密码，处理器先调用 `Confirm`。页面则把这类路由声明为 `Confirmed`，在一段时间内确认过身份的会话直接放行：
+
+```go
+pages := web.New(web.Options{
+    Login:   "/login",
+    Confirm: "/confirm",
+    // ...
+})
+pages.Routes(r, web.Require().Confirmed(15*time.Minute)).Post("/account/delete", h.Delete)
+```
+
+登录本身算一次确认。超过 15 分钟时，请求被带到 `Options.Confirm`，`next` 参数带上原地址。确认页校验密码后调用 `pages.Confirm`，再跳回原地址：
+
+```go
+func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) error {
+    sub, _ := identity.FromContext(r.Context())
+    if err := h.users.Confirm(r.Context(), sub.Ref(), r.PostFormValue("password")); err != nil {
+        return err
+    }
+    h.pages.Confirm(r.Context())
+    web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/account"))
+    return nil
+}
+```
+
+确认页本身用 `web.Require()` 保护。
 
 <a id="admin-accounts"></a>
 ## 后台创建账号
@@ -219,7 +297,7 @@ _, err := a.staff.SendCode(ctx, login.Reset, login.Email(in.Email))
 <a id="forget"></a>
 ## 注销账号
 
-`Forget` 删除账号的全部登录标识、密码和验证码。在注销账号的事务中与删除账号行一起调用，再撤销会话和 token：
+`Forget` 删除账号的全部登录标识、密码、二次验证和验证码。在注销账号的事务中与删除账号行一起调用，再撤销会话和 token：
 
 ```go
 err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {

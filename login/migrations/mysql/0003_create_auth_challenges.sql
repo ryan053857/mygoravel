@@ -1,5 +1,5 @@
 -- +goose Up
--- 验证码与完成凭证，由 login.Realm 管理：purpose 为 sign_in、reset 或 verify；subject_id 为空表示标识尚未注册；
+-- 验证码与完成凭证，由 login.Realm 管理：purpose 为 sign_in、reset、verify，或 two_factor（等待二次验证的登录）；subject_id 为空表示标识尚未注册；
 -- code_hash 是验证码的 HMAC-SHA256；proof_hash 是验证通过后签发的完成凭证的 SHA-256；
 -- expires_at 在验证通过后改为完成凭证的截止时间；过期行由 Realm.Cleanup 删除。
 CREATE TABLE auth_challenges (

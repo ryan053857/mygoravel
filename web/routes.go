@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -19,6 +20,7 @@ type Access struct {
 	declared    bool
 	login       bool
 	permissions []string
+	confirmed   time.Duration
 }
 
 // Public 允许未登录访问，例如登录页。
@@ -32,6 +34,18 @@ func Require(permissions ...string) Access {
 	return Access{declared: true, login: true, permissions: slices.Clone(permissions)}
 }
 
+// Confirmed 在 Require 的基础上要求主体在 maxAge 之内确认过身份（登录或 Pages.Confirm），
+// 例如修改邮箱、关闭二次验证、删除账号：超过时跳转到 Options.Confirm，next 参数带上原地址，
+// 确认页验证密码后调用 Pages.Confirm 再跳回。对 Public 调用或 maxAge 不为正数时 panic。
+func (a Access) Confirmed(maxAge time.Duration) Access {
+	if !a.login || maxAge <= 0 {
+		panic("web: Confirmed requires web.Require and a positive maxAge")
+	}
+	a.permissions = slices.Clone(a.permissions)
+	a.confirmed = maxAge
+	return a
+}
+
 // Routes 在一个 chi.Router 上注册同一访问策略的页面路由。
 type Routes struct {
 	pages  *Pages
@@ -41,7 +55,7 @@ type Routes struct {
 
 // Routes 返回在 r 上注册页面路由的注册器，每条路由都使用 access。
 // 页面路由只能通过注册器注册，因此每条路由都显式声明了访问策略；access 是零值，
-// 或运行模式下 access 要求登录而 Options.Accounts 为空时 panic。
+// 或运行模式下 access 要求登录而 Options.Accounts 为空、要求确认身份而 Options.Confirm 为空时 panic。
 //
 // 注册的每条路由依次：拒绝跨站的非安全请求（http.CrossOriginProtection，不需要 CSRF token）、
 // 加载和保存会话、按 access 检查登录，最后调用处理器并呈现它返回的错误。
@@ -51,6 +65,9 @@ func (p *Pages) Routes(r chi.Router, access Access) *Routes {
 	}
 	if access.login && p.opts.Mode != ModeRoutes && len(p.opts.Accounts) == 0 {
 		panic("web: Options.Accounts is required for web.Require routes")
+	}
+	if access.confirmed > 0 && p.opts.Mode != ModeRoutes && p.opts.Confirm == "" {
+		panic("web: Options.Confirm is required for Confirmed routes")
 	}
 	return &Routes{pages: p, router: r, access: access}
 }

@@ -507,9 +507,9 @@ func TestResetPassword(t *testing.T) {
 		proof := e.proof(t, ctx, login.Reset, alice)
 		_, err = e.realm.ResetPassword(ctx, proof, " short ")
 		is(t, err, login.ErrWeakPassword)
-		sub, err := e.realm.ResetPassword(ctx, proof, "new password")
-		if err != nil || sub.Ref() != ref("c1") {
-			t.Fatalf("reset: %+v %v", sub, err)
+		who, err := e.realm.ResetPassword(ctx, proof, "new password")
+		if err != nil || who != ref("c1") {
+			t.Fatalf("reset: %+v %v", who, err)
 		}
 		// 找回密码后失败计数清零：再失败一次仍能登录（配额为 2）。
 		_, err = e.realm.Password(ctx, alice, "guess")

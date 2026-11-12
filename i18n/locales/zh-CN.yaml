@@ -19,6 +19,8 @@ login.weak_password: 密码需要 8 到 128 个字符，并且首尾不能有空
 login.identifier_taken: 已被其他账号使用
 login.last_identifier: 不能移除最后一种登录方式
 login.not_found: 账号不存在
+login.two_factor_enabled: 已经启用了二次验证
+login.two_factor_disabled: 没有启用二次验证
 authz.not_member: 不存在或没有访问权限
 authz.role_not_found: 角色不存在
 authz.role_exists: 已有同名角色

@@ -234,6 +234,8 @@ func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
+启用了[二次验证](login.md#two-factor)的账号，`Password` 返回 `out.Pending` 而不是主体：把它存进表单的隐藏字段，渲染输入验证码的页面，提交后用 `TwoFactor` 完成登录。修改邮箱、删除账号这类路由可以要求最近[确认过身份](login.md#confirming)。
+
 `pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效；它还从请求中记录客户端地址和 User-Agent，用于[设备列表](session.md#listing-sessions)。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)。同一个邮箱连续失败太多次时，`Password` 返回 `ratelimit.ErrExceeded`，交给 `pages` 呈现为 `429` 错误页，见[限流与防探测](login.md#limits)。
 
 会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时，在 `Options.Accounts` 中为这套账号指定 Resolver，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回本次请求的主体。它与 API 的 [`rest.Options.Accounts`](authentication.md#resolving-subjects) 是同一个类型，同一个 Resolver 可以交给两者：
