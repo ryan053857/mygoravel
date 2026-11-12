@@ -24,15 +24,15 @@ const outputBufferTimeout = 25 * time.Millisecond
 // ErrShuttingDown 是处理函数 context 的取消原因：停止等待超时，任务已放回 NSQ。
 var ErrShuttingDown = errors.New("queue: shutting down")
 
-// dbTimeout 是写入失败任务、经由 outbox 安排重试时单次数据库操作的超时。这些操作不使用 Run 的 context，
+// dbTimeout 是写入失败任务、安排较晚的重试时单次数据库操作的超时。这些操作不使用 Run 的 context，
 // 停止过程中仍能写回处理结果。
 const dbTimeout = 30 * time.Second
 
 // Worker 转发已发布的任务，并处理已注册 topic 的任务。
 //
-// 转发：Topic.Publish 把任务写入 queue_outbox，Worker 把它们发布到 NSQ 后删除。发布任务的事务提交时
-// PostgreSQL 通知 Worker 立即转发，另外每 Config.PollInterval 检查一次。执行时间离现在超过 Config.MaxDefer 的
-// 任务留在 outbox 中，到时间再转发。多个 Worker 同时转发时互不重复。
+// 转发：Topic.Publish 把任务写入 WAL，Worker 经由逻辑复制槽（SlotName）在事务提交后立即读到，发布到 NSQ 后
+// 确认位置。一个槽同时只能被一个连接使用，多个 Worker 中只有一个在转发，其余的待命，它停止后由其中一个接手。
+// 执行时间离现在超过 Config.MaxDefer 的任务存入 queue_scheduled，快到时间时再写回 WAL；所有 Worker 都检查它，互不重复。
 //
 // 处理：每个 topic 一个 NSQ 消费者，同时处理的任务不超过它的并发数，同一个应用的 Worker 使用同一个 channel，
 // 每个任务只交给其中一个。处理函数返回 nil 时确认任务；返回错误时按退避时间重试，次数用完或错误被 Permanent
@@ -47,6 +47,7 @@ const dbTimeout = 30 * time.Second
 //	err := w.Run(ctx)
 type Worker struct {
 	db        *bun.DB
+	slot      string // 逻辑复制槽，Run 开始时确定
 	failed    *FailedJobs
 	cfg       Config
 	logger    *slog.Logger
@@ -75,7 +76,7 @@ type handler struct {
 // WorkerOption 调整 NewWorker 创建的 Worker。
 type WorkerOption func(*Worker)
 
-// NewWorker 创建 Worker。db 是 queue_outbox 和 queue_failed_jobs 所在的数据库，必须已执行 Migrations 中的迁移；
+// NewWorker 创建 Worker。db 是发布任务的数据库，必须已执行 Migrations 中的迁移；
 // cfg 是 NSQ 的地址和各 topic 的默认设置；logger 记录任务失败和 NSQ 的错误，nil 时使用 slog.Default()。
 // db 为 nil 或 cfg 不合法时 panic。
 func NewWorker(db *bun.DB, cfg Config, logger *slog.Logger, opts ...WorkerOption) *Worker {
@@ -121,7 +122,7 @@ func (w *Worker) handle(topic string, fn func(context.Context, []byte) error, op
 }
 
 // Run 转发任务、处理已注册 topic 的任务，直到 ctx 被取消，然后按 Worker 的说明停止，返回 nil。
-// 连不上 nsqd 时返回错误。没有注册处理函数时只转发。第二次调用时返回错误。
+// 连不上 nsqd、复制槽不存在或已失效时返回错误。没有注册处理函数时只转发。第二次调用时返回错误。
 func (w *Worker) Run(ctx context.Context) error {
 	w.mu.Lock()
 	handlers, started := w.handlers, w.started
@@ -129,6 +130,18 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.mu.Unlock()
 	if started {
 		return errors.New("queue: Run called twice")
+	}
+
+	// 启动检查不随 ctx 取消：已经取消的 ctx 也照常启动再停止，与连接 nsqd 一致。
+	if err := withTimeout(func(dbCtx context.Context) error {
+		slot, err := slotOf(dbCtx, w.db)
+		if err == nil {
+			err = checkSlot(dbCtx, w.db, slot)
+		}
+		w.slot = slot
+		return err
+	}); err != nil {
+		return err
 	}
 
 	producer, err := nsq.NewProducer(w.cfg.NSQD, nsq.NewConfig())
@@ -156,11 +169,9 @@ func (w *Worker) Run(ctx context.Context) error {
 		consumers = append(consumers, c)
 	}
 
-	relayed := make(chan struct{})
-	go func() {
-		defer close(relayed)
-		w.relay(ctx, producer)
-	}()
+	var background sync.WaitGroup
+	background.Go(func() { w.relay(ctx, producer) })
+	background.Go(func() { w.dispatchLoop(ctx) })
 	<-ctx.Done()
 
 	w.lifecycle.Lock()
@@ -170,7 +181,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		c.Stop() // 发送 CLS：nsqd 不再投递新的任务
 	}
 	w.drain()
-	<-relayed
+	background.Wait()
 	return nil
 }
 
@@ -319,13 +330,13 @@ func (w *Worker) nack(ctx context.Context, m *nsq.Message, j Job, env envelope, 
 	w.observe(ctx, Event{Kind: JobFailed, Job: j, Started: started, Duration: time.Since(started), Err: cause})
 }
 
-// postpone 把 env 写回 outbox，到 env.AvailableAt 再转发。
+// postpone 把 env 存入 queue_scheduled，快到 env.AvailableAt 时再写回 WAL。
 func (w *Worker) postpone(ctx context.Context, topic string, env envelope) error {
 	body, err := json.Marshal(env)
 	if err != nil {
 		return err
 	}
-	return insertOutbox(ctx, w.db, []outboxRow{{Topic: topic, Body: body, AvailableAt: env.AvailableAt, CreatedAt: time.Now().UTC()}})
+	return schedule(ctx, w.db, []scheduledRow{{ID: env.ID, Topic: topic, Body: body, AvailableAt: env.AvailableAt, CreatedAt: time.Now().UTC()}})
 }
 
 // jobContext 返回处理函数的 context：还原发布方的链路和 request_id，附上任务 ID、执行次数。

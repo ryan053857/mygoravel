@@ -8,16 +8,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/ryan053857/mygoravel/logging"
 )
 
-// notifyChannel 是发布任务时通知 Worker 的 PostgreSQL 频道。
-const notifyChannel = "queue_outbox"
-
-// insertBatch 是一条 INSERT 写入 queue_outbox 的最多行数。
-const insertBatch = 1000
+// emitBatch 是一条语句写入 WAL 的最多任务数。
+const emitBatch = 1000
 
 // PublishOption 调整 Topic.Publish 发布的任务。
 type PublishOption func(*publishOptions)
@@ -40,9 +38,9 @@ func At(t time.Time) PublishOption {
 // propagated 是从发布方 context 带到处理函数 context 的日志字段。
 var propagated = []string{logging.AttrRequestID}
 
-// publish 把 payloads 写入 queue_outbox，每个 payload 一个任务，以新的 UUIDv7 作为任务 ID。
+// publish 把 payloads 作为任务写入 db 所在数据库的 WAL，每个 payload 一个任务，以新的 UUIDv7 作为任务 ID。
 // ctx 中的 request_id 日志字段和 OpenTelemetry 链路（W3C traceparent）写入任务元数据，处理时还原到处理函数的 context 中。
-// db 是事务时，任务随事务提交；提交时通知 Worker 立即转发。
+// db 是事务时，任务随事务提交，回滚时一起取消；Worker 经由逻辑复制在提交后立即收到。
 func publish[T any](ctx context.Context, db bun.IDB, topic string, payloads []T, opts ...PublishOption) error {
 	if db == nil {
 		panic("queue: nil database")
@@ -72,7 +70,7 @@ func publish[T any](ctx context.Context, db bun.IDB, topic string, payloads []T,
 	}
 	traceContext.Inject(ctx, propagation.MapCarrier(metadata))
 
-	rows := make([]outboxRow, len(payloads))
+	bodies := make([][]byte, len(payloads))
 	for i, p := range payloads {
 		data, err := json.Marshal(p)
 		if err != nil {
@@ -82,19 +80,21 @@ func publish[T any](ctx context.Context, db bun.IDB, topic string, payloads []T,
 		if err != nil {
 			return errors.Wrapf(err, "queue: encode %q job", topic)
 		}
-		rows[i] = outboxRow{Topic: topic, Body: body, AvailableAt: at, CreatedAt: now}
+		bodies[i] = body
 	}
-	return errors.Wrapf(insertOutbox(ctx, db, rows), "queue: publish to %q", topic)
+	return errors.Wrapf(emit(ctx, db, topic, bodies), "queue: publish to %q", topic)
 }
 
-// insertOutbox 写入 rows 并通知 Worker。在事务中时通知随提交送达。
-func insertOutbox(ctx context.Context, db bun.IDB, rows []outboxRow) error {
-	for start := 0; start < len(rows); start += insertBatch {
-		batch := rows[start:min(start+insertBatch, len(rows))]
-		if _, err := db.NewInsert().Model(&batch).Exec(ctx); err != nil {
+// emit 把发给 NSQ 的消息 bodies 写入 WAL：事务性的逻辑解码消息只有在事务提交后才会被解码，回滚时一起丢弃。
+// 它们不写入任何表，只是一条 WAL 记录，所以发布任务的事务之间不会互相等待。
+func emit(ctx context.Context, db bun.IDB, topic string, bodies [][]byte) error {
+	for start := 0; start < len(bodies); start += emitBatch {
+		batch := bodies[start:min(start+emitBatch, len(bodies))]
+		_, err := db.NewRaw("SELECT pg_logical_emit_message(true, ?, b) FROM unnest(?::bytea[]) AS b",
+			MessagePrefix+topic, pgdialect.Array(batch)).Exec(ctx)
+		if err != nil {
 			return err
 		}
 	}
-	_, err := db.NewRaw("SELECT pg_notify(?, '')", notifyChannel).Exec(ctx)
-	return err
+	return nil
 }

@@ -32,6 +32,7 @@ require (
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/uuid v1.6.0
+	github.com/jackc/pglogrepl v0.0.0-20261003132456-662581bb6bb6
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/joho/godotenv v1.5.1
@@ -128,6 +129,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.3 // indirect

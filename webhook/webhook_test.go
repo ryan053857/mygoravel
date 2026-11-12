@@ -78,11 +78,7 @@ func deliveries(t *testing.T, db bun.IDB, q webhook.DeliveryQuery) []webhook.Del
 
 func jobCount(t *testing.T, db bun.IDB) int {
 	t.Helper()
-	n, err := db.NewSelect().Table("queue_outbox").Count(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return int(n)
+	return len(queuetest.Pending(t, db, webhook.Deliver))
 }
 
 func TestEndpoints(t *testing.T) {

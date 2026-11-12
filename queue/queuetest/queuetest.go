@@ -40,7 +40,6 @@ func Config(t testing.TB) queue.Config {
 	cfg.NSQD = addr
 	cfg.Prefix = "t" + strings.ToLower(rand.Text()[:10]) + "."
 	cfg.Lease = 5 * time.Second
-	cfg.PollInterval = 100 * time.Millisecond
 	cfg.ShutdownTimeout = time.Second
 	// nsqd 定期随机抽查一部分 channel 的延迟消息，channel 越多，延迟和重试越不准时：测试建的 topic 用完即删。
 	t.Cleanup(func() { deleteTopics(t, api, cfg.Prefix) })

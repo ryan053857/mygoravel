@@ -26,16 +26,17 @@ type Config struct {
 	// 进程崩溃时任务在 Lease 之后被重新投递。不能超过 nsqd 的 --max-msg-timeout（默认 15 分钟）。
 	Lease time.Duration `yaml:"lease"`
 	// MaxDefer 是 NSQ 延迟消息的最长延迟，必须不超过 nsqd 的 --max-req-timeout（默认 1 小时）。
-	// 更晚执行的任务和重试先留在 queue_outbox 中，到时间再转发。
+	// 更晚执行的任务和重试先存入 queue_scheduled，快到时间时再转发。
 	MaxDefer time.Duration `yaml:"max_defer"`
-	// PollInterval 是检查 queue_outbox 的最长间隔。新发布的任务提交时会通知 worker，立即转发，不必等它。
-	PollInterval time.Duration `yaml:"poll_interval"`
+	// ReplicationDSN 是转发任务的逻辑复制连接，为空时使用 Worker 的数据库连接的配置。
+	// 数据库连接经过 PgBouncer 等连接池时需要设置：复制连接必须直连 PostgreSQL。用户需要 REPLICATION 属性。
+	ReplicationDSN string `yaml:"replication_dsn"`
 	// ShutdownTimeout 是停止时等待处理中的任务完成的最长时间，超时的任务立即放回 NSQ。
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
 }
 
 // DefaultConfig 返回默认配置：本机 nsqd，channel 为 worker，并发 10，最多处理 10 次，租约 30 秒，
-// 最长延迟 1 小时，每秒检查一次 outbox，停止时最多等待 30 秒。
+// 最长延迟 1 小时，停止时最多等待 30 秒。
 func DefaultConfig() Config {
 	return Config{
 		NSQD:            "127.0.0.1:4150",
@@ -44,7 +45,6 @@ func DefaultConfig() Config {
 		MaxAttempts:     10,
 		Lease:           30 * time.Second,
 		MaxDefer:        time.Hour,
-		PollInterval:    time.Second,
 		ShutdownTimeout: 30 * time.Second,
 	}
 }
@@ -75,9 +75,6 @@ func (c Config) Validate() error {
 	}
 	if c.MaxDefer <= 0 {
 		errs = append(errs, errors.New("max_defer must be positive"))
-	}
-	if c.PollInterval <= 0 {
-		errs = append(errs, errors.New("poll_interval must be positive"))
 	}
 	if c.ShutdownTimeout < 0 {
 		errs = append(errs, errors.New("shutdown_timeout must not be negative"))

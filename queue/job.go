@@ -33,11 +33,11 @@ type envelope struct {
 	Attempts int `json:"attempts,omitempty"`
 }
 
-// outboxRow 是 queue_outbox 中的一行。
-type outboxRow struct {
-	bun.BaseModel `bun:"table:queue_outbox,alias:o"`
+// scheduledRow 是 queue_scheduled 中的一行：执行时间离现在超过 Config.MaxDefer、暂时不能交给 NSQ 的任务。
+type scheduledRow struct {
+	bun.BaseModel `bun:"table:queue_scheduled,alias:s"`
 
-	ID          int64     `bun:"id,pk,autoincrement"`
+	ID          uuid.UUID `bun:"id,pk,type:uuid"` // 任务 ID
 	Topic       string    `bun:"topic,notnull"`
 	Body        []byte    `bun:"body,notnull"`
 	AvailableAt time.Time `bun:"available_at,notnull"`

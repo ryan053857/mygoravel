@@ -25,7 +25,7 @@
 
 任务按 topic 分类：发布方把任务发到一个 topic，worker 为每个 topic 注册一个处理函数。
 
-任务和业务数据**在同一个事务中发布**：`Publish` 把任务写进 PostgreSQL 的 `queue_outbox` 表，事务提交后由 worker 转发到 NSQ，事务回滚时任务一起取消。这样既不会出现「文章发布了、通知任务丢了」，也不会出现「通知发出去了、文章却回滚了」。
+任务和业务数据**在同一个事务中发布**：`Publish` 把任务写进 PostgreSQL 的 WAL（预写日志），事务提交后 worker 经由逻辑复制立即读到，转发到 NSQ；事务回滚时任务一起取消。这样既不会出现「文章发布了、通知任务丢了」，也不会出现「通知发出去了、文章却回滚了」。任务不写入任何表，发布任务的事务之间不会互相等待，提交的吞吐与不发布任务时相当。
 
 每个任务**至少执行一次**：worker 崩溃或停止超时时，正在处理的任务会交给其他 worker 重新执行，处理函数需要能安全地重复执行。任务之间不保证执行顺序。
 
@@ -42,13 +42,29 @@ nsqd --data-path=/var/lib/nsqd --mem-queue-size=0
 
 即使这样，nsqd 只把消息保存在本机，没有副本：nsqd 所在的机器损坏时，其中还没处理的任务会丢失；进程崩溃时，正在处理和等待重试的任务也会丢失，因为它们只在内存中。数据盘用可靠的存储，处理函数也要能安全地重复执行，丢失时可以从业务数据中找出没有完成的工作重新发布。
 
-队列还使用两张表：`queue_outbox` 保存已经发布、还没转发到 NSQ 的任务；`queue_failed_jobs` 保存失败的任务。使用前先[发布](migrations.md#publishing-framework-migrations)它们的迁移：
+PostgreSQL 需要 17 以上的版本，并开启逻辑复制：
+
+```ini
+# postgresql.conf，修改 wal_level 需要重启
+wal_level = logical
+max_slot_wal_keep_size = 10GB   # 复制槽最多保留的 WAL，见下文
+wal_sender_timeout = 10s        # 转发的 worker 失联多久后由别的 worker 接手
+```
+
+应用的数据库用户需要 `REPLICATION` 属性（`ALTER ROLE blog REPLICATION`）。云数据库在参数组中开启逻辑复制，例如 RDS 的 `rds.logical_replication`。
+
+队列的迁移创建两张表和一个逻辑复制槽：`queue_scheduled` 保存执行时间较晚的任务，`queue_failed_jobs` 保存失败的任务；复制槽记录 worker 转发到了哪里。使用前先[发布](migrations.md#publishing-framework-migrations)这些迁移：
 
 ```go
 migrationCmd.AddCommand(migratecmd.Publish(
     migrate.Source{Name: "queue", FS: queue.Migrations()},
 ))
 ```
+
+部署时先执行迁移，再启动发布任务的进程：复制槽建立之前发布的任务不会被转发。
+
+> [!WARNING]
+> 复制槽保留 worker 还没读到的 WAL。所有 worker 都停止时，WAL 会一直累积；超过 `max_slot_wal_keep_size` 后复制槽失效，其中的任务丢失，worker 拒绝启动。不设置它则会一直累积到磁盘写满。请监控复制槽的积压并设置告警，见[部署](deployment.md#queue)。
 
 <a id="publishing-jobs"></a>
 ## 发布任务
@@ -109,7 +125,7 @@ var PublishAt = queue.Topic[uuid.UUID]("articles.publish")
 err := PublishAt.Publish(ctx, tx, item.ID, queue.At(item.PublishAt))
 ```
 
-离执行时间不超过 `max_defer`（默认 1 小时）的任务转发为 NSQ 的延迟消息；更晚的先留在 `queue_outbox` 中，到时间再转发，所以延迟多久都可以。NSQ 定期检查到期的延迟消息，新建的 topic 上第一批延迟消息可能晚几秒执行。
+离执行时间不超过 `max_defer`（默认 1 小时）的任务转发为 NSQ 的延迟消息；更晚的先存入 `queue_scheduled`，快到时间再转发，所以延迟多久都可以。NSQ 定期检查到期的延迟消息，新建的 topic 上第一批延迟消息可能晚几秒执行。
 
 业务包自己的 topic 和处理它的 action 声明在同一个文件中，见[队列任务](actions.md#as-jobs)。
 
@@ -153,7 +169,9 @@ mailjob.Send.Handle(w, mailer.Send)
 <a id="running-workers"></a>
 ### 启动 worker
 
-worker 是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。它做两件事：把 `queue_outbox` 中的任务转发到 NSQ，以及处理已注册 topic 的任务。下面是博客应用完整的 `internal/bootstrap/worker.go`：
+worker 是 `App` 的一个运行部分（见[依赖装配](dependencies.md#assembling-the-application)）。它做两件事：把发布的任务转发到 NSQ，以及处理已注册 topic 的任务。
+
+一个复制槽同时只能被一个连接读取，所以部署多个 worker 实例时，只有一个在转发，其余的待命，每 5 秒尝试一次；转发的实例停止或失联后，其中一个接手，从已经确认的位置继续。任务的处理不受影响，所有实例都处理任务。下面是博客应用完整的 `internal/bootstrap/worker.go`：
 
 ```go
 package bootstrap
@@ -220,7 +238,7 @@ queue:
   max_attempts: 10      # 最多执行的次数
   lease: 30s            # NSQ 等待处理结果的时间，见下文
   max_defer: 1h         # NSQ 延迟消息的最长延迟，不能超过 nsqd 的 --max-req-timeout
-  poll_interval: 1s     # 检查 queue_outbox 的最长间隔
+  replication_dsn: ""   # 转发任务的复制连接；数据库连接经过 PgBouncer 时设为直连 PostgreSQL 的地址
   shutdown_timeout: 30s # 停止时等待处理中的任务的最长时间
 ```
 
@@ -245,7 +263,7 @@ article.Summarize.Handle(w, summarize.Job, queue.Concurrency(2)) // 调用模型
 | --- | --- | --- | --- | --- | --- | --- |
 | 等待 | 1 秒 | 16 秒 | 81 秒 | 约 4 分钟 | 约 10 分钟 | 约 1.8 小时 |
 
-默认最多执行 10 次，从第一次失败到最后一次重试约 4.3 小时，足以跨过大多数第三方服务的故障。不超过 `max_defer` 的等待由 NSQ 完成，更长的等待写回 `queue_outbox`。重试的任务不会阻塞同一个 topic 的其他任务。
+默认最多执行 10 次，从第一次失败到最后一次重试约 4.3 小时，足以跨过大多数第三方服务的故障。不超过 `max_defer` 的等待由 NSQ 完成，更长的等待存入 `queue_scheduled`。重试的任务不会阻塞同一个 topic 的其他任务。
 
 有些错误重试也不会成功，例如文章已经被删除。用 `queue.Permanent` 包装这类错误，任务直接转入失败任务表：
 
@@ -391,7 +409,7 @@ w := queue.NewWorker(a.db, a.cfg.Queue, nil,
 <a id="stats-command"></a>
 ### 队列状态
 
-每个 topic 积压、处理中、延迟中的任务数由 nsqd 统计，在 [nsqadmin](https://nsq.io/components/nsqadmin.html) 中查看，也可以在那里暂停一个 topic 的消费；接入监控系统用 nsqd 的 [statsd 输出](https://nsq.io/components/nsqd.html#statsd--graphite-integration)。还没转发的任务在 `queue_outbox` 中，平时只有延迟超过 `max_defer` 的任务。
+每个 topic 积压、处理中、延迟中的任务数由 nsqd 统计，在 [nsqadmin](https://nsq.io/components/nsqadmin.html) 中查看，也可以在那里暂停一个 topic 的消费；接入监控系统用 nsqd 的 [statsd 输出](https://nsq.io/components/nsqd.html#statsd--graphite-integration)。还没转发的任务在复制槽中，积压的字节数用 `pg_replication_slots` 查询，见[部署](deployment.md#queue)；延迟超过 `max_defer` 的任务在 `queue_scheduled` 中。
 
 失败任务在数据库中，`queuecmd.New` 返回列出它们的 `queue` 命令，它和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明：
 
@@ -413,7 +431,7 @@ ID                                    TOPIC      ATTEMPTS  FAILED AT            
 <a id="testing"></a>
 ## 测试
 
-处理函数是普通的函数，直接调用它测试即可。发布任务的一方，用 [`dbtest.Open`](testing.md) 打开执行过 `queue.Migrations()` 的测试数据库，用 `queuetest.Pending` 读出 `queue_outbox` 中还没转发的任务：
+处理函数是普通的函数，直接调用它测试即可。发布任务的一方，用 [`dbtest.Open`](testing.md) 打开执行过 `queue.Migrations()` 的测试数据库，用 `queuetest.Pending` 读出还没转发的任务。它只能看到已经提交的任务，并且不能和运行中的 worker 同时使用：
 
 ```go
 db := dbtest.Open(t, migrations.FS) // 包含已发布的 queue 迁移

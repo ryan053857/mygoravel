@@ -2,7 +2,6 @@ package operation_test
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"slices"
 	"sync"
@@ -117,8 +116,8 @@ func TestHandleUnitSkipsSettledUnits(t *testing.T) {
 		return nil
 	}, nil)
 	op := e.fanout(t, "a", "b")
-	var units []operation.Unit[string]
-	e.claimAll(t, &units)
+	var seen int
+	units := e.claimNew(t, &seen)
 	if len(units) != 2 {
 		t.Fatalf("units: %+v", units)
 	}
@@ -143,7 +142,7 @@ func TestHandleUnitSkipsSettledUnits(t *testing.T) {
 	}
 	// 操作被删除后，剩下的任务什么也不做。
 	other := e.fanout(t, "x")
-	e.claimAll(t, &units)
+	units = e.claimNew(t, &seen)
 	if _, err := e.db.NewDelete().Model((*operation.Operation)(nil)).Where("id = ?", other.ID).Exec(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -152,28 +151,13 @@ func TestHandleUnitSkipsSettledUnits(t *testing.T) {
 	}
 }
 
-// claimAll 取出 outbox 中 unitTopic 的全部任务，解码到 units，不经过 NSQ。
-func (e env) claimAll(t *testing.T, units *[]operation.Unit[string]) {
+// claimNew 返回 unitTopic 中第 *seen 个以后发布的任务，不经过 NSQ，并把 *seen 推进到末尾。
+func (e env) claimNew(t *testing.T, seen *int) []operation.Unit[string] {
 	t.Helper()
-	ctx := context.Background()
-	var bodies [][]byte
-	err := e.db.NewSelect().Table("queue_outbox").Column("body").Where("topic = ?", string(unitTopic)).Order("id").Scan(ctx, &bodies)
-	if err != nil {
-		t.Fatal(err)
-	}
-	*units = (*units)[:0]
-	for _, body := range bodies {
-		var msg struct {
-			Payload operation.Unit[string] `json:"payload"`
-		}
-		if err := json.Unmarshal(body, &msg); err != nil {
-			t.Fatal(err)
-		}
-		*units = append(*units, msg.Payload)
-	}
-	if _, err := e.db.NewDelete().Table("queue_outbox").Where("topic = ?", string(unitTopic)).Exec(ctx); err != nil {
-		t.Fatal(err)
-	}
+	all := queuetest.Pending(t, e.db, unitTopic)
+	units := all[*seen:]
+	*seen = len(all)
+	return units
 }
 
 func TestRetryFailedUnit(t *testing.T) {

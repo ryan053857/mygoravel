@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/queue/queuetest"
 )
 
 func insertFailed(t *testing.T, db bun.IDB, topic string, age time.Duration) uuid.UUID {
@@ -75,7 +77,7 @@ func TestFailedJobsQueries(t *testing.T) {
 	}
 }
 
-// RetryAll 分批把 before 之前失败的任务写回 outbox；DeleteAll 分批删除。
+// RetryAll 分批重新发布 before 之前失败的任务；DeleteAll 分批删除。
 func TestFailedJobsBulk(t *testing.T) {
 	db := openDB(t)
 	ctx := context.Background()
@@ -102,8 +104,8 @@ func TestFailedJobsBulk(t *testing.T) {
 			t.Fatalf("batch n=%d err=%v, want %d", n, err, want)
 		}
 	}
-	if n := outboxCount(t, db); n != 3 {
-		t.Fatalf("%d jobs in the outbox", n)
+	if n := len(queuetest.Pending(t, db, queue.Topic[json.RawMessage]("mail"))); n != 3 {
+		t.Fatalf("%d jobs published", n)
 	}
 	// 全部 topic：删除 before 之前的，before 之后失败的保留。
 	if n, err := failed.DeleteAll(ctx, "", now, 10); n != 1 || err != nil {

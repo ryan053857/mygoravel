@@ -19,6 +19,10 @@
     - [维护步骤](#maintenance-steps)
     - [不必整站停服时](#without-downtime)
 - [日志](#logging)
+- [队列](#queue)
+    - [监控积压](#queue-monitoring)
+    - [主备切换](#queue-failover)
+    - [重建复制槽](#queue-recovery)
 - [备份与恢复](#backups)
     - [数据库](#database-backups)
     - [文件](#file-backups)
@@ -461,6 +465,52 @@ telemetry:
 
 排查问题时，可以使用响应头 `X-Request-ID` 中的请求 ID，在日志中找到同一请求的访问日志和错误诊断。详见[日志](logging.md)。
 
+<a id="queue"></a>
+## 队列
+
+[队列](queue.md)把任务写进 PostgreSQL 的 WAL，worker 经由逻辑复制槽读取后转发到 NSQ。数据库需要：
+
+| 设置 | 值 | 说明 |
+| --- | --- | --- |
+| 版本 | 17 以上 | 复制槽可以随主备切换同步 |
+| `wal_level` | `logical` | 修改后需要重启 |
+| 用户属性 | `REPLICATION` | 执行迁移、worker 的复制连接都需要 |
+| `max_slot_wal_keep_size` | 例如 `10GB` | 复制槽最多保留的 WAL，超过后槽失效；不设置时可能写满磁盘 |
+| `wal_sender_timeout` | `10s` | 转发的 worker 失联后多久释放复制槽，由待命的 worker 接手 |
+| `max_replication_slots`、`max_wal_senders` | 默认的 10 足够 | 每个数据库一个槽、一个复制连接 |
+
+数据库连接经过 PgBouncer 时，配置 `queue.replication_dsn` 直连 PostgreSQL：复制协议不能经过连接池。
+
+<a id="queue-monitoring"></a>
+### 监控积压
+
+复制槽保留 worker 还没读到的 WAL。worker 全部停止、nsqd 不可用时，积压会一直增长。槽的名字是 `queue.SlotName(数据库名)`，用下面的查询监控，积压超过 `max_slot_wal_keep_size` 的一半时告警：
+
+```sql
+SELECT slot_name, active, wal_status,
+       pg_wal_lsn_diff(pg_current_wal_lsn(), confirmed_flush_lsn) AS lag_bytes
+FROM pg_replication_slots WHERE slot_name LIKE 'mygoravel_queue_%';
+```
+
+`active` 为 `false` 说明没有 worker 在转发；`wal_status` 变为 `unreserved` 时槽即将失效。长时间运行的事务也会让 WAL 无法释放。
+
+<a id="queue-failover"></a>
+### 主备切换
+
+复制槽默认只在主库上。要让它随主备切换保留，在备库上设置 `sync_replication_slots = on`、`hot_standby_feedback = on`（`primary_conninfo` 中要包含 `dbname`），并在主库的 `synchronized_standby_slots` 中列出备库的物理复制槽，见 [PostgreSQL 文档](https://www.postgresql.org/docs/current/logicaldecoding-explanation.html)。没有配置时，切换后的新主库上没有复制槽，worker 拒绝启动，按下文重建。
+
+<a id="queue-recovery"></a>
+### 重建复制槽
+
+复制槽丢失（恢复备份、未同步的主备切换）或失效（`wal_status` 为 `lost`）时，worker 拒绝启动。先删除失效的槽，再用同样的名字重建：
+
+```sql
+SELECT pg_drop_replication_slot('mygoravel_queue_…');  -- 槽失效时
+SELECT pg_create_logical_replication_slot('mygoravel_queue_' || left(md5(current_database()), 16), 'pgoutput', false, false, true);
+```
+
+从丢失到重建期间发布的任务不会被转发：从业务数据中找出没有完成的工作重新发布，例如状态停在“发送中”的记录。
+
 <a id="backups"></a>
 ## 备份与恢复
 
@@ -488,7 +538,7 @@ mygoravel 不提供备份命令。只有数据库自己的备份机制能持续�
 
 数据库回到了过去，但已经发出去的邮件、已经调用过的外部接口不会跟着撤回。恢复后要注意：
 
-- **任务会再执行一次。** 做备份时还在 `queue_outbox` 中的任务，恢复后会再执行一遍，其中有些在恢复前已经执行过：邮件可能再发一封，webhook 会用相同的 `webhook-id` 再投递一次。处理函数本来就需要能安全地重复执行，见[队列](queue.md)。
+- **重建队列的复制槽。** 备份不包含复制槽，恢复后 worker 因为找不到它而拒绝启动，按[重建复制槽](#queue-recovery)处理。做备份时还没转发的任务随之丢失，从业务数据中找出没有完成的工作重新发布；备份之后执行过的任务（`queue_scheduled` 中的、失败后重新发布的）恢复后可能再执行一次，处理函数本来就需要能安全地重复执行。
 - **向量索引比数据库新。** Qdrant 中还有备份之后才写入的文档，检索可能返回数据库中已经不存在的内容。逐个[重建向量索引](vector.md#reindexing)：新版本只包含数据库中现有的数据，切换后旧版本整个删除。
 - **撤销过的凭据又能用了。** 备份之后撤销的 [API token](api-tokens.md#revoking-tokens) 和[会话](session.md)，恢复后会重新生效。如果这段时间里有用户被封禁或改过密码，恢复后对这些用户再调用一次 `RevokeSubject`。无法逐个确认时，清空 `sessions` 表并删除 `api_tokens` 中 `kind = 'login'` 的行，让所有人重新登录；这段时间里撤销过的个人访问令牌需要再撤销一次。
 

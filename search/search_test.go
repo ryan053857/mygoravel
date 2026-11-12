@@ -396,9 +396,8 @@ func TestSyncThroughQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var jobs int
-	if err := db.NewRaw("SELECT COUNT(*) FROM queue_outbox").Scan(ctx, &jobs); err != nil || jobs != 3 {
-		t.Fatalf("queued jobs = %d, %v", jobs, err)
+	if jobs := queuetest.Pending(t, db, queue.Topic[string]("search.sync.articles")); len(jobs) != 3 {
+		t.Fatalf("queued jobs = %v", jobs)
 	}
 	rollback := database.RunInTx(ctx, db, nil, func(ctx context.Context, tx database.Tx) error {
 		if err := articles.Sync(ctx, tx, "2"); err != nil {

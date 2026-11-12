@@ -244,16 +244,25 @@ func recordFailed(ctx context.Context, tx bun.Tx, row failedJob) error {
 	return err
 }
 
-// republish 在 tx 中把失败任务写回 outbox，任务 ID、payload 和元数据不变，执行次数从 0 开始。
+// republish 在 tx 中重新发布失败任务，任务 ID、payload 和元数据不变，执行次数从 0 开始。
 func republish(ctx context.Context, tx bun.IDB, rows []failedJob) error {
 	now := time.Now().UTC()
-	out := make([]outboxRow, len(rows))
-	for i, r := range rows {
+	byTopic := map[string][][]byte{}
+	var topics []string
+	for _, r := range rows {
 		body, err := json.Marshal(envelope{ID: r.ID, Payload: r.Payload, Metadata: r.Metadata, AvailableAt: now})
 		if err != nil {
 			return err
 		}
-		out[i] = outboxRow{Topic: r.Topic, Body: body, AvailableAt: now, CreatedAt: now}
+		if _, ok := byTopic[r.Topic]; !ok {
+			topics = append(topics, r.Topic)
+		}
+		byTopic[r.Topic] = append(byTopic[r.Topic], body)
 	}
-	return insertOutbox(ctx, tx, out)
+	for _, topic := range topics {
+		if err := emit(ctx, tx, topic, byTopic[topic]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

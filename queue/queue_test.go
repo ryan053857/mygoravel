@@ -75,9 +75,9 @@ func eventually(t *testing.T, timeout time.Duration, cond func() bool) {
 	}
 }
 
-func outboxCount(t *testing.T, db bun.IDB) int {
+func scheduledCount(t *testing.T, db bun.IDB) int {
 	t.Helper()
-	n, err := db.NewSelect().Table("queue_outbox").Count(context.Background())
+	n, err := db.NewSelect().Table("queue_scheduled").Count(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestPublishInTransaction(t *testing.T) {
 		requestID, msgID, attempt string
 	}
 	got := make(chan seen, 2)
-	start(t, db, queuetest.Config(t), func(w *queue.Worker) {
+	stop := start(t, db, queuetest.Config(t), func(w *queue.Worker) {
 		jobs.Handle(w, func(ctx context.Context, p payload) error {
 			got <- seen{p.N, attr(ctx, logging.AttrRequestID), attr(ctx, logging.AttrMessageID), attr(ctx, logging.AttrAttempt)}
 			return nil
@@ -179,8 +179,10 @@ func TestPublishInTransaction(t *testing.T) {
 		t.Fatalf("rolled back job handled: %+v", v)
 	case <-time.After(300 * time.Millisecond):
 	}
-	if n := outboxCount(t, db); n != 0 {
-		t.Fatalf("%d rows left in the outbox", n)
+	// 转发之后确认了复制槽的位置：停止 Worker 后，槽中没有待转发的任务。
+	stop()
+	if p := queuetest.Pending(t, db, jobs); len(p) != 0 {
+		t.Fatalf("pending after relay: %v", p)
 	}
 }
 
@@ -224,7 +226,7 @@ func TestPublishAll(t *testing.T) {
 	}
 }
 
-// 不超过 MaxDefer 的延迟由 NSQ 完成；更晚的任务先留在 outbox 中，到时间再转发。
+// 不超过 MaxDefer 的延迟由 NSQ 完成；更晚的任务先存入 queue_scheduled，快到时间再写回 WAL。
 func TestDelay(t *testing.T) {
 	db := openDB(t)
 	cfg := queuetest.Config(t)
@@ -239,10 +241,7 @@ func TestDelay(t *testing.T) {
 	begin := time.Now()
 	publish(t, db, 1, queue.Delay(500*time.Millisecond))
 	publish(t, db, 2, queue.Delay(2*time.Second))
-	time.Sleep(200 * time.Millisecond)
-	if n := outboxCount(t, db); n != 1 {
-		t.Fatalf("%d rows in the outbox, want the 2s job only", n)
-	}
+	eventually(t, time.Second, func() bool { return scheduledCount(t, db) == 1 }) // 只有 2 秒的任务
 	// nsqd 每 5 秒刷新一次要扫描延迟消息的 channel 列表，测试新建的 channel 上的延迟消息最多晚约 5 秒。
 	at := map[int]time.Duration{}
 	for range 2 {
@@ -258,7 +257,7 @@ func TestDelay(t *testing.T) {
 	}
 }
 
-// 失败的任务按 RetryAfter 重试：不超过 MaxDefer 时由 NSQ 延迟投递，更长的经由 outbox，执行次数接着计算。
+// 失败的任务按 RetryAfter 重试：不超过 MaxDefer 时由 NSQ 延迟投递，更长的经由 queue_scheduled，执行次数接着计算。
 func TestRetry(t *testing.T) {
 	db := openDB(t)
 	cfg := queuetest.Config(t)
@@ -324,7 +323,7 @@ func TestRetry(t *testing.T) {
 	if !slices.Equal(kinds, want) {
 		t.Fatalf("events %v", kinds)
 	}
-	// 首次执行和经由 outbox 的重试知道任务可以执行的时间，NSQ 重新投递的不知道。
+	// 首次执行和经由 queue_scheduled 的重试知道任务可以执行的时间，NSQ 重新投递的不知道。
 	if events[0].Job.AvailableAt.IsZero() || !events[2].Job.AvailableAt.IsZero() || events[4].Job.AvailableAt.IsZero() {
 		t.Fatalf("available at %v %v %v", events[0].Job.AvailableAt, events[2].Job.AvailableAt, events[4].Job.AvailableAt)
 	}
