@@ -8,6 +8,7 @@
     - [声明权限目录](#permission-catalog)
     - [创建和分配角色](#creating-roles)
     - [每次请求加载权限](#resolving-permissions)
+    - [缓存权限](#caching-permissions)
     - [超级管理员](#super-admins)
 - [资源级授权：所有权](#ownership)
     - [编写授权函数](#authorization-functions)
@@ -151,7 +152,7 @@ rt, err := realtime.New(hub, realtime.Options{Authenticate: tokens.Validate, Acc
 
 `authz` 按主体的类型和 ID 保存角色，可以同时用于多套账号体系，例如 `identity.Accounts{staff.Type: roles.Resolve, member.Type: roles.Resolve}`。
 
-加载是一次带索引的查询，不使用缓存，因此修改角色、撤销分配都在下一个请求生效。已经建立的长连接按新的权限每 30 秒校验一次；需要立即生效时，修改后调用 `RecheckSubject`，修改角色的权限后调用 `RecheckTenant`，见[立即断开](sse.md#immediate-revocation)。还需要检查账号是否停用时，在外面包一层：
+加载是一次带索引的查询，修改角色、撤销分配都在下一个请求生效；请求量大时可以[缓存](#caching-permissions)。已经建立的长连接按新的权限每 30 秒校验一次；需要立即生效时，修改后调用 `RecheckSubject`，修改角色的权限后调用 `RecheckTenant`，见[立即断开](sse.md#immediate-revocation)。还需要检查账号是否停用时，在外面包一层：
 
 ```go
 resolve := func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
@@ -165,6 +166,25 @@ resolve := func(ctx context.Context, sub identity.Subject) (identity.Subject, er
     return roles.Resolve(ctx, sub)
 }
 ```
+
+<a id="caching-permissions"></a>
+### 缓存权限
+
+每个请求都要加载一次权限。请求量大时，用 `authz.Cache` 把权限缓存在 [Memcached](cache.md) 中，请求不再查询数据库：
+
+```go
+roles := authz.NewStore(a.db, auth.Permissions, authz.Cache(mc, "blog:prod:", time.Minute))
+```
+
+第二个参数是命名空间，共用一个 Memcached 的应用和环境要各不相同，否则会读到别的数据库中的权限；第三个参数是过期时间。`Resolve` 和 `Permissions` 先读缓存，用法不变。
+
+缓存不改变“立即生效”：`Assign`、`Unassign`、`RemoveMember` 使这个用户的缓存失效，`UpdateRole`、`DeleteRole` 使全部缓存失效，方法返回之后，所有实例的下一个请求都读到新的权限。所以修改后照常调用 `RecheckSubject`、`RecheckTenant`。缓存用的是 `cachex` 的 [tag](cache.md#tags)，每次读取是 Memcached 的一次请求。
+
+几点限制：
+
+- 修改角色和分配的每个 `Store` 都要带上同样的 `authz.Cache`。`Store` 建在 [`database.Tx`](database.md#after-commit) 上时，缓存在事务提交之后失效；建在其他事务上会 panic，因为无从得知何时提交。
+- 绕过 `Store` 直接改表，例如手写 SQL 修复数据，旧的权限最多保留一个过期时间。
+- Memcached 不可用时直接查询数据库；修改之后使缓存失效失败时，修改照常成功，记录 Error 日志，旧的权限同样最多保留一个过期时间。
 
 <a id="super-admins"></a>
 ### 超级管理员

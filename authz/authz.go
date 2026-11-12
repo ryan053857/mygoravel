@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -13,8 +15,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
+	"github.com/ryan053857/mygoravel/cachex"
+	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/identity"
+	"github.com/ryan053857/mygoravel/logging"
 )
 
 // AllTenants 是分配角色时表示“所有租户”的域，例如让运营人员在每个租户中都有只读支持权限。
@@ -63,6 +68,32 @@ type Member struct {
 type Store struct {
 	db      bun.IDB
 	catalog Catalog
+	cache   *cachex.Cache[grant] // nil 表示不缓存
+	prefix  string               // 缓存的命名空间，见 Cache
+}
+
+// grant 是缓存的权限，即 Permissions 的结果。
+type grant struct {
+	Permissions []string `json:"p,omitempty"`
+	Member      bool     `json:"m,omitempty"`
+}
+
+// Option 是 NewStore 的选项。
+type Option func(*Store)
+
+// Cache 把主体在每个域中的权限缓存在 Memcached 中，Resolve 和 Permissions 不再每次查询数据库。
+// mc 是应用共用的 Memcached 客户端；prefix 是命名空间，例如 "blog:prod:"，共用一个 Memcached 的应用和环境各不相同，
+// 否则会读到别的数据库中的权限；ttl 是缓存的过期时间，必须为正。
+//
+// 缓存不改变“权限变化立即生效”：Assign、Unassign、RemoveMember 使主体的缓存失效，UpdateRole、DeleteRole 使全部缓存失效，
+// 方法返回之后的读取都得到新的权限，多个实例共用同一份缓存。失效在 Store 的事务提交之后执行；
+// Store 建在 database.Tx 上时，改为在外层事务提交之后执行（Tx.AfterCommit），建在其他事务上时 NewStore panic。
+// 失效失败时修改照常成功，记录 Error 日志，旧的权限最多保留 ttl。绕过 Store 直接修改表时同样最多保留 ttl。
+//
+// 修改角色和分配的每个 Store 都要使用同一个 mc 和 prefix 的 Cache，否则不会使缓存失效。
+func Cache(mc cachex.Client, prefix string, ttl time.Duration) Option {
+	c := cachex.New[grant](mc, prefix+"authz:v1:permissions:", ttl)
+	return func(s *Store) { s.cache, s.prefix = c, prefix }
 }
 
 type roleRow struct {
@@ -94,7 +125,7 @@ type assignmentRow struct {
 }
 
 // NewStore 创建存储。db 必须已执行 authz 迁移。catalog 是应用的权限目录，为空时 panic。
-func NewStore(db bun.IDB, catalog Catalog) *Store {
+func NewStore(db bun.IDB, catalog Catalog, opts ...Option) *Store {
 	if db == nil {
 		panic("authz: nil database")
 	}
@@ -106,7 +137,18 @@ func NewStore(db bun.IDB, catalog Catalog) *Store {
 			panic(errors.Newf("authz: invalid catalog permission %q", p.Name))
 		}
 	}
-	return &Store{db: db, catalog: slices.Clone(catalog)}
+	s := &Store{db: db, catalog: slices.Clone(catalog)}
+	for _, opt := range opts {
+		opt(s)
+	}
+	if s.cache != nil {
+		switch db.(type) {
+		case database.Tx:
+		case bun.Tx, *bun.Tx:
+			panic("authz: Cache needs a Store on a database or a database.Tx: invalidation must run after commit")
+		}
+	}
+	return s
 }
 
 // Catalog 返回权限目录，供角色编辑界面列出可选的权限。
@@ -129,7 +171,20 @@ func (s *Store) Resolve(ctx context.Context, sub identity.Subject) (identity.Sub
 }
 
 // Permissions 返回主体 ref 在 tenant 中的全部权限（去重、排序），以及它在其中是否有任何角色。
+// 使用 Cache 时先读缓存。
 func (s *Store) Permissions(ctx context.Context, ref identity.Ref, tenant string) ([]string, bool, error) {
+	if s.cache == nil {
+		return s.permissions(ctx, ref, tenant)
+	}
+	g, err := s.cache.Remember(ctx, lengthPrefixed(string(ref.Type), ref.ID, tenant), func(ctx context.Context) (grant, error) {
+		perms, member, err := s.permissions(ctx, ref, tenant)
+		return grant{Permissions: perms, Member: member}, err
+	}, s.subjectTag(ref), s.rolesTag())
+	return g.Permissions, g.Member, err
+}
+
+// permissions 从数据库读取主体 ref 在 tenant 中的权限。
+func (s *Store) permissions(ctx context.Context, ref identity.Ref, tenant string) ([]string, bool, error) {
 	var rows []struct {
 		RoleID     uuid.UUID      `bun:"role_id"`
 		Permission sql.NullString `bun:"permission"`
@@ -222,6 +277,7 @@ func (s *Store) UpdateRole(ctx context.Context, r Role) (Role, error) {
 	if err != nil {
 		return Role{}, err
 	}
+	s.invalidate(ctx, s.rolesTag())
 	r.Permissions = normalize(r.Permissions)
 	return r, nil
 }
@@ -232,7 +288,7 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 	if err != nil {
 		return ErrRoleNotFound.New()
 	}
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	err = s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		res, err := tx.NewDelete().Model((*roleRow)(nil)).Where("id = ?", rid).Exec(ctx)
 		if err != nil {
 			return errors.Wrap(err, "authz: delete role")
@@ -249,6 +305,11 @@ func (s *Store) DeleteRole(ctx context.Context, id string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	s.invalidate(ctx, s.rolesTag())
+	return nil
 }
 
 // Role 返回角色。tenant 不为空时，只返回全局角色或该租户的角色，其他租户的角色视为不存在，
@@ -319,7 +380,7 @@ func (s *Store) Assign(ctx context.Context, ref identity.Ref, tenant, roleID str
 	if err != nil {
 		return ErrRoleNotFound.New()
 	}
-	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	err = s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var role roleRow
 		if err := tx.NewSelect().Model(&role).Column("tenant").Where("id = ?", rid).Scan(ctx); errors.Is(err, sql.ErrNoRows) {
 			return ErrRoleNotFound.New()
@@ -341,6 +402,11 @@ func (s *Store) Assign(ctx context.Context, ref identity.Ref, tenant, roleID str
 		_, err = tx.NewInsert().Model(row).Exec(ctx)
 		return errors.Wrap(err, "authz: assign")
 	})
+	if err != nil {
+		return err
+	}
+	s.invalidate(ctx, s.subjectTag(ref))
+	return nil
 }
 
 // Unassign 撤销主体 ref 在 tenant 中的角色；没有分配时什么也不做。
@@ -351,7 +417,11 @@ func (s *Store) Unassign(ctx context.Context, ref identity.Ref, tenant, roleID s
 	}
 	_, err = s.db.NewDelete().Model((*assignmentRow)(nil)).
 		Where("subject_type = ? AND subject_id = ?", ref.Type, ref.ID).Where("tenant = ?", tenant).Where("role_id = ?", rid).Exec(ctx)
-	return errors.Wrap(err, "authz: unassign")
+	if err != nil {
+		return errors.Wrap(err, "authz: unassign")
+	}
+	s.invalidate(ctx, s.subjectTag(ref))
+	return nil
 }
 
 // RemoveMember 撤销主体 ref 在 tenant 中的全部角色，返回撤销的个数，例如把成员移出租户。
@@ -361,8 +431,45 @@ func (s *Store) RemoveMember(ctx context.Context, ref identity.Ref, tenant strin
 	if err != nil {
 		return 0, errors.Wrap(err, "authz: remove member")
 	}
+	s.invalidate(ctx, s.subjectTag(ref))
 	n, err := res.RowsAffected()
 	return int(n), errors.Wrap(err, "authz: remove member")
+}
+
+// subjectTag 是主体 ref 在所有域中的权限缓存的 tag，分配变化时失效。
+func (s *Store) subjectTag(ref identity.Ref) string {
+	return s.prefix + "authz:subject:" + lengthPrefixed(string(ref.Type), ref.ID)
+}
+
+// rolesTag 是全部权限缓存的 tag，角色的权限变化时失效。
+func (s *Store) rolesTag() string {
+	return s.prefix + "authz:roles"
+}
+
+// invalidate 在修改提交之后使 tags 的缓存失效。Store 建在 database.Tx 上时登记到外层事务提交之后。
+// 修改已经生效，所以失效失败只记录日志，旧的权限在缓存过期后消失。
+func (s *Store) invalidate(ctx context.Context, tags ...string) {
+	if s.cache == nil {
+		return
+	}
+	if tx, ok := s.db.(database.Tx); ok {
+		tx.AfterCommit(func(ctx context.Context) error { return s.cache.Invalidate(ctx, tags...) })
+		return
+	}
+	if err := s.cache.Invalidate(ctx, tags...); err != nil {
+		slog.ErrorContext(ctx, "invalidate cached permissions failed", "error", err, logging.AttrComponent, "authz")
+	}
+}
+
+// lengthPrefixed 把各部分连接成没有歧义的缓存键：每部分前面加上它的长度。
+func lengthPrefixed(parts ...string) string {
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(strconv.Itoa(len(p)))
+		b.WriteByte(':')
+		b.WriteString(p)
+	}
+	return b.String()
 }
 
 // RolesOf 返回主体 ref 在 tenant 这个域中直接分配的角色，不包括 AllTenants 中的角色。

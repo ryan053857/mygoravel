@@ -5,6 +5,7 @@
 // 租户也可以创建只在本租户中使用的角色。Store.Resolve 在每个请求中按 identity.TenantFromContext
 // 加载主体的权限，可以直接作为 rest、web、realtime 的 Options.Accounts 中一套账号的 Resolver。
 // 分配按主体的类型和 ID（identity.Ref）保存，同一个 Store 可以用于多套账号体系。
+// 请求量大时用 Cache 选项把权限缓存在 Memcached 中，修改之后缓存立即失效。
 //
 //	store := authz.NewStore(db, catalog)
 //	api := rest.New(rest.Options{Tenant: tenantOf, Accounts: identity.Accounts{Member: store.Resolve}})

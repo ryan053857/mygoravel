@@ -142,9 +142,15 @@ func TestRoles(t *testing.T) {
 	}
 }
 
+// 不缓存和缓存的 Store 结果相同：每次修改之后的读取都得到新的权限。
 func TestAssignAndResolve(t *testing.T) {
+	for name, open := range map[string]func(t *testing.T) *authz.Store{"database": newStore, "cached": newCachedStore} {
+		t.Run(name, func(t *testing.T) { testAssignAndResolve(t, open(t)) })
+	}
+}
+
+func testAssignAndResolve(t *testing.T, s *authz.Store) {
 	ctx := context.Background()
-	s := newStore(t)
 	owner := mustRole(t, s, authz.Role{Name: "owner", Permissions: []string{"*"}})
 	member := mustRole(t, s, authz.Role{Name: "member", Permissions: []string{"articles:read"}})
 	moderator := mustRole(t, s, authz.Role{Tenant: "acme", Name: "moderator", Permissions: []string{"articles:read", "comments:delete"}})

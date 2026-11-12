@@ -274,7 +274,7 @@ api := rest.New(rest.Options{
 <a id="jwt"></a>
 ## JWT 模式
 
-不透明的登录 token 每个请求都要查一次表。JWT 模式改为签发一对凭据：请求带短期的 access token（JWT），校验只验签名和有效期，不访问数据库；access token 过期后，用 refresh token 换一对新的。适合请求量大、或者有其他服务也要校验 token 的场景。
+不透明的登录 token 每个请求都要查一次表。JWT 模式改为签发一对凭据：请求带短期的 access token（JWT），校验只验签名和有效期，不访问数据库；access token 过期后，用 refresh token 换一对新的。适合请求量大、或者有其他服务也要校验 token 的场景。权限仍由 Resolver 在每个请求中[加载](#loading-permissions)，使用 `authz` 时可以[缓存权限](authorization.md#caching-permissions)，请求就不再访问数据库。
 
 每次登录仍然是 `api_tokens` 中的一行，[设备列表](#listing-tokens)、[撤销](#revoking-tokens)、[过期清理](#cleanup)都照常使用。区别在于撤销的效果：refresh token 立即失效，已经签发的 access token 在有效期（默认 10 分钟）内仍然可以发起请求。撤销需要立即生效的账号体系继续用不透明 token。两种方式可以在同一个应用中并存，例如商家后台的 API 用不透明 token，客户 App 用 JWT。运营后台是服务端渲染的页面，使用[会话](session.md)，不签发 token。
 

@@ -75,7 +75,7 @@ var rules = map[string]rule{
 	"schedule/schedulecmd": {layerEntry, []string{"command", "schedule"}},
 
 	"apitoken":         {layerFeature, []string{"crypt", "errorx", "identity"}},
-	"authz":            {layerFeature, []string{"errorx", "identity"}},
+	"authz":            {layerFeature, []string{"cachex", "database", "errorx", "identity", "logging"}},
 	"notification":     {layerFeature, []string{"errorx", "identity"}},
 	"feature":          {layerFeature, []string{"errorx", "identity"}},
 	"activity":         {layerFeature, []string{"identity", "logging"}},
