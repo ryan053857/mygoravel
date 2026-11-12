@@ -1,5 +1,6 @@
 // Package dbtest 为测试在 PostgreSQL 测试服务器上创建隔离的临时数据库，测试结束时删除。
-// 服务器的管理员连接由环境变量 POSTGRES_TEST_URL 给出。
+// 服务器的管理员连接由环境变量 POSTGRES_TEST_URL 给出。队列用逻辑复制转发任务，
+// 服务器需要 wal_level=logical，max_replication_slots 要容得下并行测试的数据库，见 docs/testing.md。
 package dbtest
 
 import (
@@ -57,6 +58,9 @@ func Open(t testing.TB, migrations fs.FS) *bun.DB {
 			return
 		}
 		defer db.Close()
+		if err := dropSlots(cleanCtx, db, name); err != nil {
+			t.Errorf("dbtest: drop replication slots: %v", err)
+		}
 		if _, err := db.ExecContext(cleanCtx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); err != nil {
 			t.Errorf("dbtest: drop database: %v", err)
 		}
@@ -82,6 +86,33 @@ func Open(t testing.TB, migrations fs.FS) *bun.DB {
 		}
 	}
 	return db
+}
+
+// dropSlots 删除数据库 name 的逻辑复制槽：数据库有槽时 DROP DATABASE 失败，WITH (FORCE) 也不会删除它们。
+// 正在使用槽的连接先被结束，它们释放槽之后才能删除，所以重试到全部删除或 ctx 结束。
+func dropSlots(ctx context.Context, db *bun.DB, name string) error {
+	for {
+		if _, err := db.ExecContext(ctx, `SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots
+			WHERE database = ? AND active_pid IS NOT NULL`, name); err != nil {
+			return err
+		}
+		var left int
+		if err := db.NewRaw(`SELECT count(*) FROM (SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots
+			WHERE database = ? AND NOT active) dropped`, name).Scan(ctx, &left); err != nil {
+			return err
+		}
+		if err := db.NewRaw("SELECT count(*) FROM pg_replication_slots WHERE database = ?", name).Scan(ctx, &left); err != nil {
+			return err
+		}
+		if left == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 // withDatabase 返回把 dsn 的数据库换成 name 的连接串。dsn 是 postgres:// URL，

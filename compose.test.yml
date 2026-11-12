@@ -5,6 +5,8 @@ name: mygoravel-test
 services:
   postgres:
     image: postgres:18
+    # 队列用逻辑复制转发任务（docs/queue.md）；每个测试数据库一个复制槽，并行测试需要很多个。
+    command: [postgres, -c, wal_level=logical, -c, max_replication_slots=256, -c, max_wal_senders=64]
     environment:
       POSTGRES_PASSWORD: postgres
     ports:

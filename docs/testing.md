@@ -467,6 +467,8 @@ name: blog-test
 services:
   postgres:
     image: postgres:18
+    # 使用队列时需要：任务经由逻辑复制转发，每个测试数据库一个复制槽
+    command: [postgres, -c, wal_level=logical, -c, max_replication_slots=256, -c, max_wal_senders=64]
     environment:
       POSTGRES_PASSWORD: postgres
     ports:
