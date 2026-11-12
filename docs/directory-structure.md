@@ -148,7 +148,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 ```text
 功能        apitoken  login  authz  notification  activity  feature  operation  webhook  search  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  command
-基础设施    database  queue  schedule  monitor  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  pdf  outbound  sheet  document
+基础设施    database  queue  schedule  monitor  cachex  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  pdf  outbound  sheet  document
 基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt
 ```
 
@@ -202,6 +202,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `schedule` | 按 cron 表达式定时执行任务，多个实例之间去重 | [定时任务](scheduling.md) |
 | `monitor` | 把运行统计按分钟汇总、保存最新值，存在应用数据库中供命令和后台页面查询 | [运行统计](monitor.md) |
 | `monitor/cachemon` | 包装 gocache 缓存，记录命中、未命中和出错次数 | [命中率](cache.md#hit-rate) |
+| `cachex` | 在 gocache 之上的 cache-aside 读取：合并并发加载、过期时间抖动、缓存空结果，缓存出错时直接加载 | [为文章详情加缓存](cache.md#caching-articles) |
 | `broadcast` | 在实例之间广播消息，供 SSE、WebSocket 推送；`broadcast/redisbroadcast`、`broadcast/natsbroadcast` 是 Redis 与 NATS 后端，`broadcast/broadcasttest` 是测试用的内存后端与后端的契约测试 | [广播](broadcasting.md) |
 | `filesystem` | 基于单张 `files` 表管理上传、确认、公开地址和清理 | [文件存储与上传](filesystem.md) |
 | `filesystem/local`、`filesystem/s3` | 本地与 S3 磁盘 | [文件存储与上传](filesystem.md#disks) |

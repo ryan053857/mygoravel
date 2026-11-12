@@ -58,6 +58,7 @@ var rules = map[string]rule{
 	"mail":             {layerInfrastructure, []string{"i18n"}},
 	"queue":            {layerInfrastructure, []string{"logging", "monitor"}},
 	"monitor":          {layerInfrastructure, []string{"logging"}},
+	"cachex":           {layerInfrastructure, []string{"logging"}},
 	"monitor/cachemon": {layerInfrastructure, []string{"monitor"}},
 	"schedule":         {layerInfrastructure, []string{"lock", "logging", "monitor"}},
 	"broadcast":        {layerInfrastructure, []string{"identity", "logging"}},
