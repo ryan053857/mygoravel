@@ -152,7 +152,21 @@ router.Handle("/t/{tenant}/realtime", rt.Handler())
 
 同源页面不需要设置它：连接经过页面路由，租户已经由 `web.Options.Tenant` 写入。
 
-token 无效、属于其他账号体系，或 Resolver 拒绝主体时，连接以 3500 关闭，SDK 不再重连。连接期间两者每 30 秒重新运行一次，token 被撤销、用户被停用或移出租户后连接结束。使用 [JWT 模式](api-tokens.md#jwt)时，SDK 传入 access token；复查时检查的是登录是否已被撤销，access token 过期后连接照常保持。既没有会话也没有 token 的连接是匿名的，只能订阅公开频道。
+token 无效、属于其他账号体系，或 Resolver 拒绝主体时，连接以 3500 关闭，SDK 不再重连。连接期间两者每 30 秒重新运行一次，token 被撤销、用户被停用或移出租户后连接结束。既没有会话也没有 token 的连接是匿名的，只能订阅公开频道。
+
+使用 [JWT 模式](api-tokens.md#jwt)时，SDK 传入 access token，并设置 `getToken`：
+
+```js
+const centrifuge = new Centrifuge('wss://api.example.com/realtime', {
+    token: localStorage.getItem('access_token'),
+    // 刷新后返回新的 access token；返回空字符串表示需要重新登录
+    getToken: async () => (await refresh()) ? localStorage.getItem('access_token') : '',
+});
+```
+
+`refresh` 是 [API 客户端](clients.md#creating-the-client)中用 refresh token 换新凭据的函数。断线一段时间后重连，access token 可能已经过期，这时连接返回 109（token 已过期），SDK 调用 `getToken` 换新的再连。已经建立的连接不受 access token 过期的影响：复查只检查这次登录是否已被撤销。
+
+这个处理不限于 JWT：`Authenticate` 返回的错误匹配 `identity.ErrExpired` 时，连接返回 109；连接期间复查遇到它时以 3005 断开，SDK 重连时同样换新的 token。
 
 <a id="revocation"></a>
 ### 撤销后断开

@@ -46,6 +46,7 @@ func TestEstablish(t *testing.T) {
 		"no credential":              {auth: as(identity.Subject{}, nil), want: identity.ErrUnauthenticated},
 		"invalid credential":         {auth: as(identity.Subject{}, errDisabled.New()), want: identity.ErrUnauthenticated},
 		"invalid with other kind":    {auth: as(identity.Subject{}, errNotMember.New()), want: identity.ErrUnauthenticated},
+		"expired credential":         {auth: as(identity.Subject{}, errDisabled.Wrap(identity.ErrExpired.New())), want: identity.ErrExpired},
 		"backend down":               {auth: as(identity.Subject{}, errDown.New()), want: errDown, failed: true},
 		"backend plain error":        {auth: as(identity.Subject{}, plain), want: plain, failed: true},
 		"bound to another tenant":    {tenant: "globex", auth: as(identity.Subject{ID: "alice", Tenant: "acme"}, nil), resolve: grant("*"), want: identity.ErrForbidden},
@@ -163,5 +164,18 @@ func TestReestablish(t *testing.T) {
 	now = identity.Subject{}
 	if err := check(); !errors.Is(err, identity.ErrUnauthenticated) {
 		t.Fatalf("revoked: %v", err)
+	}
+}
+
+// 凭据只是过期：返回的错误仍然是 ErrUnauthenticated（错误码不变），同时匹配 ErrExpired。
+func TestEstablishExpired(t *testing.T) {
+	auth := func(context.Context) (identity.Subject, error) { return identity.Subject{}, identity.ErrExpired.New() }
+	_, err := identity.Establish(context.Background(), auth, nil)
+	if !errors.Is(err, identity.ErrUnauthenticated) || !errors.Is(err, identity.ErrExpired) || errorx.CodeOf(err) != "auth.unauthenticated" {
+		t.Fatalf("expired: %v", err)
+	}
+	invalid := func(context.Context) (identity.Subject, error) { return identity.Subject{}, errDisabled.New() }
+	if _, err := identity.Establish(context.Background(), invalid, nil); errors.Is(err, identity.ErrExpired) {
+		t.Fatalf("invalid credential reported as expired: %v", err)
 	}
 }

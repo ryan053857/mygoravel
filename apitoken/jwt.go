@@ -286,7 +286,8 @@ const leeway = 5 * time.Second
 // access token 本身过期不影响复查，连接不会每个 TTL 断开一次。
 //
 // 返回的主体 Method 为 bearer，Credential 为登录的 ID（与 Store.List 的 Token.ID 相同，可以交给 Store.Revoke），
-// Tenant、Impersonator 与签发时相同，Scopes、Permissions 为空。无效或过期时返回 ErrInvalid。
+// Tenant、Impersonator 与签发时相同，Scopes、Permissions 为空。无效或过期时返回 ErrInvalid；
+// 只是过期时返回的错误同时匹配 identity.ErrExpired，实时连接据此让客户端 SDK 换新的 access token 重连。
 //
 // 不是 JWT 的 token 交给 Store.Validate，所以同一个 API 也接受个人访问令牌和不透明的登录 token；refresh token 不能用作凭据。
 func (j *JWT) Validate(ctx context.Context, token string) (identity.Subject, error) {
@@ -309,14 +310,16 @@ func (j *JWT) Validate(ctx context.Context, token string) (identity.Subject, err
 	if j.cfg.Audience != "" {
 		want.AnyAudience = jwt.Audience{j.cfg.Audience}
 	}
+	// 先校验有效期以外的各项，再单独检查有效期：只是过期的 token 由客户端刷新后重试。
 	recheck := identity.Rechecking(ctx)
 	checked := c.Claims
-	if recheck {
-		// 复查时由数据库中的登录决定是否有效，不看 access token 的有效期。
-		checked.Expiry = nil
-	}
+	checked.Expiry = nil
 	if err := checked.ValidateWithLeeway(want, leeway); err != nil {
 		return identity.Subject{}, ErrInvalid.New()
+	}
+	// 复查时由数据库中的登录决定是否有效，不看 access token 的有效期。
+	if !recheck && c.ValidateWithLeeway(want, leeway) != nil {
+		return identity.Subject{}, ErrInvalid.Wrap(identity.ErrExpired.New())
 	}
 	ref, err := identity.ParseRef(c.Subject)
 	if err != nil || c.Session == "" {

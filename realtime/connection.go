@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -31,6 +32,9 @@ func (rt *Realtime) connecting(ctx context.Context, e centrifuge.ConnectEvent) (
 		case identity.Failed(err):
 			rt.logger.ErrorContext(ctx, "authentication backend failed", "error", err)
 			return centrifuge.ConnectReply{}, centrifuge.ErrorInternal
+		case errors.Is(err, identity.ErrExpired):
+			// SDK 收到后调用 getToken 换新的 token 再连接，例如 JWT 模式的 access token 在断线期间过期。
+			return centrifuge.ConnectReply{}, centrifuge.ErrorTokenExpired
 		case err != nil:
 			return centrifuge.ConnectReply{}, centrifuge.DisconnectInvalidToken
 		}
@@ -53,15 +57,25 @@ func (rt *Realtime) authenticator(token string) identity.Authenticator {
 	}
 }
 
-// valid 重新校验连接的凭据，只有确定已经失效时返回 false。
-func (rt *Realtime) valid(ctx context.Context, conn *connection) bool {
+// check 重新校验连接的凭据，只有确定已经失效时返回断开的方式：token 只是过期时以 DisconnectExpired 断开，
+// SDK 重连时收到“token 已过期”，换新的 token；其他情况以 DisconnectInvalidToken 断开，SDK 不再重连。
+func (rt *Realtime) check(ctx context.Context, conn *connection) *centrifuge.Disconnect {
 	ctx, cancel := context.WithTimeout(ctx, credentialTimeout)
 	defer cancel()
+	var err error
 	if conn.token == "" {
-		return httpx.CheckCredential(ctx) == nil
+		err = httpx.CheckCredential(ctx)
+	} else {
+		err = identity.Reestablish(ctx, conn.sub, rt.authenticator(conn.token), rt.opts.Accounts.Resolve)
 	}
-	err := identity.Reestablish(ctx, conn.sub, rt.authenticator(conn.token), rt.opts.Accounts.Resolve)
-	return err == nil || identity.Failed(err)
+	switch {
+	case err == nil, identity.Failed(err):
+		return nil
+	case errors.Is(err, identity.ErrExpired):
+		return &centrifuge.DisconnectExpired
+	default:
+		return &centrifuge.DisconnectInvalidToken
+	}
 }
 
 // connected 为已经建立的连接安装订阅和发布的处理器，并在连接期间复查凭据。
@@ -149,7 +163,7 @@ func (rt *Realtime) authorize(ctx context.Context, conn *connection, channel str
 	return opts, nil
 }
 
-// watch 在连接期间定期复查凭据，收到 Options.Credentials 的信号时立即复查；凭据失效后断开连接，客户端不再重连。
+// watch 在连接期间定期复查凭据，收到 Options.Credentials 的信号时立即复查；凭据失效后断开连接，见 check。
 func (rt *Realtime) watch(client *centrifuge.Client, conn *connection) {
 	ctx := client.Context()
 	var changed <-chan struct{}
@@ -169,8 +183,8 @@ func (rt *Realtime) watch(client *centrifuge.Client, conn *connection) {
 				continue
 			}
 		}
-		if !rt.valid(ctx, conn) {
-			client.Disconnect(centrifuge.DisconnectInvalidToken)
+		if d := rt.check(ctx, conn); d != nil {
+			client.Disconnect(*d)
 			return
 		}
 	}

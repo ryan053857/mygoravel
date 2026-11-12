@@ -30,7 +30,8 @@ const credentialTimeout = 10 * time.Second
 type Options struct {
 	// Authenticate 校验客户端 SDK 连接时传入的 token，返回主体，通常与 rest.RequireBearer 使用同一个校验器。
 	// SPA 和移动端用它认证：浏览器的 WebSocket 不能设置 Authorization 请求头。ctx 是连接请求的 context。
-	// 返回 4xx 类错误或 ID 为空的主体表示 token 无效；返回 5xx 类错误表示暂时无法判断，客户端稍后重连。
+	// 返回 4xx 类错误或 ID 为空的主体表示 token 无效；错误匹配 identity.ErrExpired 时表示 token 只是过期，
+	// 连接返回 109（token 已过期），SDK 调用 getToken 换新的再连；返回 5xx 类错误表示暂时无法判断，客户端稍后重连。
 	// 连接期间用同一个 token 定期重新调用，token 被撤销后连接结束。
 	//
 	// nil 时带 token 的连接一律拒绝。请求已经由认证中间件识别出主体时（例如同源页面的会话），不使用 token。

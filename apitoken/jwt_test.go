@@ -113,8 +113,11 @@ func TestJWTLoginAndValidate(t *testing.T) {
 
 			// access token 过期后失效（允许 5 秒时钟偏差）。
 			time.Sleep(10*time.Minute + 6*time.Second)
-			if _, ok := access(t, j, p.Access); ok {
-				t.Fatal("expired access token accepted")
+			if _, err := j.Validate(ctx, p.Access); !errors.Is(err, apitoken.ErrInvalid) || !errors.Is(err, identity.ErrExpired) {
+				t.Fatalf("expired access token: %v", err)
+			}
+			if _, err := j.Validate(ctx, p.Access+"x"); !errors.Is(err, apitoken.ErrInvalid) || errors.Is(err, identity.ErrExpired) {
+				t.Fatalf("tampered access token: %v", err)
 			}
 			// 长连接复查由登录本身决定：登录还在，过期的 access token 不会让连接断开。
 			if err := recheck(j, got, p.Access); err != nil {

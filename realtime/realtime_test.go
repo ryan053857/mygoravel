@@ -112,10 +112,11 @@ func publish(t *testing.T, hub *broadcast.Hub, topic string, v any) {
 	}
 }
 
-// tokens 是测试用的 token 校验器：token 就是主体 ID，可以撤销或模拟后端故障。
+// tokens 是测试用的 token 校验器：token 就是主体 ID，可以撤销、使其过期或模拟后端故障。
 type tokens struct {
 	mu      sync.Mutex
 	revoked map[string]bool
+	expired map[string]bool
 	down    bool
 }
 
@@ -127,6 +128,8 @@ func (s *tokens) validate(_ context.Context, token string) (identity.Subject, er
 		return identity.Subject{}, errUnavailable.New()
 	case s.revoked[token]:
 		return identity.Subject{}, errRevoked.New()
+	case s.expired[token]:
+		return identity.Subject{}, errRevoked.Wrap(identity.ErrExpired.New())
 	}
 	return identity.Subject{Type: "user", ID: token, Credential: "cred-" + token}, nil
 }
@@ -138,6 +141,15 @@ func (s *tokens) revoke(token string) {
 		s.revoked = map[string]bool{}
 	}
 	s.revoked[token] = true
+}
+
+func (s *tokens) expire(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.expired == nil {
+		s.expired = map[string]bool{}
+	}
+	s.expired[token] = true
 }
 
 func (s *tokens) setDown(down bool) {
@@ -342,6 +354,11 @@ func TestTokenAuthentication(t *testing.T) {
 	if rejected(t, n.url, "revoked", nil) != 3500 {
 		t.Fatal("revoked token was not rejected as invalid")
 	}
+	// 只是过期的 token 返回“token 已过期”（109），连接不关闭：SDK 换新的 token 后重试。
+	store.expire("expired")
+	if _, reply := connect(t, n.url, "expired", nil); reply.Error == nil || reply.Error.Code != 109 {
+		t.Fatalf("connect with an expired token: %+v", reply)
+	}
 	// 后端故障时返回内部错误，不是无效 token：客户端 SDK 会稍后重连。
 	store.setDown(true)
 	if _, reply := connect(t, n.url, "alice", nil); reply.Error == nil || reply.Error.Code != 100 {
@@ -521,6 +538,12 @@ func TestPeriodicRecheckDisconnects(t *testing.T) {
 	store.revoke("alice")
 	if code := c.closed(); code != 3500 {
 		t.Fatalf("closed with %d", code)
+	}
+	// token 在连接期间过期：以 3005 断开，SDK 重连时会收到 109，换新的 token。
+	b := mustConnect(t, n.url, "bob", nil)
+	store.expire("bob")
+	if code := b.closed(); code != 3005 {
+		t.Fatalf("expired token closed with %d", code)
 	}
 }
 
