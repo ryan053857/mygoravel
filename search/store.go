@@ -53,17 +53,15 @@ func (s store) lockKey(ctx context.Context, tx bun.IDB, index, key string) error
 	return errors.Wrap(err, "search: lock key")
 }
 
-// replace 删除 key 原有的文档，写入 entries；entries 为空时同时删除 search_keys 中的记录。
-func (s store) replace(ctx context.Context, tx bun.IDB, index, key string, entries []entry) error {
-	ids := tx.NewRaw(`SELECT id FROM search_entries WHERE index_name = ? AND doc_key = ?`, index, key)
+// replace 把 key 在 version 中原有的文档替换为 entries。
+func (s store) replace(ctx context.Context, tx bun.IDB, index string, version int, key string, entries []entry) error {
+	ids := tx.NewRaw(`SELECT id FROM search_entries WHERE index_name = ? AND version = ? AND doc_key = ?`, index, version, key)
 	deletes := []*bun.RawQuery{tx.NewRaw(`DELETE FROM search_values WHERE entry_id IN (?)`, ids)}
 	if s.dialect == dialect.SQLite {
 		deletes = append(deletes, tx.NewRaw(`DELETE FROM search_fts WHERE rowid IN (?)`, ids))
 	}
-	deletes = append(deletes, tx.NewRaw(`DELETE FROM search_entries WHERE index_name = ? AND doc_key = ?`, index, key))
-	if len(entries) == 0 {
-		deletes = append(deletes, tx.NewRaw(`DELETE FROM search_keys WHERE index_name = ? AND doc_key = ?`, index, key))
-	}
+	deletes = append(deletes,
+		tx.NewRaw(`DELETE FROM search_entries WHERE index_name = ? AND version = ? AND doc_key = ?`, index, version, key))
 	for _, q := range deletes {
 		if _, err := q.Exec(ctx); err != nil {
 			return errors.Wrap(err, "search: delete entries")
@@ -73,7 +71,7 @@ func (s store) replace(ctx context.Context, tx bun.IDB, index, key string, entri
 		return nil
 	}
 
-	entryIDs, err := s.insertEntries(ctx, tx, index, key, entries)
+	entryIDs, err := s.insertEntries(ctx, tx, index, version, key, entries)
 	if err != nil {
 		return errors.Wrap(err, "search: insert entries")
 	}
@@ -96,15 +94,21 @@ func (s store) replace(ctx context.Context, tx bun.IDB, index, key string, entri
 	return nil
 }
 
+// unlockKey 删除 search_keys 中 key 的记录，key 已经没有文档时调用。
+func (s store) unlockKey(ctx context.Context, tx bun.IDB, index, key string) error {
+	_, err := tx.NewRaw(`DELETE FROM search_keys WHERE index_name = ? AND doc_key = ?`, index, key).Exec(ctx)
+	return errors.Wrap(err, "search: delete key")
+}
+
 // insertEntries 写入 search_entries（SQLite 还有 search_fts），按 entries 的顺序返回它们的 id。
-func (s store) insertEntries(ctx context.Context, tx bun.IDB, index, key string, entries []entry) ([]int64, error) {
+func (s store) insertEntries(ctx context.Context, tx bun.IDB, index string, version int, key string, entries []entry) ([]int64, error) {
 	ids := make([]int64, len(entries))
 	switch s.dialect {
 	case dialect.MySQL:
 		// MySQL 没有 RETURNING，逐行写入，用 LastInsertId 取得 id
 		for i, e := range entries {
-			res, err := tx.NewRaw(`INSERT INTO search_entries (index_name, doc_key, position, tenant, doc, boost, body) `+
-				`VALUES (?, ?, ?, ?, ?, ?, ?)`, index, key, i, e.tenant, e.doc, encodeTerms(e.boost), encodeTerms(e.body)).Exec(ctx)
+			res, err := tx.NewRaw(`INSERT INTO search_entries (index_name, version, doc_key, position, tenant, doc, boost, body) `+
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, index, version, key, i, e.tenant, e.doc, encodeTerms(e.boost), encodeTerms(e.body)).Exec(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -116,19 +120,19 @@ func (s store) insertEntries(ctx context.Context, tx bun.IDB, index, key string,
 	case dialect.PG:
 		rows, args := make([]string, len(entries)), []any{}
 		for i, e := range entries {
-			rows[i] = "(?, ?, ?, ?, ?, ?::tsvector)"
-			args = append(args, index, key, i, e.tenant, e.doc, tsvector(e.boost, e.body))
+			rows[i] = "(?, ?, ?, ?, ?, ?, ?::tsvector)"
+			args = append(args, index, version, key, i, e.tenant, e.doc, tsvector(e.boost, e.body))
 		}
-		err := s.returning(ctx, tx, `INSERT INTO search_entries (index_name, doc_key, position, tenant, doc, tokens) VALUES `+
+		err := s.returning(ctx, tx, `INSERT INTO search_entries (index_name, version, doc_key, position, tenant, doc, tokens) VALUES `+
 			strings.Join(rows, ", ")+` RETURNING id, position`, args, ids)
 		return ids, err
 	default:
 		rows, args := make([]string, len(entries)), []any{}
 		for i, e := range entries {
-			rows[i] = "(?, ?, ?, ?, ?)"
-			args = append(args, index, key, i, e.tenant, e.doc)
+			rows[i] = "(?, ?, ?, ?, ?, ?)"
+			args = append(args, index, version, key, i, e.tenant, e.doc)
 		}
-		err := s.returning(ctx, tx, `INSERT INTO search_entries (index_name, doc_key, position, tenant, doc) VALUES `+
+		err := s.returning(ctx, tx, `INSERT INTO search_entries (index_name, version, doc_key, position, tenant, doc) VALUES `+
 			strings.Join(rows, ", ")+` RETURNING id, position`, args, ids)
 		if err != nil {
 			return nil, err

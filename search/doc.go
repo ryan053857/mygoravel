@@ -12,7 +12,10 @@
 //	    return Articles.Sync(ctx, tx, item.ID.String())
 //	})
 //
-//	Articles.Handle(w, db, loadArticle)
+//	Articles.Handle(w, db, loadArticle, scanArticles)
+//
+// 修改了文档类型或者分词器之后，用 Reindex 重建：重建写入索引的新版本，期间同步同时写入新旧两个版本，
+// 完成后切换，查询不会看到建了一半的索引。search/searchcmd 提供发起重建并显示进度的 search reindex 命令。
 //
 // Search 按查询文本、过滤条件、排序和分页查询，返回解码后的文档、命中词的摘要和分面统计：
 //

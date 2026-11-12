@@ -237,8 +237,9 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `activity` | 操作日志：在业务事务中记录谁对什么做了什么 | [操作日志](activity.md) |
 | `operation` | 后台操作的状态与进度：任务中心、断点续跑、进度推送 | [后台操作](operations.md) |
 | `webhook` | 向租户的端点推送事件，按 Standard Webhooks 签名与校验 | [Webhook](webhooks.md) |
-| `search` | 全文搜索：在应用的数据库中建索引，事务中发起同步，过滤、排序、分面和高亮 | [全文搜索](search.md) |
+| `search` | 全文搜索：在应用的数据库中建索引，事务中发起同步，过滤、排序、分面和高亮，不停服重建 | [全文搜索](search.md) |
 | `search/gse` | 按词语切分中文的分词器，基于 gse 的词典 | [分词](search.md#tokenizers) |
+| `search/searchcmd` | `search reindex` 命令：发起重建并显示进度 | [重建索引](search.md#reindexing) |
 | `sheet/imports` | 在后台导入表格：进度、断点续跑、失败行下载 | [后台导入](import-export.md#background-imports) |
 | `sheet/exports` | 在后台导出表格：进度，完成后上传到文件存储 | [后台导出](import-export.md#background-exports) |
 | `ai` | 模型的配置和几种能力的接口：生成图片、合成与识别语音、计算向量、重排、决策 | [媒体](ai.md#media)、[决策](ai.md#decisions) |

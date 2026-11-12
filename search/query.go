@@ -85,7 +85,9 @@ func (ix *Index[D]) Search(ctx context.Context, db bun.IDB, q Query) (*Result[D]
 	text := len(terms.terms) > 0
 
 	var where sqlExpr
-	where.add("e.index_name = ? AND e.tenant = ?", ix.name, q.Tenant)
+	// 只查询 search_indexes 中记录的版本，没有记录时为 1，见 versions.go
+	where.add("e.index_name = ? AND e.version = COALESCE((SELECT i.version FROM search_indexes AS i WHERE i.name = ?), 1)"+
+		" AND e.tenant = ?", ix.name, ix.name, q.Tenant)
 	columns, scoreArgs := "e.doc_key, e.doc", []any(nil)
 	if text {
 		cond, condArgs, score, sArgs := st.match(terms)

@@ -7,8 +7,10 @@ import (
 	"regexp"
 
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
+	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/queue"
 )
 
@@ -22,12 +24,13 @@ const MaxTerms = 16383
 // errInvalid 标记无法建索引的文档，例如过滤字段的值太长。重试也不会成功，同步任务直接转入失败任务表。
 var errInvalid = errors.New("search: invalid document")
 
-// Index 是一个搜索索引，D 是它的文档类型。用 Define 声明为包级变量，同步和查询都通过它。
+// Index 是一个搜索索引，D 是它的文档类型。用 Define 声明为包级变量，同步、重建和查询都通过它。
 type Index[D any] struct {
-	name   string
-	schema *schema
-	tok    Tokenizer
-	topic  queue.Topic[string]
+	name    string
+	schema  *schema
+	tok     Tokenizer
+	sync    queue.Topic[string]
+	reindex queue.Topic[uuid.UUID]
 }
 
 // Option 是 Define 的选项。
@@ -35,7 +38,7 @@ type Option func(*options)
 
 type options struct{ tok Tokenizer }
 
-// WithTokenizer 设置分词器，默认是 Bigram。修改分词器之后要重建索引。
+// WithTokenizer 设置分词器，默认是 Bigram。修改分词器之后要用 Reindex 重建索引。
 func WithTokenizer(t Tokenizer) Option {
 	return func(o *options) { o.tok = t }
 }
@@ -77,7 +80,11 @@ func Define[D any](name string, opts ...Option) *Index[D] {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return &Index[D]{name: name, schema: s, tok: o.tok, topic: queue.Topic[string]("search." + name)}
+	return &Index[D]{
+		name: name, schema: s, tok: o.tok,
+		sync:    queue.Topic[string]("search.sync." + name),
+		reindex: queue.Topic[uuid.UUID]("search.reindex." + name),
+	}
 }
 
 // Name 返回索引的名称。
@@ -103,35 +110,41 @@ func (ix *Index[D]) Sync(ctx context.Context, db bun.IDB, keys ...string) error 
 	}
 	jobs := queue.Database(db)
 	for _, key := range keys {
-		if err := ix.topic.Publish(ctx, jobs, key, queue.Unique(key)); err != nil {
+		if err := ix.sync.Publish(ctx, jobs, key, queue.Unique(key)); err != nil {
 			return errors.Wrapf(err, "search: publish %s sync", ix.name)
 		}
 	}
 	return nil
 }
 
-// Handle 把同步任务的处理函数注册到 w。w 必须使用 Sync 发布任务的数据库队列，db 是索引所在的数据库。
-// 文档无法建索引（例如过滤字段的值太长）时不再重试，任务直接转入失败任务表。
-func (ix *Index[D]) Handle(w *queue.Worker, db bun.IDB, load LoadFunc[D], opts ...queue.HandleOption) {
-	if db == nil || load == nil {
-		panic("search: nil database or load function")
+// Handle 把同步任务和重建任务（见 Reindex）的处理函数注册到 w。w 必须使用 Sync 发布任务的数据库队列，
+// db 是索引所在的数据库，load 读取一个 key 的文档，scan 在重建时列出所有的 key。opts 调整同步任务的处理。
+// 文档无法建索引（例如过滤字段的值太长）时同步任务不再重试，直接转入失败任务表。
+func (ix *Index[D]) Handle(w *queue.Worker, db *bun.DB, load LoadFunc[D], scan ScanFunc, opts ...queue.HandleOption) {
+	if db == nil || load == nil || scan == nil {
+		panic("search: nil database, load or scan function")
 	}
-	ix.topic.Handle(w, func(ctx context.Context, key string) error {
+	ix.sync.Handle(w, func(ctx context.Context, key string) error {
 		err := ix.Refresh(ctx, db, load, key)
 		if errors.Is(err, errInvalid) {
 			return queue.Permanent(err)
 		}
 		return err
 	}, opts...)
+	ops := operation.New(db)
+	ix.reindex.Handle(w, func(ctx context.Context, id uuid.UUID) error {
+		return ix.rebuild(ctx, db, ops, load, scan, id)
+	})
 }
 
 // Refresh 立即同步 keys，每个 key 一个事务，与同步任务的处理相同。用于测试，或者需要马上能搜到的场合。
+// 重建期间同时写入查询使用的版本和正在重建的版本。
 func (ix *Index[D]) Refresh(ctx context.Context, db bun.IDB, load LoadFunc[D], keys ...string) error {
 	for _, key := range keys {
 		if err := checkKey(key); err != nil {
 			return err
 		}
-		if err := ix.refresh(ctx, db, load, key); err != nil {
+		if err := ix.refresh(ctx, db, load, key, 0); err != nil {
 			return err
 		}
 	}
@@ -145,12 +158,20 @@ func checkKey(key string) error {
 	return nil
 }
 
-func (ix *Index[D]) refresh(ctx context.Context, db bun.IDB, load LoadFunc[D], key string) error {
+// refresh 在一个事务中同步 key：build 为 0 时写入 versions 返回的版本，否则只写入重建的版本 build。
+func (ix *Index[D]) refresh(ctx context.Context, db bun.IDB, load LoadFunc[D], key string, build int) error {
 	st := storeOf(db)
 	err := db.RunInTx(ctx, st.txOptions(), func(ctx context.Context, tx bun.Tx) error {
 		// 先锁住这个 key：同一个 key 的同步依次执行，后执行的读到的数据更新，不会被先读到旧数据的覆盖
 		if err := st.lockKey(ctx, tx, ix.name, key); err != nil {
 			return err
+		}
+		versions := []int{build}
+		if build == 0 {
+			var err error
+			if versions, err = st.versions(ctx, tx, ix.name); err != nil {
+				return err
+			}
 		}
 		docs, err := load(ctx, tx, key)
 		if err != nil {
@@ -160,7 +181,15 @@ func (ix *Index[D]) refresh(ctx context.Context, db bun.IDB, load LoadFunc[D], k
 		if err != nil {
 			return err
 		}
-		return st.replace(ctx, tx, ix.name, key, entries)
+		for _, v := range versions {
+			if err := st.replace(ctx, tx, ix.name, v, key, entries); err != nil {
+				return err
+			}
+		}
+		if len(entries) == 0 {
+			return st.unlockKey(ctx, tx, ix.name, key)
+		}
+		return nil
 	})
 	return errors.Wrapf(err, "search: sync %s %q", ix.name, key)
 }

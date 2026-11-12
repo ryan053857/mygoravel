@@ -18,6 +18,7 @@ authz.invalid: Invalid input
 notification.not_found: Notification not found
 operation.not_found: Operation not found
 operation.failed: The operation was interrupted, please try again
+search.reindex_superseded: The reindex was superseded by a later one
 imports.errors_column: Errors
 sheet.unsupported_format: Only CSV and XLSX files are supported
 sheet.bad_file: The spreadsheet could not be read

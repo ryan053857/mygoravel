@@ -16,6 +16,7 @@ import (
 
 	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/internal/dbtesting"
+	"github.com/ryan053857/mygoravel/operation"
 	"github.com/ryan053857/mygoravel/page"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/search"
@@ -54,11 +55,25 @@ func (s *source) load(_ context.Context, _ bun.IDB, key string) ([]articleDoc, e
 	return s.docs[key], nil
 }
 
-// migrations 合并队列和搜索的迁移，队列的版本号在前。
+// scan 按 key 的顺序返回 after 之后的 key，每次最多 2 个，让重建分成多批。
+func (s *source) scan(_ context.Context, _ bun.IDB, after string, limit int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for key := range s.docs {
+		if key > after {
+			out = append(out, key)
+		}
+	}
+	slices.Sort(out)
+	return out[:min(len(out), limit, 2)], nil
+}
+
+// migrations 合并队列、操作和搜索的迁移，按这个顺序排列版本号。
 func migrations(t *testing.T) fs.FS {
 	t.Helper()
 	merged := fstest.MapFS{}
-	for prefix, src := range map[string]fs.FS{"1": queue.Migrations(), "2": search.Migrations()} {
+	for prefix, src := range map[string]fs.FS{"1": queue.Migrations(), "2": operation.Migrations(), "3": search.Migrations()} {
 		err := fs.WalkDir(src, ".", func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
@@ -369,6 +384,22 @@ func TestInvalidDocuments(t *testing.T) {
 	})
 }
 
+// runWorker 在后台运行一个处理 db 中任务的 worker，测试结束时停止它。register 注册处理函数。
+func runWorker(t *testing.T, db *bun.DB, register func(w *queue.Worker)) {
+	t.Helper()
+	cfg := queue.DefaultConfig()
+	cfg.PollInterval = 20 * time.Millisecond
+	w := queue.NewWorker(queue.Database(db), cfg, slog.New(slog.DiscardHandler))
+	register(w)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+}
+
 func TestSyncThroughQueue(t *testing.T) {
 	dbtesting.ForEach(t, func(t *testing.T, driver database.Driver) {
 		ctx := context.Background()
@@ -396,18 +427,7 @@ func TestSyncThroughQueue(t *testing.T) {
 			t.Fatal("rollback returned nil")
 		}
 
-		cfg := queue.DefaultConfig()
-		cfg.PollInterval = 20 * time.Millisecond
-		w := queue.NewWorker(queue.Database(db), cfg, slog.New(slog.DiscardHandler))
-		articles.Handle(w, db, src.load)
-		runCtx, cancel := context.WithCancel(ctx)
-		done := make(chan error, 1)
-		go func() { done <- w.Run(runCtx) }()
-		defer func() {
-			cancel()
-			<-done
-		}()
-
+		runWorker(t, db, func(w *queue.Worker) { articles.Handle(w, db, src.load, src.scan) })
 		deadline := time.Now().Add(10 * time.Second)
 		for find(t, db, search.Query{}).Total == 0 {
 			if time.Now().After(deadline) {

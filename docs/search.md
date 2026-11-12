@@ -6,6 +6,7 @@
 - [同步](#syncing)
     - [一个 key 多个文档](#multiple-documents)
     - [立即同步](#refreshing)
+- [重建索引](#reindexing)
 - [搜索](#searching)
     - [过滤与排序](#filtering-and-sorting)
     - [分面](#facets)
@@ -25,11 +26,12 @@
 <a id="installation"></a>
 ## 安装
 
-把 `search` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`。同步任务通过数据库队列执行，还需要[队列](queue.md)的迁移：
+把 `search` 的迁移加入[发布命令](migrations.md#publishing-framework-migrations)，发布后执行 `migrate up`。同步任务通过数据库队列执行，重建索引的进度记在[后台操作](operations.md)中，所以还需要它们的迁移：
 
 ```go
 migratecmd.Publish(postgres.Driver,
     migrate.Source{Name: "queue", FS: queue.Migrations()},
+    migrate.Source{Name: "operation", FS: operation.Migrations()},
     migrate.Source{Name: "search", FS: search.Migrations()},
 )
 ```
@@ -37,7 +39,7 @@ migratecmd.Publish(postgres.Driver,
 <a id="defining-indexes"></a>
 ## 声明索引
 
-索引的文档是一个结构体，字段的 `search` 标签说明它的用途。下面是博客应用完整的 `internal/article/search.go`，声明文章索引、读取文档的函数和搜索接口：
+索引的文档是一个结构体，字段的 `search` 标签说明它的用途。下面是博客应用完整的 `internal/article/search.go`，声明文章索引、读取文档和列出 key 的函数，以及搜索接口：
 
 ```go
 package article
@@ -87,6 +89,28 @@ func LoadSearchDocs(ctx context.Context, tx bun.IDB, key string) ([]SearchDoc, e
         }
     }
     return docs, nil
+}
+
+// ScanSearchKeys 按 ID 的顺序列出 after 之后的已发布文章，重建索引时使用。
+func ScanSearchKeys(ctx context.Context, db bun.IDB, after string, limit int) ([]string, error) {
+    q := db.NewSelect().Model((*Article)(nil)).Column("id").
+        Where("status = ?", StatusPublished).OrderExpr("id").Limit(int64(limit))
+    if after != "" {
+        id, err := uuid.Parse(after)
+        if err != nil {
+            return nil, queue.Permanent(err)
+        }
+        q = q.Where("id > ?", id)
+    }
+    var ids []uuid.UUID
+    if err := q.Scan(ctx, &ids); err != nil {
+        return nil, errors.Wrap(err, "scan articles")
+    }
+    keys := make([]string, len(ids))
+    for i, id := range ids {
+        keys[i] = id.String()
+    }
+    return keys, nil
 }
 
 // Search 搜索已发布的文章。
@@ -142,10 +166,10 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 })
 ```
 
-`Sync` 只发布一个带着 key 的队列任务，事务提交后才执行。worker 注册同步任务的处理函数，加在 [worker 的装配](queue.md#running-workers)中：
+`Sync` 只发布一个带着 key 的队列任务，事务提交后才执行。worker 注册同步任务和[重建任务](#reindexing)的处理函数，加在 [worker 的装配](queue.md#running-workers)中：
 
 ```go
-article.SearchIndex.Handle(w, a.db, article.LoadSearchDocs)
+article.SearchIndex.Handle(w, a.db, article.LoadSearchDocs, article.ScanSearchKeys)
 ```
 
 处理任务时，`LoadSearchDocs` 在同步事务中读取文章当前的状态，替换索引中这个 key 原有的文档；返回空时从索引中删除。因为任务只带 key、每次都重新读取，重复或乱序执行的结果都一样；同一篇文章连续修改多次，还没开始处理的任务会用 [queue.Unique](queue.md#unique-jobs) 合并为一次。
@@ -155,7 +179,7 @@ article.SearchIndex.Handle(w, a.db, article.LoadSearchDocs)
 - 一个文档最多索引前 `search.MaxTerms`（16383）个词，大约一万多字，之后的文字搜不到。更长的内容按[一个 key 多个文档](#multiple-documents)切分。
 - 文档无法建索引时（例如过滤字段的值超过 191 字节），任务不再重试，直接转入[失败任务表](queue.md#failed-jobs)。
 
-修改了 `SearchDoc` 的字段或者[分词器](#tokenizers)之后，已有的文档要重新同步：为所有文章发布一次 `Sync` 即可，`Sync` 一次可以传入多个 key。
+修改了 `SearchDoc` 的字段或者[分词器](#tokenizers)之后，已有的文档要按新的方式重新写入，见[重建索引](#reindexing)。
 
 <a id="multiple-documents"></a>
 ### 一个 key 多个文档
@@ -169,6 +193,43 @@ article.SearchIndex.Handle(w, a.db, article.LoadSearchDocs)
 
 ```go
 err := article.SearchIndex.Refresh(ctx, db, article.LoadSearchDocs, item.ID.String())
+```
+
+<a id="reindexing"></a>
+## 重建索引
+
+修改了 `SearchDoc` 的字段或者[分词器](#tokenizers)，或者有数据绕过 `Sync` 被修改过（例如直接执行的 SQL），就要重建索引。`search/searchcmd` 提供了重建命令，和其他需要数据库的命令一样在 [bootstrap.Commands](actions.md#as-commands) 中声明：
+
+```go
+searchcmd.New(a.db, article.SearchIndex)
+```
+
+部署新版本之后执行：
+
+```bash
+$ ./bin/api search reindex articles
+已发起 articles 的重建，操作 0193e7b1-…，由 worker 执行
+已处理 500 / 约 12000 个 key
+已处理 1000 / 约 12000 个 key
+……
+重建完成：12000 个 key，其中 0 个无法建索引
+```
+
+重建由 worker 执行，命令只负责发起和显示进度，按 Ctrl-C 只停止查看；加上 `--detach` 发起后立即返回。重建写入索引的一个新版本，完成之前查询仍然使用原来的版本，用户不会搜到半个索引：
+
+- 发起之后，同步同时写入原来的版本和新版本，重建期间修改的文章不会漏掉。
+- 重建任务用 `ScanSearchKeys` 每次列出 500 个 key，逐个用 `LoadSearchDocs` 读取并写入新版本。`ScanSearchKeys` 返回的 key 读不到文档也没关系，它不会被写入。
+- 每处理完一批保存一次进度。worker 重启或者任务出错重试时，从上次保存的地方继续。
+- 全部写入后，新版本成为查询使用的版本，原来版本的数据随后删除。
+
+重建期间查询的仍是原来的数据：新加的过滤字段在其中没有值；换了分词器时，查询按新的方式分词，可能搜不全原来的数据。新加的过滤字段可以分两次部署：先部署只修改 `SearchDoc` 的版本并重建，再部署用到这个字段的查询。
+
+同一个索引再次发起重建时，正在进行的重建被取代，它的操作变为失败，错误码是 `search.reindex_superseded`。一个文档无法建索引时，这个 key 计为失败，不影响其他 key。
+
+重建是一个[后台操作](operations.md)，类型是 `search.reindex.articles`。在管理后台发起时直接调用 `Reindex`，操作属于发起的管理员，出现在这个管理员的操作列表中：
+
+```go
+op, err := article.SearchIndex.Reindex(ctx, tx, ops, sub)
 ```
 
 <a id="searching"></a>
@@ -269,4 +330,4 @@ var SearchIndex = search.Define[SearchDoc]("articles", search.WithTokenizer(gse.
 
 建索引时它还输出长词中包含的短词（“搜索引擎”还输出“搜索”“引擎”），查询短词也能命中。代价是程序增大约 25 MB，第一次分词时加载词典约 0.5 秒，常驻内存约 300 MB。
 
-也可以实现 `search.Tokenizer` 接入其他分词方式，`search.Split` 处理了字母、数字和标点，只需要提供切分中日韩文字的函数。更换分词器之后要[重新同步](#syncing)已有的文档。
+也可以实现 `search.Tokenizer` 接入其他分词方式，`search.Split` 处理了字母、数字和标点，只需要提供切分中日韩文字的函数。更换分词器之后要[重建索引](#reindexing)。

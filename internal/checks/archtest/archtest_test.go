@@ -69,19 +69,20 @@ var rules = map[string]rule{
 	"command/httpcmd":    {layerEntry, []string{"command", "httpx"}},
 	"command/migratecmd": {layerEntry, []string{"command", "database"}},
 
-	"apitoken":      {layerFeature, []string{"errorx", "identity"}},
-	"authz":         {layerFeature, []string{"errorx", "identity"}},
-	"notification":  {layerFeature, []string{"errorx", "identity"}},
-	"feature":       {layerFeature, []string{"errorx", "identity"}},
-	"activity":      {layerFeature, []string{"identity", "logging"}},
-	"operation":     {layerFeature, []string{"database", "errorx", "i18n", "identity", "queue"}},
-	"webhook":       {layerFeature, []string{"errorx", "identity", "outbound", "queue"}},
-	"sheet/imports": {layerFeature, []string{"database", "errorx", "filesystem", "i18n", "identity", "operation", "sheet"}},
-	"sheet/exports": {layerFeature, []string{"database", "filesystem", "identity", "operation", "sheet"}},
-	"search":        {layerFeature, []string{"page", "queue"}},
-	"search/gse":    {layerFeature, []string{"search"}},
-	"ai":            {layerFeature, nil},
-	"ai/chat":       {layerFeature, []string{"ai", "broadcast", "database", "errorx", "httpx", "lock", "logging"}},
+	"apitoken":         {layerFeature, []string{"errorx", "identity"}},
+	"authz":            {layerFeature, []string{"errorx", "identity"}},
+	"notification":     {layerFeature, []string{"errorx", "identity"}},
+	"feature":          {layerFeature, []string{"errorx", "identity"}},
+	"activity":         {layerFeature, []string{"identity", "logging"}},
+	"operation":        {layerFeature, []string{"database", "errorx", "i18n", "identity", "queue"}},
+	"webhook":          {layerFeature, []string{"errorx", "identity", "outbound", "queue"}},
+	"sheet/imports":    {layerFeature, []string{"database", "errorx", "filesystem", "i18n", "identity", "operation", "sheet"}},
+	"sheet/exports":    {layerFeature, []string{"database", "filesystem", "identity", "operation", "sheet"}},
+	"search":           {layerFeature, []string{"database", "errorx", "identity", "operation", "page", "queue"}},
+	"search/gse":       {layerFeature, []string{"search"}},
+	"search/searchcmd": {layerFeature, []string{"command", "database", "identity", "operation"}},
+	"ai":               {layerFeature, nil},
+	"ai/chat":          {layerFeature, []string{"ai", "broadcast", "database", "errorx", "httpx", "lock", "logging"}},
 
 	"internal": {},
 }
@@ -353,14 +354,14 @@ func TestDocumentCoreIsLight(t *testing.T) {
 	}
 }
 
-// TestSearchCoreIsLight 确保只用默认分词器的应用不会链接 gse 和它嵌入的词典，它们只由 search/gse 引入。
+// TestSearchCoreIsLight 确保 search 不链接 gse 和它嵌入的词典，也不链接 Cobra，它们只由 search/gse 和 search/searchcmd 引入。
 func TestSearchCoreIsLight(t *testing.T) {
 	out, err := exec.Command("go", "list", "-deps", module+"/search").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list: %v\n%s", err, out)
 	}
 	for _, dep := range strings.Fields(string(out)) {
-		if under(dep, "github.com/go-ego/gse") {
+		if under(dep, "github.com/go-ego/gse") || under(dep, "github.com/spf13/cobra") {
 			t.Errorf("search depends on %s", dep)
 		}
 	}
