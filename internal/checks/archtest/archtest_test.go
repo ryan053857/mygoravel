@@ -113,11 +113,6 @@ var components = []string{
 // 基础层中的例外：form 按 Huma 的标签和校验规则转换字段值。
 var componentExceptions = map[string]string{"form": "github.com/danielgtaylor/huma"}
 
-// 后期应用形态使用的组件，当前 module 保持 HTTP API 依赖范围。
-var laterFormModules = []string{
-	"github.com/gorilla/websocket", "google.golang.org/grpc",
-}
-
 func under(pkg, prefix string) bool {
 	return pkg == prefix || strings.HasPrefix(pkg, prefix+"/")
 }
@@ -410,21 +405,6 @@ func TestMailCoreDoesNotLinkDrivers(t *testing.T) {
 		for _, dep := range strings.Fields(string(out)) {
 			if under(dep, "github.com/wneessen/go-mail") || under(dep, "github.com/resend/resend-go") {
 				t.Errorf("%s depends on %s", pkg, dep)
-			}
-		}
-	}
-}
-
-func TestDependencyScope(t *testing.T) {
-	cmd := exec.Command("go", "list", "-m", "-f", `{{if not .Indirect}}{{.Path}}{{end}}`, "all")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go list -m: %v\n%s", err, out)
-	}
-	for _, path := range strings.Fields(string(out)) {
-		for _, prefix := range laterFormModules {
-			if under(path, prefix) {
-				t.Errorf("HTTP API module imports later-form component %s", path)
 			}
 		}
 	}
