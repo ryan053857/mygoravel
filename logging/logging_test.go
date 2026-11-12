@@ -14,8 +14,8 @@ import (
 
 func TestNewAndContextIsolation(t *testing.T) {
 	var bufA, bufB bytes.Buffer
-	logA := logging.New(logging.Config{Service: "a", Writer: &bufA})
-	logB := logging.New(logging.Config{Service: "b", Writer: &bufB})
+	logA := logging.New(logging.Config{Writer: &bufA}).With(logging.AttrComponent, "a")
+	logB := logging.New(logging.Config{Writer: &bufB}).With(logging.AttrComponent, "b")
 
 	ctxA := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "ra"))
 	ctxB := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "rb"))
@@ -29,13 +29,13 @@ func TestNewAndContextIsolation(t *testing.T) {
 	if err := json.Unmarshal(bufB.Bytes(), &recB); err != nil {
 		t.Fatal(err)
 	}
-	if recA[logging.AttrService] != "a" || recA[logging.AttrRequestID] != "ra" {
+	if recA[logging.AttrComponent] != "a" || recA[logging.AttrRequestID] != "ra" {
 		t.Fatalf("a=%v", recA)
 	}
-	if recB[logging.AttrService] != "b" || recB[logging.AttrRequestID] != "rb" {
+	if recB[logging.AttrComponent] != "b" || recB[logging.AttrRequestID] != "rb" {
 		t.Fatalf("b=%v", recB)
 	}
-	if strings.Contains(bufA.String(), `"service":"b"`) || strings.Contains(bufB.String(), `"service":"a"`) {
+	if strings.Contains(bufA.String(), `"component":"b"`) || strings.Contains(bufB.String(), `"component":"a"`) {
 		t.Fatal("loggers polluted each other")
 	}
 }
@@ -76,21 +76,6 @@ func TestTextFormatIsPlainWhenNotATerminal(t *testing.T) {
 	if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} ERR failed `).MatchString(out) ||
 		!strings.Contains(out, "error.message=boom") || !strings.Contains(out, "response.status=500") || !strings.Contains(out, "request_id=r1") {
 		t.Fatalf("output=%q", out)
-	}
-}
-
-func TestVersionAttr(t *testing.T) {
-	var buf bytes.Buffer
-	logging.New(logging.Config{Version: "v1.2.3", Writer: &buf}).Info("x")
-	var rec map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
-		t.Fatal(err)
-	}
-	if rec[logging.AttrVersion] != "v1.2.3" {
-		t.Fatalf("rec=%v", rec)
-	}
-	if _, ok := rec[logging.AttrService]; ok {
-		t.Fatalf("empty service should be omitted: %v", rec)
 	}
 }
 

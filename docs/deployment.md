@@ -336,15 +336,14 @@ TLS 终止和响应压缩通常在反向代理中配置；应用直接对外提�
 <a id="logging"></a>
 ## 日志
 
-`logging.New` 默认输出到标准错误，使用 JSON 格式。建议在配置中填写服务名，便于日志平台采集和检索；版本号默认取自构建信息，也可以在部署时通过环境变量指定：
+`logging.New` 默认输出到标准错误，使用 JSON 格式。配置了 [`telemetry`](telemetry.md#setup) 时，日志还会和指标、链路一起推送到日志平台，标准错误上的日志照常输出。服务名和版本只在 `telemetry` 段配置，版本号默认取自构建信息，也可以在部署时通过环境变量指定：
 
 ```yaml
-logs:
+telemetry:
+  endpoint: ${OTLP_ENDPOINT:-}
   service: blog
   version: ${APP_VERSION:-}
 ```
-
-配置了 [`telemetry`](telemetry.md#setup) 时，日志还会和指标、链路一起推送到日志平台，标准错误上的日志照常输出。
 
 排查问题时，可以使用响应头 `X-Request-ID` 中的请求 ID，在日志中找到同一请求的访问日志和错误诊断。详见[日志](logging.md)。
 

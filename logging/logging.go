@@ -1,12 +1,10 @@
 package logging
 
 import (
-	"cmp"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"runtime/debug"
 	"time"
 
 	"github.com/lmittmann/tint"
@@ -24,8 +22,6 @@ const (
 
 // 标准关联字段名。
 const (
-	AttrService   = "service"
-	AttrVersion   = "version"
 	AttrComponent = "component"
 	AttrRequestID = "request_id"
 	AttrTraceID   = "trace_id"
@@ -46,10 +42,6 @@ type Config struct {
 	Format string `yaml:"format"`
 	// AddSource 在日志中附加源码位置。
 	AddSource bool `yaml:"add_source"`
-	// Service 非空时作为 service 字段附加到每条日志。
-	Service string `yaml:"service"`
-	// Version 作为 version 字段附加到每条日志；空值取构建信息中的主模块版本，取不到时省略。
-	Version string `yaml:"version"`
 	// TimeZone 是日志时间使用的时区，例如 UTC、Asia/Shanghai；空值表示本地时区。
 	TimeZone string `yaml:"time_zone"`
 	// Writer 是基础输出的目标，nil 表示 os.Stderr；只能在代码中设置。
@@ -117,7 +109,7 @@ func Fanout(handlers ...slog.Handler) Option {
 
 // New 按 cfg 构造 *slog.Logger，处理链由外到内为：
 //
-//	context 字段 → 组件级别 → service / version → Pipe 中间件 → 格式化 → 基础输出 + Fanout 输出 + Export
+//	context 字段 → 组件级别 → Pipe 中间件 → 格式化 → 基础输出 + Fanout 输出 + Export
 //
 // 格式化默认包含 ErrorFormatter；cfg.TimeZone 非空时还会把时间值转换到该时区。
 // New 不修改 slog.Default，通常在入口处用 slog.SetDefault 安装它。cfg 不合法时 panic。
@@ -146,16 +138,6 @@ func New(cfg Config, opts ...Option) *slog.Logger {
 	h = slogformatter.NewFormatterHandler(formatters...)(h)
 	if len(o.middlewares) > 0 {
 		h = slogmulti.Pipe(o.middlewares...).Handler(h)
-	}
-	var attrs []slog.Attr
-	if cfg.Service != "" {
-		attrs = append(attrs, slog.String(AttrService, cfg.Service))
-	}
-	if v := cmp.Or(cfg.Version, buildVersion()); v != "" {
-		attrs = append(attrs, slog.String(AttrVersion, v))
-	}
-	if len(attrs) > 0 {
-		h = h.WithAttrs(attrs)
 	}
 	if len(cfg.Levels) > 0 {
 		h = &componentHandler{inner: h, root: cfg.Level, levels: cfg.Levels}
@@ -222,13 +204,4 @@ func Or(l *slog.Logger) *slog.Logger {
 		return l
 	}
 	return slog.New(NewContextHandler(slogformatter.NewFormatterHandler(ErrorFormatter())(h)))
-}
-
-// buildVersion 返回主模块版本；本地构建的 (devel) 视为无版本。
-func buildVersion() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok || info.Main.Version == "(devel)" {
-		return ""
-	}
-	return info.Main.Version
 }

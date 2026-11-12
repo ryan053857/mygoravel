@@ -38,7 +38,6 @@ slog.SetDefault(logging.New(cfg.Logs))
 logs:
   level: ${LOG_LEVEL:-info}
   format: ${LOG_FORMAT:-json}
-  service: blog
   time_zone: UTC
 ```
 
@@ -47,8 +46,6 @@ logs:
 | `level` | 最低记录级别：`debug`、`info`、`warn`、`error` | `info` |
 | `format` | `json` 或 `text`，见[输出格式](#formats) | `json` |
 | `add_source` | 是否记录源码位置 | `false` |
-| `service` | 附加到每条日志的 `service` 字段，为空时省略 | 空 |
-| `version` | 附加到每条日志的 `version` 字段 | 构建信息中的模块版本，取不到时省略 |
 | `time_zone` | 日志时间使用的时区，例如 `UTC`、`Asia/Shanghai`；同时作用于字段中的时间值 | 本地时区 |
 | `levels` | 按组件覆盖 `level`，见[按组件设置级别](#component-levels) | 无 |
 
@@ -60,6 +57,8 @@ slog.SetDefault(logging.New(cfg.Logs))
 
 `logging.Config` 的零值可以直接使用，不写 `logs` 段也能得到合理的日志。
 
+日志中没有服务名和版本：推送到日志平台时，它们由 [`telemetry`](telemetry.md#setup) 段配置，作为资源属性附在每条日志上；采集标准错误时，由采集端按 systemd unit 或容器区分来源。
+
 <a id="formats"></a>
 两种输出格式分别面向机器和人：
 
@@ -67,7 +66,7 @@ slog.SetDefault(logging.New(cfg.Logs))
 - `text`：本地开发时阅读，基于 [tint](https://github.com/lmittmann/tint)。时间显示到毫秒，级别缩写为 `DBG`、`INF`、`WRN`、`ERR`，分组字段以 `.` 连接：
 
   ```text
-  2026-11-10 17:05:12.345 INF http request service=blog component=http request.method=GET response.status=200 request_id=9F2K…
+  2026-11-10 17:05:12.345 INF http request component=http request.method=GET response.status=200 request_id=9F2K…
   2026-11-10 17:05:12.401 ERR request failed error.message=boom request_id=9F2K…
   ```
 
@@ -166,7 +165,7 @@ api := rest.New(rest.Options{Router: router})
 `httpx.AssignRequestID` 还会把[请求 ID](middleware.md#request-id) 放入请求的 context。之后，只要你在业务代码中配合请求的 `ctx` 记录日志（`slog.InfoContext(ctx, ...)`），这些日志就会自动带上 `request_id` 字段：
 
 ```json
-{"level":"INFO","msg":"article published","service":"blog","request_id":"9F2K…","article_id":"0f8c…","author_id":"alice"}
+{"level":"INFO","msg":"article published","request_id":"9F2K…","article_id":"0f8c…","author_id":"alice"}
 ```
 
 这样，同一个请求的访问日志、错误诊断和业务日志都可以通过 `request_id` 关联起来。部署在反向代理之后时，还可以沿用代理生成的请求 ID，把代理日志也关联进来。

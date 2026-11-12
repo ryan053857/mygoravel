@@ -41,7 +41,7 @@ telemetry:
 
 - `endpoint` 是基础地址，日志、指标、链路分别发往其下的 `/v1/logs`、`/v1/metrics`、`/v1/traces`。为空时不推送，本地开发不用配置。
 - `headers` 附加到每个请求，通常是认证信息。
-- `service` 为空时取可执行文件名；`version` 为空时取构建信息中的模块版本。
+- `service` 为空时取可执行文件名；`version` 为空时取构建信息中的模块版本。日志、指标、链路都用这里的服务名和版本，`logs` 段不再重复。
 - `sample_ratio` 是新链路的采样比例，默认 `1`，即全部记录。请求带着调用方的链路进来时，跟随调用方的决定。
 
 把 `telemetry.Config` 放进[根配置](configuration.md#loading-configuration)，在[入口](dependencies.md#assembling-the-application)的 `open` 中最先打开它：

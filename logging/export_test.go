@@ -54,8 +54,6 @@ func attrs(r sdklog.Record) map[string]attribute.Value {
 
 func TestExport(t *testing.T) {
 	cfg := logging.DefaultConfig()
-	cfg.Service = "blog"
-	cfg.Version = "v1.2.3"
 	ctx, span := sdktrace.NewTracerProvider().Tracer("test").Start(context.Background(), "op")
 	defer span.End()
 	ctx = logging.WithAttrs(ctx, slog.String(logging.AttrRequestID, "req-1"))
@@ -65,7 +63,7 @@ func TestExport(t *testing.T) {
 		l.With(logging.AttrComponent, "article").ErrorContext(ctx, "publish failed", "error", errors.New("boom"))
 	})
 
-	if !bytes.Contains(buf.Bytes(), []byte(`"trace_id"`)) || !bytes.Contains(buf.Bytes(), []byte(`"service":"blog"`)) {
+	if !bytes.Contains(buf.Bytes(), []byte(`"trace_id"`)) {
 		t.Fatalf("base output lost fields: %s", buf)
 	}
 	if len(records) != 1 {
@@ -79,7 +77,7 @@ func TestExport(t *testing.T) {
 		t.Fatalf("trace context %s/%s", r.TraceID(), r.SpanID())
 	}
 	got := attrs(r)
-	for _, key := range []string{logging.AttrService, logging.AttrVersion, logging.AttrTraceID, logging.AttrSpanID} {
+	for _, key := range []string{logging.AttrTraceID, logging.AttrSpanID} {
 		if _, ok := got[key]; ok {
 			t.Errorf("attribute %s duplicated: %v", key, got)
 		}
@@ -94,14 +92,14 @@ func TestExport(t *testing.T) {
 
 func TestExportKeepsGroupedKeys(t *testing.T) {
 	_, records := exported(t, logging.DefaultConfig(), func(l *slog.Logger) {
-		l.WithGroup("deploy").Info("rollout", logging.AttrVersion, "v2")
+		l.WithGroup("upstream").Info("call", logging.AttrTraceID, "abc")
 	})
 	if len(records) != 1 {
 		t.Fatalf("exported %d records", len(records))
 	}
-	deploy := attrs(records[0])["deploy"]
-	if kvs := deploy.AsMap(); len(kvs) != 1 || string(kvs[0].Key) != logging.AttrVersion {
-		t.Fatalf("group %v", deploy)
+	upstream := attrs(records[0])["upstream"]
+	if kvs := upstream.AsMap(); len(kvs) != 1 || string(kvs[0].Key) != logging.AttrTraceID {
+		t.Fatalf("group %v", upstream)
 	}
 }
 

@@ -72,16 +72,17 @@ func TestFormatAppliesToEveryOutput(t *testing.T) {
 
 func TestFanoutOutputsFilterByOwnLevel(t *testing.T) {
 	var base, alerts bytes.Buffer
-	logger := logging.New(logging.Config{Writer: &base, Service: "blog"},
+	logger := logging.New(logging.Config{Writer: &base},
 		logging.Fanout(slog.NewJSONHandler(&alerts, &slog.HandlerOptions{Level: slog.LevelError})),
 	)
-	logger.Info("routine")
-	logger.Error("broken")
+	ctx := logging.WithAttrs(context.Background(), slog.String(logging.AttrRequestID, "r1"))
+	logger.InfoContext(ctx, "routine")
+	logger.ErrorContext(ctx, "broken")
 	if strings.Count(base.String(), "\n") != 2 || strings.Count(alerts.String(), "\n") != 1 {
 		t.Fatalf("base=%q alerts=%q", base.String(), alerts.String())
 	}
-	if decode(t, alerts.Bytes())["service"] != "blog" {
-		t.Fatalf("fanout output misses service: %s", alerts.String())
+	if decode(t, alerts.Bytes())["request_id"] != "r1" {
+		t.Fatalf("fanout output misses context fields: %s", alerts.String())
 	}
 }
 

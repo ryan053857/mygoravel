@@ -1,6 +1,6 @@
 // Package logging 构造 slog.Logger 并连接 context 中的关联字段。
 //
-// Config 描述级别、格式、时区与 service / version 字段，可直接放进应用配置；
+// Config 描述级别、格式与时区，可直接放进应用配置；
 // New 按 Config 返回日志器，入口处通常用 slog.SetDefault 安装：
 //
 //	slog.SetDefault(logging.New(cfg.Logs,
