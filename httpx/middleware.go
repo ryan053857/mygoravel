@@ -10,17 +10,19 @@ import (
 	"net/netip"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5/middleware"
 	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 
+	"github.com/ryan053857/mygoravel/database"
 	"github.com/ryan053857/mygoravel/i18n"
 	"github.com/ryan053857/mygoravel/logging"
 )
 
 // Defaults 返回每个应用都应安装的基础中间件，按执行顺序排列：
-// AssignRequestID、NoSniff、ClientIP、Locale、AccessLog、Recover、BodyLimit。
+// AssignRequestID、NoSniff、ClientIP、Locale、AccessLog、Recover、BodyLimit、DBAcquireTimeout。
 // 参数取自 cfg 的对应子段，cfg 不合法时 panic；logger 为 nil 时使用 slog.Default()；
 // languages 为 nil 时只使用框架内置的中英文消息，默认语言为 zh-CN。
 //
@@ -35,6 +37,23 @@ func Defaults(cfg Config, logger *slog.Logger, languages *goi18n.Bundle) []func(
 		AccessLog(cfg.AccessLog, logger),
 		Recover(logger),
 		BodyLimit(cfg.BodyLimit),
+		DBAcquireTimeout(cfg.DBAcquireTimeout),
+	}
+}
+
+// DBAcquireTimeout 让请求等待空闲数据库连接最多 d（database.WithAcquireTimeout）：连接池用满时，
+// 请求在 d 之后以 database.ErrBusy 失败，响应 503 并带 Retry-After，而不是排队到请求超时。d 为 0 时什么也不做。
+func DBAcquireTimeout(d time.Duration) func(http.Handler) http.Handler {
+	if d < 0 {
+		panic("httpx: DBAcquireTimeout: negative timeout")
+	}
+	return func(next http.Handler) http.Handler {
+		if d == 0 {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(database.WithAcquireTimeout(r.Context(), d)))
+		})
 	}
 }
 

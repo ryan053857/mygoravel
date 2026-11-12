@@ -79,7 +79,7 @@ if err != nil {
 ctx = database.WithAcquireTimeout(ctx, time.Second)
 ```
 
-时限只作用于取连接，不影响语句本身的执行时间。队列任务和命令不设置它，排队等待连接是它们的正常情况。连接池的使用情况和超时次数见[指标](telemetry.md#database)。
+不需要自己调用：[默认中间件](middleware.md#default-middleware)为每个请求按 `http.db_acquire_timeout`（默认 1 秒）设置它。时限只作用于取连接，不影响语句本身的执行时间。队列任务和命令不设置它，排队等待连接是它们的正常情况。连接池的使用情况和超时次数见[指标](telemetry.md#database)。
 
 <a id="connecting"></a>
 ## 连接数据库

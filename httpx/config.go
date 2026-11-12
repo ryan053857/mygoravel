@@ -25,6 +25,9 @@ type Config struct {
 	IdleTimeout       time.Duration `yaml:"idle_timeout"`
 	// ShutdownTimeout 是停机时排空请求的上限。
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
+	// DBAcquireTimeout 是请求等待空闲数据库连接的最长时间，超过时请求以 503 快速失败，见 database.WithAcquireTimeout。
+	// 0 表示不限制，等到请求超时为止。由 Defaults 中的 DBAcquireTimeout 中间件使用。
+	DBAcquireTimeout time.Duration `yaml:"db_acquire_timeout"`
 
 	RequestID RequestIDConfig `yaml:"request_id"`
 	ClientIP  ClientIPConfig  `yaml:"client_ip"`
@@ -47,6 +50,7 @@ func DefaultConfig() Config {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       time.Minute,
 		ShutdownTimeout:   10 * time.Second,
+		DBAcquireTimeout:  time.Second,
 		RequestID:         DefaultRequestIDConfig(),
 		ClientIP:          DefaultClientIPConfig(),
 		AccessLog:         DefaultAccessLogConfig(),
@@ -84,6 +88,9 @@ func (c Config) Validate() error {
 		if f.d <= 0 {
 			return errors.Newf("%s must be positive", f.name)
 		}
+	}
+	if c.DBAcquireTimeout < 0 {
+		return errors.New("db_acquire_timeout must not be negative")
 	}
 	return nil
 }

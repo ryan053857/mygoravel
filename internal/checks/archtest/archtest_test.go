@@ -68,7 +68,7 @@ var rules = map[string]rule{
 	"filesystem":         {layerInfrastructure, []string{"errorx", "identity"}},
 	"sheet":              {layerInfrastructure, []string{"errorx", "form"}},
 
-	"httpx":                {layerEntry, []string{"errorx", "i18n", "identity", "logging", "ratelimit"}},
+	"httpx":                {layerEntry, []string{"database", "errorx", "i18n", "identity", "logging", "ratelimit"}},
 	"httpx/rest/clientgen": {layerEntry, []string{"command", "errorx", "httpx", "page"}},
 	"session":              {layerEntry, []string{"errorx", "identity"}},
 	"web":                  {layerEntry, []string{"errorx", "form", "httpx", "i18n", "identity", "logging", "session"}},
