@@ -23,18 +23,18 @@ func retrying(t *testing.T, opts outbound.RetryOptions) (*outboundtest.Transport
 	return fake, &http.Client{Transport: outbound.Retry(fake, opts)}
 }
 
-// timed 发送请求，返回响应的状态码（出错时为 0）、错误和耗时。
-func timed(t *testing.T, c *http.Client, req *http.Request) (int, error, time.Duration) {
+// timed 发送请求，返回响应的状态码（出错时为 0）、耗时和错误。
+func timed(t *testing.T, c *http.Client, req *http.Request) (int, time.Duration, error) {
 	t.Helper()
 	start := time.Now()
 	resp, err := c.Do(req)
 	elapsed := time.Since(start)
 	if err != nil {
-		return 0, err, elapsed
+		return 0, elapsed, err
 	}
 	defer resp.Body.Close()
 	_, _ = io.ReadAll(resp.Body)
-	return resp.StatusCode, nil, elapsed
+	return resp.StatusCode, elapsed, nil
 }
 
 func newRequest(t *testing.T, method, url, body string) *http.Request {
@@ -62,7 +62,7 @@ func TestRetryTemporaryStatus(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			fake, c := retrying(t, outbound.RetryOptions{})
 			fake.On("https://example.com/").Reply(outboundtest.Status(status), outboundtest.Text(200, "ok"))
-			code, err, waited := timed(t, c, newRequest(t, "GET", "https://example.com/", ""))
+			code, waited, err := timed(t, c, newRequest(t, "GET", "https://example.com/", ""))
 			if err != nil || code != 200 {
 				t.Fatalf("%d: %d %v", status, code, err)
 			}
@@ -95,14 +95,14 @@ func TestRetryBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake, c := retrying(t, outbound.RetryOptions{Attempts: 4})
 		fake.On("*").Reply(outboundtest.Status(503))
-		_, _, waited := timed(t, c, newRequest(t, "GET", "https://example.com/", ""))
+		_, waited, _ := timed(t, c, newRequest(t, "GET", "https://example.com/", ""))
 		// 100–200ms、200–400ms、400–800ms。
 		between(t, waited, 700*time.Millisecond, 1400*time.Millisecond)
 	})
 	synctest.Test(t, func(t *testing.T) {
 		fake, c := retrying(t, outbound.RetryOptions{Attempts: 4, Backoff: time.Second, MaxWait: 1500 * time.Millisecond})
 		fake.On("*").Reply(outboundtest.Status(503))
-		_, _, waited := timed(t, c, newRequest(t, "GET", "https://example.com/", ""))
+		_, waited, _ := timed(t, c, newRequest(t, "GET", "https://example.com/", ""))
 		// 0.5–1s，之后不超过 MaxWait：0.75–1.5s 两次。
 		between(t, waited, 2000*time.Millisecond, 4000*time.Millisecond)
 	})
@@ -112,21 +112,21 @@ func TestRetryAfter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake, c := retrying(t, outbound.RetryOptions{})
 		fake.On("https://example.com/seconds").Reply(outboundtest.Status(429).Header("Retry-After", "2"), outboundtest.Status(200))
-		_, _, waited := timed(t, c, newRequest(t, "GET", "https://example.com/seconds", ""))
+		_, waited, _ := timed(t, c, newRequest(t, "GET", "https://example.com/seconds", ""))
 		if waited != 2*time.Second {
 			t.Fatalf("seconds: waited %v", waited)
 		}
 
 		at := time.Now().Add(3 * time.Second).UTC().Format(http.TimeFormat)
 		fake.On("https://example.com/date").Reply(outboundtest.Status(503).Header("Retry-After", at), outboundtest.Status(200))
-		_, _, waited = timed(t, c, newRequest(t, "GET", "https://example.com/date", ""))
+		_, waited, _ = timed(t, c, newRequest(t, "GET", "https://example.com/date", ""))
 		if waited != 3*time.Second {
 			t.Fatalf("date: waited %v", waited)
 		}
 
 		// 超过 MaxWait 时不等待，直接返回。
 		fake.On("https://example.com/long").Reply(outboundtest.Status(429).Header("Retry-After", "60"), outboundtest.Status(200))
-		code, _, waited := timed(t, c, newRequest(t, "GET", "https://example.com/long", ""))
+		code, waited, _ := timed(t, c, newRequest(t, "GET", "https://example.com/long", ""))
 		if code != 429 || waited != 0 || len(fake.Sent("https://example.com/long")) != 1 {
 			t.Fatalf("long: %d after %v", code, waited)
 		}
@@ -197,7 +197,7 @@ func TestRetryErrors(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			fake, c := retrying(t, outbound.RetryOptions{})
 			fake.On("*").Reply(outboundtest.Fail(failure), outboundtest.Status(200))
-			if code, err, _ := timed(t, c, newRequest(t, "GET", "https://example.com/", "")); code != 200 {
+			if code, _, err := timed(t, c, newRequest(t, "GET", "https://example.com/", "")); code != 200 {
 				t.Fatalf("%v: %d %v", failure, code, err)
 			}
 		})
@@ -210,7 +210,7 @@ func TestRetryErrors(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			fake, c := retrying(t, outbound.RetryOptions{})
 			fake.On("*").Reply(outboundtest.Fail(failure), outboundtest.Status(200))
-			if _, err, _ := timed(t, c, newRequest(t, "GET", "https://example.com/", "")); !errors.Is(err, failure) {
+			if _, _, err := timed(t, c, newRequest(t, "GET", "https://example.com/", "")); !errors.Is(err, failure) {
 				t.Fatalf("%v: %v", failure, err)
 			}
 			if len(fake.Requests()) != 1 {
@@ -228,7 +228,7 @@ func TestRetryContext(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 		req := newRequest(t, "GET", "https://example.com/", "").WithContext(ctx)
-		if code, err, waited := timed(t, c, req); code != 429 || err != nil || waited != 0 {
+		if code, waited, err := timed(t, c, req); code != 429 || err != nil || waited != 0 {
 			t.Fatalf("%d %v after %v", code, err, waited)
 		}
 	})
@@ -239,7 +239,7 @@ func TestRetryContext(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		time.AfterFunc(time.Second, cancel)
 		req := newRequest(t, "GET", "https://example.com/", "").WithContext(ctx)
-		if _, err, waited := timed(t, c, req); !errors.Is(err, context.Canceled) || waited != time.Second {
+		if _, waited, err := timed(t, c, req); !errors.Is(err, context.Canceled) || waited != time.Second {
 			t.Fatalf("%v after %v", err, waited)
 		}
 	})
@@ -248,7 +248,7 @@ func TestRetryContext(t *testing.T) {
 		fake, c := retrying(t, outbound.RetryOptions{Attempts: 10, Backoff: time.Second})
 		c.Timeout = 3 * time.Second
 		fake.On("*").Reply(outboundtest.Status(503))
-		code, err, waited := timed(t, c, newRequest(t, "GET", "https://example.com/", ""))
+		code, waited, err := timed(t, c, newRequest(t, "GET", "https://example.com/", ""))
 		if waited > 3*time.Second || (err == nil && code != 503) {
 			t.Fatalf("%d %v after %v", code, err, waited)
 		}
