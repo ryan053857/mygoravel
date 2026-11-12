@@ -146,7 +146,7 @@ blog/
 mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包分为四层，包只引用同层或更低层的包：
 
 ```text
-功能        apitoken  login  authz  notification  activity  feature  operation  webhook  search  sheet/imports  sheet/exports  ai
+功能        apitoken  login  authz  notification  push  activity  feature  operation  webhook  search  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  command
 基础设施    database  queue  schedule  cachex  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  pdf  outbound  sheet  document
 基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt
@@ -240,6 +240,9 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `login/passkey` | 用 passkey（WebAuthn）登录和注册 | [登录与注册](login.md#passkeys) |
 | `authz` | 基于角色的权限：代码中声明的权限目录，角色按租户分配 | [授权](authorization.md)、[多租户](tenancy.md) |
 | `notification` | 站内通知收件箱，带已读状态 | [通知](notifications.md) |
+| `push` | 移动推送：服务端登记设备，在业务事务中发送，按平台分批推送 | [移动推送](push.md) |
+| `push/aliyun` | 对接阿里云移动推送，国内经厂商通道、海外经 FCM 和 APNs 送达 | [运行推送](push.md#delivering) |
+| `push/pushtest` | 记录推送的 Provider，用于测试 | [测试](push.md#testing) |
 | `feature` | 功能开关：代码中声明，按全员、租户、用户或比例开启 | [功能开关](features.md) |
 | `activity` | 操作日志：在业务事务中记录谁对什么做了什么 | [操作日志](activity.md) |
 | `operation` | 后台操作的状态与进度：任务中心、断点续跑、进度推送 | [后台操作](operations.md) |

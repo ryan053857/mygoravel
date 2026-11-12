@@ -413,7 +413,7 @@ ID                                    TOPIC      ATTEMPTS  FAILED AT            
 <a id="testing"></a>
 ## 测试
 
-处理函数是普通的函数，直接调用它测试即可。发布任务的一方，用 [`dbtest.Open`](testing.md) 打开执行过 `queue.Migrations()` 的测试数据库，检查 `queue_outbox` 中的任务：
+处理函数是普通的函数，直接调用它测试即可。发布任务的一方，用 [`dbtest.Open`](testing.md) 打开执行过 `queue.Migrations()` 的测试数据库，用 `queuetest.Pending` 读出 `queue_outbox` 中还没转发的任务：
 
 ```go
 db := dbtest.Open(t, migrations.FS) // 包含已发布的 queue 迁移
@@ -421,9 +421,8 @@ publish := article.NewPublish(db, emails, editors)
 
 // ... 创建并发布一篇文章
 
-n, err := db.NewSelect().Table("queue_outbox").Where("topic = ?", "mail.send").Count(ctx)
-if err != nil || n != 1 {
-    t.Fatalf("queued %d jobs, err %v", n, err)
+if jobs := queuetest.Pending(t, db, mailjob.Send); len(jobs) != 1 {
+    t.Fatalf("queued %d mails", len(jobs))
 }
 ```
 

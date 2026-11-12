@@ -62,6 +62,7 @@
 现成的业务功能，各自带有数据表，按需引入。
 
 - [通知](notifications.md)
+- [移动推送](push.md)
 - [操作日志](activity.md)
 - [功能开关](features.md)
 - [后台操作](operations.md)

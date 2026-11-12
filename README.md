@@ -37,6 +37,7 @@ go get github.com/ryan053857/mygoravel@main
 | 生成发票、报表等 PDF | [生成 PDF](docs/pdf.md) |
 | 请求用户填写的地址 | [出站请求](docs/outbound.md) |
 | 给用户发站内通知 | [通知](docs/notifications.md) |
+| 给 App 发推送通知 | [移动推送](docs/push.md) |
 | 记录谁改了什么 | [操作日志](docs/activity.md) |
 | 逐步放量、紧急关闭新功能 | [功能开关](docs/features.md) |
 | 导入导出 Excel 和 CSV | [导入与导出](docs/import-export.md) |

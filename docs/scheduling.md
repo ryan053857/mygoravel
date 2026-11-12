@@ -285,6 +285,7 @@ article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) erro
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |
 | [操作日志](activity.md#retention) | `activity.Cleanup(db, 保留期)` | 每天 |
 | [通知](notifications.md#retention) | `notification.Cleanup(db, 保留期)` | 每天 |
+| [推送设备](push.md#cleanup) | `push.Cleanup(db, 保留期)` | 每天 |
 | [后台操作](operations.md#cleanup)（包括导入和导出） | `operation.New(db)` 的 `Cleanup(保留期)` | 每天 |
 | [Webhook 投递记录](webhooks.md#retention) | `webhook.Cleanup(db, 保留期)` | 每天 |
 | [失败任务](queue.md#failed-jobs) | `queue.NewFailedJobs(db).Cleanup(保留期)` | 每天 |
