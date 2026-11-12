@@ -63,36 +63,28 @@ func (a *PublishScheduled) Handle(ctx context.Context) error {
 释放锁不受 `ctx` 取消影响：请求或命令被取消后，`Do` 仍会释放锁。
 
 > [!TIP]
-> 按时触发的任务交给[调度器](scheduling.md)执行时，调度器已经保证每次触发只在一个实例上执行，任务里不需要再加锁。锁适合调度器之外的场景，例如下面的缓存重建。
+> 按时触发的任务交给[调度器](scheduling.md)执行时，调度器已经保证每次触发只在一个实例上执行，任务里不需要再加锁。锁适合调度器之外的场景，例如下面的重新生成站点地图。
 
 <a id="waiting-for-locks"></a>
 ## 等待锁
 
 `Acquire` 尝试取得锁，失败时立即返回 `lock.ErrNotAcquired`；`Wait` 在锁被占用时最多等待一段时间。两者都返回 `*lock.Lock`，用完后调用 `Release`。
 
-例如[缓存](cache.md#cache-aside)一章的文章详情在缓存失效时，多个请求会同时查询数据库。用锁让一个请求查询数据库并写回缓存，其他请求等它完成后重读缓存。下面是改写后的 `load`，多了一个 `locker` 参数，`Get` 通过构造函数接收它再传进来；`cached` 是从原来的 `load` 中拆出的读缓存和解码部分：
+例如站点地图生成得很慢，多个请求同时发现它过期时，只让一个请求重新生成，其他请求等它完成后直接使用结果：
 
 ```go
-func load(ctx context.Context, db bun.IDB, c cache.CacheInterface[string], locker *lock.Locker, id uuid.UUID) (*Article, error) {
-    key := cacheKey(id)
-    if item, ok := cached(ctx, c, key); ok {
-        return item, nil
-    }
-
-    // 未命中：只让一个请求重建缓存，其他请求最多等待 3 秒
-    if lk, err := locker.Wait(ctx, key+":rebuild", 10*time.Second, 3*time.Second); err == nil {
-        defer lk.Release(ctx)
-        if item, ok := cached(ctx, c, key); ok {
-            return item, nil // 等待期间已由其他请求重建
-        }
-    }
-
-    item, err := find(ctx, db, id)
-    // 写回缓存，与原来相同……
+lk, err := locker.Wait(ctx, "sitemap:rebuild", time.Minute, 3*time.Second)
+if err != nil {
+    return err // 3 秒内没等到锁时是 lock.ErrNotAcquired
 }
+defer lk.Release(ctx)
+if fresh, err := sitemapFresh(ctx); err != nil || fresh {
+    return err // 等待期间已由其他请求生成
+}
+return generateSitemap(ctx)
 ```
 
-没等到锁时照常查询数据库，和缓存一样，锁出问题不应让请求失败。
+取得锁之后要再检查一次：等待的请求拿到锁时，前一个请求通常已经生成好了。读缓存时同一个进程内的并发加载由 [cachex](cache.md#hot-keys) 合并，不需要自己加锁。
 
 `Wait` 每 100 毫秒重试一次，`ctx` 取消时立即返回 `ctx` 的错误。
 

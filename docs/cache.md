@@ -130,11 +130,14 @@ err = c.Clear(ctx)
 <a id="using-in-services"></a>
 ### action 接收缓存
 
-`cachex.New` 在 gocache 缓存之上创建一种值的缓存，第二个参数是过期时间。文章详情的缓存在 `open` 中创建，保存在 `App` 中，和数据库一起传给 `article.Register`，再由它传给 `Get` 和 `Publish`：
+`cachex.New` 在 gocache 缓存之上创建一种值的缓存。文章详情的缓存在 `open` 中创建，保存在 `App` 中，和数据库一起传给 `article.Register`，再由它传给 `Get` 和 `Publish`：
 
 ```go
-articles := cachex.New[*article.Article](articleCache, cfg.Cache.DefaultTTL)
+articles := cachex.New[*article.Article](articleCache, "blog:article:v1:", cfg.Cache.DefaultTTL,
+    cachex.Missing(article.ErrNotFound.New))
 ```
+
+第二个参数是键的前缀，见[缓存键与序列化](#keys-and-serialization)；第三个参数是过期时间；`cachex.Missing` 声明文章不存在时的错误，见[不存在的数据](#hot-keys)。
 
 ```go
 type Get struct {
@@ -159,26 +162,20 @@ func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID
     if subject.ID == "" {
         return nil, ErrForbidden.New()
     }
-    item, err := a.articles.Remember(ctx, cacheKey(id), func(ctx context.Context) (*Article, error) {
-        item, err := find(ctx, a.db, id)
-        if errors.Is(err, ErrNotFound) {
-            return nil, nil // 不存在也缓存，同一个 ID 不会每次都查数据库
-        }
-        return item, err
+    item, err := a.articles.Remember(ctx, id.String(), func(ctx context.Context) (*Article, error) {
+        return find(ctx, a.db, id)
     })
-    switch {
-    case err != nil:
+    if err != nil {
         return nil, err
-    case item == nil, item.Status == StatusDraft && item.AuthorID != subject.ID:
+    }
+    if item.Status == StatusDraft && item.AuthorID != subject.ID {
         return nil, ErrNotFound.New()
     }
     return item, nil
 }
-
-func cacheKey(id uuid.UUID) string {
-    return "blog:article:v1:" + id.String()
-}
 ```
+
+`Remember` 的第二个参数是文章 ID，`cachex` 在它前面加上创建时的前缀，得到 `blog:article:v1:<id>`。
 
 > [!WARNING]
 > 草稿同样会被缓存，所以命中缓存后**仍要检查访问权限**，否则会把别人的草稿返回给当前用户。写操作的权限检查则应使用事务中读取的数据，不要依赖缓存，见[在事务中检查](authorization.md#checking-in-transactions)。
@@ -190,8 +187,10 @@ func cacheKey(id uuid.UUID) string {
 | 命中 | 解码后返回，每次得到独立的一份 |
 | 未命中 | 调用加载函数，结果写回缓存 |
 | 读取失败、内容无法解码 | 记录 `warn` 日志，调用加载函数 |
-| 加载函数返回错误 | 原样返回，不写缓存 |
+| 加载函数返回错误 | 原样返回；除了 `Missing` 声明的错误，都不写缓存 |
 | 写回失败 | 记录 `warn` 日志，照常返回加载的结果 |
+
+缓存后端不可用时每个请求都会出错，所以这些日志每个 `Cache` 每分钟最多一条，附上期间省略的条数。出错的次数见[命中率](#hit-rate)。
 
 这套降级策略只适用于可丢弃的查询缓存。如果用缓存保存会话或限流计数，需要根据用途单独设计故障时的行为。
 
@@ -202,7 +201,7 @@ func cacheKey(id uuid.UUID) string {
 
 - **击穿**：热点文章的缓存过期的瞬间，大量请求同时发现没有缓存，一起查数据库。`Remember` 把同一个进程中同一个键的并发加载合并为一次，其他请求等它的结果。一个请求取消时只有它自己返回，加载继续，其他请求照常得到结果；加载使用第一个请求的截止时间。部署多个实例时，每个实例最多同时加载一次，通常已经足够。
 - **雪崩**：同一批写入的大量键在同一时刻过期。写入时过期时间随机增加至多 10%，让它们错开。
-- **穿透**：请求不存在的 ID 时，缓存永远没有，每次都查数据库。加载函数返回 `nil` 时空结果也写入缓存，保留约一分钟，上面的 `Get` 就是这样处理 `ErrNotFound` 的。
+- **穿透**：请求不存在的 ID 时，缓存永远没有，每次都查数据库。`cachex.Missing` 声明「不存在」的错误后，加载返回的错误与它匹配（`errors.Is`）时也写入缓存，保留约一分钟，期间直接返回一个新的同类错误。`errorx` 的错误按错误码匹配，传入模板的 `New` 方法即可，所以上面的 `find` 不用改：它返回的 `ErrNotFound` 被缓存，`Get` 收到的仍是 `ErrNotFound`。其他错误都不缓存。
 
 <a id="invalidation"></a>
 ### 失效：提交后删除
@@ -213,7 +212,7 @@ func cacheKey(id uuid.UUID) string {
 err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
     // 加锁读取、检查权限、更新状态……
     tx.AfterCommit(func(ctx context.Context) error {
-        return a.articles.Forget(ctx, cacheKey(id))
+        return a.articles.Forget(ctx, id.String())
     })
     return nil
 })
@@ -228,11 +227,11 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 <a id="keys-and-serialization"></a>
 ## 缓存键与序列化
 
-缓存键建议由命名空间、资源类型、格式版本和资源 ID 组成，例如 `blog:article:v1:<id>`：
+缓存键建议由命名空间、资源类型、格式版本和资源 ID 组成，例如 `blog:article:v1:<id>`。前三部分是传给 `cachex.New` 的前缀，`Remember` 和 `Forget` 只传 ID：
 
 - 命名空间区分不同的应用和部署环境，多个环境共用一个 Redis 时不会互相覆盖；
 - 修改缓存内容的结构时，把 `v1` 升为 `v2`，新代码不再读取旧格式，旧键等过期后自然消失；
-- 多租户应用中键还要带上租户，例如 `blog:article:v1:<tenant>:<id>`，见[缓存、广播与其他资源](tenancy.md#other-resources)。
+- 多租户应用中键还要带上租户，例如传入 `<tenant>:<id>`，得到 `blog:article:v1:<tenant>:<id>`，见[缓存、广播与其他资源](tenancy.md#other-resources)。
 
 `cachex` 把值编码为 JSON 字符串存进 `cache.New[string]`。内存缓存其实可以直接保存结构体，但这样切换到 Redis 时业务代码就要改：Redis store 读出的总是字符串，如果声明为 `cache.New[Article]`，`Get` 会返回零值和 `nil` 错误，而不是报错。统一存 JSON 字符串，两种后端可以无缝替换。
 
@@ -243,7 +242,8 @@ err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx
 
 ```go
 articleCache := cachemon.Wrap("articles", cache.New[string](gocachestore.NewGoCache(memoryClient)), mon)
-articles := cachex.New[*article.Article](articleCache, cfg.Cache.DefaultTTL)
+articles := cachex.New[*article.Article](articleCache, "blog:article:v1:", cfg.Cache.DefaultTTL,
+    cachex.Missing(article.ErrNotFound.New))
 ```
 
 第一个参数是缓存名，`mon` 是 `open` 中创建的 [Monitor](dependencies.md#assembling-the-application)。键不存在或已过期记为未命中，其他错误记为出错：Redis 断线表现为出错次数增加，而不是命中率下降。
@@ -265,7 +265,8 @@ articles  18342  1204    0       93.8%     41µs
 
 ```go
 func newTestCache() *cachex.Cache[*article.Article] {
-    return cachex.New[*article.Article](cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0))), time.Minute)
+    c := cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0)))
+    return cachex.New[*article.Article](c, "blog:article:v1:", time.Minute, cachex.Missing(article.ErrNotFound.New))
 }
 
 get := article.NewGet(db, newTestCache())

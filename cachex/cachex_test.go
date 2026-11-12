@@ -3,10 +3,12 @@ package cachex_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/eko/gocache/lib/v4/cache"
@@ -84,11 +86,11 @@ func counter(n *atomic.Int64, v *article, err error) func(context.Context) (*art
 
 func TestRemember(t *testing.T) {
 	ctx := context.Background()
-	c := cachex.New[*article](cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0))), 10*time.Minute)
+	c := cachex.New[*article](cache.New[string](gocachestore.NewGoCache(memory.New(time.Minute, 0))), "article:", 10*time.Minute)
 	var loads atomic.Int64
 	load := counter(&loads, &article{ID: 1, Title: "hello"}, nil)
 	for range 3 {
-		got, err := c.Remember(ctx, "article:1", load)
+		got, err := c.Remember(ctx, "1", load)
 		if err != nil || got.Title != "hello" {
 			t.Fatalf("got %+v err %v", got, err)
 		}
@@ -96,10 +98,10 @@ func TestRemember(t *testing.T) {
 	if loads.Load() != 1 {
 		t.Fatalf("loaded %d times", loads.Load())
 	}
-	if err := c.Forget(ctx, "article:1"); err != nil {
+	if err := c.Forget(ctx, "1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Remember(ctx, "article:1", load); err != nil || loads.Load() != 2 {
+	if _, err := c.Remember(ctx, "1", load); err != nil || loads.Load() != 2 {
 		t.Fatalf("after forget: loaded %d times, err %v", loads.Load(), err)
 	}
 }
@@ -107,7 +109,7 @@ func TestRemember(t *testing.T) {
 // 热点键过期时，并发的读取只加载一次，每个调用者得到独立的一份。
 func TestConcurrentLoadsMerge(t *testing.T) {
 	ctx := context.Background()
-	c := cachex.New[*article](newFake(), time.Minute)
+	c := cachex.New[*article](newFake(), "", time.Minute)
 	var loads atomic.Int64
 	release := make(chan struct{})
 	load := func(context.Context) (*article, error) {
@@ -147,7 +149,7 @@ func TestConcurrentLoadsMerge(t *testing.T) {
 
 // 一个调用者取消只影响它自己，加载继续，其他调用者得到结果。
 func TestCallerCancellation(t *testing.T) {
-	c := cachex.New[*article](newFake(), time.Minute)
+	c := cachex.New[*article](newFake(), "", time.Minute)
 	started, release := make(chan struct{}), make(chan struct{})
 	var loadErr atomic.Value
 	load := func(ctx context.Context) (*article, error) {
@@ -183,7 +185,7 @@ func TestCallerCancellation(t *testing.T) {
 
 func TestLoadErrorsAndPanics(t *testing.T) {
 	ctx := context.Background()
-	c := cachex.New[*article](newFake(), time.Minute)
+	c := cachex.New[*article](newFake(), "", time.Minute)
 	var loads atomic.Int64
 	boom := errors.New("database down")
 	for range 2 {
@@ -200,21 +202,12 @@ func TestLoadErrorsAndPanics(t *testing.T) {
 	}
 }
 
-// 空结果缓存约一分钟，过期时间都加上至多 10% 的抖动。
+// 过期时间加上至多 10% 的抖动。
 func TestTTL(t *testing.T) {
 	ctx := context.Background()
 	f := newFake()
-	c := cachex.New[*article](f, 10*time.Minute)
+	c := cachex.New[*article](f, "", 10*time.Minute)
 	var loads atomic.Int64
-	for range 2 {
-		got, err := c.Remember(ctx, "article:404", counter(&loads, nil, nil))
-		if err != nil || got != nil {
-			t.Fatalf("got %+v err %v", got, err)
-		}
-	}
-	if ttl := f.ttl("article:404"); loads.Load() != 1 || ttl < time.Minute || ttl >= time.Minute+6*time.Second {
-		t.Fatalf("missing: loaded %d times, ttl %v", loads.Load(), f.ttl("article:404"))
-	}
 	seen := map[time.Duration]bool{}
 	for i := range 20 {
 		key := "article:" + string(rune('a'+i))
@@ -232,11 +225,70 @@ func TestTTL(t *testing.T) {
 	}
 }
 
+// codeError 像 errorx 的错误一样按错误码匹配。
+type codeError struct{ code string }
+
+func (e *codeError) Error() string { return e.code }
+
+func (e *codeError) Is(target error) bool {
+	t, ok := target.(*codeError)
+	return ok && t.code == e.code
+}
+
+func errNotFound() error { return &codeError{"article.not_found"} }
+
+// Missing 声明的错误缓存约一分钟，期间返回新的同类错误；其他错误和 nil 值照常处理。
+func TestMissing(t *testing.T) {
+	ctx := context.Background()
+	f := newFake()
+	c := cachex.New[*article](f, "article:", 10*time.Minute, cachex.Missing(errNotFound))
+	var loads atomic.Int64
+	notFound := func(context.Context) (*article, error) {
+		loads.Add(1)
+		return nil, errors.Join(errors.New("select"), errNotFound()) // 包装过的错误同样匹配
+	}
+	for range 3 {
+		if _, err := c.Remember(ctx, "404", notFound); !errors.Is(err, errNotFound()) {
+			t.Fatalf("err %v", err)
+		}
+	}
+	if ttl := f.ttl("article:404"); loads.Load() != 1 || ttl < time.Minute || ttl >= time.Minute+6*time.Second {
+		t.Fatalf("missing: loaded %d times, ttl %v", loads.Load(), ttl)
+	}
+
+	// 其他错误不缓存。
+	boom := errors.New("database down")
+	for range 2 {
+		if _, err := c.Remember(ctx, "500", counter(&loads, nil, boom)); !errors.Is(err, boom) {
+			t.Fatalf("err %v", err)
+		}
+	}
+	if loads.Load() != 3 {
+		t.Fatalf("loaded %d times", loads.Load())
+	}
+
+	// nil 是普通的值，按 ttl 缓存。
+	for range 2 {
+		if got, err := c.Remember(ctx, "nil", counter(&loads, nil, nil)); err != nil || got != nil {
+			t.Fatalf("got %+v err %v", got, err)
+		}
+	}
+	if ttl := f.ttl("article:nil"); loads.Load() != 4 || ttl < 10*time.Minute {
+		t.Fatalf("nil: loaded %d times, ttl %v", loads.Load(), ttl)
+	}
+
+	// 没有声明 Missing 的 Cache 把标记当作无法解码的内容，重新加载。
+	plain := cachex.New[*article](f, "article:", 10*time.Minute)
+	if got, err := plain.Remember(ctx, "404", counter(&loads, &article{ID: 404}, nil)); err != nil || got.ID != 404 {
+		t.Fatalf("plain got %+v err %v", got, err)
+	}
+}
+
 // 缓存出错或内容无法解码时直接加载，结果照常返回。
 func TestDegradation(t *testing.T) {
 	ctx := context.Background()
 	f := newFake()
-	c := cachex.New[*article](f, time.Minute)
+	c := cachex.New[*article](f, "", time.Minute)
 	var loads atomic.Int64
 	load := counter(&loads, &article{ID: 1, Title: "hello"}, nil)
 
@@ -258,8 +310,9 @@ func TestDegradation(t *testing.T) {
 
 func TestInvalidArguments(t *testing.T) {
 	for name, f := range map[string]func(){
-		"nil cache": func() { cachex.New[int](nil, time.Minute) },
-		"ttl":       func() { cachex.New[int](newFake(), 0) },
+		"nil cache":   func() { cachex.New[int](nil, "", time.Minute) },
+		"ttl":         func() { cachex.New[int](newFake(), "", 0) },
+		"nil missing": func() { cachex.Missing(nil) },
 	} {
 		func() {
 			defer func() {
@@ -271,3 +324,59 @@ func TestInvalidArguments(t *testing.T) {
 		}()
 	}
 }
+
+// 缓存后端不可用时，每个 Cache 每分钟只记录一条日志，附上省略的条数。
+func TestLogThrottle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var mu sync.Mutex
+		var records []slog.Record
+		old := slog.Default()
+		slog.SetDefault(slog.New(handlerFunc(func(r slog.Record) {
+			mu.Lock()
+			records = append(records, r)
+			mu.Unlock()
+		})))
+		defer slog.SetDefault(old)
+
+		ctx := context.Background()
+		f := newFake()
+		f.getErr, f.setErr = errors.New("connection refused"), errors.New("connection refused")
+		c := cachex.New[*article](f, "", time.Minute)
+		load := func(context.Context) (*article, error) { return &article{ID: 1}, nil }
+		for range 5 {
+			if _, err := c.Remember(ctx, "1", load); err != nil {
+				t.Fatal(err)
+			}
+		}
+		time.Sleep(time.Minute)
+		if _, err := c.Remember(ctx, "1", load); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(records) != 2 {
+			t.Fatalf("%d log records", len(records))
+		}
+		var suppressed int64
+		records[1].Attrs(func(a slog.Attr) bool {
+			if a.Key == "suppressed" {
+				suppressed = a.Value.Int64()
+			}
+			return true
+		})
+		// 前 5 次各有读、写两条，记录了第一条；之后的读被记录，它前面省略了 9 条。
+		if suppressed != 9 {
+			t.Fatalf("suppressed %d", suppressed)
+		}
+	})
+}
+
+type handlerFunc func(slog.Record)
+
+func (h handlerFunc) Enabled(context.Context, slog.Level) bool { return true }
+func (h handlerFunc) Handle(_ context.Context, r slog.Record) error {
+	h(r)
+	return nil
+}
+func (h handlerFunc) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h handlerFunc) WithGroup(string) slog.Handler      { return h }
