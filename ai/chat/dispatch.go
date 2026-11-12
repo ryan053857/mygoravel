@@ -24,6 +24,9 @@ var (
 // dispatchTimeout 是等待 worker 处理请求的时限。Approve 在 worker 上执行工具，可能需要一段时间。
 var dispatchTimeout = 2 * time.Minute
 
+// beforeDone 供测试在 worker 回复 done 之前插入等待，例如等运行结束。
+var beforeDone func(*Run)
+
 // RunOnWorkers 让本实例不执行运行：Start、Notify、Approve、Reject，以及基于它们的 Submit 和 Send，
 // 把请求转交给调用了 Runs.Serve 的实例（通常是 worker 进程）。返回的运行是 worker 上那次运行的镜像，
 // 事件、插话、停止的用法与本地的运行相同。需要 Cluster，否则 NewRuns panic。
@@ -226,17 +229,26 @@ func (rs *Runs) serveOne(req dispatchReq) {
 	out := dispatchReply{Kind: "done", Error: encodeError(err)}
 	if run != nil {
 		out.Run = run.ID
+		if beforeDone != nil {
+			beforeDone(run)
+		}
 	}
 	reply(out)
 }
 
-// getRun 返回对话中 ID 为 runID 的运行的镜像。镜像可能先连到刚结束的上一次运行，短时间内重试。
+// getRun 返回对话中 ID 为 runID 的运行的镜像。本实例可能还保留着上一次运行的镜像，短时间内重试。
 func (rs *Runs) getRun(ctx context.Context, userID, sessionID, runID string) (*Run, error) {
+	key := rs.key(userID, sessionID)
 	deadline := time.Now().Add(replyTimeout)
 	for {
-		r, err := rs.Get(ctx, userID, sessionID)
-		if err != nil {
-			return nil, err
+		rs.mu.Lock()
+		r := rs.runs[key]
+		rs.mu.Unlock()
+		if r == nil || r.ID != runID {
+			var err error
+			if r, err = rs.cluster.mirror(ctx, rs, key, runID); err != nil {
+				return nil, err
+			}
 		}
 		if r != nil && r.ID == runID {
 			return r, nil

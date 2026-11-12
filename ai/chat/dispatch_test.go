@@ -150,6 +150,24 @@ func TestWorkersApproval(t *testing.T) {
 	}
 }
 
+// 运行在 worker 回复之前就结束、对话锁已经释放时，web 仍然拿到这次运行的镜像（#173）。
+func TestWorkersRunFinishedBeforeReply(t *testing.T) {
+	defer chat.SetReplyTimeout(500 * time.Millisecond)()
+	defer chat.SetBeforeDone(func(r *chat.Run) {
+		<-r.Done()
+		time.Sleep(50 * time.Millisecond) // 等 worker 释放对话锁
+	})()
+	d := newDeployment(t, chattest.NewModel(chattest.Text("好")), nil, 1)
+	r, err := d.web.Start(context.Background(), "u1", "c1", model.NewUserMessage("hi"))
+	if err != nil || r == nil {
+		t.Fatalf("start: %v %v", r, err)
+	}
+	names, _ := collect(t, r, "")
+	if !strings.Contains(strings.Join(names, " "), chat.EventText) {
+		t.Fatalf("events %q", names)
+	}
+}
+
 func TestWorkersUnavailable(t *testing.T) {
 	defer chat.SetReplyTimeout(200 * time.Millisecond)()
 	ctx := context.Background()

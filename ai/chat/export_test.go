@@ -15,3 +15,10 @@ func SetReplyTimeout(d time.Duration) func() {
 	replyTimeout = d
 	return func() { replyTimeout = old }
 }
+
+// SetBeforeDone 供测试在 worker 回复 done 之前插入等待，返回恢复函数。
+func SetBeforeDone(f func(*Run)) func() {
+	old := beforeDone
+	beforeDone = f
+	return func() { beforeDone = old }
+}

@@ -407,7 +407,7 @@ func (rs *Runs) Get(ctx context.Context, userID, sessionID string) (*Run, error)
 	if rs.cluster == nil {
 		return r, nil
 	}
-	return rs.cluster.mirror(ctx, rs, key)
+	return rs.cluster.mirror(ctx, rs, key, "")
 }
 
 // Steer 把消息插入对话正在进行的运行，见 Run.Steer。对话没有在运行时返回 ErrFinished。

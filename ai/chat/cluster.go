@@ -404,10 +404,15 @@ func (c *cluster) held(ctx context.Context, key session.Key) (bool, error) {
 }
 
 // mirror 为其他实例上正在进行的运行建立镜像；没有运行或运行所在的实例没有回应时返回 nil。
-func (c *cluster) mirror(ctx context.Context, rs *Runs, key session.Key) (*Run, error) {
-	held, err := c.held(ctx, key)
-	if err != nil || !held {
-		return nil, err
+//
+// want 非空时只接受这次运行的快照，并且不先检查对话锁：转交的请求已经开始了这次运行，
+// 它可能在请求方建立镜像之前就结束、释放了锁，而运行所在的实例在保留期内仍然回应快照。
+func (c *cluster) mirror(ctx context.Context, rs *Runs, key session.Key, want string) (*Run, error) {
+	if want == "" {
+		held, err := c.held(ctx, key)
+		if err != nil || !held {
+			return nil, err
+		}
 	}
 	sub := c.hub.Subscribe(c.runTopic(key)) // 先订阅再请求快照，期间的事件不会漏掉
 	req := uuid.NewString()
@@ -433,7 +438,7 @@ wait:
 				continue
 			}
 			switch {
-			case m.Kind == "snapshot" && m.Req == req:
+			case m.Kind == "snapshot" && m.Req == req && (want == "" || m.Run == want):
 				runID = m.Run
 				snap = append(snap, m.Events...)
 				if m.Last {
