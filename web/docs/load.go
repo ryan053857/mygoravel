@@ -33,6 +33,8 @@ type page struct {
 	// body 是渲染好的正文，其中的 label 在每次请求时替换（localize）。
 	body string
 	toc  []heading
+	// entries 是这一页的搜索索引，加载完成后按顺序合并到 tree.entries。
+	entries []entry
 	// content 报告页面有正文。目录的首页没有正文时显示目录中的页面列表，也不出现在侧边栏中。
 	content bool
 	// section 非 nil 时，这一页是这个目录的首页。
@@ -63,6 +65,8 @@ type tree struct {
 	home  *page
 	pages map[string]*page  // 按 path
 	files map[string]string // Markdown 之外的文件（例如图片）和它们的 ETag
+	// entries 是搜索索引，按侧边栏的顺序。
+	entries []entry
 }
 
 // meta 是文档开头的 front matter。
@@ -139,6 +143,9 @@ func load(fsys fs.FS, prefix string, rawHTML bool) (*tree, error) {
 		if other, ok := t.pages[p.path]; ok {
 			return fmt.Errorf("%s and %s have the same address /%s", other.file, name, p.path)
 		}
+		if p.path == searchPath {
+			return fmt.Errorf("%s: the address /%s is reserved for search", name, searchPath)
+		}
 		t.pages[p.path] = p
 		byFile[name] = p
 		parsed = append(parsed, parsedPage{page: p, src: src, doc: doc})
@@ -186,6 +193,7 @@ func load(fsys fs.FS, prefix string, rawHTML bool) (*tree, error) {
 			continue
 		}
 		alerts(pp.doc, pp.src)
+		pp.page.entries = index(pp.page, pp.doc, pp.src)
 		pp.page.toc = outline(pp.doc, pp.src)
 		var b bytes.Buffer
 		if err := md.Renderer().Render(&b, pp.src, pp.doc); err != nil {
@@ -219,6 +227,18 @@ func load(fsys fs.FS, prefix string, rawHTML bool) (*tree, error) {
 		}
 		if i < len(seq)-1 {
 			p.next = seq[i+1]
+		}
+	}
+
+	// 搜索索引按侧边栏的顺序，不在侧边栏中的页面（没有正文的目录首页）排在后面。
+	inSeq := map[*page]bool{}
+	for _, p := range seq {
+		inSeq[p] = true
+		t.entries = append(t.entries, p.entries...)
+	}
+	for _, pp := range parsed {
+		if !inSeq[pp.page] {
+			t.entries = append(t.entries, pp.page.entries...)
 		}
 	}
 	return t, nil

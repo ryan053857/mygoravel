@@ -1186,6 +1186,7 @@ ${width}px
 (!x)
 (!y
 ($
+($event.target.closest(
 (&:where([data-orientation=
 ((!event
 (((_middlewareData$flip2
@@ -11165,6 +11166,7 @@ ${width}px
 <line
 <linearGradient
 <main
+<mark
 <meta
 <nav
 <noscript>
@@ -11251,6 +11253,7 @@ ${width}px
 >Toggle
 >x</span>
 >{
+>›
 >删除</button>
 ?
 ?.closest(
@@ -11322,6 +11325,8 @@ ${width}px
 @childrenOr(n.label)
 @childrenOr(progressLabel(s))
 @childrenOr(utils.IfElse(is.required,
+@click.outside=
+@click=
 @collapsible.Collapsible(collapsible.Props{DefaultOpen:
 @collapsible.Content()
 @combobox.Combobox()
@@ -11385,6 +11390,7 @@ ${width}px
 @floating-ui/react-dom
 @floating-ui/utils/dom,
 @floating-ui/utils/dom:
+@focus
 @formExample()
 @formExampleMenu()
 @icon.ArrowDown()
@@ -11443,8 +11449,10 @@ ${width}px
 @icon.X()
 @icon.X(icon.Props{Attributes:
 @icon.X(icon.Props{Class:
+@input
 @input.Input(input.Props{
 @input.Input(input.Props{ID:
+@input.Input(input.Props{Type:
 @inputgroup.Addon()
 @inputgroup.Addon(inputgroup.AddonProps{Align:
 @inputgroup.Button(inputgroup.ButtonProps{
@@ -11457,8 +11465,10 @@ ${width}px
 @itemLabel(label)
 @itemLabel(s.labelOf(p.Value))
 @itemLabel(s.labelOf(s.value))
+@keydown.escape=
 @legendContent(legendItems(configFrom(ctx),
 @m.Icon()
+@main
 @md/field-group:*:data-[slot=field-label]:flex-auto
 @md/field-group:*:w-auto
 @md/field-group:flex-row
@@ -11480,7 +11490,6 @@ ${width}px
 @p.Head
 @p.Icon()
 @p.Logo(icon.Props{Class:
-@pageView(v)
 @pagination.Content()
 @pagination.Ellipsis()
 @pagination.Item()
@@ -11495,6 +11504,8 @@ ${width}px
 @renderAs(*p.Render,
 @responsiveContainer()
 @returns
+@searchBox(v)
+@searchResults(v,
 @see
 @selectcomp.Content()
 @selectcomp.Group()
@@ -11641,7 +11652,7 @@ ActionProps
 Actions
 Actions(props
 ActionsProps
-Actions，正文右侧是本页目录。
+Actions，main
 ActivateOnFocus
 Activation
 ActiveBar
@@ -15594,6 +15605,8 @@ Search
 SearchAlert
 SearchCheck
 SearchCode
+SearchResultsID
+SearchResultsID,
 SearchSlash
 SearchX
 Section
@@ -16841,6 +16854,7 @@ ZoomOut
 []float64{r}
 []float64{v},
 []int
+[]result)
 []selectcomp.ItemData{
 []string
 []string,
@@ -17283,6 +17297,7 @@ action,
 action.addEventListener(
 action.remove();
 action:
+action={
 actionChildren
 actionChildren;
 actionProps
@@ -18613,6 +18628,7 @@ bg-foreground
 bg-muted
 bg-popover
 bg-primary
+bg-primary/15
 bg-sidebar
 bg-sidebar-primary
 bg-transparent
@@ -22311,6 +22327,7 @@ delay);
 delay,
 delay.
 delay:
+delay:200ms
 delay;
 delayValue
 delayed
@@ -22720,8 +22737,11 @@ dock
 docs
 docs-prose
 docs.next
+docs.no_results
 docs.overview
 docs.previous
+docs.search
+docs.search_placeholder
 docs.toc
 document
 document,
@@ -23647,6 +23667,8 @@ f.Checked(name),
 f.Error(name)
 f.Value(name)
 f.Value(name),
+f.mark
+f.text
 f;
 faIR
 faIR:
@@ -24107,9 +24129,11 @@ focus-out
 focus-out)
 focus-visible
 focus-visible.
+focus-visible:bg-muted
 focus-visible:border-ring
 focus-visible:outline-1
 focus-visible:outline-hidden
+focus-visible:outline-none
 focus-visible:outline-ring
 focus-visible:ring-1
 focus-visible:ring-[3px]
@@ -25855,8 +25879,11 @@ hx-boost=
 hx-confirm
 hx-confirm=
 hx-delete=
+hx-get
 hx-preserve=
+hx-swap
 hx-target
+hx-trigger
 hyperlinks
 i
 i)
@@ -26210,6 +26237,7 @@ inner:
 inner;
 innerArcAngle
 innerEnd
+innerHTML
 innerR
 innerR,
 innerR;
@@ -27223,6 +27251,7 @@ just
 justify-between
 justify-center
 justify-content
+justify-end
 justify-items
 justify-self-end
 justify-self-start
@@ -27586,6 +27615,8 @@ len(p.Modifiers)
 len(p.ModifiersClassNames)
 len(p.SnapPoints)
 len(props)
+len(r.snippet)
+len(results)
 len(rows)
 len(s.Gaps)
 len(s.items)
@@ -28522,6 +28553,7 @@ max-0.99*step;
 max-age=
 max-h-(--available-height)
 max-h-(--drawer-content-max-height,none)
+max-h-[70vh]
 max-h-[calc(100svh-7rem)]
 max-height),
 max-height:100%;max-width:100%;flex-grow:1;overflow:auto;
@@ -28529,6 +28561,7 @@ max-w-(--available-width)
 max-w-(--skeleton-width)
 max-w-3xl
 max-w-5xl
+max-w-[calc(100vw-2rem)]
 max-w-full
 max-w-lg
 max-w-max
@@ -28862,6 +28895,7 @@ metadata
 metadata.set(toast.id,
 metadata;
 method
+method=
 metronome
 mic
 mic-off
@@ -29241,9 +29275,11 @@ msg),
 msg)})
 mss
 mss)
+mt-0.5
 mt-1
 mt-12
 mt-2
+mt-6
 mt-8
 mt-auto
 much
@@ -30601,6 +30637,7 @@ p)
 p))
 p,
 p-0
+p-1
 p-12
 p-2
 p-4
@@ -32194,6 +32231,7 @@ px,0)
 px-(--cell-size)
 px-1.5
 px-2.5,
+px-3
 px-4
 px.
 px/ms,
@@ -32201,11 +32239,13 @@ px/rem
 px;
 py
 py-2
+py-6
 py-8
 pyramid
 p})
 p（page.Offset）的分页导航，只有一页时不显示。
 q
+q,
 q.PageURL,
 q.SortURL,
 qr-code
@@ -32310,6 +32350,8 @@ r.firstItem;
 r.handleSwipeEnd
 r.handledScrollAnchors);
 r.handledScrollAnchors.add(anchor);
+r.heading.ID
+r.heading.Text
 r.height
 r.icon
 r.icon?.remove();
@@ -32356,6 +32398,7 @@ r.prependRestore;
 r.recalculateHeight
 r.recalculateHeight()),
 r.recalculateHeight();
+r.snippet
 r.spacer
 r.spacer))
 r.spacer);
@@ -33331,6 +33374,8 @@ result?.[prop];
 result[0]
 result[1]
 result[keys[index]]
+results
+results)
 results.
 resumeTimers()
 resumeTimersIfWindowFocused()
@@ -33535,6 +33580,7 @@ rounded-lg
 rounded-md
 rounded-none
 rounded-r-(--cell-radius)
+rounded-sm
 rounded-xl
 roundedBarPath(Math.min(rect.x,
 roundedBarPath(rect.x,
@@ -34122,9 +34168,15 @@ search-code
 search-slash
 search-x
 search;
+searchBox
+searchBox(v
 searchOf(root)
 searchOf(root))
 searchOf(root);
+searchResults
+searchResults(v
+searchView
+searchView(v
 searching.
 second
 second.
@@ -34506,6 +34558,7 @@ shadcn/ui.
 shadcn;
 shadow
 shadow-lg
+shadow-md
 shadow-none
 shall
 shape.
@@ -34791,6 +34844,7 @@ size-3.5
 size-4
 size-6
 size-8
+size-9
 size-auto
 size-full
 size.
@@ -36645,6 +36699,8 @@ templ.SafeURL(fi.URL)
 templ.SafeURL(orDefault(p.Home,
 templ.SafeURL(p.Href)
 templ.SafeURL(v.home())
+templ.SafeURL(v.resultURL(r))
+templ.SafeURL(v.searchURL())
 templ.SafeURL(v.url(c))
 templ.SafeURL(v.url(g.section))
 templ.SafeURL(v.url(p))
@@ -38065,6 +38121,9 @@ v.page.next;
 v.page.prev
 v.page.prev;
 v.page.toc
+v.pageTitle(r.page)
+v.searchURL()
+v.searchURL(),
 v.site.opts.Actions
 v.site.opts.Logo
 v.site.opts.Title
@@ -38478,6 +38537,7 @@ w-56
 w-7
 w-72
 w-[150px]
+w-[28rem]
 w-auto
 w-auto.
 w-fit
@@ -38912,7 +38972,9 @@ wrote,
 x
 x(u)
 x,
+x-data=
 x-line-top
+x-show=
 x.
 x.AxisLine
 x.DataKey,
@@ -39143,6 +39205,7 @@ zooming
 }</h1>
 }</label>
 }</linearGradient>
+}</mark>
 }</p>
 }</span>
 }</textarea>
@@ -39244,6 +39307,7 @@ zooming
 加上序号。
 升序，再点击改为降序；当前排序的列显示方向箭头并带
 取出的提示，
+取回结果，显示在下方的弹层中；回车打开搜索页。
 右侧是顶栏（收起按钮、页面标题、Actions）和
 后台
 图片显示缩略图，可以移除。表单提交的是文件
@@ -39279,14 +39343,18 @@ zooming
 是带标签、说明和错误提示的输入框，值和错误取自
 是开关，标签在左侧，对应表单结构体中的布尔字段。
 是当前的排序参数（key
+是搜索结果的列表，搜索框的弹层和搜索页共用。
+是搜索页的正文区域：没有脚本时也能用，手机上从顶栏的搜索图标进入。
 是操作，例如「新建文章」按钮。
 是放置服务端渲染的对话框的位置，放在布局的
-是文档页：左侧是目录导航，顶栏是展开侧边栏的按钮和
+是文档页的外壳：左侧是目录导航，顶栏是展开侧边栏的按钮、搜索框和
+是正文区域。
 是正文区域：htmx
 是登录、注册、找回密码等页面的居中卡片：上方是名称，卡片中是标题、说明和
 是确认按钮的文字，
 是说明，data-confirm-action
 是追加在
+是顶栏中的搜索框：输入时用
 显示提示：整页渲染时
 显示错误提示，没有错误时显示说明。
 替换中保留（hx-preserve）：验证失败重新渲染表单时，已上传的文件仍然显示。

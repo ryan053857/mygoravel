@@ -243,3 +243,10 @@ func TestFrontMatter(t *testing.T) {
 	assert.Contains(t, get(t, c, "/b"), "<title>乙</title>")
 	assert.Contains(t, get(t, c, "/c"), "<title>c</title>")
 }
+
+func TestNoCookieForVisitors(t *testing.T) {
+	c := newClient(t, docs.Options{Content: help(), Prefix: "/help"})
+	for _, path := range []string{"/help", "/help/_search?q=发票", "/help/getting-started/images/shot.png"} {
+		assert.Empty(t, c.Get(path).Header().Values("Set-Cookie"), path)
+	}
+}

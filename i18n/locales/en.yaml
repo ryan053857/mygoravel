@@ -69,6 +69,9 @@ docs.alert.tip: Tip
 docs.alert.important: Important
 docs.alert.warning: Warning
 docs.alert.caution: Caution
+docs.search: Search
+docs.search_placeholder: Search docs
+docs.no_results: No results
 validation.required: This field is required
 validation.filled: This field must not be empty
 validation.min_length: Must be at least {{.Min}} characters

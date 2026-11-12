@@ -94,8 +94,12 @@ func (s *Site) serve(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	rel = strings.Trim(rel, "/")
+	if rel == searchPath {
+		return s.search(w, r, t)
+	}
 	if p, ok := t.pages[rel]; ok {
-		return web.Render(w, r, http.StatusOK, layout(view{site: s, tree: t, page: p}))
+		v := view{site: s, tree: t, page: p}
+		return web.Render(w, r, http.StatusOK, layout(v, pageView(v)))
 	}
 	if etag, ok := t.files[rel]; ok {
 		w.Header().Set("ETag", etag)
@@ -104,4 +108,15 @@ func (s *Site) serve(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	return web.ErrNotFound.New()
+}
+
+// search 渲染搜索结果：顶栏搜索框的 htmx 请求只返回结果列表，否则返回搜索页。
+func (s *Site) search(w http.ResponseWriter, r *http.Request, t *tree) error {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	results := t.search(q)
+	v := view{site: s, tree: t, page: &page{path: searchPath, title: text(r.Context(), "docs.search")}}
+	if web.IsPartial(r) {
+		return web.Render(w, r, http.StatusOK, searchResults(v, q, results))
+	}
+	return web.Render(w, r, http.StatusOK, layout(v, searchView(v, q, results)))
 }

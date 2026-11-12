@@ -8,6 +8,9 @@ const SidebarID = "web-docs-sidebar"
 // PageID 是正文区域的 ID：侧边栏、正文中指向其他文档的链接、上一页和下一页只用 htmx 替换这个区域。
 const PageID = "docs-page"
 
+// SearchResultsID 是顶栏搜索框下方的结果弹层的 ID。
+const SearchResultsID = "docs-search-results"
+
 // boost 是只替换正文区域的属性：写在侧边栏和正文区域上，其中带 hx-boost 的链接沿用它们。
 var boost = templ.Attributes{
 	"hx-target:inherited": "#" + PageID,
@@ -26,13 +29,26 @@ func (v view) url(p *page) string { return pageURL(v.site.opts.Prefix, p.path) }
 
 func (v view) home() string { return pageURL(v.site.opts.Prefix, "") }
 
-// title 是页面的标题：首页没有标题时为文档的名称。
-func (v view) title() string {
-	if v.page.title == "" {
+func (v view) searchURL() string { return pageURL(v.site.opts.Prefix, searchPath) }
+
+// resultURL 是搜索结果的地址：小节的结果带上标题的锚点。
+func (v view) resultURL(r result) string {
+	if r.heading.ID == "" {
+		return v.url(r.page)
+	}
+	return v.url(r.page) + "#" + r.heading.ID
+}
+
+// pageTitle 是 p 的标题：首页没有标题时为文档的名称。
+func (v view) pageTitle(p *page) string {
+	if p.title == "" {
 		return v.site.opts.Title
 	}
-	return v.page.title
+	return p.title
 }
+
+// title 是页面的标题：首页没有标题时为文档的名称。
+func (v view) title() string { return v.pageTitle(v.page) }
 
 // documentTitle 是 <title>：页面的标题加上文档的名称。
 func (v view) documentTitle() string {

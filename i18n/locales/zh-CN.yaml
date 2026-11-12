@@ -69,6 +69,9 @@ docs.alert.tip: 提示
 docs.alert.important: 重要
 docs.alert.warning: 警告
 docs.alert.caution: 注意
+docs.search: 搜索
+docs.search_placeholder: 搜索文档
+docs.no_results: 没有找到相关内容
 validation.required: 必填
 validation.filled: 不能为空
 validation.min_length: 至少 {{.Min}} 个字符

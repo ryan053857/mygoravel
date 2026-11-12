@@ -3,12 +3,13 @@ package docs
 import (
 	"github.com/axadrn/shadcn-templ/v2/components/collapsible"
 	"github.com/axadrn/shadcn-templ/v2/components/icon"
+	"github.com/axadrn/shadcn-templ/v2/components/input"
 	"github.com/axadrn/shadcn-templ/v2/components/sidebar"
 	"github.com/ryan053857/mygoravel/web/ui"
 )
 
-// layout 是文档页：左侧是目录导航，顶栏是展开侧边栏的按钮和 Actions，正文右侧是本页目录。
-templ layout(v view) {
+// layout 是文档页的外壳：左侧是目录导航，顶栏是展开侧边栏的按钮、搜索框和 Actions，main 是正文区域。
+templ layout(v view, main templ.Component) {
 	@ui.Page(ui.PageProps{Title: v.documentTitle()}) {
 		@sidebar.Provider(sidebar.ProviderProps{ID: SidebarID}) {
 			@sidebar.Sidebar() {
@@ -36,14 +37,18 @@ templ layout(v view) {
 				<header class="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
 					@sidebar.Trigger(sidebar.TriggerProps{Class: "-ml-1", Attributes: templ.Attributes{"aria-label": text(ctx, "ui.sidebar.toggle")}})
 					<a href={ templ.SafeURL(v.home()) } class="truncate text-sm font-semibold md:hidden">{ v.site.opts.Title }</a>
-					<div class="ml-auto flex items-center gap-2">
+					<div class="ml-auto flex flex-1 items-center justify-end gap-2">
+						@searchBox(v)
+						<a href={ templ.SafeURL(v.searchURL()) } class="inline-flex size-9 shrink-0 items-center justify-center rounded-md hover:bg-muted md:hidden" aria-label={ text(ctx, "docs.search") }>
+							@icon.Search(icon.Props{Class: "size-4"})
+						</a>
 						if v.site.opts.Actions != nil {
 							@v.site.opts.Actions
 						}
 						@ui.ThemeToggle()
 					</div>
 				</header>
-				@pageView(v)
+				@main
 			}
 		}
 	}
@@ -166,5 +171,65 @@ templ pageView(v view) {
 				</nav>
 			</aside>
 		}
+	</div>
+}
+
+// searchBox 是顶栏中的搜索框：输入时用 htmx 取回结果，显示在下方的弹层中；回车打开搜索页。
+templ searchBox(v view) {
+	<form action={ templ.SafeURL(v.searchURL()) } method="get" role="search" class="relative hidden w-full max-w-xs md:block" x-data="{ open: false }" @click.outside="open = false" @keydown.escape="open = false">
+		@input.Input(input.Props{Type: "search", Name: "q", Placeholder: text(ctx, "docs.search_placeholder"), Attributes: templ.Attributes{
+			"aria-label":   text(ctx, "docs.search"),
+			"autocomplete": "off",
+			"hx-get":       v.searchURL(),
+			"hx-trigger":   "input changed delay:200ms",
+			"hx-target":    "#" + SearchResultsID,
+			"hx-swap":      "innerHTML",
+			"@focus":       "open = true",
+			"@input":       "open = true",
+		}})
+		<div id={ SearchResultsID } x-show="open" class="absolute right-0 top-full z-50 mt-2 max-h-[70vh] w-[28rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md empty:hidden" @click="if ($event.target.closest('a')) open = false" { boost... }></div>
+	</form>
+}
+
+// searchResults 是搜索结果的列表，搜索框的弹层和搜索页共用。
+templ searchResults(v view, q string, results []result) {
+	if len(results) == 0 && q != "" {
+		<p class="px-3 py-6 text-center text-sm text-muted-foreground">{ text(ctx, "docs.no_results") }</p>
+	}
+	for _, r := range results {
+		<a href={ templ.SafeURL(v.resultURL(r)) } hx-boost="true" class="block rounded-md px-3 py-2 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none">
+			<p class="text-sm font-medium">
+				{ v.pageTitle(r.page) }
+				if r.heading.ID != "" {
+					<span class="text-muted-foreground">› { r.heading.Text }</span>
+				}
+			</p>
+			if len(r.snippet) > 0 {
+				<p class="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+					for _, f := range r.snippet {
+						if f.mark {
+							<mark class="rounded-sm bg-primary/15 text-foreground">{ f.text }</mark>
+						} else {
+							{ f.text }
+						}
+					}
+				</p>
+			}
+		</a>
+	}
+}
+
+// searchView 是搜索页的正文区域：没有脚本时也能用，手机上从顶栏的搜索图标进入。
+templ searchView(v view, q string, results []result) {
+	<div id={ PageID } class="flex flex-1 justify-center px-4 py-8 md:px-8" data-docs-path={ v.searchURL() } { boost... }>
+		<div class="w-full min-w-0 max-w-3xl">
+			<h1 class="text-3xl font-bold tracking-tight">{ text(ctx, "docs.search") }</h1>
+			<form action={ templ.SafeURL(v.searchURL()) } method="get" role="search" class="mt-6" hx-boost="true">
+				@input.Input(input.Props{Type: "search", Name: "q", Value: q, Placeholder: text(ctx, "docs.search_placeholder"), Attributes: templ.Attributes{"aria-label": text(ctx, "docs.search")}})
+			</form>
+			<div class="mt-6 flex flex-col gap-1">
+				@searchResults(v, q, results)
+			</div>
+		</div>
 	</div>
 }

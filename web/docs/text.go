@@ -10,17 +10,20 @@ import (
 
 // fallbacks 是本包的文案 id 和英文的 fallback：context 中没有语言（没有经过 httpx.Locale）时使用。
 var fallbacks = map[string]string{
-	"docs.toc":             "On this page",
-	"ui.sidebar.toggle":    "Toggle sidebar",
-	"docs.previous":        "Previous",
-	"docs.next":            "Next",
-	"docs.overview":        "Overview",
-	"docs.copy":            "Copy",
-	"docs.alert.note":      "Note",
-	"docs.alert.tip":       "Tip",
-	"docs.alert.important": "Important",
-	"docs.alert.warning":   "Warning",
-	"docs.alert.caution":   "Caution",
+	"docs.toc":                "On this page",
+	"ui.sidebar.toggle":       "Toggle sidebar",
+	"docs.previous":           "Previous",
+	"docs.next":               "Next",
+	"docs.overview":           "Overview",
+	"docs.copy":               "Copy",
+	"docs.search":             "Search",
+	"docs.search_placeholder": "Search docs",
+	"docs.no_results":         "No results",
+	"docs.alert.note":         "Note",
+	"docs.alert.tip":          "Tip",
+	"docs.alert.important":    "Important",
+	"docs.alert.warning":      "Warning",
+	"docs.alert.caution":      "Caution",
 }
 
 // text 按请求的语言翻译文案 id。
