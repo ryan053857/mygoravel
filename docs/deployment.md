@@ -344,6 +344,8 @@ logs:
   version: ${APP_VERSION:-}
 ```
 
+配置了 [`telemetry`](telemetry.md#setup) 时，日志还会和指标、链路一起推送到日志平台，标准错误上的日志照常输出。
+
 排查问题时，可以使用响应头 `X-Request-ID` 中的请求 ID，在日志中找到同一请求的访问日志和错误诊断。详见[日志](logging.md)。
 
 <a id="sqlite"></a>

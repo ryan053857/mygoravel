@@ -35,7 +35,7 @@
 - [会话](session.md)
 - [错误处理](errors.md)
 - [日志](logging.md)
-- [指标与链路追踪](telemetry.md)
+- [可观测性](telemetry.md)
 
 ## 深入了解
 

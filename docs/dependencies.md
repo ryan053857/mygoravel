@@ -71,19 +71,29 @@ import (
     "github.com/ryan053857/mygoravel/database/postgres"
     "github.com/ryan053857/mygoravel/lock"
     "github.com/ryan053857/mygoravel/logging"
+    "github.com/ryan053857/mygoravel/telemetry"
     "github.com/uptrace/bun"
+    "go.opentelemetry.io/otel/metric"
+    "go.opentelemetry.io/otel/trace"
 )
 
 // App 是各个运行部分共用的资源，每个进程只装配一次。
 type App struct {
-    cfg    settings.Config
-    db     *bun.DB
-    locker *lock.Locker
+    cfg     settings.Config
+    db      *bun.DB
+    locker  *lock.Locker
+    meters  metric.MeterProvider
+    tracers trace.TracerProvider
 }
 
-// open 安装全局日志器，打开数据库，把关闭操作登记到 stack。
+// open 开启推送，安装全局日志器，打开数据库，把关闭操作登记到 stack。
 func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App, error) {
-    slog.SetDefault(logging.New(cfg.Logs))
+    tel, err := telemetry.Open(ctx, cfg.Telemetry)
+    if err != nil {
+        return nil, err
+    }
+    stack.MustAdd("telemetry", tel.Shutdown)
+    slog.SetDefault(logging.New(cfg.Logs, logging.Export(tel.Logs)))
 
     db, err := database.Open(ctx, postgres.Driver, cfg.Database)
     if err != nil {
@@ -94,9 +104,11 @@ func open(ctx context.Context, cfg settings.Config, stack *cleanup.Stack) (*App,
     })
 
     return &App{
-        cfg:    cfg,
-        db:     db,
-        locker: lock.New(lock.NewDatabase(db)),
+        cfg:     cfg,
+        db:      db,
+        locker:  lock.New(lock.NewDatabase(db)),
+        meters:  tel.Meters,
+        tracers: tel.Tracers,
     }, nil
 }
 
@@ -137,7 +149,7 @@ func Start(ctx context.Context, cfg settings.Config) error {
 }
 ```
 
-`locker` 是[原子锁](locks.md)，[调度器](scheduling.md#multiple-instances)用它在多个实例之间去重。`Worker` 和 `Scheduler` 两个运行部分分别在[队列](queue.md#running-workers)和[定时任务](scheduling.md#running-the-scheduler)两章中介绍。
+`telemetry.Open` 把日志、指标和链路推送到配置的接收端，没有配置时什么也不做，见[可观测性](telemetry.md#setup)。它最先登记，最后关闭，其他资源关闭时记录的日志也能推送出去。`locker` 是[原子锁](locks.md)，[调度器](scheduling.md#multiple-instances)用它在多个实例之间去重。`Worker` 和 `Scheduler` 两个运行部分分别在[队列](queue.md#running-workers)和[定时任务](scheduling.md#running-the-scheduler)两章中介绍。
 
 HTTP 服务在 `internal/bootstrap/http.go` 中：
 

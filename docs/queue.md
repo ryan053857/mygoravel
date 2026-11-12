@@ -356,7 +356,7 @@ worker 领取任务时同时取得一个租约（默认 30 秒），处理期间
 <a id="metrics"></a>
 ### 指标
 
-指标使用 OpenTelemetry 的接口，`a.meters` 是入口中创建的 `MeterProvider`，见[指标与链路追踪](telemetry.md#meter-provider)。`Worker` 创建订阅者时传入它，记录每个任务的等待时长和处理耗时：
+指标使用 OpenTelemetry 的接口，`a.meters` 是入口中创建的 `MeterProvider`，见[推送](telemetry.md#setup)。`Worker` 创建订阅者时传入它，记录每个任务的等待时长和处理耗时：
 
 ```go
 sub := queue.NewSubscriber(queue.Database(a.db), a.cfg.Queue, nil, queue.WithMeterProvider(a.meters))
@@ -393,7 +393,7 @@ func (a *App) Scheduler(*command.Daemon) (func(context.Context) error, error) {
 max by (queue_topic) (queue_job_oldest_ready_age_seconds) > 300
 ```
 
-HTTP 请求和定时任务的指标见[指标与链路追踪](telemetry.md)。
+HTTP 请求和定时任务的指标见[可观测性](telemetry.md)。
 
 [NATS 驱动](#nats-driver)给不出的数据不报告：`queue.jobs` 只有 `ready`、`running` 和 `failed`，没有 `queue.job.oldest_ready_age`，`queue.job.wait` 只记录首次执行。
 

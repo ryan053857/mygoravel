@@ -28,7 +28,7 @@ go get github.com/ryan053857/mygoravel@main
 | 编写接口 | [路由](docs/routing.md) · [请求](docs/requests.md) · [验证](docs/validation.md) · [响应](docs/responses.md) · [会话](docs/session.md) |
 | 渲染页面 | [视图](docs/views.md) · [表单](docs/forms.md) · [界面组件](docs/components.md) · [服务端推送](docs/sse.md) · [广播](docs/broadcasting.md) · [实时频道](docs/realtime.md) |
 | 查看全部路由 | [routes 命令](docs/commands.md#routes-command) |
-| 处理错误与日志 | [错误处理](docs/errors.md) · [日志](docs/logging.md) · [指标与链路追踪](docs/telemetry.md) |
+| 处理错误与日志 | [错误处理](docs/errors.md) · [日志](docs/logging.md) · [可观测性](docs/telemetry.md) |
 | 在后台执行任务 | [队列](docs/queue.md) · [定时任务](docs/scheduling.md) |
 | 防止任务重复执行 | [原子锁](docs/locks.md) |
 | 上传和管理文件 | [文件存储与上传](docs/filesystem.md) |

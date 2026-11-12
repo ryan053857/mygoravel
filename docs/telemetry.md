@@ -1,8 +1,9 @@
-# 指标与链路追踪
+# 可观测性
 
 - [简介](#introduction)
+- [推送](#setup)
+    - [自己创建 Provider](#custom-providers)
 - [指标](#metrics)
-    - [创建 MeterProvider](#meter-provider)
     - [HTTP 请求](#http-metrics)
     - [队列](#queue-metrics)
     - [定时任务](#schedule-metrics)
@@ -10,7 +11,6 @@
     - [实时频道](#realtime-metrics)
     - [告警示例](#alerting)
 - [链路追踪](#tracing)
-    - [创建 TracerProvider](#tracer-provider)
     - [HTTP 请求](#http-tracing)
     - [队列](#queue-tracing)
     - [定时任务](#schedule-tracing)
@@ -19,37 +19,57 @@
 <a id="introduction"></a>
 ## 简介
 
-框架的 HTTP 服务、队列、调度器、限流器和实时频道都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，前三者还报告链路。框架只依赖 OpenTelemetry 的接口，数据导出到哪里由应用决定：Prometheus、Jaeger、Grafana、Datadog 等都能接收。
+框架的 HTTP 服务、队列、调度器、限流器和实时频道都可以报告 [OpenTelemetry](https://opentelemetry.io/docs/languages/go/) 指标，前三者还报告链路。`telemetry` 包把这些指标、链路和应用的日志一起推送到一个 OTLP 接收端，例如 [OpenObserve](https://openobserve.ai/)，不需要另外部署收集器。
 
 这里只有框架自己的组件。数据库、Redis、NATS 这些依赖由各自的生态报告，例如 Bun 的 [bunotel](https://pkg.go.dev/github.com/uptrace/bun/extra/bunotel)、go-redis 的 [redisotel](https://pkg.go.dev/github.com/redis/go-redis/extra/redisotel/v9)，或者服务器一侧的 exporter，把同一个 Provider 交给它们即可。
 
-和其他功能一样，两者都需要显式开启：把同一个 `MeterProvider`、`TracerProvider` 交给需要报告的部分即可，没有传入的部分不报告。
+和其他功能一样，指标和链路都需要显式开启：把 `MeterProvider`、`TracerProvider` 交给需要报告的部分，没有传入的部分不报告。
 
-<a id="metrics"></a>
-## 指标
+<a id="setup"></a>
+## 推送
 
-<a id="meter-provider"></a>
-### 创建 MeterProvider
+在配置文件的 `telemetry` 段填写接收端：
 
-在[入口](dependencies.md#assembling-the-application)的 `open` 中创建 `MeterProvider`，登记到 `cleanup.Stack`，并保存在 `App` 中。下面用 OTLP 定期把指标推送出去：
+```yaml
+telemetry:
+  endpoint: ${OTLP_ENDPOINT:-}    # 例如 http://openobserve:5080/api/default
+  headers:
+    Authorization: Basic ${OTLP_TOKEN:-}
+  service: blog
+  version: ${APP_VERSION:-}
+```
+
+- `endpoint` 是基础地址，日志、指标、链路分别发往其下的 `/v1/logs`、`/v1/metrics`、`/v1/traces`。为空时不推送，本地开发不用配置。
+- `headers` 附加到每个请求，通常是认证信息。
+- `service` 为空时取可执行文件名；`version` 为空时取构建信息中的模块版本。
+- `sample_ratio` 是新链路的采样比例，默认 `1`，即全部记录。请求带着调用方的链路进来时，跟随调用方的决定。
+
+把 `telemetry.Config` 放进[根配置](configuration.md#loading-configuration)，在[入口](dependencies.md#assembling-the-application)的 `open` 中最先打开它：
 
 ```go
-import (
-    "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
-    sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-)
-
-exporter, err := otlpmetrichttp.New(ctx)
+tel, err := telemetry.Open(ctx, cfg.Telemetry)
 if err != nil {
     return nil, err
 }
-meters := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)))
-stack.MustAdd("metrics", meters.Shutdown)
+stack.MustAdd("telemetry", tel.Shutdown)
+slog.SetDefault(logging.New(cfg.Logs, logging.Export(tel.Logs)))
 ```
 
-接收地址和服务名来自 OpenTelemetry 的标准环境变量，例如 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`、`OTEL_SERVICE_NAME=blog`。Prometheus 3 可以直接接收 OTLP。
+`tel.Meters`、`tel.Tracers` 保存在 `App` 的 `meters`、`tracers` 字段中，下面各节把它们交给需要报告的部分。`tel.Shutdown` 最先登记、最后执行，发出缓冲中的数据，其他资源关闭时记录的日志也能推送出去。
 
-推送的好处是 worker、调度器这些不提供 HTTP 服务的进程也能报告指标。如果要让 Prometheus 来抓取，改用 `go.opentelemetry.io/otel/exporters/prometheus` 作为 Reader，每个进程都需要提供 `/metrics`。
+`logging.Export` 让日志同时推送出去，经过和标准错误上同样的级别和格式化。`ctx` 中有 span 时，日志记录带上它的链路，日志平台可以从一条日志跳到它所在的链路。标准错误上的日志照常输出，启动阶段的错误和接收端不可用时的排查都靠它。只想推送指标和链路时，不传 `logging.Export` 即可。
+
+三种数据共用一组资源属性：`service.name`、`service.version`、`service.instance.id`、主机名和进程号。`service.instance.id` 每个进程随机生成，同一服务的 `serve`、`work` 进程和多个副本靠它区分，指标不会写进同一条序列。
+
+推送在后台批量进行，接收端变慢不会阻塞请求，缓冲满时丢弃新数据。推送失败记录为 `component=telemetry` 的错误日志。
+
+<a id="custom-providers"></a>
+### 自己创建 Provider
+
+框架组件只依赖 OpenTelemetry 的接口，不一定要用 `telemetry`。需要尾部采样（只保留出错或慢的链路）、同时发往多个后端，或者让 Prometheus 来抓取时，用 OpenTelemetry 的 SDK 自己创建 Provider，或者推送到 [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) 由它处理。日志用 `logging.Export` 接入任意 `LoggerProvider`。
+
+<a id="metrics"></a>
+## 指标
 
 <a id="http-metrics"></a>
 ### HTTP 请求
@@ -137,27 +157,6 @@ increase(schedule_task_duration_seconds_count{schedule_task="reports:daily", sch
 
 一个请求发布了任务、任务又调用了其他服务时，链路追踪把它们串成一条链路，可以看到每一步的耗时和在哪一步出错。
 
-<a id="tracer-provider"></a>
-### 创建 TracerProvider
-
-和 `MeterProvider` 一样在 `open` 中创建，保存在 `App` 中：
-
-```go
-import (
-    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-    sdktrace "go.opentelemetry.io/otel/sdk/trace"
-)
-
-traceExporter, err := otlptracehttp.New(ctx)
-if err != nil {
-    return nil, err
-}
-tracers := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExporter))
-stack.MustAdd("tracing", tracers.Shutdown)
-```
-
-接收地址、服务名和采样率同样来自标准环境变量，例如 `OTEL_TRACES_SAMPLER=parentbased_traceidratio`、`OTEL_TRACES_SAMPLER_ARG=0.1` 只记录 10% 的链路。
-
 框架按 [W3C Trace Context](https://www.w3.org/TR/trace-context/) 读写链路，不需要设置全局的 propagator。
 
 <a id="http-tracing"></a>
@@ -198,4 +197,6 @@ sched := schedule.New(a.locker, a.cfg.Schedule, nil,
 ### 日志
 
 `ctx` 中有 span 时，用它记录的日志自动带上 `trace_id` 和 `span_id`，包括访问日志、队列和调度器的日志，以及处理函数里 `slog.InfoContext(ctx, ...)` 记录的业务日志。在链路追踪系统中可以按 `trace_id` 找到一条链路的全部日志。
+
+用 [`logging.Export`](#setup) 推送的日志把链路写在记录本身，而不是作为 `trace_id` 字段，日志平台据此在日志和链路之间跳转。
 

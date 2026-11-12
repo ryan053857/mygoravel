@@ -35,16 +35,17 @@ type rule struct {
 // rules 的键是相对模块根的包路径，规则对这个包和它的子包生效；子包另有规则时用子包的（最长的键优先）。
 // 同一条规则内的包可以互相引用。internal 中是测试辅助包，可以引用任何框架包。
 var rules = map[string]rule{
-	"cleanup":  {layerFoundation, nil},
-	"config":   {layerFoundation, nil},
-	"errorx":   {layerFoundation, nil},
-	"i18n":     {layerFoundation, nil},
-	"hashing":  {layerFoundation, nil},
-	"identity": {layerFoundation, []string{"errorx"}},
-	"logging":  {layerFoundation, []string{"errorx"}},
-	"page":     {layerFoundation, []string{"errorx"}},
-	"crypt":    {layerFoundation, []string{"errorx"}},
-	"form":     {layerFoundation, []string{"i18n"}},
+	"cleanup":   {layerFoundation, nil},
+	"config":    {layerFoundation, nil},
+	"errorx":    {layerFoundation, nil},
+	"i18n":      {layerFoundation, nil},
+	"hashing":   {layerFoundation, nil},
+	"identity":  {layerFoundation, []string{"errorx"}},
+	"logging":   {layerFoundation, []string{"errorx"}},
+	"page":      {layerFoundation, []string{"errorx"}},
+	"crypt":     {layerFoundation, []string{"errorx"}},
+	"form":      {layerFoundation, []string{"i18n"}},
+	"telemetry": {layerFoundation, nil},
 
 	"lock":       {layerInfrastructure, nil},
 	"outbound":   {layerInfrastructure, nil},

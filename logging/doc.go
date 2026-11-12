@@ -7,6 +7,7 @@
 //		logging.Format(slogformatter.PIIFormatter("user")), // 字段格式化（slog-formatter）
 //		logging.Pipe(sampling),                             // Handler 中间件（slog-multi）
 //		logging.Fanout(slackHandler),                       // 追加输出
+//		logging.Export(tel.Logs),                           // 推送到 OpenTelemetry（telemetry 包）
 //	))
 //
 // 框架组件的 Logger 参数为 nil 时使用 slog.Default()。

@@ -293,7 +293,7 @@ router.Use(httpx.Metrics(a.meters))
 router.Use(httpx.Defaults(a.cfg.HTTP, nil, nil)...)
 ```
 
-`a.meters` 的创建和指标的属性见[指标与链路追踪](telemetry.md#http-metrics)。为每个请求创建链路的 `httpx.Tracing` 也在那里介绍。
+`a.meters` 的创建和指标的属性见[可观测性](telemetry.md#http-metrics)。为每个请求创建链路的 `httpx.Tracing` 也在那里介绍。
 
 <a id="custom-stack"></a>
 ## 自行组装

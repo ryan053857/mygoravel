@@ -328,7 +328,7 @@ dropHealthChecks := slogmulti.NewHandleInlineMiddleware(
 <a id="custom-handlers"></a>
 ### 使用自己的 slog Handler
 
-已有的第三方 Handler（例如 OpenTelemetry 的日志桥接）用 `logging.Fanout` 接入即可，它会得到完整的 context 字段和格式化结果。
+已有的第三方 Handler 用 `logging.Fanout` 接入即可，它会得到完整的 context 字段和格式化结果。推送到 OpenTelemetry 的日志平台用 `logging.Export`，见[推送](telemetry.md#setup)。
 
 如果要完全绕开 `logging.New`，自己构造日志器，请用 `logging.NewContextHandler` 包装 Handler，日志才能读取 context 中的关联字段：
 

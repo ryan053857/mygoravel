@@ -12,6 +12,7 @@ import (
 	"github.com/lmittmann/tint"
 	slogformatter "github.com/samber/slog-formatter"
 	slogmulti "github.com/samber/slog-multi"
+	"go.opentelemetry.io/otel/log"
 	"golang.org/x/term"
 )
 
@@ -94,6 +95,7 @@ type options struct {
 	formatters  []slogformatter.Formatter
 	middlewares []slogmulti.Middleware
 	handlers    []slog.Handler
+	export      log.LoggerProvider
 }
 
 // Format 追加字段格式化规则，例如 slogformatter.PIIFormatter("user")。
@@ -115,7 +117,7 @@ func Fanout(handlers ...slog.Handler) Option {
 
 // New 按 cfg 构造 *slog.Logger，处理链由外到内为：
 //
-//	context 字段 → 组件级别 → service / version → Pipe 中间件 → 格式化 → 基础输出 + Fanout 输出
+//	context 字段 → 组件级别 → service / version → Pipe 中间件 → 格式化 → 基础输出 + Fanout 输出 + Export
 //
 // 格式化默认包含 ErrorFormatter；cfg.TimeZone 非空时还会把时间值转换到该时区。
 // New 不修改 slog.Default，通常在入口处用 slog.SetDefault 安装它。cfg 不合法时 panic。
@@ -130,8 +132,12 @@ func New(cfg Config, opts ...Option) *slog.Logger {
 	loc, _ := cfg.location()
 
 	h := baseHandler(cfg, loc)
-	if len(o.handlers) > 0 {
-		h = slog.NewMultiHandler(append([]slog.Handler{h}, o.handlers...)...)
+	handlers := o.handlers
+	if o.export != nil {
+		handlers = append(handlers, newExportHandler(o.export, cfg))
+	}
+	if len(handlers) > 0 {
+		h = slog.NewMultiHandler(append([]slog.Handler{h}, handlers...)...)
 	}
 	formatters := append([]slogformatter.Formatter{ErrorFormatter()}, o.formatters...)
 	if loc != nil {
@@ -157,18 +163,22 @@ func New(cfg Config, opts ...Option) *slog.Logger {
 	return slog.New(NewContextHandler(h))
 }
 
+// minLevel 返回 Level 和各组件级别中最低的一个。输出放行到这个级别，由 componentHandler 负责按组件过滤。
+func (c Config) minLevel() slog.Level {
+	level := c.Level
+	for _, lv := range c.Levels {
+		level = min(level, lv)
+	}
+	return level
+}
+
 // baseHandler 按格式写入 cfg.Writer；loc 非空时把记录时间转换到该时区。
 func baseHandler(cfg Config, loc *time.Location) slog.Handler {
 	w := cfg.Writer
 	if w == nil {
 		w = os.Stderr
 	}
-	// 组件级别可能低于 Level，基础输出放行到最低的那个，由 componentHandler 负责过滤。
-	level := cfg.Level
-	for _, lv := range cfg.Levels {
-		level = min(level, lv)
-	}
-	hopts := &slog.HandlerOptions{AddSource: cfg.AddSource, Level: level}
+	hopts := &slog.HandlerOptions{AddSource: cfg.AddSource, Level: cfg.minLevel()}
 	if loc != nil {
 		hopts.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
 			if len(groups) == 0 && a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {

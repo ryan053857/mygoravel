@@ -13,17 +13,19 @@ import (
 	"github.com/ryan053857/mygoravel/mail/smtp"
 	"github.com/ryan053857/mygoravel/queue"
 	"github.com/ryan053857/mygoravel/schedule"
+	"github.com/ryan053857/mygoravel/telemetry"
 )
 
 type Config struct {
-	HTTP     httpx.Config    `yaml:"http"`
-	Logs     logging.Config  `yaml:"logs"`
-	Database database.Config `yaml:"database"`
-	Auth     auth.Config     `yaml:"auth"`
-	Crypt    crypt.Config    `yaml:"crypt"`
-	Mail     MailConfig      `yaml:"mail"`
-	Queue    queue.Config    `yaml:"queue"`
-	Schedule schedule.Config `yaml:"schedule"`
+	HTTP      httpx.Config     `yaml:"http"`
+	Logs      logging.Config   `yaml:"logs"`
+	Telemetry telemetry.Config `yaml:"telemetry"`
+	Database  database.Config  `yaml:"database"`
+	Auth      auth.Config      `yaml:"auth"`
+	Crypt     crypt.Config     `yaml:"crypt"`
+	Mail      MailConfig       `yaml:"mail"`
+	Queue     queue.Config     `yaml:"queue"`
+	Schedule  schedule.Config  `yaml:"schedule"`
 }
 
 type MailConfig struct {

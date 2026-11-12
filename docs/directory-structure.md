@@ -149,7 +149,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 功能        apitoken  authz  notification  activity  feature  operation  webhook  sheet/imports  sheet/exports  ai
 入口        httpx  web  session  realtime  command
 基础设施    database  queue  schedule  lock  ratelimit  broadcast  filesystem  mail  pdf  outbound  sheet  document
-基础        errorx  identity  config  cleanup  logging  i18n  page  form  hashing  crypt
+基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt
 ```
 
 分层由[架构测试](contributions.md#architecture-tests)保证，新增的引用违反分层时测试会失败。下面由低到高列出每一层的包。
@@ -168,6 +168,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `hashing` | 密码的单向哈希与重新哈希 | [哈希](hashing.md) |
 | `identity` | 表示已认证的主体，并在 context 中传递；API、页面和实时频道共用的主体确立规则 | [认证](authentication.md) |
 | `logging` | 构造 slog 日志器，传递请求关联字段；`logging/logtest` 用于测试 | [日志](logging.md) |
+| `telemetry` | 把日志、指标和链路用 OTLP 推送到一个接收端 | [可观测性](telemetry.md#setup) |
 | `page` | 固定分页与游标分页的参数和响应结构 | [分页](responses.md#pagination) |
 | `crypt` | 用应用密钥加密数据、签名和校验链接 | [加密与签名链接](encryption.md) |
 | `form` | 按 Huma 标签转换、验证文本形式的字段值，页面表单和表格导入共用 | [表单](forms.md#defining-forms) |
