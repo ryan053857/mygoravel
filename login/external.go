@@ -25,6 +25,13 @@ type External struct {
 	EmailVerified bool
 	// Name 是对方提供的显示名称，供注册页预填，不参与登录。
 	Name string
+	// Claims 是 ID token 的全部声明（login/oauth 的 OpenID Connect 提供方填写），或 Account 读到的原始资料，
+	// 供应用读取 groups 等字段，例如每次登录时把企业 IdP 的分组同步为角色。Realm 不读取、也不保存它。
+	Claims map[string]any
+	// TwoFactor 表示提供方在这次登录中做过多因素认证，由应用按 Claims 判断后设置，例如 ID token 的 amr 含 mfa、otp 或 hwk；
+	// 各家 IdP 的写法不同，框架不自己解读。设置后这次登录的 Auth.Methods 记为 [提供方, idp_mfa]，计入二次验证。
+	// 只对应用信任其 MFA 的提供方设置，例如租户自己的企业 IdP。
+	TwoFactor bool
 }
 
 // externalData 是保存在注册凭证中的、对方确认过的邮箱。
@@ -64,7 +71,11 @@ func (r *Realm) External(ctx context.Context, ext External) (Outcome, error) {
 		return Outcome{}, err
 	}
 	if owner != "" {
-		return r.authenticated(ctx, r.db, owner, tenant, false, id.Kind)
+		methods := []string{id.Kind}
+		if ext.TwoFactor {
+			methods = append(methods, MethodIdPMFA)
+		}
+		return r.authenticated(ctx, r.db, owner, tenant, false, methods...)
 	}
 
 	var data externalData

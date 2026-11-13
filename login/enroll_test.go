@@ -85,6 +85,11 @@ func TestRequireTwoFactorExternal(t *testing.T) {
 	if out, err := e.realm.External(ctx, login.External{Provider: "passkey", Subject: "cred1"}); err != nil || out.Subject.ID != "c1" {
 		t.Fatalf("passkey: %+v %v", out, err)
 	}
+	// 提供方做过多因素认证（应用按 amr 设置 TwoFactor）时算作二次验证，直接成功。
+	mfa, err := e.realm.External(ctx, login.External{Provider: "github", Subject: "42", TwoFactor: true})
+	if err != nil || mfa.Subject.ID != "c1" || strings.Join(mfa.Subject.Auth.Methods, " ") != "github idp_mfa" || !mfa.Subject.Auth.TwoFactor() {
+		t.Fatalf("idp mfa: %+v %v", mfa, err)
+	}
 
 	reg, err := e.realm.Register(ctx, e.db, e.proof(t, ctx, login.SignIn, login.Email("new@example.com")), ref("c2"))
 	if err != nil || reg.Enroll == "" || reg.Subject.ID != "" {

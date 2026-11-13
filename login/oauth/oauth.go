@@ -55,10 +55,22 @@ type Config struct {
 	NoPKCE bool
 	// FormPost 让提供方用表单 POST 提交回调（response_mode=form_post），例如 Apple 申请邮箱或姓名时要求这样做。
 	FormPost bool
+	// Client 发出全部请求：发现文档、校验 ID token 的公钥、换取 token，以及 Account 读取账号。
+	// Issuer 来自租户后台填写的企业 SSO 等不可信来源时，必须使用 outbound 的客户端，拒绝访问内网地址；
+	// 发现文档中的 token 端点同样不可信。为 nil 时使用 http.DefaultClient。
+	Client *http.Client
 }
 
-// Account 用换到的 token 读取第三方账号，用于只支持 OAuth 2.0 的提供方。client 会在请求中带上 token。
-// 返回值的 Provider 由 New 的 Config.Provider 填入。
+// with 让 ctx 中的出站请求使用 Config.Client。
+func (cfg Config) with(ctx context.Context) context.Context {
+	if cfg.Client == nil {
+		return ctx
+	}
+	return oidc.ClientContext(ctx, cfg.Client)
+}
+
+// Account 用换到的 token 读取第三方账号，用于只支持 OAuth 2.0 的提供方。client 会在请求中带上 token，
+// 并使用 Config.Client 发出请求。返回值的 Provider 由 New 的 Config.Provider 填入；需要时把读到的原始资料放进 Claims。
 type Account func(ctx context.Context, client *http.Client, tok *oauth2.Token) (login.External, error)
 
 // Provider 是一个第三方登录提供方，可以并发使用。
@@ -79,7 +91,7 @@ func Discover(ctx context.Context, cfg Config) (*Provider, error) {
 		return nil, errors.New("oauth: Config.Issuer is required")
 	}
 	// 发现文档之后的公钥下载使用这个 ctx，不能随请求取消。
-	provider, err := oidc.NewProvider(context.WithoutCancel(ctx), cfg.Issuer)
+	provider, err := oidc.NewProvider(cfg.with(context.WithoutCancel(ctx)), cfg.Issuer)
 	if err != nil {
 		return nil, errors.Wrapf(err, "oauth: discover %s", cfg.Issuer)
 	}
@@ -209,6 +221,7 @@ func (p *Provider) exchange(ctx context.Context, conf oauth2.Config, code, verif
 	if code == "" {
 		return login.External{}, ErrInvalid.New()
 	}
+	ctx = p.cfg.with(ctx)
 	var opts []oauth2.AuthCodeOption
 	if !p.cfg.NoPKCE {
 		opts = append(opts, oauth2.VerifierOption(verifier))
@@ -259,12 +272,16 @@ func (p *Provider) verify(ctx context.Context, raw, nonce string) (login.Externa
 		EmailVerified flexBool `json:"email_verified"`
 		Name          string   `json:"name"`
 	}
+	var all map[string]any
 	if err := tok.Claims(&claims); err != nil {
+		return login.External{}, ErrInvalid.Wrap(err)
+	}
+	if err := tok.Claims(&all); err != nil {
 		return login.External{}, ErrInvalid.Wrap(err)
 	}
 	return login.External{
 		Provider: p.cfg.Provider, Subject: tok.Subject,
-		Email: claims.Email, EmailVerified: bool(claims.EmailVerified), Name: claims.Name,
+		Email: claims.Email, EmailVerified: bool(claims.EmailVerified), Name: claims.Name, Claims: all,
 	}, nil
 }
 

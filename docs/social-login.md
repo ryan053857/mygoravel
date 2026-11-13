@@ -168,6 +168,7 @@ social:
 - 只支持 OAuth 2.0 的提供方，由应用写一个函数用换到的 token 读取账号，例如上面的 `githubAccount`；`client` 会在请求中带上 token。
 - 第三方返回的用户 ID 才是账号的唯一标识：GitHub 是数字 `id`，OpenID Connect 是 `sub`，微信是 `unionid`。用户名和邮箱都可能变化，不要用作 `Subject`。
 - `oauth.Discover` 会请求发现文档，校验 ID token 的公钥按需下载并缓存，所以提供方在启动时创建一次，之后一直复用。
+- 全部出站请求使用 `Config.Client`，默认是 `http.DefaultClient`。Issuer 来自租户后台填写的企业 SSO 时，要传入 [`outbound`](outbound.md) 的客户端，拒绝访问内网地址。
 
 <a id="signing-in"></a>
 ## 登录与注册
@@ -182,8 +183,11 @@ out, err := users.External(ctx, ext)
 | --- | --- | --- |
 | `out.Subject` | 这个第三方账号已经绑定 | 签发 token |
 | `out.Proof` | 还没有绑定 | 注册新账号，或者让用户登录已有账号后[绑定](#linking-accounts) |
+| `out.Pending`、`out.Enroll` | 账号体系要求[二次验证](login.md#requiring-two-factor) | 与密码登录相同，先完成第二步或先启用 |
 
-注册与[验证码注册](login.md#codes)相同：应用的注册 action 在事务中创建账号行，再把 `out.Proof` 交给 `Register`。第三方账号作为登录标识写入，第三方确认过（`EmailVerified`）的邮箱也一并写入，之后用户也可以用这个邮箱收验证码登录。第三方账号登录不再要求[二次验证](login.md#two-factor)，由提供方负责验证身份。
+注册与[验证码注册](login.md#codes)相同：应用的注册 action 在事务中创建账号行，再把 `out.Proof` 交给 `Register`。第三方账号作为登录标识写入，第三方确认过（`EmailVerified`）的邮箱也一并写入，之后用户也可以用这个邮箱收验证码登录。第三方账号登录不再要求[二次验证](login.md#two-factor)，由提供方负责验证身份；账号体系[强制二次验证](login.md#requiring-two-factor)时除外。
+
+`ext.Claims` 是 ID token 的全部声明（`Account` 读取的提供方由应用自己填写），例如企业 IdP 的 `groups`，应用可以在每次登录时据此同步角色。提供方在这次登录中做过多因素认证时（各家写在 `amr` 等声明中，写法不同），应用确认后设置 `ext.TwoFactor = true`，这次登录记为 `[提供方, idp_mfa]`，计入二次验证。只对信任其 MFA 的提供方这样做，例如租户自己的企业 IdP。
 
 **框架不按邮箱把第三方账号自动关联到已有账号。** 否则任何人都可以在一个不验证邮箱的第三方平台上填上别人的邮箱，借此登录别人的账号。注册时邮箱已属于其他账号，`Register` 返回 `login.ErrTaken`：提示用户先用原来的方式登录，再绑定这个第三方账号。
 

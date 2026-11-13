@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -174,6 +176,13 @@ func newProvider(t *testing.T, p *idp, edit ...func(*oauth.Config)) *oauth.Provi
 
 var alice = login.External{Provider: "google", Subject: "google-42", Email: "alice@example.com", EmailVerified: true, Name: "Alice"}
 
+// isAlice 报告 got 是 alice：Claims 是 ID token 的全部声明，单独检查其中几项。
+func isAlice(got login.External) bool {
+	claims := got.Claims
+	got.Claims = nil
+	return reflect.DeepEqual(got, alice) && claims["sub"] == "google-42" && claims["email"] == "alice@example.com" && claims["aud"] != nil
+}
+
 func is(t *testing.T, err, want error) {
 	t.Helper()
 	if !errors.Is(err, want) {
@@ -199,7 +208,7 @@ func TestPageFlow(t *testing.T) {
 	}
 	params := authorize(t, authURL)
 	got, err := provider.Finish(ctx, restored, params)
-	if err != nil || got != alice {
+	if err != nil || !isAlice(got) {
 		t.Fatalf("finish: %+v %v", got, err)
 	}
 	// 授权码只能用一次。
@@ -251,7 +260,7 @@ func TestExchange(t *testing.T) {
 	}
 
 	g, _ := client(appRedirect)
-	if got, err := provider.Exchange(ctx, g); err != nil || got != alice {
+	if got, err := provider.Exchange(ctx, g); err != nil || !isAlice(got) {
 		t.Fatalf("exchange: %+v %v", got, err)
 	}
 	// 回调地址不在登记的列表中：不去换取 token。
@@ -276,7 +285,7 @@ func TestIDToken(t *testing.T) {
 	provider := newProvider(t, p, func(c *oauth.Config) { c.Audiences = []string{clientID, iosClientID} })
 
 	raw := p.idToken(t, iosClientID, "n1", time.Now().Add(time.Hour))
-	if got, err := provider.IDToken(ctx, raw, "n1"); err != nil || got != alice {
+	if got, err := provider.IDToken(ctx, raw, "n1"); err != nil || !isAlice(got) {
 		t.Fatalf("ios token: %+v %v", got, err)
 	}
 	if _, err := provider.IDToken(ctx, raw, ""); err != nil {
@@ -383,7 +392,7 @@ func TestPlainOAuth2(t *testing.T) {
 		t.Fatalf("auth url %s", authURL)
 	}
 	got, err := github.Finish(ctx, flow, authorize(t, authURL))
-	if err != nil || got != (login.External{Provider: "github", Subject: "42", Name: "alice"}) {
+	if err != nil || !reflect.DeepEqual(got, login.External{Provider: "github", Subject: "42", Name: "alice"}) {
 		t.Fatalf("finish: %+v %v", got, err)
 	}
 	// 客户端自己完成授权时不需要 nonce。
@@ -407,6 +416,40 @@ func TestPlainOAuth2(t *testing.T) {
 	} {
 		if _, err := build(); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// countingTransport 记下经过它的请求路径。
+type countingTransport struct {
+	mu    sync.Mutex
+	paths []string
+}
+
+func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	c.paths = append(c.paths, r.URL.Path)
+	c.mu.Unlock()
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// Config.Client 发出全部请求：发现文档、公钥和换取 token。
+func TestClient(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p := newIDP(t)
+	tr := &countingTransport{}
+	provider := newProvider(t, p, func(cfg *oauth.Config) { cfg.Client = &http.Client{Transport: tr} })
+	authURL, flow := provider.Start()
+	got, err := provider.Finish(ctx, flow, authorize(t, authURL))
+	if err != nil || !isAlice(got) {
+		t.Fatalf("finish: %+v %v", got, err)
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	for _, path := range []string{"/.well-known/openid-configuration", "/token", "/keys"} {
+		if !slices.Contains(tr.paths, path) {
+			t.Errorf("%s did not go through Config.Client: %v", path, tr.paths)
 		}
 	}
 }

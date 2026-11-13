@@ -30,16 +30,17 @@ type Subject struct {
 // 个人访问令牌、OAuth 令牌、代为登录等不经过本人登录的凭据为零值，过不了 rest.Confirmed 和二次验证的要求。
 type Auth struct {
 	// Methods 是这次登录依次通过的验证方式，之后确认身份时补充新的方式，例如：
-	// password；email、phone（验证码发到哪里）；totp、recovery（二次验证）；passkey；第三方提供方的名称，如 google。
+	// password；email、phone（验证码发到哪里）；totp、recovery（二次验证）；passkey；第三方提供方的名称，如 google，
+	// 提供方做过多因素认证时再加上 idp_mfa。
 	Methods []string
 	// Time 是最近一次验证身份的时间：登录，或之后的确认身份。
 	Time time.Time
 }
 
-// 计入二次验证的方式：TOTP 和恢复码是第二步，passkey 本身同时验证了设备和使用者。
-var twoFactorMethods = []string{"totp", "recovery", "passkey"}
+// 计入二次验证的方式：TOTP 和恢复码是第二步，passkey 本身同时验证了设备和使用者，idp_mfa 是第三方提供方做过的多因素认证。
+var twoFactorMethods = []string{"totp", "recovery", "passkey", "idp_mfa"}
 
-// TwoFactor 报告这次登录是否经过了二次验证：Methods 中有 totp、recovery 或 passkey。
+// TwoFactor 报告这次登录是否经过了二次验证：Methods 中有 totp、recovery、passkey 或 idp_mfa。
 func (a Auth) TwoFactor() bool {
 	return slices.ContainsFunc(a.Methods, func(m string) bool { return slices.Contains(twoFactorMethods, m) })
 }

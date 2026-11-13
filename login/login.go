@@ -202,6 +202,7 @@ const (
 	MethodPassword = "password" // 密码
 	MethodTOTP     = "totp"     // 验证器 App 上的数字
 	MethodRecovery = "recovery" // 恢复码
+	MethodIdPMFA   = "idp_mfa"  // 第三方提供方做过多因素认证，见 External.TwoFactor
 )
 
 // signedIn 返回登录成功的结果，主体的 Auth 记下这次通过的验证方式；签发前调用 Options.Resolve。

@@ -85,6 +85,7 @@ func TestAuth(t *testing.T) {
 		"password totp":     true,
 		"password recovery": true,
 		"passkey":           true,
+		"google idp_mfa":    true,
 	} {
 		if got := (identity.Auth{Methods: strings.Fields(methods)}).TwoFactor(); got != want {
 			t.Errorf("TwoFactor(%q) = %v", methods, got)
