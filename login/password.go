@@ -61,7 +61,7 @@ func (r *Realm) Password(ctx context.Context, id Identifier, password string) (O
 			return Outcome{}, err
 		}
 	}
-	return r.authenticated(ctx, owner, tenant, MethodPassword)
+	return r.authenticated(ctx, r.db, owner, tenant, true, MethodPassword)
 }
 
 // limitKey 是标识在限流器中的 key。

@@ -185,7 +185,7 @@ func (r *Realm) VerifyCode(ctx context.Context, requestID, code string) (Outcome
 		if err := r.use(ctx, c); err != nil {
 			return Outcome{}, err
 		}
-		return r.authenticated(ctx, c.SubjectID, c.Tenant, c.Kind)
+		return r.authenticated(ctx, r.db, c.SubjectID, c.Tenant, true, c.Kind)
 	}
 	secret := token()
 	n, err := affected(r.db.NewUpdate().Model((*challengeRow)(nil)).
@@ -298,15 +298,16 @@ func WithPassword(password string) RegisterOption {
 	return func(reg *registration) { reg.password = password }
 }
 
-// Register 用 SignIn、Verify 或 External 的完成凭证，把已验证的标识写给应用刚创建的主体 ref，返回可以签发凭据的主体，
-// 它的 Auth 记下注册时验证的方式：标识的类型或第三方提供方。
+// Register 用 SignIn、Verify 或 External 的完成凭证，把已验证的标识写给应用刚创建的主体 ref，返回 Outcome：
+// 通常是可以签发凭据的 Outcome.Subject，它的 Auth 记下注册时验证的方式（标识的类型或第三方提供方）；
+// Options.RequireTwoFactor 要求二次验证时是 Outcome.Enroll，先启用二次验证再签发凭据。
 // External 的凭证写入第三方账号，以及对方确认过的邮箱。
 //
 // 应用的注册 action 在自己的事务中先创建账号行，再调用 Register 并传入同一个事务 db；
 // 任何一步失败都一起回滚，凭证仍可再次使用。标识（包括第三方确认过的邮箱）已属于其他主体时返回 ErrTaken，凭证不被消耗。
-func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref identity.Ref, opts ...RegisterOption) (identity.Subject, error) {
+func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref identity.Ref, opts ...RegisterOption) (Outcome, error) {
 	if err := r.check(ref); err != nil {
-		return identity.Subject{}, err
+		return Outcome{}, err
 	}
 	var reg registration
 	for _, opt := range opts {
@@ -314,41 +315,38 @@ func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref iden
 	}
 	if reg.password != "" {
 		if err := r.opts.PasswordPolicy(reg.password); err != nil {
-			return identity.Subject{}, err
+			return Outcome{}, err
 		}
 	}
 	c, err := r.proof(ctx, db, proof, SignIn, Verify, purposeExternal)
 	if err != nil {
-		return identity.Subject{}, err
+		return Outcome{}, err
 	}
 	ids, err := c.proven()
 	if err != nil {
-		return identity.Subject{}, err
+		return Outcome{}, err
 	}
 	for _, id := range ids {
 		if owner, err := r.owner(ctx, db, c.Tenant, id); err != nil {
-			return identity.Subject{}, err
+			return Outcome{}, err
 		} else if owner != "" && owner != ref.ID {
-			return identity.Subject{}, ErrTaken.New()
+			return Outcome{}, ErrTaken.New()
 		}
 	}
 	if err := r.complete(ctx, db, c); err != nil {
-		return identity.Subject{}, err
+		return Outcome{}, err
 	}
 	for _, id := range ids {
 		if err := r.attach(ctx, db, c.Tenant, id, ref.ID, true); err != nil {
-			return identity.Subject{}, err
+			return Outcome{}, err
 		}
 	}
 	if reg.password != "" {
 		if err := r.storePassword(ctx, db, ref.ID, reg.password, false); err != nil {
-			return identity.Subject{}, err
+			return Outcome{}, err
 		}
 	}
-	return identity.Subject{
-		Type: ref.Type, ID: ref.ID, Tenant: c.Tenant,
-		Auth: identity.Auth{Methods: []string{c.Kind}, Time: r.now().UTC()},
-	}, nil
+	return r.authenticated(ctx, db, ref.ID, c.Tenant, false, c.Kind)
 }
 
 // ResetPassword 用 Reset 的完成凭证设置新密码，按 Options.PasswordPolicy 检查；接收验证码的标识同时标为已验证，

@@ -8,6 +8,7 @@
 - [找回密码](#reset)
 - [管理登录方式](#managing)
 - [二次验证](#two-factor)
+    - [强制二次验证](#requiring-two-factor)
 - [Passkey](#passkeys)
 - [确认身份](#confirming)
 - [后台创建账号](#admin-accounts)
@@ -143,17 +144,17 @@ plain, err := tokens.Login(ctx, out.Subject, device)
 
 ```go
 func (a *SignUp) Handle(ctx context.Context, in SignUpInput) (identity.Subject, error) {
-    var sub identity.Subject
+    var out login.Outcome
     err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         u := &User{ID: uuid.Must(uuid.NewV7()).String(), Name: in.Name}
         if _, err := tx.NewInsert().Model(u).Exec(ctx); err != nil {
             return err
         }
         var err error
-        sub, err = a.users.Register(ctx, tx, in.Proof, u.Ref(), login.WithPassword(in.Password))
+        out, err = a.users.Register(ctx, tx, in.Proof, u.Ref(), login.WithPassword(in.Password))
         return err
     })
-    return sub, err
+    return out.Subject, err
 }
 ```
 
@@ -255,7 +256,29 @@ plain, err := tokens.Login(ctx, out.Subject, device)
 
 `Pending` 15 分钟内有效，最多输错 5 次，之后要重新登录。同一个验证码不能用两次；验证器与服务器的时钟允许相差 30 秒。`DisableTwoFactor` 关闭二次验证，之前先[确认身份](#confirming)。
 
-运营后台通常要求员工都启用二次验证。这由应用决定，写法见[完整示例](account-examples.md#editor-api)：员工登录后，`TwoFactorEnabled` 为 `false` 时只允许调用启用二次验证的接口。
+<a id="requiring-two-factor"></a>
+### 强制二次验证
+
+运营后台通常要求员工都启用二次验证。在这套账号的 `Options` 中设置 `RequireTwoFactor`：
+
+```go
+staff := login.New(db, login.Options{
+    // ……
+    RequireTwoFactor: func(context.Context, identity.Subject) (bool, error) { return true, nil },
+})
+```
+
+之后没有经过二次验证的登录都不签发凭据：账号已经启用的，返回 `out.Pending`，第三方登录也是如此；还没有启用的，返回 `out.Enroll`，客户端先引导用户启用，启用后才登录成功：
+
+```go
+setup, err := staff.EnrollTOTP(ctx, in.Body.Enroll, email)          // 返回二维码
+out, codes, err := staff.CompleteEnroll(ctx, in.Body.Enroll, in.Body.Code) // 启用并登录，codes 是恢复码
+plain, err := tokens.Login(ctx, out.Subject, device)
+```
+
+`Enroll` 与 `Pending` 一样 15 分钟内有效，最多输错 5 次。passkey 登录本身就算二次验证，直接成功；`Register` 注册的新账号同样先启用。完整的写法见[编辑后台](account-examples.md#editor-api)。
+
+`RequireTwoFactor` 收到的主体带有登录时的租户，[按租户登录](#identifiers)的账号体系可以按租户的设置决定。一套账号在多个租户中使用、只有部分租户要求二次验证时，登录时还不知道要进哪个租户，改由这些租户的 Resolver 检查：`!sub.Auth.TwoFactor()` 时返回 `identity.ErrTwoFactorRequired`，请求得到 `403 auth.two_factor_required`。客户端让用户输入验证器上的数字，`CheckTwoFactor` 校验后用 token 的 `Confirm` 补上这次的方式（见[确认身份](#confirming)），再重试；账号还没有启用二次验证的，先到账号设置中启用。
 
 <a id="passkeys"></a>
 ## Passkey

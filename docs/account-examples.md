@@ -18,7 +18,7 @@
 | 入口 | 单页应用调用 `/admin` 下的 JSON API，不透明的登录 token | JSON API，JWT access token + refresh token |
 | 账号怎么来 | 管理员邀请，编辑通过邮件中的链接设置密码 | 手机验证码自助注册，或 Sign in with Apple |
 | 怎么登录 | 邮箱 + 密码，**必须**启用 TOTP 二次验证 | 手机验证码，或 Apple |
-| 敏感操作 | 邀请编辑时再输入一次自己的密码 | 注销账号前用验证码或重新登录 Apple 确认身份 |
+| 敏感操作 | 邀请编辑前 15 分钟内输入过一次自己的密码 | 注销账号前用验证码或重新登录 Apple 确认身份 |
 
 两套账号的登录凭据都保存在框架的 `auth_*` 表中，`editors`、`readers` 表只有业务字段。下面的五个文件都是完整的代码。
 
@@ -172,16 +172,16 @@ func NewSignUp(db *bun.DB, logins *login.Realm) *SignUp { return &SignUp{db: db,
 
 func (a *SignUp) Handle(ctx context.Context, proof, name string) (identity.Subject, error) {
     r := &Reader{ID: uuid.Must(uuid.NewV7()).String(), Name: name, CreatedAt: time.Now().UTC()}
-    var sub identity.Subject
+    var out login.Outcome
     err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
         if _, err := tx.NewInsert().Model(r).Exec(ctx); err != nil {
             return err
         }
         var err error
-        sub, err = a.logins.Register(ctx, tx, proof, r.Ref())
+        out, err = a.logins.Register(ctx, tx, proof, r.Ref())
         return err
     })
-    return sub, err
+    return out.Subject, err // 读者不要求二次验证，Register 总是返回 Subject
 }
 
 // Delete 注销读者：删除账号行和全部登录凭据，再撤销全部 token。
@@ -233,6 +233,7 @@ import (
     "github.com/ryan053857/mygoravel/apitoken"
     "github.com/ryan053857/mygoravel/crypt"
     "github.com/ryan053857/mygoravel/hashing"
+    "github.com/ryan053857/mygoravel/identity"
     "github.com/ryan053857/mygoravel/login"
     "github.com/ryan053857/mygoravel/login/oauth"
     "github.com/ryan053857/mygoravel/mail"
@@ -274,6 +275,8 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
         Issuer:        "Blog 编辑后台",
         PasswordKinds: []string{login.KindEmail},
         Resolve:       editor.Resolve(db),
+        // 编辑必须使用二次验证：还没有启用的，登录时先启用。
+        RequireTwoFactor: func(context.Context, identity.Subject) (bool, error) { return true, nil },
         Attempts:      redislimit.New(rdb, "blog:login:editor:attempts", every15),
         Sends:         redislimit.New(rdb, "blog:login:editor:sends", every15),
         Send: func(ctx context.Context, code login.Code) error {
@@ -333,11 +336,11 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
 编辑后台是[单页应用](spa.md)，调用 `/admin` 下的接口：
 
 1. 编辑收到邀请邮件，打开单页应用中的设置密码页。页面把链接中的 `request` 和 `code` 交给 `POST /auth/password/verify`，得到完成凭证，再带着它和新密码调用 `POST /auth/password`；
-2. 用邮箱和密码登录（`POST /auth/login`）。启用了二次验证时得到 `pending`，带着它和验证器上的数字调用 `POST /auth/two-factor`；
-3. 还没有启用二次验证时，先到启用页：`POST /account/two-factor/setup` 得到二维码，`POST /account/two-factor` 提交验证码启用；
-4. 邀请其他编辑时（`POST /editors`），请求中再带上自己的密码。
+2. 用邮箱和密码登录（`POST /auth/login`），得到三种结果之一：`token`，登录成功；`pending`，带着它和验证器上的数字调用 `POST /auth/two-factor`；`enroll`，还没有启用二次验证，先启用；
+3. 启用：`POST /auth/two-factor/enroll` 得到二维码，扫码后 `POST /auth/two-factor/enroll/confirm` 提交验证器上的数字，得到 token 和恢复码；
+4. 邀请其他编辑（`POST /editors`）要求 15 分钟内确认过身份。超过时返回 `403 auth.confirm_required`，单页应用弹出密码框，`POST /account/confirm` 之后重试。
 
-“必须启用二次验证”由 Resolver 保证：没有启用的编辑没有任何权限，只能调用不要求权限的接口，也就是登录、启用二次验证和退出。下面是完整的 `internal/editor/editorapi/routes.go`：
+“必须启用二次验证”由 `accounts` 中的 `RequireTwoFactor` 保证：没有经过二次验证的编辑拿不到 token。下面是完整的 `internal/editor/editorapi/routes.go`：
 
 ```go
 package editorapi
@@ -345,6 +348,7 @@ package editorapi
 import (
     "context"
     "net/http"
+    "time"
 
     "github.com/danielgtaylor/huma/v2"
     "github.com/uptrace/bun"
@@ -356,25 +360,6 @@ import (
     "github.com/ryan053857/mygoravel/identity"
     "github.com/ryan053857/mygoravel/login"
 )
-
-// Resolve 是编辑后台 API 的 Resolver：在 editor.Resolve 的基础上，没有启用二次验证的编辑没有任何权限。
-func Resolve(db *bun.DB, logins *login.Realm) identity.Resolver {
-    base := editor.Resolve(db)
-    return func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
-        sub, err := base(ctx, sub)
-        if err != nil {
-            return sub, err
-        }
-        enabled, err := logins.TwoFactorEnabled(ctx, sub.Ref())
-        if err != nil {
-            return identity.Subject{}, err
-        }
-        if !enabled {
-            sub.Permissions = nil
-        }
-        return sub, nil
-    }
-}
 
 type LoginInput struct {
     UserAgent string `header:"User-Agent"`
@@ -392,12 +377,40 @@ type TwoFactorInput struct {
     }
 }
 
-// LoginOutput 是登录的结果：token；需要二次验证时只有 pending。
+// LoginOutput 是登录的结果，三者只有一个不为空。
 type LoginOutput struct {
     Body struct {
-        Token     string `json:"token,omitempty"`
-        Pending   string `json:"pending,omitempty" doc:"带着它和验证码调用 /auth/two-factor"`
-        TwoFactor bool   `json:"two_factor" doc:"是否已经启用二次验证；为 false 时先去启用"`
+        Token   string `json:"token,omitempty"`
+        Pending string `json:"pending,omitempty" doc:"带着它和验证器上的数字调用 /auth/two-factor"`
+        Enroll  string `json:"enroll,omitempty" doc:"还没有启用二次验证：带着它调用 /auth/two-factor/enroll"`
+    }
+}
+
+type EnrollInput struct {
+    Body struct {
+        Enroll string `json:"enroll" minLength:"1"`
+    }
+}
+
+type EnrollOutput struct {
+    Body struct {
+        Secret string `json:"secret"`
+        URI    string `json:"uri" doc:"otpauth:// 地址，渲染成二维码"`
+    }
+}
+
+type CompleteEnrollInput struct {
+    UserAgent string `header:"User-Agent"`
+    Body      struct {
+        Enroll string `json:"enroll" minLength:"1"`
+        Code   string `json:"code" minLength:"1"`
+    }
+}
+
+type CompleteEnrollOutput struct {
+    Body struct {
+        Token         string   `json:"token"`
+        RecoveryCodes []string `json:"recovery_codes"`
     }
 }
 
@@ -421,57 +434,46 @@ type PasswordInput struct {
     }
 }
 
-type SetupOutput struct {
+type ConfirmInput struct {
     Body struct {
-        Secret string `json:"secret"`
-        URI    string `json:"uri" doc:"otpauth:// 地址，渲染成二维码"`
-    }
-}
-
-type EnableInput struct {
-    Body struct {
-        Code string `json:"code" minLength:"1"`
-    }
-}
-
-type EnableOutput struct {
-    Body struct {
-        RecoveryCodes []string `json:"recovery_codes"`
+        Password string `json:"password" minLength:"1"`
     }
 }
 
 type InviteInput struct {
     Body struct {
-        Name     string `json:"name" minLength:"1" maxLength:"50"`
-        Email    string `json:"email" format:"email"`
-        Password string `json:"password" minLength:"1" doc:"当前编辑的密码，确认是本人操作"`
+        Name  string `json:"name" minLength:"1" maxLength:"50"`
+        Email string `json:"email" format:"email"`
     }
 }
 
 type handlers struct {
-    db     *bun.DB
     logins *login.Realm
     tokens *apitoken.Store
     invite *editor.Invite
 }
 
 func Register(api *rest.API, db *bun.DB, acc *accounts.Accounts) {
-    h := &handlers{db: db, logins: acc.Editors, tokens: acc.EditorTokens, invite: editor.NewInvite(db, acc.Editors)}
-    op := func(id, method, path string, auth func(*huma.Operation)) huma.Operation {
+    h := &handlers{logins: acc.Editors, tokens: acc.EditorTokens, invite: editor.NewInvite(db, acc.Editors)}
+    op := func(id, method, path string, opts ...func(*huma.Operation)) huma.Operation {
         o := huma.Operation{OperationID: id, Method: method, Path: path}
-        auth(&o)
+        for _, opt := range opts {
+            opt(&o)
+        }
         return o
     }
     public := rest.Public()
     signedIn := rest.RequireBearer(api, acc.EditorTokens.Validate)
     rest.Register(api, op("editor-login", http.MethodPost, "/auth/login", public), h.login)
     rest.Register(api, op("editor-two-factor", http.MethodPost, "/auth/two-factor", public), h.twoFactor)
+    rest.Register(api, op("editor-enroll", http.MethodPost, "/auth/two-factor/enroll", public), h.enroll)
+    rest.Register(api, op("editor-enroll-confirm", http.MethodPost, "/auth/two-factor/enroll/confirm", public), h.completeEnroll)
     rest.Register(api, op("editor-password-verify", http.MethodPost, "/auth/password/verify", public), h.verifyLink)
     rest.Register(api, op("editor-password", http.MethodPost, "/auth/password", public), h.setPassword)
     rest.Register(api, op("editor-logout", http.MethodDelete, "/auth/session", signedIn), h.logout)
-    rest.Register(api, op("editor-two-factor-setup", http.MethodPost, "/account/two-factor/setup", signedIn), h.setup)
-    rest.Register(api, op("editor-two-factor-enable", http.MethodPost, "/account/two-factor", signedIn), h.enable)
-    rest.Register(api, op("editor-invite", http.MethodPost, "/editors", rest.RequireBearer(api, acc.EditorTokens.Validate, "editors:invite")), h.inviteEditor)
+    rest.Register(api, op("editor-confirm", http.MethodPost, "/account/confirm", signedIn), h.confirm)
+    rest.Register(api, op("editor-invite", http.MethodPost, "/editors",
+        rest.RequireBearer(api, acc.EditorTokens.Validate, "editors:invite"), rest.Confirmed(15*time.Minute)), h.inviteEditor)
 }
 
 func (h *handlers) login(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
@@ -479,9 +481,9 @@ func (h *handlers) login(ctx context.Context, in *LoginInput) (*LoginOutput, err
     if err != nil {
         return nil, err // 密码错误：login.ErrInvalidCredentials，401；连续失败太多次：ratelimit.ErrExceeded，429
     }
-    if out.Pending != "" {
+    if out.Pending != "" || out.Enroll != "" {
         resp := &LoginOutput{}
-        resp.Body.Pending, resp.Body.TwoFactor = out.Pending, true
+        resp.Body.Pending, resp.Body.Enroll = out.Pending, out.Enroll
         return resp, nil
     }
     return h.issue(ctx, out.Subject, in.UserAgent)
@@ -495,18 +497,37 @@ func (h *handlers) twoFactor(ctx context.Context, in *TwoFactorInput) (*LoginOut
     return h.issue(ctx, out.Subject, in.UserAgent)
 }
 
-// issue 签发登录 token，并告诉单页应用这个编辑是否已经启用二次验证。
-func (h *handlers) issue(ctx context.Context, sub identity.Subject, userAgent string) (*LoginOutput, error) {
-    enabled, err := h.logins.TwoFactorEnabled(ctx, sub.Ref())
+func (h *handlers) enroll(ctx context.Context, in *EnrollInput) (*EnrollOutput, error) {
+    setup, err := h.logins.EnrollTOTP(ctx, in.Body.Enroll, "Blog 编辑")
+    if err != nil {
+        return nil, err // 超时：login.ErrInvalidProof，重新登录
+    }
+    resp := &EnrollOutput{}
+    resp.Body.Secret, resp.Body.URI = setup.Secret, setup.URI
+    return resp, nil
+}
+
+func (h *handlers) completeEnroll(ctx context.Context, in *CompleteEnrollInput) (*CompleteEnrollOutput, error) {
+    out, codes, err := h.logins.CompleteEnroll(ctx, in.Body.Enroll, in.Body.Code)
+    if err != nil {
+        return nil, err // 验证码不正确：login.ErrInvalidCode，重新扫码或再输一次
+    }
+    token, err := h.tokens.Login(ctx, out.Subject, apitoken.Device{UserAgent: in.UserAgent})
     if err != nil {
         return nil, err
     }
+    resp := &CompleteEnrollOutput{}
+    resp.Body.Token, resp.Body.RecoveryCodes = token, codes
+    return resp, nil
+}
+
+func (h *handlers) issue(ctx context.Context, sub identity.Subject, userAgent string) (*LoginOutput, error) {
     token, err := h.tokens.Login(ctx, sub, apitoken.Device{UserAgent: userAgent})
     if err != nil {
         return nil, err
     }
     resp := &LoginOutput{}
-    resp.Body.Token, resp.Body.TwoFactor = token, enabled
+    resp.Body.Token = token
     return resp, nil
 }
 
@@ -533,33 +554,16 @@ func (h *handlers) logout(ctx context.Context, _ *struct{}) (*struct{}, error) {
     return nil, h.tokens.Revoke(ctx, sub, sub.Credential)
 }
 
-func (h *handlers) setup(ctx context.Context, _ *struct{}) (*SetupOutput, error) {
-    sub, _ := identity.FromContext(ctx)
-    setup, err := h.logins.SetupTOTP(ctx, h.db, sub.Ref(), sub.ID)
-    if err != nil {
-        return nil, err // 已经启用：login.ErrTwoFactorEnabled
-    }
-    resp := &SetupOutput{}
-    resp.Body.Secret, resp.Body.URI = setup.Secret, setup.URI
-    return resp, nil
-}
-
-func (h *handlers) enable(ctx context.Context, in *EnableInput) (*EnableOutput, error) {
-    sub, _ := identity.FromContext(ctx)
-    codes, err := h.logins.ConfirmTOTP(ctx, h.db, sub.Ref(), in.Body.Code)
-    if err != nil {
-        return nil, err // 验证码不正确：login.ErrInvalidCode，重新扫码
-    }
-    resp := &EnableOutput{}
-    resp.Body.RecoveryCodes = codes
-    return resp, nil
-}
-
-func (h *handlers) inviteEditor(ctx context.Context, in *InviteInput) (*struct{}, error) {
+// confirm 确认身份：校验密码后记下确认时间，之后 15 分钟内可以邀请编辑。
+func (h *handlers) confirm(ctx context.Context, in *ConfirmInput) (*struct{}, error) {
     sub, _ := identity.FromContext(ctx)
     if err := h.logins.Confirm(ctx, sub.Ref(), in.Body.Password); err != nil {
         return nil, err // 密码错误：login.ErrInvalidCredentials
     }
+    return nil, h.tokens.Confirm(ctx, sub, login.MethodPassword)
+}
+
+func (h *handlers) inviteEditor(ctx context.Context, in *InviteInput) (*struct{}, error) {
     _, err := h.invite.Handle(ctx, in.Body.Name, in.Body.Email)
     return nil, err // 邮箱已被使用：login.ErrTaken
 }
@@ -567,10 +571,10 @@ func (h *handlers) inviteEditor(ctx context.Context, in *InviteInput) (*struct{}
 
 几点说明：
 
-- 待完成的登录（`pending`）由单页应用暂存，带到二次验证的请求中；它 15 分钟内有效，最多输错 5 次。
-- 没有启用二次验证的编辑也会拿到 token，`two_factor` 为 `false`。Resolver 让这个 token 没有任何权限，单页应用据此直接进入启用页，启用后不需要重新登录。
-- `SetupTOTP` 的第三个参数是验证器中显示的账号名，这里用编辑的 ID，也可以查出邮箱或姓名。`uri` 由单页应用渲染成二维码。
-- 邀请编辑在请求中带上自己的密码，与[读者注销账号](#reader-api)带验证码的做法相同，见[确认身份](login.md#confirming)。
+- 待完成的登录（`pending`、`enroll`）由单页应用暂存，带到下一步的请求中；它们 15 分钟内有效，最多输错 5 次。
+- 启用二次验证在登录的过程中完成，之后签发的 token 已经经过了二次验证（`sub.Auth.TwoFactor()` 为 `true`）。Resolver 不需要再检查二次验证，也不存在“没有权限、只能去启用”的 token。
+- `EnrollTOTP` 的最后一个参数是验证器中显示的账号名，这里用固定的文字，也可以查出编辑的邮箱。`uri` 由单页应用渲染成二维码。
+- 邀请编辑用 `rest.Confirmed`：登录本身算一次确认，登录后 15 分钟内直接放行，之后先确认密码。读者注销账号则是在请求中直接带上验证码，两种写法见[确认身份](login.md#confirming)。
 
 <a id="reader-api"></a>
 ## 读者 App
@@ -844,7 +848,7 @@ router.Route("/admin/api", func(r chi.Router) {
         Title:    "Blog Admin API",
         Router:   r,
         BasePath: "/admin/api",
-        Accounts: identity.Accounts{editor.Type: editorapi.Resolve(a.db, acc.Editors)},
+        Accounts: identity.Accounts{editor.Type: editor.Resolve(a.db)},
     })
     editorapi.Register(admin, a.db, acc)
 })

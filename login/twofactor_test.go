@@ -302,9 +302,8 @@ func TestAuthMethods(t *testing.T) {
 	}
 
 	// 注册得到的主体记下验证的标识。
-	sub, err := e.realm.Register(ctx, e.db, e.proof(t, ctx, login.SignIn, login.Phone("+8613800138000")), ref("c2"))
-	if err != nil || strings.Join(sub.Auth.Methods, " ") != "phone" || !sub.Auth.Time.Equal(e.clock.now()) {
-		t.Fatalf("register: %+v %v", sub.Auth, err)
+	if got := methods(e.realm.Register(ctx, e.db, e.proof(t, ctx, login.SignIn, login.Phone("+8613800138000")), ref("c2"))); got != "phone" {
+		t.Errorf("register: %q", got)
 	}
 
 	// Options.Resolve 不能改变验证情况。

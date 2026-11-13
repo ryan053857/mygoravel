@@ -479,13 +479,13 @@ func TestRegister(t *testing.T) {
 	_, err = e.realm.Register(ctx, e.db, out.Proof, ref("c9"), login.WithPassword("short"))
 	is(t, err, login.ErrWeakPassword)
 
-	var sub identity.Subject
+	var reg login.Outcome
 	err = database.RunInTx(ctx, e.db, nil, func(ctx context.Context, tx database.Tx) error {
-		sub, err = e.realm.Register(ctx, tx, out.Proof, ref("c9"), login.WithPassword("correct horse"))
+		reg, err = e.realm.Register(ctx, tx, out.Proof, ref("c9"), login.WithPassword("correct horse"))
 		return err
 	})
-	if err != nil || sub.Ref() != ref("c9") {
-		t.Fatalf("register: %+v %v", sub, err)
+	if err != nil || reg.Subject.Ref() != ref("c9") {
+		t.Fatalf("register: %+v %v", reg, err)
 	}
 	list, _ := e.realm.Identifiers(ctx, ref("c9"))
 	if len(list) != 1 || list[0].Identifier != email || !list[0].Verified {
@@ -703,9 +703,9 @@ func TestPerTenant(t *testing.T) {
 	newcomer := e.proof(t, acme, login.SignIn, login.Email("new@example.com"))
 	_, err = e.realm.Register(globex, e.db, newcomer, ref("globex:2"))
 	is(t, err, login.ErrInvalidProof)
-	sub, err := e.realm.Register(acme, e.db, newcomer, ref("acme:2"))
-	if err != nil || sub.Tenant != "acme" {
-		t.Fatalf("register: %+v %v", sub, err)
+	reg, err := e.realm.Register(acme, e.db, newcomer, ref("acme:2"))
+	if err != nil || reg.Subject.Tenant != "acme" {
+		t.Fatalf("register: %+v %v", reg, err)
 	}
 	if _, err := e.realm.Lookup(globex, login.Email("new@example.com")); !errors.Is(err, login.ErrNotFound) {
 		t.Fatalf("identifier leaked to another tenant: %v", err)

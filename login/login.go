@@ -59,6 +59,10 @@ type Options struct {
 	Send func(ctx context.Context, c Code) error
 	// Issuer 是 TOTP 验证器中显示的发行者，通常是应用的名称，见 SetupTOTP。
 	Issuer string
+	// RequireTwoFactor 报告 sub（Type、ID、Tenant）是否必须使用二次验证，例如运营人员，或者要求成员使用二次验证的租户；
+	// 为 nil 时不要求。要求而这次登录没有经过二次验证（passkey 登录本身就算）时不签发凭据：账号已经启用二次验证的，
+	// 返回 Outcome.Pending，第三方登录也是如此；还没有启用的，返回 Outcome.Enroll，先启用再登录，见 EnrollTOTP。
+	RequireTwoFactor func(ctx context.Context, sub identity.Subject) (bool, error)
 	// Resolve 在登录成功、签发凭据之前调用一次，通常与入口的 identity.Accounts 中这套账号的 Resolver 相同：
 	// 返回错误（例如账号已停用）时登录失败，返回的 Permissions 等字段带入 Outcome.Subject。
 	// Type、ID、Tenant 不能被它修改。为 nil 时不调用。
@@ -154,7 +158,7 @@ func defaultPolicy(password string) error {
 	return nil
 }
 
-// Outcome 是一次身份证明的结果，三者只有一个不为零值。
+// Outcome 是一次身份证明的结果，四者只有一个不为零值。
 type Outcome struct {
 	// Subject 是登录成功的主体：Type、ID，PerTenant 时还有 Tenant，Auth 记下这次通过的验证方式（见 MethodPassword），
 	// 以及 Options.Resolve 加载的字段。交给 tokens.Login 或 JWT.Login 签发凭据。
@@ -165,6 +169,9 @@ type Outcome struct {
 	// Proof 是需要应用继续完成的一次性完成凭证：标识未注册时交给 Register，找回密码时交给 ResetPassword，
 	// 绑定标识时交给 Link。
 	Proof string
+	// Enroll 表示身份已经得到证明，但 Options.RequireTwoFactor 要求二次验证而账号还没有启用：把它交给客户端，
+	// 客户端用 EnrollTOTP 取得二维码，再用 CompleteEnroll 提交验证器上的数字，启用后登录成功。
+	Enroll string
 }
 
 // Type 返回这套账号体系，即 Options.Type。

@@ -64,7 +64,7 @@ func (r *Realm) External(ctx context.Context, ext External) (Outcome, error) {
 		return Outcome{}, err
 	}
 	if owner != "" {
-		return r.signedIn(ctx, owner, tenant, id.Kind)
+		return r.authenticated(ctx, r.db, owner, tenant, false, id.Kind)
 	}
 
 	var data externalData

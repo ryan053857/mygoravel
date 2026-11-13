@@ -249,13 +249,8 @@ func (r *Realm) TwoFactor(ctx context.Context, pending, code string) (Outcome, e
 	if err != nil {
 		return Outcome{}, err
 	}
-	n, err := affected(r.db.NewUpdate().Model((*challengeRow)(nil)).Set("attempts = attempts + 1").
-		Where("id = ?", c.ID).Where("attempts < ?", pendingAttempts).Where("completed_at IS NULL").Exec(ctx))
-	if err != nil {
-		return Outcome{}, errors.Wrap(err, "login: count attempt")
-	}
-	if n == 0 {
-		return Outcome{}, ErrInvalidProof.New()
+	if err := r.attemptPending(ctx, c); err != nil {
+		return Outcome{}, err
 	}
 	method, err := r.checkTwoFactor(ctx, c.SubjectID, code)
 	if err != nil {
@@ -264,11 +259,11 @@ func (r *Realm) TwoFactor(ctx context.Context, pending, code string) (Outcome, e
 	if err := r.complete(ctx, r.db, c); err != nil {
 		return Outcome{}, err
 	}
-	var first pendingData
-	if err := json.Unmarshal([]byte(c.Data), &first); err != nil {
-		return Outcome{}, errors.Wrap(err, "login: decode pending login")
+	methods, err := c.methods()
+	if err != nil {
+		return Outcome{}, err
 	}
-	return r.signedIn(ctx, c.SubjectID, c.Tenant, append(first.Methods, method)...)
+	return r.signedIn(ctx, c.SubjectID, c.Tenant, append(methods, method)...)
 }
 
 // pendingData 是等待二次验证的登录记下的第一步验证方式。
@@ -276,34 +271,84 @@ type pendingData struct {
 	Methods []string `json:"methods"`
 }
 
-// authenticated 在第一步验证（密码、验证码）通过后调用，method 是这一步的验证方式：
-// 启用了二次验证时返回 Outcome.Pending，否则登录成功。
-func (r *Realm) authenticated(ctx context.Context, subjectID, tenant, method string) (Outcome, error) {
-	enabled, err := r.enabled(ctx, r.db, subjectID)
-	if err != nil || !enabled {
-		if err != nil {
+// authenticated 在身份得到证明后调用，决定是登录成功，还是先完成二次验证（Outcome.Pending）或先启用它（Outcome.Enroll）。
+// methods 是已经通过的验证方式；local 表示由本 Realm 验证（密码、验证码），这时只要启用了二次验证就要求第二步，
+// 第三方登录只在 Options.RequireTwoFactor 要求时才要求。db 是保存待完成登录的数据库，注册时是应用的事务。
+func (r *Realm) authenticated(ctx context.Context, db bun.IDB, subjectID, tenant string, local bool, methods ...string) (Outcome, error) {
+	if (identity.Auth{Methods: methods}).TwoFactor() {
+		return r.signedIn(ctx, subjectID, tenant, methods...)
+	}
+	enabled, err := r.enabled(ctx, db, subjectID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	required := false
+	if !enabled || !local {
+		if required, err = r.requireTwoFactor(ctx, subjectID, tenant); err != nil {
 			return Outcome{}, err
 		}
-		return r.signedIn(ctx, subjectID, tenant, method)
 	}
-	data, err := json.Marshal(pendingData{Methods: []string{method}})
+	switch {
+	case enabled && (local || required):
+		pending, err := r.challenge(ctx, db, purposeTwoFactor, subjectID, tenant, methods)
+		return Outcome{Pending: pending}, err
+	case required:
+		enroll, err := r.challenge(ctx, db, purposeEnroll, subjectID, tenant, methods)
+		return Outcome{Enroll: enroll}, err
+	}
+	return r.signedIn(ctx, subjectID, tenant, methods...)
+}
+
+// requireTwoFactor 调用 Options.RequireTwoFactor。
+func (r *Realm) requireTwoFactor(ctx context.Context, subjectID, tenant string) (bool, error) {
+	if r.opts.RequireTwoFactor == nil {
+		return false, nil
+	}
+	return r.opts.RequireTwoFactor(ctx, identity.Subject{Type: r.opts.Type, ID: subjectID, Tenant: tenant})
+}
+
+// challenge 保存一次待完成的登录（二次验证或启用二次验证），记下已经通过的验证方式，返回交给客户端的凭证。
+func (r *Realm) challenge(ctx context.Context, db bun.IDB, purpose Purpose, subjectID, tenant string, methods []string) (string, error) {
+	data, err := json.Marshal(pendingData{Methods: methods})
 	if err != nil {
-		return Outcome{}, errors.Wrap(err, "login: encode pending login")
+		return "", errors.Wrap(err, "login: encode pending login")
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
-		return Outcome{}, errors.Wrap(err, "login: new id")
+		return "", errors.Wrap(err, "login: new id")
 	}
 	secret := token()
 	now := r.now().UTC()
 	row := &challengeRow{
-		ID: id, Purpose: purposeTwoFactor, SubjectType: string(r.opts.Type), Tenant: tenant, SubjectID: subjectID,
+		ID: id, Purpose: purpose, SubjectType: string(r.opts.Type), Tenant: tenant, SubjectID: subjectID,
 		ProofHash: sha(secret), Data: string(data), ExpiresAt: now.Add(r.opts.ProofTTL), CreatedAt: now,
 	}
-	if _, err := r.db.NewInsert().Model(row).Exec(ctx); err != nil {
-		return Outcome{}, errors.Wrap(err, "login: save pending login")
+	if _, err := db.NewInsert().Model(row).Exec(ctx); err != nil {
+		return "", errors.Wrap(err, "login: save pending login")
 	}
-	return Outcome{Pending: id.String() + "." + secret}, nil
+	return id.String() + "." + secret, nil
+}
+
+// attemptPending 为待完成的登录 c 计一次尝试，超过 pendingAttempts 次或已经完成时返回 ErrInvalidProof。
+func (r *Realm) attemptPending(ctx context.Context, c *challengeRow) error {
+	n, err := affected(r.db.NewUpdate().Model((*challengeRow)(nil)).Set("attempts = attempts + 1").
+		Where("id = ?", c.ID).Where("attempts < ?", pendingAttempts).Where("completed_at IS NULL").Exec(ctx))
+	if err != nil {
+		return errors.Wrap(err, "login: count attempt")
+	}
+	if n == 0 {
+		return ErrInvalidProof.New()
+	}
+	return nil
+}
+
+// methods 返回待完成的登录已经通过的验证方式。
+func (c *challengeRow) methods() ([]string, error) {
+	var data pendingData
+	if err := json.Unmarshal([]byte(c.Data), &data); err != nil {
+		return nil, errors.Wrap(err, "login: decode pending login")
+	}
+	return data.Methods, nil
 }
 
 func (r *Realm) twoFactor(ctx context.Context, db bun.IDB, subjectID string) (*twoFactorRow, error) {
