@@ -36,7 +36,7 @@ var dist embed.FS
 var Dist, _ = fs.Sub(dist, "dist")
 ```
 
-`dist` 不提交到版本库。没有构建前端时编译会失败（`pattern dist: no matching files found`），所以不会发布一个缺少页面的二进制，见[构建与发布](#building)。
+`dist` 不提交到版本库。没有 `dist` 时直接 `go build` 会失败（`pattern dist: no matching files found`）；`tenon dev` 和 `tenon generate` 会先写一个占位的 `index.html`，发布时用 [tenon build](tooling.md#build)，它总是先构建前端，见[构建与发布](#building)。
 
 <a id="mounting"></a>
 ## 挂载
@@ -112,7 +112,7 @@ bun run dev   # package.json 中是 "dev": "go tool tenon dev"
 
 修改 Go 代码后应用自动重新编译、重启，并重新生成 [TypeScript 客户端](clients.md#typescript)，前端的热更新不受影响。按约定的[目录结构](directory-structure.md)组织时不需要任何配置，见 [tenon dev](tooling.md#dev)。
 
-设置了 `DevServer` 时，`NewSPA` 不读取构建产物，但 `dist` 仍然要存在，程序才能编译。`tenon dev` 第一次启动时，没有 `node_modules` 就先运行 `bun install`，没有 `dist` 就先构建一次；停止后再构建一次，`dist` 总是最新的。Vite 没有启动时，页面返回 `502`，内容是连接错误。
+设置了 `DevServer` 时，`NewSPA` 不读取构建产物，但 `dist` 仍然要存在，程序才能编译。`tenon dev` 第一次启动时，没有 `node_modules` 就先运行 `bun install`，没有 `dist` 就写一个占位页；停止后构建一次，`dist` 是最新的。Vite 没有启动时，页面返回 `502`，内容是连接错误。
 
 <a id="building"></a>
 ## 构建与发布

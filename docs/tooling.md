@@ -2,6 +2,7 @@
 
 - [简介](#introduction)
 - [安装](#installation)
+- [tenon init](#init)
 - [tenon dev](#dev)
 - [tenon build](#build)
 - [tenon generate](#generate)
@@ -26,7 +27,7 @@
 <a id="installation"></a>
 ## 安装
 
-把 `tenon` 加入 `go.mod` 的工具，版本随框架一起固定，不需要另外安装：
+用 [tenon init](#init) 生成的项目已经装好了。已有的项目把 `tenon` 加入 `go.mod` 的工具，版本随框架一起固定，不需要另外安装：
 
 ```bash
 go get -tool github.com/go-tenon/tenon/cmd/tenon
@@ -58,6 +59,19 @@ export default defineConfig({
 
 构建产物默认在 `frontend/dist`，由 `frontend/frontend.go` 嵌入程序，见[单页应用](spa.md#embedding)。
 
+<a id="init"></a>
+## tenon init
+
+```bash
+go run github.com/go-tenon/tenon/cmd/tenon@main init todo
+```
+
+在 `todo` 目录生成一个能直接运行的项目：Go 应用加 React 单页应用，带一个待办事项的示例资源，数据保存在内存中，不依赖任何外部服务。目录结构见[安装](installation.md#creating-a-project)。
+
+生成后它运行 `go mod tidy`、生成 TypeScript 客户端，装了 Bun 时再运行 `bun install`。`--module` 是 Go 模块路径，`--name` 是应用的名称，默认都是目录名。目录必须不存在或为空。
+
+`go.mod` 要求的框架版本就是运行 `init` 的这个版本：用 `@main` 运行时是 main 分支当前的提交，用 `@v1.2.0` 时是这个版本。开发框架本身时用 `--tenon <框架目录>`，`go.mod` 用 `replace` 指向本地的副本。
+
 <a id="dev"></a>
 ## tenon dev
 
@@ -67,7 +81,7 @@ bun run dev   # 即 go tool tenon dev
 
 它同时运行：
 
-- **Vite**：在 `package.json` 所在的目录运行 `bun x vite`（不经过 `package.json` 的 `dev` 脚本，那个名字留给 `tenon dev` 自己）。启动前没有 `node_modules` 时先 `bun install`，没有 `dist` 时先构建一次，`go:embed` 才能编译通过。
+- **Vite**：在 `package.json` 所在的目录运行 `bun x vite`（不经过 `package.json` 的 `dev` 脚本，那个名字留给 `tenon dev` 自己）。启动前没有 `node_modules` 时先 `bun install`；没有 `dist` 时写一个占位的 `index.html`，`go:embed` 才能编译通过，开发时页面来自 Vite，用不到它。
 - **应用**：等 Vite 能访问后，把 `main` 编译到临时目录，用 `serve` 中的参数运行。应用的 `httpx.SPA` 把页面请求转给 Vite（`config/local.yaml` 中的 `frontend_dev_server`），浏览器打开应用的地址，页面和 API 同源，热更新照常工作。
 - **重新编译**：模块中的 `.go` 文件（测试除外）、`go.mod`、`go.sum` 变化后重新编译。成功时平滑停止旧进程（`SIGTERM`），启动新的，再运行一次 [`generate`](#generate)，前端的类型随接口一起更新；失败时打印编译错误，旧进程继续运行。跳过隐藏目录、`node_modules`、`vendor`、`testdata` 和 `dist`。
 - **服务端渲染的页面**（模块中有 `.templ` 文件时）：`go tool templ generate --watch`，在 `templ.proxyPort`（默认 7331）代理应用并注入自动刷新的脚本，这时打开 http://localhost:7331。只改了文字时不必重新编译。`templ.static` 目录中的文件变化时也刷新浏览器。
@@ -87,7 +101,7 @@ bun run build   # 即 go tool tenon build
 <a id="generate"></a>
 ## tenon generate
 
-编译应用，用它的 `client` 命令生成客户端，写到 `generate` 指定的目录：TypeScript 客户端见[客户端代码](clients.md#typescript)，Go 客户端见 [Go 客户端](clients.md#go)。`tenon dev` 每次重新编译成功后会自动运行它。把生成的代码提交到仓库，CI 中重新生成后用 `git diff --exit-code` 检查是否忘了更新。
+编译应用（没有 `dist` 时同样先写占位页），用它的 `client` 命令生成客户端，写到 `generate` 指定的目录：TypeScript 客户端见[客户端代码](clients.md#typescript)，Go 客户端见 [Go 客户端](clients.md#go)。`tenon dev` 每次重新编译成功后会自动运行它。把生成的代码提交到仓库，CI 中重新生成后用 `git diff --exit-code` 检查是否忘了更新。
 
 <a id="configuration"></a>
 ## tenon.json

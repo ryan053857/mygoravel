@@ -1,0 +1,45 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #f6f6f6;
+}
+
+main {
+  max-width: 32rem;
+  margin: 3rem auto;
+  padding: 1.5rem;
+  background: #fff;
+  border-radius: 0.75rem;
+}
+
+form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+input[type="text"],
+form input {
+  flex: 1;
+  padding: 0.5rem;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+li.done label {
+  color: #999;
+  text-decoration: line-through;
+}
+
+.error {
+  color: #c00;
+}

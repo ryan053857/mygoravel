@@ -1,0 +1,11 @@
+module [[.Module]]
+
+go [[.GoVersion]]
+
+require github.com/go-tenon/tenon [[.TenonVersion]]
+[[- if .TenonDir]]
+
+replace github.com/go-tenon/tenon => [[.TenonDir]]
+[[- end]]
+
+tool github.com/go-tenon/tenon/cmd/tenon

@@ -1,0 +1,13 @@
+// Package frontend 嵌入 Vite 的构建产物 dist，由 httpx.SPA 提供。
+package frontend
+
+import (
+	"embed"
+	"io/fs"
+)
+
+//go:embed dist
+var dist embed.FS
+
+// Dist 是 Vite 的构建产物，包含 index.html 和 assets 目录。
+var Dist, _ = fs.Sub(dist, "dist")

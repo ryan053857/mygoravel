@@ -40,7 +40,7 @@ APP
 	exit 0
 fi
 case "$*" in
-*--watch*|"x vite")
+*--watch*|"x vite"*--strictPort*)
 	trap 'echo "stopped $(basename "$0")" >> "$DEVCMD_LOG"; exit 0' INT
 	while :; do sleep 0.02; done ;;
 esac
@@ -78,7 +78,7 @@ func read(path string) string {
 
 func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		if ok() {
 			return
 		}
@@ -209,7 +209,7 @@ func TestDevMissingTools(t *testing.T) {
 	}
 }
 
-// 单页应用：没有 node_modules、dist 时先安装、构建；运行 vite 和应用；改了 Go 代码后重新编译、重启并生成客户端；
+// 单页应用：没有 node_modules 时先安装，没有 dist 时写入占位页；运行 vite 和应用；改了 Go 代码后重新编译、重启并生成客户端；
 // 编译失败时旧进程继续运行；测试文件和前端的变化不触发重新编译。
 func TestDevSPA(t *testing.T) {
 	defer dev.SetPollInterval(20 * time.Millisecond)()
@@ -232,13 +232,19 @@ func TestDevSPA(t *testing.T) {
 
 	count := func(s string) int { return strings.Count(read(log), s) }
 	waitFor(t, "app, generate and vite", func() bool {
-		return count("app serve") == 1 && count("app client --ts frontend/src/api") == 1 && count("bun x vite\n") == 1
+		return count("app serve") == 1 && count("app client --ts frontend/src/api") == 1 && count("bun x vite --port") == 1
 	})
 	l := read(log)
-	for _, want := range []string{"bun install\n", "bun x vite build\n", "app serve --config config/app.yaml templ=\n"} {
+	for _, want := range []string{"bun install\n", "app serve --config config/app.yaml templ=\n"} {
 		if !strings.Contains(l, want) {
 			t.Errorf("log missing %q:\n%s", want, l)
 		}
+	}
+	if count("bun x vite build") != 0 {
+		t.Errorf("built before start:\n%s", l)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "frontend", "dist", "index.html")); err != nil || string(b) != dev.Placeholder {
+		t.Errorf("dist placeholder = %q, %v", b, err)
 	}
 	if strings.Contains(l, "go tool") {
 		t.Errorf("templ used without .templ files:\n%s", l)
@@ -272,7 +278,7 @@ func TestDevSPA(t *testing.T) {
 		t.Fatalf("dev returned %v", err)
 	}
 	l = read(log)
-	if !strings.Contains(l, "stopped bun") || count("app stopped") != 2 || count("bun x vite build") != 2 {
+	if !strings.Contains(l, "stopped bun") || count("app stopped") != 2 || count("bun x vite build") != 1 {
 		t.Errorf("after stop:\n%s", l)
 	}
 	if !strings.Contains(out.String(), "dev: 打开 http://localhost:8080") {

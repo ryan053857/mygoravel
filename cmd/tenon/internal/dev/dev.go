@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,8 +112,8 @@ func (d dev) check() error {
 	return nil
 }
 
-// prepare 在启动监听进程之前运行一次：没有 node_modules 时 bun install，没有 dist 时先构建前端
-// （否则嵌入 dist 的代码不能编译）；把框架 web/ui 的样式源复制到 Tailwind 入口旁边。
+// prepare 在启动监听进程之前运行一次：没有 node_modules 时 bun install，确保 dist 存在（见 EnsureDist），
+// 把框架 web/ui 的样式源复制到 Tailwind 入口旁边。
 func (d dev) prepare() error {
 	if f := d.cfg.Frontend; f != nil {
 		root := FrontendRoot(d.cfg)
@@ -121,16 +122,34 @@ func (d dev) prepare() error {
 				return err
 			}
 		}
-		if _, err := os.Stat(filepath.Join(f.Dir, "dist")); errors.Is(err, fs.ErrNotExist) {
-			if err := d.exec(root, "bun", "x", "vite", "build"); err != nil {
-				return err
-			}
-		}
+	}
+	if err := EnsureDist(d.cfg); err != nil {
+		return err
 	}
 	if t := d.cfg.Tailwind; t != nil {
 		return copyUI(filepath.Join(filepath.Dir(t.Input), UIDir))
 	}
 	return nil
+}
+
+// Placeholder 是前端还没有构建时 dist/index.html 的内容。
+const Placeholder = "<!doctype html><p>前端还没有构建：运行 bun run dev 或 bun run build。</p>\n"
+
+// EnsureDist 在前端的 dist 不存在时（例如刚 clone 的项目，dist 被 .gitignore 忽略）写入占位的 index.html，
+// 嵌入 dist 的代码才能编译。不运行 vite build：它可能依赖还没生成的客户端，开发时页面也来自 Vite 的开发服务器，
+// 构建发布时 build 会先构建前端。
+func EnsureDist(cfg *project.Config) error {
+	if cfg.Frontend == nil {
+		return nil
+	}
+	dist := filepath.Join(cfg.Frontend.Dir, "dist")
+	if _, err := os.Stat(dist); !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(dist, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dist, "index.html"), []byte(Placeholder), 0o644)
 }
 
 func (d dev) exec(dir string, args ...string) error {
@@ -151,7 +170,8 @@ func (d dev) watchers() []watcher {
 	var ws []watcher
 	if d.cfg.Frontend != nil {
 		// 直接运行 vite，不经过 package.json 的 dev 脚本：那个名字留给 tenon dev 自己。
-		ws = append(ws, watcher{FrontendRoot(d.cfg), []string{"bun", "x", "vite"}})
+		// 端口固定为 devUrl 的端口，被占用时直接失败：应用只会把请求转给这个地址，不能让 Vite 换一个端口。
+		ws = append(ws, watcher{FrontendRoot(d.cfg), append([]string{"bun", "x", "vite"}, vitePort(d.cfg.Frontend.DevURL)...)})
 	}
 	if t := d.cfg.Templ; t != nil {
 		ws = append(ws, watcher{".", []string{"go", "tool", "templ", "generate", "--watch",
@@ -165,6 +185,15 @@ func (d dev) watchers() []watcher {
 		ws = append(ws, watcher{".", t.Watch})
 	}
 	return ws
+}
+
+// vitePort 返回让 Vite 监听 devURL 的端口的参数；devURL 没有端口时为空。
+func vitePort(devURL string) []string {
+	u, err := url.Parse(devURL)
+	if err != nil || u.Port() == "" {
+		return nil
+	}
+	return []string{"--port", u.Port(), "--strictPort"}
 }
 
 // builds 返回停止后运行的生成命令。

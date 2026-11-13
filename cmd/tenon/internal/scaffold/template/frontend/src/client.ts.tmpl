@@ -1,0 +1,4 @@
+// api 是 tenon generate 生成的客户端（src/api），接口改了以后 tenon dev 会自动重新生成。
+import { createClient } from "./api/api"
+
+export const api = createClient({ baseURL: "/api" })

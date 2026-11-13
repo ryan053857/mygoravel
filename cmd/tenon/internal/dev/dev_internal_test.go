@@ -29,7 +29,7 @@ func TestHostPort(t *testing.T) {
 func TestWatchersAndBuilds(t *testing.T) {
 	cfg := &project.Config{
 		URL:      "http://localhost:8080",
-		Frontend: &project.Frontend{Dir: "frontend"},
+		Frontend: &project.Frontend{Dir: "frontend", DevURL: "http://localhost:5173"},
 		Templ:    &project.Templ{ProxyPort: 7331},
 		Tailwind: &project.Tailwind{Input: "web/app.css", Output: "web/static/app.css"},
 		Tools:    []project.Tool{{Watch: []string{"esbuild", "--watch"}, Build: []string{"esbuild"}}},
@@ -37,7 +37,7 @@ func TestWatchersAndBuilds(t *testing.T) {
 	t.Chdir(t.TempDir()) // 没有根目录的 package.json：在前端目录中运行 vite
 	d := dev{cfg: cfg}
 	want := []watcher{
-		{"frontend", []string{"bun", "x", "vite"}},
+		{"frontend", []string{"bun", "x", "vite", "--port", "5173", "--strictPort"}},
 		{".", []string{"go", "tool", "templ", "generate", "--watch", "--proxy=http://localhost:8080", "--proxyport=7331", "--open-browser=false"}},
 		{".", []string{"tailwindcss", "-i", "web/app.css", "-o", "web/static/app.css", "--watch=always"}},
 		{".", []string{"esbuild", "--watch"}},

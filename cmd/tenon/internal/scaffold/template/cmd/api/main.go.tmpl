@@ -1,0 +1,71 @@
+// Command api 是[[.Name]]的入口：serve 启动 HTTP 服务，openapi、routes、client 供 go tool tenon 使用。
+package main
+
+import (
+	"context"
+	"log/slog"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/command/httpcmd"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/logging"
+
+	"[[.Module]]/frontend"
+	"[[.Module]]/internal/todo"
+)
+
+// Config 是应用的配置：config/app.yaml，开发时再叠加 config/local.yaml。
+type Config struct {
+	HTTP httpx.Config `yaml:"http"`
+	// FrontendDevServer 非空时把页面请求转给 Vite 的开发服务器，只在 config/local.yaml 中设置。
+	FrontendDevServer string `yaml:"frontend_dev_server"`
+}
+
+// api 是 JSON API 的选项，挂在 /api 下。
+var api = rest.Options{Title: "[[.Name]]", Version: "0.1.0", BasePath: "/api"}
+
+func main() {
+	root := command.Root("api", "[[.Name]]")
+	root.AddCommand(
+		command.Run("serve", "启动 HTTP 服务", serve),
+		command.Config[Config](),
+	)
+	root.AddCommand(httpcmd.Commands(api, docRoutes, docRouter)...)
+	command.Execute(root)
+}
+
+// serve 挂载 /api 和单页应用，直到收到停止信号。
+func serve(ctx context.Context, cfg Config) error {
+	slog.SetDefault(logging.New(logging.Config{}))
+	spa, err := httpx.NewSPA(frontend.Dist, httpx.SPAOptions{DevServer: cfg.FrontendDevServer})
+	if err != nil {
+		return err
+	}
+	router := chi.NewRouter()
+	router.Use(httpx.Defaults(cfg.HTTP, nil, nil)...)
+	router.Route("/api", func(r chi.Router) {
+		r.Use(httpx.Timeout(cfg.HTTP.Timeout))
+		opts := api
+		opts.Router = r
+		todo.Register(rest.New(opts), todo.NewStore())
+	})
+	router.Handle("/*", spa)
+	return httpx.ListenAndServe(ctx, cfg.HTTP, router, httpx.ServeOptions{})
+}
+
+// docRoutes 以文档模式注册全部接口，openapi 和 client 命令用它。
+func docRoutes(a *rest.API) { todo.Register(a, nil) }
+
+// docRouter 在文档模式下构造全部路由，routes 命令用它。
+func docRouter() chi.Routes {
+	router := chi.NewRouter()
+	router.Route("/api", func(r chi.Router) {
+		opts := api
+		opts.Mode, opts.Router = rest.ModeOpenAPI, r
+		docRoutes(rest.New(opts))
+	})
+	return router
+}

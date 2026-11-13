@@ -4,6 +4,10 @@
     - [为什么选择 Tenon](#why-tenon)
 - [创建应用](#creating-an-application)
     - [环境要求](#requirements)
+    - [生成项目](#creating-a-project)
+    - [开发](#developing)
+    - [构建](#building)
+- [只写一个 API](#api-only)
     - [安装 Tenon](#installing-tenon)
     - [编写入口文件](#entrypoint)
     - [启动服务](#running)
@@ -34,14 +38,71 @@ Tenon 是一个用于构建 HTTP API 的 Go 应用框架。它为配置加载、
 ### 环境要求
 
 - Go 1.27.3 或更高版本（精确的工具链要求以框架的 [go.mod](../go.mod) 为准）
-- PostgreSQL（仅在使用数据库功能时需要）
+- [Bun](https://bun.sh)，用来安装前端依赖、运行 Vite
 
-本章创建的最小 API 只需要 Go 工具链。
+生成的项目不依赖任何外部服务：示例数据保存在内存中，不需要 PostgreSQL。
+
+<a id="creating-a-project"></a>
+### 生成项目
+
+```bash
+go run github.com/go-tenon/tenon/cmd/tenon@main init todo
+```
+
+这会生成一个 Go 应用加 React 单页应用的项目，安装好 Go 和前端的依赖，并生成前端调用接口用的 TypeScript 客户端。`--module` 指定 Go 模块路径，默认是目录名。
+
+```text
+todo/
+├── go.mod                 tool github.com/go-tenon/tenon/cmd/tenon：开发工具随框架的版本固定
+├── package.json           dev、build、generate 脚本；React、TanStack Query、Vite
+├── vite.config.ts         root 指向 frontend
+├── config/
+│   ├── app.yaml           监听地址
+│   └── local.yaml         开发时把页面请求转给 Vite
+├── cmd/api/main.go        serve 命令：挂载 /api 和单页应用
+├── internal/todo/todo.go  示例资源：待办事项的四个接口，数据保存在内存中
+└── frontend/
+    ├── frontend.go        把构建产物 dist 嵌入程序
+    ├── index.html
+    └── src/
+        ├── App.tsx        待办列表
+        └── api/           生成的客户端，不要手改
+```
+
+<a id="developing"></a>
+### 开发
+
+```bash
+cd todo
+bun run dev
+```
+
+打开 `http://localhost:8080`，就能添加、勾选、删除待办事项。
+
+- **修改前端代码**：页面会热更新。
+- **修改 Go 代码**：应用自动重新编译、重启，`frontend/src/api` 里的客户端也会跟着重新生成。比如给 `Todo` 加一个字段，前端立刻就能用到它的类型。
+
+接口文档在 `http://localhost:8080/api/docs`。`bun run dev` 运行的是 [`go tool tenon dev`](tooling.md#dev)，见[开发工具](tooling.md)。
+
+<a id="building"></a>
+### 构建
+
+```bash
+bun run build
+./bin/api serve --config config/app.yaml
+```
+
+`bun run build` 先构建前端，再把它嵌入 Go 程序。得到的 `bin/api` 是一个不依赖其他文件的二进制，部署见[部署](deployment.md)。
+
+<a id="api-only"></a>
+## 只写一个 API
+
+不需要前端时，也可以不用脚手架，从一个空目录开始写一个最小的 API。
 
 <a id="installing-tenon"></a>
 ### 安装 Tenon
 
-Tenon 是一个普通的 Go module。首先为你的应用创建一个目录并初始化 module：
+Tenon 是一个普通的 Go module。创建一个目录并初始化 module：
 
 ```bash
 mkdir hello-api
@@ -172,12 +233,13 @@ Tenon 还为你生成了接口文档。在浏览器中打开 `http://localhost:8
 <a id="next-steps"></a>
 ## 下一步
 
-现在你已经有了一个可以运行的 API，接下来可以根据需要逐步加入更多能力：
+现在你已经有了一个可以运行的应用，接下来可以根据需要逐步加入更多能力：
 
+- 用[数据库](database.md)连接 PostgreSQL，把示例中的内存存储换成数据表，用[迁移](migrations.md)管理表结构；
 - 用[配置](configuration.md)把监听地址、日志级别等参数放进 YAML 文件；
 - 阅读[路由](routing.md)、[请求](requests.md)和[响应](responses.md)，编写真正的业务接口；
 - 用[认证](authentication.md)保护需要登录才能访问的接口；
-- 用[数据库](database.md)连接 PostgreSQL，用[迁移](migrations.md)管理表结构；
-- 用[命令行](commands.md)为应用加上 `serve`、`migrate`、`openapi`、`routes` 等子命令。
+- 用[命令行](commands.md)为应用加上 `migrate`、`work` 等子命令；
+- 阅读[单页应用](spa.md)和[客户端](clients.md)，了解前端如何托管、如何调用接口。
 
 如果想先了解一个 Tenon 应用整体是如何组织的，可以阅读[目录结构](directory-structure.md)和[依赖装配](dependencies.md)。
