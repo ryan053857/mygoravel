@@ -189,7 +189,7 @@ func TestDevStopsWhenAWatcherExits(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "layout.templ"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "bin", "tailwindcss"), []byte("#!/bin/sh\nuntil grep -q 'templ generate --watch' \"$DEVCMD_LOG\"; do sleep 0.02; done\nexit 3\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "bin", "tailwindcss"), []byte("#!/bin/sh\nuntil grep -q 'templ generate --watch' \"$DEVCMD_LOG\" && grep -q 'app serve' \"$DEVCMD_LOG\"; do sleep 0.02; done\nexit 3\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	root := command.Root("api", "")
