@@ -321,20 +321,36 @@ err = users.Link(ctx, a.db, sub.Ref(), proof)
 | --- | --- |
 | 密码 | `Confirm(ctx, ref, password)` |
 | 验证码 | `SendConfirmCode(ctx, ref, id)` 发给账号自己的邮箱或手机号，`ConfirmCode(ctx, ref, requestID, code)` 校验 |
-| 二次验证 | `CheckTwoFactor(ctx, ref, code)` 校验验证器上的数字或恢复码 |
+| 二次验证 | `CheckTwoFactor(ctx, ref, code)` 校验验证器上的数字或恢复码，返回用到的方式 |
 | passkey、第三方账号 | 再登录一次，`out.Subject.Ref()` 等于 `ref` 即可 |
 
 失败次数都有限制。`HasPassword` 决定显示密码框还是“发送验证码”。确认用的验证码只发给 `ref` 自己的标识，其他标识返回 `ErrNotFound`；它不能用来登录，`VerifyCode` 不接受它，所以不会绕过二次验证。
 
-没有密码的账号用验证码确认：
+最简单的写法是客户端在敏感请求中直接带上密码或验证码，处理器先确认、再执行，见[读者注销账号](account-examples.md#reader-api)。几个敏感操作连在一起时，每次都输入密码很烦，可以改为“确认一次，一段时间内放行”：
+
+1. 敏感操作的路由加上 `rest.Confirmed(15*time.Minute)`。距离上次登录或确认超过 15 分钟时，请求返回 `403 auth.confirm_required`；
+2. 客户端弹出确认框，调用应用的确认接口：校验密码或验证码，再用 token 的 `Confirm` 记下确认时间；
+3. 客户端重试原请求。
 
 ```go
-requestID, err := users.SendConfirmCode(ctx, sub.Ref(), login.Phone(phone))
-// 用户收到验证码后
-err = users.ConfirmCode(ctx, sub.Ref(), in.Body.RequestID, in.Body.Code)
+// POST /account/confirm
+func (a *ConfirmAccount) Handle(ctx context.Context, sub identity.Subject, password string) error {
+    if err := a.users.Confirm(ctx, sub.Ref(), password); err != nil {
+        return err
+    }
+    return a.tokens.Confirm(ctx, sub, login.MethodPassword)
+}
 ```
 
-客户端在这类请求中带上密码或验证码，处理器先确认，再执行操作，完整的写法见[读者注销账号](account-examples.md#reader-api)。
+```go
+op := huma.Operation{OperationID: "account-delete", Method: http.MethodDelete, Path: "/account"}
+rest.RequireBearer(api, tokens.Validate)(&op)
+rest.Confirmed(15 * time.Minute)(&op)
+```
+
+`Confirm` 的方式参数是这次确认用到的方式：密码为 `login.MethodPassword`，验证码为标识的类型（如 `login.KindPhone`），二次验证为 `CheckTwoFactor` 的返回值。[JWT 模式](api-tokens.md#jwt)用 `jwt.Confirm`，它返回新的 access token，客户端替换后重试。个人访问令牌和代为登录的 token 不能确认身份，访问 `Confirmed` 的路由总是 `403`。
+
+登录本身也算一次确认。登录得到的 `out.Subject.Auth` 记下了这次通过的验证方式（如 `password`、`password totp`、`email`、`passkey`、`google`）和时间，token 保存它们，之后每个请求的主体都带着，见[认证](authentication.md#key-concepts)。
 
 <a id="admin-accounts"></a>
 ## 后台创建账号

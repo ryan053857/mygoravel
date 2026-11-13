@@ -172,9 +172,10 @@ func TestTwoFactorLogin(t *testing.T) {
 	if err != nil || len(fresh) != 8 {
 		t.Fatalf("regenerate: %v %v", fresh, err)
 	}
-	is(t, e.realm.CheckTwoFactor(ctx, ref("c1"), codes[1]), login.ErrInvalidCode)
-	if err := e.realm.CheckTwoFactor(ctx, ref("c1"), fresh[1]); err != nil {
-		t.Fatal(err)
+	_, err = e.realm.CheckTwoFactor(ctx, ref("c1"), codes[1])
+	is(t, err, login.ErrInvalidCode)
+	if method, err := e.realm.CheckTwoFactor(ctx, ref("c1"), fresh[1]); err != nil || method != login.MethodRecovery {
+		t.Fatalf("recovery code: %q %v", method, err)
 	}
 
 	// 关闭后直接登录。
@@ -184,7 +185,8 @@ func TestTwoFactorLogin(t *testing.T) {
 	if out, err := e.realm.Password(ctx, login.Email("c1@example.com"), "correct horse"); err != nil || out.Subject.ID != "c1" {
 		t.Fatalf("after disable: %+v %v", out, err)
 	}
-	is(t, e.realm.CheckTwoFactor(ctx, ref("c1"), fresh[2]), login.ErrTwoFactorDisabled)
+	_, err = e.realm.CheckTwoFactor(ctx, ref("c1"), fresh[2])
+	is(t, err, login.ErrTwoFactorDisabled)
 	_, err = e.realm.RegenerateRecoveryCodes(ctx, e.db, ref("c1"))
 	is(t, err, login.ErrTwoFactorDisabled)
 }
@@ -226,7 +228,7 @@ func TestTOTPReplay(t *testing.T) {
 	)
 	for range 8 {
 		wg.Go(func() {
-			err := e.realm.CheckTwoFactor(ctx, ref("c1"), code)
+			_, err := e.realm.CheckTwoFactor(ctx, ref("c1"), code)
 			if err != nil && !errors.Is(err, login.ErrInvalidCode) {
 				t.Error(err)
 			}
@@ -243,9 +245,75 @@ func TestTOTPReplay(t *testing.T) {
 	}
 	// 允许前后各一个时间步的时钟误差，但不能早于已用过的那一步。
 	e.clock.add(-30 * time.Second)
-	is(t, e.realm.CheckTwoFactor(ctx, ref("c1"), a.code()), login.ErrInvalidCode)
+	_, err := e.realm.CheckTwoFactor(ctx, ref("c1"), a.code())
+	is(t, err, login.ErrInvalidCode)
 	e.clock.add(60 * time.Second)
-	if err := e.realm.CheckTwoFactor(ctx, ref("c1"), login.TOTP(a.key, e.clock.now().Unix()/30+1)); err != nil {
-		t.Fatalf("next step within skew: %v", err)
+	if method, err := e.realm.CheckTwoFactor(ctx, ref("c1"), login.TOTP(a.key, e.clock.now().Unix()/30+1)); err != nil || method != login.MethodTOTP {
+		t.Fatalf("next step within skew: %q %v", method, err)
+	}
+}
+
+// 登录成功的主体记下这次通过的验证方式和时间，签发的凭据保存它们（identity.Auth）。
+func TestAuthMethods(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newRealm(t, login.Options{Register: true})
+	methodsOf := func(e *env) func(login.Outcome, error) string {
+		return func(out login.Outcome, err error) string {
+			t.Helper()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !out.Subject.Auth.Time.Equal(e.clock.now()) {
+				t.Fatalf("auth time %v, want %v", out.Subject.Auth.Time, e.clock.now())
+			}
+			return strings.Join(out.Subject.Auth.Methods, " ")
+		}
+	}
+	methods := methodsOf(e)
+
+	e.account(t, ctx, "c1", "c1@example.com", "correct horse")
+	if got := methods(e.realm.Password(ctx, login.Email("c1@example.com"), "correct horse")); got != "password" {
+		t.Errorf("password: %q", got)
+	}
+	requestID, c := e.code(t, ctx, login.SignIn, login.Email("c1@example.com"))
+	if got := methods(e.realm.VerifyCode(ctx, requestID, c.Code)); got != "email" {
+		t.Errorf("code: %q", got)
+	}
+	if err := e.realm.Attach(ctx, e.db, ref("c1"), login.Identifier{Kind: "github", Value: "42"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := methods(e.realm.External(ctx, login.External{Provider: "github", Subject: "42"})); got != "github" {
+		t.Errorf("external: %q", got)
+	}
+
+	// 二次验证：第一步的方式加上第二步。
+	a, codes := e.enable(t, ctx, "c1")
+	if got := methods(e.realm.TwoFactor(ctx, e.pending(t, ctx, "c1@example.com", "correct horse"), a.code())); got != "password totp" {
+		t.Errorf("password + totp: %q", got)
+	}
+	requestID, c = e.code(t, ctx, login.SignIn, login.Email("c1@example.com"))
+	out, err := e.realm.VerifyCode(ctx, requestID, c.Code)
+	if err != nil || out.Pending == "" {
+		t.Fatalf("code with two-factor: %+v %v", out, err)
+	}
+	if got := methods(e.realm.TwoFactor(ctx, out.Pending, codes[0])); got != "email recovery" {
+		t.Errorf("code + recovery: %q", got)
+	}
+
+	// 注册得到的主体记下验证的标识。
+	sub, err := e.realm.Register(ctx, e.db, e.proof(t, ctx, login.SignIn, login.Phone("+8613800138000")), ref("c2"))
+	if err != nil || strings.Join(sub.Auth.Methods, " ") != "phone" || !sub.Auth.Time.Equal(e.clock.now()) {
+		t.Fatalf("register: %+v %v", sub.Auth, err)
+	}
+
+	// Options.Resolve 不能改变验证情况。
+	forged := newRealm(t, login.Options{Resolve: func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
+		sub.Auth = identity.Auth{Methods: []string{"passkey"}}
+		return sub, nil
+	}})
+	forged.account(t, ctx, "c3", "c3@example.com", "correct horse")
+	if got := methodsOf(forged)(forged.realm.Password(ctx, login.Email("c3@example.com"), "correct horse")); got != "password" {
+		t.Errorf("resolve changed auth: %q", got)
 	}
 }

@@ -125,9 +125,11 @@ type Pair struct {
 // claims 是 access token 的内容，只包含签发时确定、之后不变的信息；权限由 Resolver 按请求加载。
 type claims struct {
 	jwt.Claims
-	Session string `json:"sid"`
-	Tenant  string `json:"tid,omitempty"`
-	Actor   *actor `json:"act,omitempty"`
+	Session  string           `json:"sid"`
+	Tenant   string           `json:"tid,omitempty"`
+	Actor    *actor           `json:"act,omitempty"`
+	Methods  []string         `json:"amr,omitempty"`       // identity.Auth.Methods（RFC 8176 的 amr）
+	AuthTime *jwt.NumericDate `json:"auth_time,omitempty"` // identity.Auth.Time（OIDC 的 auth_time）
 }
 
 // actor 是代为登录时的实际操作者，见 RFC 8693 的 act。
@@ -218,6 +220,17 @@ func (j *JWT) Refresh(ctx context.Context, refresh string) (Pair, error) {
 	return p, err
 }
 
+// Confirm 与 Store.Confirm 相同，记录 sub 本次请求所用的登录此刻再次验证了身份，并返回带有新验证情况的 access token
+// （Pair.Refresh 为空，客户端继续使用已有的 refresh token）。之后刷新得到的 access token 同样带有它。
+// sub.Credential 不是 JWT 模式的登录时返回 ErrNotFound。
+func (j *JWT) Confirm(ctx context.Context, sub identity.Subject, methods ...string) (Pair, error) {
+	r, err := j.store.confirm(ctx, sub, methods, KindRefresh)
+	if err != nil {
+		return Pair{}, err
+	}
+	return j.sign(r, time.Now().UTC())
+}
+
 // find 返回当前或上一个 token 为 h 的未过期登录。
 func (j *JWT) find(ctx context.Context, h string, now time.Time) (*row, error) {
 	var r row
@@ -261,6 +274,10 @@ func (j *JWT) sign(r *row, now time.Time) (Pair, error) {
 		},
 		Session: r.ID.String(),
 		Tenant:  r.Tenant,
+		Methods: strings.Fields(r.AuthMethods),
+	}
+	if !r.AuthTime.IsZero() {
+		c.AuthTime = jwt.NewNumericDate(r.AuthTime)
 	}
 	if j.cfg.Audience != "" {
 		c.Audience = jwt.Audience{j.cfg.Audience}
@@ -280,6 +297,7 @@ func (j *JWT) sign(r *row, now time.Time) (Pair, error) {
 const leeway = 5 * time.Second
 
 // Validate 实现 rest.TokenValidator：access token 只校验签名和有效期（允许 5 秒时钟偏差），不访问数据库。
+// 主体的 Auth 取自 access token 的 amr、auth_time，即签发时登录的验证情况。
 //
 // 长连接复查时（identity.Rechecking 报告为 true）改为确认登录仍然存在：按 sid 查一次 api_tokens，
 // 登录被撤销或过期时返回 ErrInvalid，所以撤销后 SSE、实时连接在下一次复查时结束；
@@ -331,6 +349,10 @@ func (j *JWT) Validate(ctx context.Context, token string) (identity.Subject, err
 		Method:     "bearer",
 		Credential: c.Session,
 		Tenant:     c.Tenant,
+		Auth:       identity.Auth{Methods: c.Methods},
+	}
+	if c.AuthTime != nil {
+		sub.Auth.Time = c.AuthTime.Time().UTC()
 	}
 	if c.Actor != nil {
 		if sub.Impersonator, err = identity.ParseRef(c.Actor.Subject); err != nil {

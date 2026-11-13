@@ -150,7 +150,7 @@ rest.RequireBearer(api, tokens.Validate)(&op)
 rest.Register(api, op, revokeToken(tokens))
 ```
 
-`Login` 记录 IP 和 User-Agent，用于[设备列表](#listing-tokens)。登出时把主体的 `Credential` 交给 `Revoke`，撤销的就是本次请求所用的 token。验证码登录、注册和找回密码见[登录与注册](login.md)。
+`Login` 记录 IP 和 User-Agent，用于[设备列表](#listing-tokens)，并保存 `out.Subject.Auth`（这次登录通过的验证方式和时间），之后校验得到的主体带着它。敏感操作前用户再次输入密码时，`Confirm(ctx, sub, methods...)` 更新它，见[确认身份](login.md#confirming)；JWT 模式用 `jwt.Confirm`，它返回新的 access token。登出时把主体的 `Credential` 交给 `Revoke`，撤销的就是本次请求所用的 token。验证码登录、注册和找回密码见[登录与注册](login.md)。
 
 <a id="personal-access-tokens"></a>
 ## 个人访问令牌
@@ -308,7 +308,7 @@ customerJWT := apitoken.NewJWT(customerTokens, apitoken.JWTConfig{
 
 ### access token 的内容
 
-access token 只包含签发时确定、之后不会变化的信息，**不包含权限**；权限仍由 `rest.Options.Accounts` 中的 Resolver 在每个请求中[加载](#loading-permissions)。Resolver 查库时，请求仍会访问数据库；不需要权限的入口可以把 Resolver 设为 `nil`。
+access token 只包含签发时确定的信息，**不包含权限**；权限仍由 `rest.Options.Accounts` 中的 Resolver 在每个请求中[加载](#loading-permissions)。Resolver 查库时，请求仍会访问数据库；不需要权限的入口可以把 Resolver 设为 `nil`。
 
 | claim | 内容 | 校验后的主体 |
 | --- | --- | --- |
@@ -316,6 +316,7 @@ access token 只包含签发时确定、之后不会变化的信息，**不包�
 | `sid` | 登录的 ID，即 `api_tokens` 的行 ID | `Credential` |
 | `tid` | 绑定的租户 | `Tenant` |
 | `act` | [代为登录](authentication.md#impersonation)的实际操作者（RFC 8693） | `Impersonator` |
+| `amr`、`auth_time` | 登录通过的验证方式和最近一次验证身份的时间（RFC 8176、OIDC） | `Auth` |
 | `iat`、`exp` | 签发与过期时间，过期时间不晚于登录本身 | — |
 | `iss`、`aud` | `JWTConfig.Issuer`、`Audience`，设置时才写入并校验 | — |
 

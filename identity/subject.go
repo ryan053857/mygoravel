@@ -2,7 +2,9 @@ package identity
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"time"
 )
 
 // Subject 是已认证主体：Type 是它所属的账号体系，ID 是它在其中的标识，两者合起来见 Ref。
@@ -21,6 +23,30 @@ type Subject struct {
 	Tenant       string   // 本次请求所在的租户，"" 表示平台本身；由凭据设置时，凭据只能在这个租户中使用
 	Permissions  []string // 主体在 Tenant 中拥有的权限，支持通配符，见 Can
 	Scopes       []string // 凭据的权限限制，支持通配符；nil 表示不限制，空切片表示什么都不允许
+	Auth         Auth     // 凭据是怎么得到的：登录时通过的验证方式和最近一次验证身份的时间；不经过登录的凭据为零值
+}
+
+// Auth 记录一次登录怎样验证了主体的身份，由凭据保存（见 apitoken），对应 OIDC 的 amr 和 auth_time。
+// 个人访问令牌、OAuth 令牌、代为登录等不经过本人登录的凭据为零值，过不了 rest.Confirmed 和二次验证的要求。
+type Auth struct {
+	// Methods 是这次登录依次通过的验证方式，之后确认身份时补充新的方式，例如：
+	// password；email、phone（验证码发到哪里）；totp、recovery（二次验证）；passkey；第三方提供方的名称，如 google。
+	Methods []string
+	// Time 是最近一次验证身份的时间：登录，或之后的确认身份。
+	Time time.Time
+}
+
+// 计入二次验证的方式：TOTP 和恢复码是第二步，passkey 本身同时验证了设备和使用者。
+var twoFactorMethods = []string{"totp", "recovery", "passkey"}
+
+// TwoFactor 报告这次登录是否经过了二次验证：Methods 中有 totp、recovery 或 passkey。
+func (a Auth) TwoFactor() bool {
+	return slices.ContainsFunc(a.Methods, func(m string) bool { return slices.Contains(twoFactorMethods, m) })
+}
+
+// ConfirmedWithin 报告最近一次验证身份是否在 d 之内。Time 为零值时返回 false。
+func (a Auth) ConfirmedWithin(d time.Duration) bool {
+	return !a.Time.IsZero() && time.Since(a.Time) <= d
 }
 
 // Ref 返回主体的引用。

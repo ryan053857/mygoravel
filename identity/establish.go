@@ -16,6 +16,12 @@ var (
 	// 客户端换一个新的凭据（刷新）后重试即可，不需要重新登录。认证器返回匹配它的错误时，
 	// Establish 返回的 ErrUnauthenticated 同样匹配它，入口据此提示客户端刷新，例如实时连接返回“token 已过期”。
 	ErrExpired = errorx.Define(errorx.Unauthenticated, "auth.expired")
+	// ErrConfirmRequired 表示操作要求最近确认过身份（rest.Confirmed）：客户端让用户再次输入密码或验证码，
+	// 确认后（apitoken 的 Confirm）重试。
+	ErrConfirmRequired = errorx.Define(errorx.PermissionDenied, "auth.confirm_required")
+	// ErrTwoFactorRequired 表示操作要求这次登录经过二次验证（Auth.TwoFactor），例如租户要求成员使用二次验证：
+	// 客户端让用户完成二次验证并确认身份后重试；账号还没有启用二次验证时，先去启用。
+	ErrTwoFactorRequired = errorx.Define(errorx.PermissionDenied, "auth.two_factor_required")
 )
 
 // Authenticator 识别调用者，返回凭据给出的主体。没有凭据或凭据无效时返回 ID 为空的主体或 4xx 类错误；
@@ -24,7 +30,7 @@ type Authenticator func(ctx context.Context) (Subject, error)
 
 // Resolver 把凭据给出的主体转换为本次请求的主体，例如按 TenantFromContext 加载主体在租户中的权限。
 // 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效；其他 4xx 类错误按其分类处理，
-// 例如不是租户成员时返回 errorx.NotFound。返回的主体中 Type、ID、Method、Credential、Scopes、Impersonator
+// 例如不是租户成员时返回 errorx.NotFound。返回的主体中 Type、ID、Method、Credential、Scopes、Impersonator、Auth
 // 总是取自凭据，Resolver 改变它们不起作用：它只加载权限和租户，不能把主体换成另一个人。
 // 入口通过 Accounts 为每套账号体系指定 Resolver。
 type Resolver func(ctx context.Context, sub Subject) (Subject, error)
@@ -63,9 +69,10 @@ func Establish(ctx context.Context, authenticate Authenticator, resolve Resolver
 		case err != nil:
 			return Subject{}, err
 		}
-		// resolve 加载权限和租户；主体本身、认证方式、凭据、凭据的限制和代为登录者由凭据决定，不随 resolve 改变。
+		// resolve 加载权限和租户；主体本身、认证方式、凭据、凭据的限制、代为登录者和验证情况由凭据决定，不随 resolve 改变。
 		sub.Type, sub.ID = cred.Type, cred.ID
 		sub.Method, sub.Credential, sub.Scopes, sub.Impersonator = cred.Method, cred.Credential, cred.Scopes, cred.Impersonator
+		sub.Auth = cred.Auth
 	}
 	for _, perm := range permissions {
 		if !sub.Can(perm) {

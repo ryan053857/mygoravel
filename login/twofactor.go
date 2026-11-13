@@ -11,6 +11,7 @@ import (
 	"encoding/base32"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -202,39 +203,43 @@ func (r *Realm) forgetTwoFactor(ctx context.Context, db bun.IDB, subjectID strin
 	return nil
 }
 
-// CheckTwoFactor 校验 ref 的 TOTP 验证码或恢复码，恢复码用过即作废，同一个 TOTP 验证码也不能用两次。
-// 用于敏感操作前再次确认身份。不正确时返回 ErrInvalidCode，未启用时返回 ErrTwoFactorDisabled；
+// CheckTwoFactor 校验 ref 的 TOTP 验证码或恢复码，返回用到的方式（MethodTOTP 或 MethodRecovery），
+// 恢复码用过即作废，同一个 TOTP 验证码也不能用两次。用于敏感操作前再次确认身份，返回的方式交给 apitoken 的 Confirm。
+// 不正确时返回 ErrInvalidCode，未启用时返回 ErrTwoFactorDisabled；
 // 失败次数由 Options.Attempts 限制，成功后清零。
-func (r *Realm) CheckTwoFactor(ctx context.Context, ref identity.Ref, code string) error {
+func (r *Realm) CheckTwoFactor(ctx context.Context, ref identity.Ref, code string) (string, error) {
 	if err := r.check(ref); err != nil {
-		return err
+		return "", err
 	}
 	return r.checkTwoFactor(ctx, ref.ID, code)
 }
 
-func (r *Realm) checkTwoFactor(ctx context.Context, subjectID, code string) error {
+// checkTwoFactor 校验 TOTP 验证码或恢复码，返回用到的方式（MethodTOTP 或 MethodRecovery）。
+func (r *Realm) checkTwoFactor(ctx context.Context, subjectID, code string) (string, error) {
 	key := string(r.opts.Type) + "|two_factor|" + subjectID
 	if err := r.opts.Attempts.Allow(ctx, key); err != nil {
-		return err
+		return "", err
 	}
 	row, err := r.twoFactor(ctx, r.db, subjectID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if row == nil || row.ConfirmedAt.IsZero() {
-		return ErrTwoFactorDisabled.New()
+		return "", ErrTwoFactorDisabled.New()
 	}
+	method := MethodTOTP
 	ok, err := r.useTOTP(ctx, r.db, row, code)
 	if err == nil && !ok {
+		method = MethodRecovery
 		ok, err = r.useRecoveryCode(ctx, subjectID, code)
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !ok {
-		return ErrInvalidCode.New()
+		return "", ErrInvalidCode.New()
 	}
-	return r.opts.Attempts.Reset(ctx, key)
+	return method, r.opts.Attempts.Reset(ctx, key)
 }
 
 // TwoFactor 用 TOTP 验证码或恢复码完成等待二次验证的登录（Outcome.Pending），返回登录成功的主体。
@@ -252,23 +257,38 @@ func (r *Realm) TwoFactor(ctx context.Context, pending, code string) (Outcome, e
 	if n == 0 {
 		return Outcome{}, ErrInvalidProof.New()
 	}
-	if err := r.checkTwoFactor(ctx, c.SubjectID, code); err != nil {
+	method, err := r.checkTwoFactor(ctx, c.SubjectID, code)
+	if err != nil {
 		return Outcome{}, err
 	}
 	if err := r.complete(ctx, r.db, c); err != nil {
 		return Outcome{}, err
 	}
-	return r.signedIn(ctx, c.SubjectID, c.Tenant)
+	var first pendingData
+	if err := json.Unmarshal([]byte(c.Data), &first); err != nil {
+		return Outcome{}, errors.Wrap(err, "login: decode pending login")
+	}
+	return r.signedIn(ctx, c.SubjectID, c.Tenant, append(first.Methods, method)...)
 }
 
-// authenticated 在第一步验证（密码、验证码）通过后调用：启用了二次验证时返回 Outcome.Pending，否则登录成功。
-func (r *Realm) authenticated(ctx context.Context, subjectID, tenant string) (Outcome, error) {
+// pendingData 是等待二次验证的登录记下的第一步验证方式。
+type pendingData struct {
+	Methods []string `json:"methods"`
+}
+
+// authenticated 在第一步验证（密码、验证码）通过后调用，method 是这一步的验证方式：
+// 启用了二次验证时返回 Outcome.Pending，否则登录成功。
+func (r *Realm) authenticated(ctx context.Context, subjectID, tenant, method string) (Outcome, error) {
 	enabled, err := r.enabled(ctx, r.db, subjectID)
 	if err != nil || !enabled {
 		if err != nil {
 			return Outcome{}, err
 		}
-		return r.signedIn(ctx, subjectID, tenant)
+		return r.signedIn(ctx, subjectID, tenant, method)
+	}
+	data, err := json.Marshal(pendingData{Methods: []string{method}})
+	if err != nil {
+		return Outcome{}, errors.Wrap(err, "login: encode pending login")
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -278,7 +298,7 @@ func (r *Realm) authenticated(ctx context.Context, subjectID, tenant string) (Ou
 	now := r.now().UTC()
 	row := &challengeRow{
 		ID: id, Purpose: purposeTwoFactor, SubjectType: string(r.opts.Type), Tenant: tenant, SubjectID: subjectID,
-		ProofHash: sha(secret), ExpiresAt: now.Add(r.opts.ProofTTL), CreatedAt: now,
+		ProofHash: sha(secret), Data: string(data), ExpiresAt: now.Add(r.opts.ProofTTL), CreatedAt: now,
 	}
 	if _, err := r.db.NewInsert().Model(row).Exec(ctx); err != nil {
 		return Outcome{}, errors.Wrap(err, "login: save pending login")

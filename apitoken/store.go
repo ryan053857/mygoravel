@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -117,6 +118,8 @@ type row struct {
 	ClientID         string    `bun:"client_id,notnull"`
 	ClientName       string    `bun:"client_name,notnull"`
 	Resource         string    `bun:"resource,notnull"`
+	AuthMethods      string    `bun:"auth_methods,notnull"` // 登录的验证方式，空格分隔；其他种类为空
+	AuthTime         time.Time `bun:"auth_time,nullzero"`   // 登录最近一次验证身份的时间
 }
 
 // NewStore 创建 token 存储。db 必须已执行 api_tokens 迁移。cfg 不合法或 db 为 nil 时 panic。
@@ -136,6 +139,7 @@ func NewStore(db bun.IDB, cfg Config) *Store {
 // 登录 token 代表用户本人，不限制权限：校验得到的主体 Scopes 为 nil，权限由 Resolve 按用户当前的角色加载。
 // sub.Tenant 不为空时，token 只能在这个租户中使用，例如只属于某个租户的终端客户账号。
 // sub.Impersonator 不为零值时签发的是代为登录的 token，校验得到的主体带有同样的 Impersonator。
+// sub.Auth 记录这次登录怎样验证了身份（login.Realm 填写），校验得到的主体带有它，见 Confirm。
 func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (string, error) {
 	plain, _, err := s.login(ctx, sub, d, KindLogin)
 	return plain, err
@@ -144,8 +148,14 @@ func (s *Store) Login(ctx context.Context, sub identity.Subject, d Device) (stri
 // login 签发 kind 类的登录 token，返回明文和写入的行。
 func (s *Store) login(ctx context.Context, sub identity.Subject, d Device, kind Kind) (string, *row, error) {
 	now := time.Now().UTC()
+	methods, err := joinWords(sub.Auth.Methods, "auth method")
+	if err != nil {
+		return "", nil, err
+	}
 	idle, end := s.cfg.idle(d.Remember), now.Add(s.cfg.Lifetime)
 	r := &row{
+		AuthMethods: methods,
+		AuthTime:    sub.Auth.Time.UTC(),
 		Kind:        kind,
 		Tenant:      sub.Tenant,
 		IdleTimeout: int64(idle / time.Second),
@@ -320,7 +330,60 @@ func (s *Store) validate(ctx context.Context, token, resource string) (identity.
 	if r.Kind == KindPersonal || r.Kind == KindOAuth {
 		sub.Scopes = strings.Fields(r.Scopes)
 	}
+	if r.Kind == KindLogin {
+		sub.Auth = r.auth()
+	}
 	return sub, nil
+}
+
+// Confirm 记录 sub 本次请求所用的登录（sub.Credential）此刻再次验证了身份，例如用户重新输入了密码（login.Realm.Confirm），
+// methods 是这次用到的验证方式，补充到登录的 Auth.Methods 中；之后 rest.Confirmed 的路由在有效期内放行。
+// 用二次验证确认后，没有经过二次验证的登录也变为经过了（identity.Auth.TwoFactor），不需要重新登录。
+//
+// 不透明的登录 token 下一个请求就生效；JWT 模式用 JWT.Confirm，它同时返回带有新验证情况的 access token。
+// sub.Credential 不是 sub 的登录（个人访问令牌、OAuth 令牌）时返回 ErrNotFound；代为登录的 token 返回 identity.ErrForbidden，
+// 实际操作的人不是主体本人。methods 不能为空。
+func (s *Store) Confirm(ctx context.Context, sub identity.Subject, methods ...string) error {
+	_, err := s.confirm(ctx, sub, methods, KindLogin, KindRefresh)
+	return err
+}
+
+// confirm 更新 kinds 类登录的验证情况，返回更新后的行。
+func (s *Store) confirm(ctx context.Context, sub identity.Subject, methods []string, kinds ...Kind) (*row, error) {
+	if len(methods) == 0 {
+		return nil, errors.New("apitoken: Confirm needs at least one auth method")
+	}
+	if _, err := joinWords(methods, "auth method"); err != nil {
+		return nil, err
+	}
+	if !sub.Impersonator.IsZero() {
+		return nil, identity.ErrForbidden.New()
+	}
+	id, err := uuid.Parse(sub.Credential)
+	if err != nil || sub.ID == "" {
+		return nil, ErrNotFound.New()
+	}
+	now := time.Now().UTC()
+	var r row
+	err = s.live(s.db.NewSelect().Model(&r), now).Where("id = ?", id).
+		Where("subject_type = ? AND subject_id = ?", sub.Type, sub.ID).
+		Where("kind IN (?)", bun.List(kinds)).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound.New()
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "apitoken: confirm")
+	}
+	merged := strings.Fields(r.AuthMethods)
+	for _, m := range methods {
+		if !slices.Contains(merged, m) {
+			merged = append(merged, m)
+		}
+	}
+	r.AuthMethods, r.AuthTime = strings.Join(merged, " "), now
+	_, err = s.db.NewUpdate().Model((*row)(nil)).
+		Set("auth_methods = ?", r.AuthMethods).Set("auth_time = ?", r.AuthTime).Where("id = ?", r.ID).Exec(ctx)
+	return &r, errors.Wrap(err, "apitoken: confirm")
 }
 
 // touch 记录 token 在 now 被使用。条件更新保证并发请求中只有一个真正写入。
@@ -433,6 +496,11 @@ func (r *row) token() Token {
 	}
 }
 
+// auth 返回登录的验证情况。
+func (r *row) auth() identity.Auth {
+	return identity.Auth{Methods: strings.Fields(r.AuthMethods), Time: r.AuthTime}
+}
+
 func (r *row) impersonator() identity.Ref {
 	return identity.Ref{Type: identity.SubjectType(r.ImpersonatorType), ID: r.ImpersonatorID}
 }
@@ -455,13 +523,16 @@ func hash(token string) string {
 }
 
 // joinScopes 把 scope 存为空格分隔的字符串；scope 不能为空，也不能包含空白。
-func joinScopes(scopes []string) (string, error) {
-	for _, sc := range scopes {
-		if sc == "" || strings.ContainsFunc(sc, unicode.IsSpace) {
-			return "", errors.Newf("apitoken: invalid scope %q", sc)
+func joinScopes(scopes []string) (string, error) { return joinWords(scopes, "scope") }
+
+// joinWords 把 words 存为空格分隔的字符串；每一项不能为空，也不能包含空白。what 用于错误信息。
+func joinWords(words []string, what string) (string, error) {
+	for _, w := range words {
+		if w == "" || strings.ContainsFunc(w, unicode.IsSpace) {
+			return "", errors.Newf("apitoken: invalid %s %q", what, w)
 		}
 	}
-	return strings.Join(scopes, " "), nil
+	return strings.Join(words, " "), nil
 }
 
 func truncate(s string, n int) string {

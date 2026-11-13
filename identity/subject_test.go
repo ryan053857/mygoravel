@@ -2,7 +2,9 @@ package identity_test
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ryan053857/mygoravel/identity"
 )
@@ -70,5 +72,29 @@ func TestCan(t *testing.T) {
 	token.Scopes = []string{}
 	if token.Can("articles:read") {
 		t.Error("empty scopes allowed a permission")
+	}
+}
+
+func TestAuth(t *testing.T) {
+	t.Parallel()
+	for methods, want := range map[string]bool{
+		"":                  false,
+		"password":          false,
+		"email":             false,
+		"google":            false,
+		"password totp":     true,
+		"password recovery": true,
+		"passkey":           true,
+	} {
+		if got := (identity.Auth{Methods: strings.Fields(methods)}).TwoFactor(); got != want {
+			t.Errorf("TwoFactor(%q) = %v", methods, got)
+		}
+	}
+	if (identity.Auth{}).ConfirmedWithin(time.Hour) {
+		t.Error("zero Auth confirmed")
+	}
+	recent := identity.Auth{Time: time.Now().Add(-10 * time.Minute)}
+	if !recent.ConfirmedWithin(15*time.Minute) || recent.ConfirmedWithin(5*time.Minute) {
+		t.Errorf("ConfirmedWithin %v", recent.Time)
 	}
 }

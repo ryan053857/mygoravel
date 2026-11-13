@@ -1,5 +1,7 @@
 auth.unauthenticated: 请先认证
 auth.forbidden: 没有访问权限
+auth.confirm_required: 请先确认身份
+auth.two_factor_required: 请先完成二次验证
 url.invalid_signature: 链接无效
 url.expired: 链接已过期
 pdf.unavailable: PDF 生成服务暂时不可用，请稍后再试

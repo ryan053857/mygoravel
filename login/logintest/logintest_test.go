@@ -89,7 +89,7 @@ func TestWithRealm(t *testing.T) {
 		}
 		// 同一个 30 秒内的验证码已经用过，时间前进后得到新的。
 		time.Sleep(30 * time.Second)
-		if err := users.CheckTwoFactor(ctx, alice, logintest.TOTP(setup.Secret)); err != nil {
+		if _, err := users.CheckTwoFactor(ctx, alice, logintest.TOTP(setup.Secret)); err != nil {
 			t.Fatal(err)
 		}
 	})

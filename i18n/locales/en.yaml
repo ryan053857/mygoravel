@@ -1,5 +1,7 @@
 auth.unauthenticated: Authentication required
 auth.forbidden: Permission denied
+auth.confirm_required: Please confirm your identity first
+auth.two_factor_required: Two-factor authentication is required
 url.invalid_signature: Invalid link
 url.expired: This link has expired
 pdf.unavailable: PDF service is temporarily unavailable, please try again later

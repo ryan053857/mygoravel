@@ -156,8 +156,8 @@ func defaultPolicy(password string) error {
 
 // Outcome 是一次身份证明的结果，三者只有一个不为零值。
 type Outcome struct {
-	// Subject 是登录成功的主体：Type、ID，PerTenant 时还有 Tenant，以及 Options.Resolve 加载的字段。
-	// 交给 tokens.Login 或 JWT.Login 签发凭据。
+	// Subject 是登录成功的主体：Type、ID，PerTenant 时还有 Tenant，Auth 记下这次通过的验证方式（见 MethodPassword），
+	// 以及 Options.Resolve 加载的字段。交给 tokens.Login 或 JWT.Login 签发凭据。
 	Subject identity.Subject
 	// Pending 表示第一步验证已通过，但账号启用了二次验证：把它交给客户端，
 	// 客户端连同 TOTP 验证码或恢复码提交给 TwoFactor 完成登录。
@@ -189,15 +189,23 @@ func (r *Realm) check(ref identity.Ref) error {
 	return nil
 }
 
-// signedIn 返回登录成功的结果，签发前调用 Options.Resolve。
-func (r *Realm) signedIn(ctx context.Context, id, tenant string) (Outcome, error) {
-	sub := identity.Subject{Type: r.opts.Type, ID: id, Tenant: tenant}
+// 登录方式的名称，记录在 identity.Auth.Methods 中。验证码登录记为标识的类型（email、phone），
+// 第三方登录记为提供方的名称（如 google），passkey 登录记为 passkey。
+const (
+	MethodPassword = "password" // 密码
+	MethodTOTP     = "totp"     // 验证器 App 上的数字
+	MethodRecovery = "recovery" // 恢复码
+)
+
+// signedIn 返回登录成功的结果，主体的 Auth 记下这次通过的验证方式；签发前调用 Options.Resolve。
+func (r *Realm) signedIn(ctx context.Context, id, tenant string, methods ...string) (Outcome, error) {
+	sub := identity.Subject{Type: r.opts.Type, ID: id, Tenant: tenant, Auth: identity.Auth{Methods: methods, Time: r.now().UTC()}}
 	if resolve := r.opts.Resolve; resolve != nil {
 		resolved, err := resolve(ctx, sub)
 		if err != nil {
 			return Outcome{}, err
 		}
-		resolved.Type, resolved.ID, resolved.Tenant = sub.Type, sub.ID, sub.Tenant
+		resolved.Type, resolved.ID, resolved.Tenant, resolved.Auth = sub.Type, sub.ID, sub.Tenant, sub.Auth
 		sub = resolved
 	}
 	return Outcome{Subject: sub}, nil

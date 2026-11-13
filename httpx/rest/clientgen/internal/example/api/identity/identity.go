@@ -17,4 +17,10 @@ const (
 	// 客户端换一个新的凭据（刷新）后重试即可，不需要重新登录。认证器返回匹配它的错误时，
 	// Establish 返回的 ErrUnauthenticated 同样匹配它，入口据此提示客户端刷新，例如实时连接返回“token 已过期”。
 	ErrExpired wire.Code = "auth.expired"
+	// ErrConfirmRequired 表示操作要求最近确认过身份（rest.Confirmed）：客户端让用户再次输入密码或验证码，
+	// 确认后（apitoken 的 Confirm）重试。
+	ErrConfirmRequired wire.Code = "auth.confirm_required"
+	// ErrTwoFactorRequired 表示操作要求这次登录经过二次验证（Auth.TwoFactor），例如租户要求成员使用二次验证：
+	// 客户端让用户完成二次验证并确认身份后重试；账号还没有启用二次验证时，先去启用。
+	ErrTwoFactorRequired wire.Code = "auth.two_factor_required"
 )

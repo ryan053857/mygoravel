@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.opentelemetry.io/otel/trace"
@@ -20,7 +21,10 @@ type TokenValidator func(ctx context.Context, token string) (identity.Subject, e
 // 请求没有携带凭据时返回 ID 为空的主体或 errorx.Unauthenticated 错误；后端故障时返回 5xx 类错误。
 type Authenticator func(ctx huma.Context) (identity.Subject, error)
 
-const authMetadata = "mygoravel.auth"
+const (
+	authMetadata    = "mygoravel.auth"
+	confirmMetadata = "mygoravel.confirmed"
+)
 
 // RequireBearer 要求请求携带有效的 Authorization: Bearer token，校验器返回有效主体，
 // 并且主体能执行 permissions 中的全部权限（identity.Subject.Can）。
@@ -104,6 +108,10 @@ func RequireAuth(api *API, name string, scheme *huma.SecurityScheme, authenticat
 				writeError(api, ctx, problem(api, ctx, err))
 				return
 			}
+			if maxAge, ok := ctx.Operation().Metadata[confirmMetadata].(time.Duration); ok && !sub.Auth.ConfirmedWithin(maxAge) {
+				writeError(api, ctx, problem(api, ctx, identity.ErrConfirmRequired.New()))
+				return
+			}
 			// 长连接期间（例如 SSE）重新执行全部检查：凭据被撤销、主体变化、不再是租户成员或失去权限时结束连接。
 			recheck := func(c context.Context) error {
 				return identity.Reestablish(c, sub, auth, resolve, required...)
@@ -114,6 +122,28 @@ func RequireAuth(api *API, name string, scheme *huma.SecurityScheme, authenticat
 			}
 			next(huma.WithContext(ctx, reqCtx))
 		})
+	}
+}
+
+// Confirmed 要求主体在 maxAge 之内验证过身份（identity.Auth.Time）：登录，或之后确认身份（apitoken 的 Confirm）。
+// 用于修改邮箱、邀请成员、删除账号等敏感操作；超过时返回 403 auth.confirm_required，客户端让用户再次输入密码或验证码，
+// 调用应用的确认接口后重试。个人访问令牌、OAuth 令牌和代为登录的 token 没有验证情况，总是返回 403。
+//
+// 与 RequireBearer 等认证方案一起使用，先后不限；只有它而没有认证方案时 Register panic。
+// OpenAPI 中记录为扩展字段 x-confirm-max-age（秒）。maxAge 不为正数时 panic。
+func Confirmed(maxAge time.Duration) func(op *huma.Operation) {
+	if maxAge <= 0 {
+		panic("rest: Confirmed needs a positive maxAge")
+	}
+	return func(op *huma.Operation) {
+		if op.Metadata == nil {
+			op.Metadata = map[string]any{}
+		}
+		op.Metadata[confirmMetadata] = maxAge
+		if op.Extensions == nil {
+			op.Extensions = map[string]any{}
+		}
+		op.Extensions["x-confirm-max-age"] = int(maxAge / time.Second)
 	}
 }
 

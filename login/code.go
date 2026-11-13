@@ -185,7 +185,7 @@ func (r *Realm) VerifyCode(ctx context.Context, requestID, code string) (Outcome
 		if err := r.use(ctx, c); err != nil {
 			return Outcome{}, err
 		}
-		return r.authenticated(ctx, c.SubjectID, c.Tenant)
+		return r.authenticated(ctx, c.SubjectID, c.Tenant, c.Kind)
 	}
 	secret := token()
 	n, err := affected(r.db.NewUpdate().Model((*challengeRow)(nil)).
@@ -298,7 +298,8 @@ func WithPassword(password string) RegisterOption {
 	return func(reg *registration) { reg.password = password }
 }
 
-// Register 用 SignIn、Verify 或 External 的完成凭证，把已验证的标识写给应用刚创建的主体 ref，返回可以签发凭据的主体。
+// Register 用 SignIn、Verify 或 External 的完成凭证，把已验证的标识写给应用刚创建的主体 ref，返回可以签发凭据的主体，
+// 它的 Auth 记下注册时验证的方式：标识的类型或第三方提供方。
 // External 的凭证写入第三方账号，以及对方确认过的邮箱。
 //
 // 应用的注册 action 在自己的事务中先创建账号行，再调用 Register 并传入同一个事务 db；
@@ -344,7 +345,10 @@ func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref iden
 			return identity.Subject{}, err
 		}
 	}
-	return identity.Subject{Type: ref.Type, ID: ref.ID, Tenant: c.Tenant}, nil
+	return identity.Subject{
+		Type: ref.Type, ID: ref.ID, Tenant: c.Tenant,
+		Auth: identity.Auth{Methods: []string{c.Kind}, Time: r.now().UTC()},
+	}, nil
 }
 
 // ResetPassword 用 Reset 的完成凭证设置新密码，按 Options.PasswordPolicy 检查；接收验证码的标识同时标为已验证，

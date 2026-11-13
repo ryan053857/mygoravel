@@ -41,6 +41,7 @@ type Subject struct {
     Tenant       string
     Permissions  []string
     Scopes       []string
+    Auth         Auth
 }
 ```
 
@@ -54,6 +55,7 @@ type Subject struct {
 | `Tenant` | 本次请求所在的租户，`""` 表示平台本身；由凭据设置时，凭据只能在这个租户中使用，见[多租户](#tenants) |
 | `Permissions` | 调用者拥有的权限，例如 `articles:write` |
 | `Scopes` | 本次请求所用凭据被限制在内的权限，例如只读令牌的 `articles:read`；`nil` 表示不限制 |
+| `Auth` | 这次登录怎样验证了身份：`Methods` 是通过的方式，如 `[password totp]`，`Time` 是最近一次验证的时间（登录或[确认身份](login.md#confirming)）；`Auth.TwoFactor()` 报告是否经过了二次验证。个人访问令牌、代为登录等不经过本人登录的凭据为零值 |
 
 `Type` 和 `ID` 合起来是 `identity.Ref`，用 `sub.Ref()` 取得。框架保存主体的地方——令牌、角色、操作日志、通知等——都同时记录两者，所以 `ID` 只需在同一种 `Type` 中唯一：员工表和客户表可以各自使用自增 ID，互不混淆。博客应用只有一套账号，在用户模块 `internal/user/user.go` 中声明它的类型：
 
@@ -209,6 +211,8 @@ rest.Register(api, op, NewGet(db).HTTP)
 | 校验器拒绝了 token | 401 | `auth.unauthenticated` |
 | token 属于 API 不接受的账号体系 | 401 | `auth.unauthenticated` |
 | 缺少所需的权限 | 403 | `auth.forbidden` |
+| 路由要求最近确认过身份（[`rest.Confirmed`](login.md#confirming)），而凭据太久没有确认 | 403 | `auth.confirm_required` |
+| Resolver 要求这次登录经过二次验证，返回 `identity.ErrTwoFactorRequired` | 403 | `auth.two_factor_required` |
 | 校验器返回 5xx 类错误 | 与错误分类对应，例如 503 | 无 |
 
 无论校验器返回什么错误码，客户端看到的都是统一的 `auth.unauthenticated`，不会因此得知 token 是“不存在”还是“已过期”。`401` 响应带有 `WWW-Authenticate: Bearer` 响应头。校验器返回 5xx 类错误时，响应的 `detail` 为 `authentication unavailable`，不包含校验器的错误码；框架会记录一条诊断日志。
@@ -264,7 +268,7 @@ api := rest.New(rest.Options{
 | 其他 4xx 类错误 | 按错误分类响应，错误码就是你定义的业务错误码，例如不是租户成员时返回 `errorx.NotFound` 得到 `404` |
 | 5xx 类错误 | 与校验器的 5xx 相同 |
 
-Resolver 只负责加载权限和租户：返回的主体中 `Type`、`ID`、`Method`、`Credential`、`Scopes` 和 `Impersonator` 总是取自凭据，像上面这样修改收到的主体，或者新建一个主体返回，结果都一样，Resolver 不能把主体换成另一个人。
+Resolver 只负责加载权限和租户：返回的主体中 `Type`、`ID`、`Method`、`Credential`、`Scopes`、`Impersonator` 和 `Auth` 总是取自凭据，像上面这样修改收到的主体，或者新建一个主体返回，结果都一样，Resolver 不能把主体换成另一个人。
 
 [MCP 服务](mcp.md)和[实时频道](realtime.md#tokens)的 `Accounts` 与它是同一个类型 `identity.Accounts`，所以同一个 Resolver 可以同时交给它们，三者按相同的规则处理它的返回值。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
 
