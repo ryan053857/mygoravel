@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/internal/redistest"
-	"github.com/ryan053857/mygoravel/ratelimit"
-	"github.com/ryan053857/mygoravel/ratelimit/redislimit"
+	"github.com/go-tenon/tenon/internal/redistest"
+	"github.com/go-tenon/tenon/ratelimit"
+	"github.com/go-tenon/tenon/ratelimit/redislimit"
 )
 
 func TestNewRejectsInvalidArguments(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // Params 是频道名中 {name} 占位符匹配到的值。

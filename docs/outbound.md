@@ -29,7 +29,7 @@
 博客为文章中的链接显示预览卡片：取出页面的标题和图片。链接是作者填的，用 `outbound` 的客户端请求它。客户端可以复用，在[入口](dependencies.md#assembling-the-application)中创建一次，传给 action：
 
 ```go
-import "github.com/ryan053857/mygoravel/outbound"
+import "github.com/go-tenon/tenon/outbound"
 
 previews := outbound.New(outbound.Options{Timeout: 5 * time.Second})
 ```

@@ -14,13 +14,13 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/operation"
-	"github.com/ryan053857/mygoravel/page"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/queue/queuetest"
-	"github.com/ryan053857/mygoravel/search"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/operation"
+	"github.com/go-tenon/tenon/page"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/queue/queuetest"
+	"github.com/go-tenon/tenon/search"
 )
 
 type articleDoc struct {

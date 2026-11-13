@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 var (

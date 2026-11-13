@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/ryan053857/mygoravel/mail"
+	"github.com/go-tenon/tenon/mail"
 )
 
 // Mailer 记录每封通过 Validate 的邮件，可并发使用。

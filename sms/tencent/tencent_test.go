@@ -9,8 +9,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/outbound/outboundtest"
-	"github.com/ryan053857/mygoravel/sms"
+	"github.com/go-tenon/tenon/outbound/outboundtest"
+	"github.com/go-tenon/tenon/sms"
 )
 
 const api = "POST https://sms.tencentcloudapi.com/"

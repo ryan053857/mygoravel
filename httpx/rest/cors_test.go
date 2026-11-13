@@ -9,9 +9,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // 预检请求在路由之前应答：只注册了 GET 和 POST 的路径不会返回 405，认证也不会拦住它。

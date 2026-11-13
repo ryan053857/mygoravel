@@ -6,7 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 func yamlFS(files map[string]string) fstest.MapFS {

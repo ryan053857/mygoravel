@@ -17,7 +17,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/pdf"
+	"github.com/go-tenon/tenon/pdf"
 )
 
 // Config 是 Gotenberg 的连接配置。

@@ -13,8 +13,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/openai"
+	"github.com/go-tenon/tenon/ai"
+	"github.com/go-tenon/tenon/ai/openai"
 )
 
 // Client 是提供 System One 接口的一个决策模型。它嵌入 openai.Client，同一个地址上的其他 OpenAI 兼容接口照常可用，

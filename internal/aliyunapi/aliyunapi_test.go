@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/outbound/outboundtest"
+	"github.com/go-tenon/tenon/outbound/outboundtest"
 )
 
 func TestAuthorization(t *testing.T) {

@@ -19,7 +19,7 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/filesystem"
+	"github.com/go-tenon/tenon/filesystem"
 )
 
 // uploadPartSize 是服务端 Put 的分片缓冲大小，大于它的正文按分片上传，内存占用不超过一片。

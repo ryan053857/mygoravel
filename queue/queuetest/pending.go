@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pglogrepl"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // Pending 返回 db 中 topic 还没转发的任务的 payload：先是 WAL 中的，按提交顺序，再是 queue_scheduled 中的，按存入顺序。

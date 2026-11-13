@@ -15,7 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 func TestUnexpectedListenerExitDrainsRequests(t *testing.T) {

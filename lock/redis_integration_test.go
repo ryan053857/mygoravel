@@ -8,10 +8,10 @@ import (
 
 	"github.com/redis/rueidis"
 
-	"github.com/ryan053857/mygoravel/internal/redistest"
-	"github.com/ryan053857/mygoravel/lock"
-	"github.com/ryan053857/mygoravel/lock/locktest"
-	"github.com/ryan053857/mygoravel/lock/redislock"
+	"github.com/go-tenon/tenon/internal/redistest"
+	"github.com/go-tenon/tenon/lock"
+	"github.com/go-tenon/tenon/lock/locktest"
+	"github.com/go-tenon/tenon/lock/redislock"
 )
 
 func TestRedisStore(t *testing.T) {

@@ -16,7 +16,7 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 
-	"github.com/ryan053857/mygoravel/cachex"
+	"github.com/go-tenon/tenon/cachex"
 )
 
 type article struct {

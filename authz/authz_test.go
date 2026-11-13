@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/authz"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/authz"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/identity"
 )
 
 var catalog = authz.Catalog{

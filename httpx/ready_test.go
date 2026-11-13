@@ -13,8 +13,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/logging/logtest"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/logging/logtest"
 )
 
 type readyBody struct {

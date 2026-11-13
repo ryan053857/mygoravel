@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/logmail"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/logmail"
 )
 
 func TestMailer(t *testing.T) {

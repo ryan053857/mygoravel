@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/go-tenon/tenon/database/migrate"
 )
 
 // Publish 创建按需注册的 publish 子命令，把 sources 中的迁移复制到 --dir。

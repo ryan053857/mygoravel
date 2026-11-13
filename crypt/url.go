@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 var (

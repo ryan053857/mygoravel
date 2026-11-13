@@ -9,7 +9,7 @@ import (
 )
 
 // scopeName 是导出日志的 instrumentation scope。
-const scopeName = "github.com/ryan053857/mygoravel/logging"
+const scopeName = "github.com/go-tenon/tenon/logging"
 
 // Export 把日志同时交给 OpenTelemetry 的 lp，通常是 telemetry.Open 返回的 Logs，由它推送到日志平台。
 // 导出的日志和基础输出经过同样的级别、Pipe 和格式化；ctx 中的 span 写入记录的链路字段，

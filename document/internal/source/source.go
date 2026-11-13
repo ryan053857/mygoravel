@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ryan053857/mygoravel/document/convert"
+	"github.com/go-tenon/tenon/document/convert"
 )
 
 // chunkSize 是两次检查取消之间读取的字节数。

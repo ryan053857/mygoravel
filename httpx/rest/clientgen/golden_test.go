@@ -11,16 +11,16 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/httpx/rest/clientgen"
-	"github.com/ryan053857/mygoravel/httpx/rest/clientgen/internal/example/article"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/httpx/rest/clientgen"
+	"github.com/go-tenon/tenon/httpx/rest/clientgen/internal/example/article"
+	"github.com/go-tenon/tenon/identity"
 )
 
 var update = flag.Bool("update", false, "rewrite the generated example client in internal/example/api")
 
 const (
-	exampleMain = "github.com/ryan053857/mygoravel/httpx/rest/clientgen/internal/example/article"
+	exampleMain = "github.com/go-tenon/tenon/httpx/rest/clientgen/internal/example/article"
 	exampleOut  = "internal/example/api"
 )
 

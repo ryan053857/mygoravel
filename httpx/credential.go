@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // CredentialCheck 在长连接期间重新校验请求的凭据。

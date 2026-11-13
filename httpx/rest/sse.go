@@ -11,8 +11,8 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // RegisterSSE 登记一个以 text/event-stream 响应的端点。events 的键是事件名，值是该事件数据的类型，

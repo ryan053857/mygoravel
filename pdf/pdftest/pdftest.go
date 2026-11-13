@@ -10,7 +10,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/pdf"
+	"github.com/go-tenon/tenon/pdf"
 )
 
 // Renderer 渲染并记录每份文档的 HTML，返回一页空白的 PDF，可并发使用。

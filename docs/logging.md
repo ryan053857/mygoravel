@@ -19,7 +19,7 @@
 <a id="introduction"></a>
 ## 简介
 
-mygoravel 使用 Go 标准库的 [`log/slog`](https://pkg.go.dev/log/slog) 记录结构化日志，全局日志器就是 `slog.Default()`。在入口处安装一次：
+Tenon 使用 Go 标准库的 [`log/slog`](https://pkg.go.dev/log/slog) 记录结构化日志，全局日志器就是 `slog.Default()`。在入口处安装一次：
 
 ```go
 slog.SetDefault(logging.New(cfg.Logs))
@@ -186,7 +186,7 @@ ctx = logging.WithAttrs(ctx, slog.String("component", "article"))
 <a id="error-logging"></a>
 ## 错误日志
 
-业务代码通常**不需要**自己记录错误日志，只需添加上下文并返回错误。mygoravel 会在 HTTP 边界为每个 `5xx` 错误记录一条诊断日志。如果每一层都记录一次，同一个错误就会在日志中出现很多遍，反而难以排查。
+业务代码通常**不需要**自己记录错误日志，只需添加上下文并返回错误。Tenon 会在 HTTP 边界为每个 `5xx` 错误记录一条诊断日志。如果每一层都记录一次，同一个错误就会在日志中出现很多遍，反而难以排查。
 
 | 日志 | 记录者 | 内容 |
 | --- | --- | --- |

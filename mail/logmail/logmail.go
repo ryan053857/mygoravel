@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/ryan053857/mygoravel/mail"
+	"github.com/go-tenon/tenon/mail"
 )
 
 // Mailer 以 Info 级别记录每封邮件的收件人、主题和正文。

@@ -14,7 +14,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/httpx/rest"
+	"github.com/go-tenon/tenon/httpx/rest"
 )
 
 // skip 表示端点的形式第一版不生成，原因写入 Result.Skipped。
@@ -162,7 +162,7 @@ func (g *generator) clientDoc() string {
 	if info := g.api.OpenAPI().Info; info != nil && info.Title != "" {
 		title = info.Title
 	}
-	return "// Package " + g.rootName + " 是 " + title + " 的 Go 客户端，由 mygoravel 的 client 命令生成。\n"
+	return "// Package " + g.rootName + " 是 " + title + " 的 Go 客户端，由 Tenon 的 client 命令生成。\n"
 }
 
 func (g *generator) client(f *file, groups []string) string {

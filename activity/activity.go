@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // DefaultLimit 是 List 在 Query.Limit 不大于 0 时返回的条数。

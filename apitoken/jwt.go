@@ -17,8 +17,8 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/google/uuid"
 
-	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/crypt"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // Keys 是签名和校验 access token 的密钥，用 HMACKeys 或 Ed25519Keys 创建。

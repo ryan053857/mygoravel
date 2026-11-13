@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/migrate"
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/migrate"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 func TestConfigValidate(t *testing.T) {

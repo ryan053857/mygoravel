@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/docx"
-	"github.com/ryan053857/mygoravel/document/internal/ooxmltest"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/docx"
+	"github.com/go-tenon/tenon/document/internal/ooxmltest"
 )
 
 const ns = `xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`

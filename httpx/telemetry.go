@@ -16,7 +16,7 @@ import (
 )
 
 // scopeName 是 HTTP 指标和链路的 instrumentation scope。
-const scopeName = "github.com/ryan053857/mygoravel/httpx"
+const scopeName = "github.com/go-tenon/tenon/httpx"
 
 // durationBuckets 是 OpenTelemetry HTTP 语义约定建议的耗时分桶（秒）。
 var durationBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}

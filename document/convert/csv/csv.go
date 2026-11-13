@@ -15,10 +15,10 @@ import (
 
 	"golang.org/x/text/encoding"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/internal/mdwrite"
-	"github.com/ryan053857/mygoravel/document/internal/source"
-	"github.com/ryan053857/mygoravel/document/internal/textdecode"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/internal/mdwrite"
+	"github.com/go-tenon/tenon/document/internal/source"
+	"github.com/go-tenon/tenon/document/internal/textdecode"
 )
 
 // Options 配置 CSV 转换器，零值即默认配置。

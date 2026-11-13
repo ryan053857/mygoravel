@@ -6,7 +6,7 @@ import (
 
 	slogformatter "github.com/samber/slog-formatter"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // ErrorFormatter 把 error 类型的字段展开为分组：

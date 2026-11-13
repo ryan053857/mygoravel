@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 func TestNewAndContextIsolation(t *testing.T) {

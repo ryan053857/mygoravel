@@ -12,8 +12,8 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"github.com/ryan053857/mygoravel/notification"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/notification"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // Deliver 是推送任务的 topic，由 Send 发布，Deliverer 处理。

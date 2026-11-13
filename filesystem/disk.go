@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // 服务返回的业务错误。它们是 errorx 模板，rest 处理器直接返回即可得到对应的 HTTP 状态和错误码；

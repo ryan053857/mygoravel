@@ -8,11 +8,11 @@ import (
 
 	"github.com/redis/rueidis"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/redistest"
-	"github.com/ryan053857/mygoravel/realtime"
-	"github.com/ryan053857/mygoravel/realtime/realtimetest"
-	"github.com/ryan053857/mygoravel/realtime/redispresence"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/internal/redistest"
+	"github.com/go-tenon/tenon/realtime"
+	"github.com/go-tenon/tenon/realtime/realtimetest"
+	"github.com/go-tenon/tenon/realtime/redispresence"
 )
 
 func TestStore(t *testing.T) {

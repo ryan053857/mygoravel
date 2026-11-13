@@ -9,10 +9,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/form"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/form"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 // ErrorModel 在 Huma 原生 Problem Details 上增加业务错误码和字段错误的验证规则。

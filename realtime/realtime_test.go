@@ -14,14 +14,14 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/broadcast/redisbroadcast"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/redistest"
-	"github.com/ryan053857/mygoravel/realtime"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/broadcast/broadcasttest"
+	"github.com/go-tenon/tenon/broadcast/redisbroadcast"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/internal/redistest"
+	"github.com/go-tenon/tenon/realtime"
 )
 
 var (

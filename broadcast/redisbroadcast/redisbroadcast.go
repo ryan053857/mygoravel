@@ -12,7 +12,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/redis/rueidis"
 
-	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/go-tenon/tenon/broadcast"
 )
 
 var _ broadcast.Backend = (*Backend)(nil)

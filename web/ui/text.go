@@ -3,7 +3,7 @@ package ui
 import (
 	"context"
 
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 // text 按请求的语言翻译框架内置的文案 id；context 中没有语言（没有经过 httpx.Locale）时返回英文的 fallback。

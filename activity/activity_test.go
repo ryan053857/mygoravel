@@ -10,10 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/activity"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/activity"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/logging"
 )
 
 var alice = identity.Subject{ID: "u1", Type: "user", Tenant: "acme", Permissions: []string{"*"}}

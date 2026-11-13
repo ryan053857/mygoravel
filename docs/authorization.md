@@ -23,7 +23,7 @@
 
 [认证](authentication.md)确认了调用者是谁，接下来还需要回答：这个调用者**能不能**执行当前的操作？这就是授权。
 
-mygoravel 的授权分为三层：
+Tenon 的授权分为三层：
 
 | 层次 | 回答的问题 | 由谁检查 |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ migrationCmd.AddCommand(migratecmd.Publish(
 ```go
 package auth
 
-import "github.com/ryan053857/mygoravel/authz"
+import "github.com/go-tenon/tenon/authz"
 
 const (
     ArticlesRead       = "articles:read"

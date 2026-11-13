@@ -7,7 +7,7 @@ import (
 
 	"trpc.group/trpc-go/trpc-agent-go/log"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // SetLogger 让 trpc-agent-go 的日志写到 l，带 component=ai 字段，可以按组件设置级别。

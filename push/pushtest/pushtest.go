@@ -13,7 +13,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/ryan053857/mygoravel/push"
+	"github.com/go-tenon/tenon/push"
 )
 
 // Provider 记录收到的每一批推送，可并发使用，零值可用。

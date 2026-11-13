@@ -21,7 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // purposeTwoFactor 是等待二次验证的登录在 auth_challenges 中的用途，见 Outcome.Pending。

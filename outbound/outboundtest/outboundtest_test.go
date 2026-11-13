@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/outbound"
-	"github.com/ryan053857/mygoravel/outbound/outboundtest"
+	"github.com/go-tenon/tenon/outbound"
+	"github.com/go-tenon/tenon/outbound/outboundtest"
 )
 
 func get(t *testing.T, c *http.Client, u string) (int, string) {

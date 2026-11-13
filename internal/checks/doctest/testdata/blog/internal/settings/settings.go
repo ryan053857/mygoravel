@@ -4,17 +4,17 @@ package settings
 
 import (
 	"example.com/blog/internal/auth"
-	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/logging"
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/resend"
-	"github.com/ryan053857/mygoravel/mail/ses"
-	"github.com/ryan053857/mygoravel/mail/smtp"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/schedule"
-	"github.com/ryan053857/mygoravel/telemetry"
+	"github.com/go-tenon/tenon/crypt"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/logging"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/resend"
+	"github.com/go-tenon/tenon/mail/ses"
+	"github.com/go-tenon/tenon/mail/smtp"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/schedule"
+	"github.com/go-tenon/tenon/telemetry"
 )
 
 type Config struct {

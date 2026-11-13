@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // Purpose 是验证码的用途。

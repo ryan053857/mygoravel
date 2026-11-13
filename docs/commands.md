@@ -16,7 +16,7 @@
 <a id="introduction"></a>
 ## 简介
 
-一个 API 应用除了启动 HTTP 服务，通常还需要执行一些运维任务：检查配置、执行数据库迁移、导出接口文档、查看路由。mygoravel 的 `command` 包基于 [Cobra](https://github.com/spf13/cobra) 实现了这些命令。每个命令都是一个独立的 `*cobra.Command`，应用按需把它们装配到根命令上，用不到的命令不会出现。
+一个 API 应用除了启动 HTTP 服务，通常还需要执行一些运维任务：检查配置、执行数据库迁移、导出接口文档、查看路由。Tenon 的 `command` 包基于 [Cobra](https://github.com/spf13/cobra) 实现了这些命令。每个命令都是一个独立的 `*cobra.Command`，应用按需把它们装配到根命令上，用不到的命令不会出现。
 
 完成本章后，你的应用可以这样使用：
 
@@ -42,11 +42,11 @@ import (
     "example.com/blog/internal/bootstrap"
     "example.com/blog/internal/settings"
     "example.com/blog/migrations"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/command/devcmd"
-    "github.com/ryan053857/mygoravel/command/migratecmd"
-    "github.com/ryan053857/mygoravel/command/httpcmd"
-    "github.com/ryan053857/mygoravel/database"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/command/devcmd"
+    "github.com/go-tenon/tenon/command/migratecmd"
+    "github.com/go-tenon/tenon/command/httpcmd"
+    "github.com/go-tenon/tenon/database"
 )
 
 // New 返回应用的根命令。
@@ -86,7 +86,7 @@ package main
 
 import (
     "example.com/blog/internal/cli"
-    "github.com/ryan053857/mygoravel/command"
+    "github.com/go-tenon/tenon/command"
 )
 
 func main() {

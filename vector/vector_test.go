@@ -19,14 +19,14 @@ import (
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/ai/aitest"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/operation"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/queue/queuetest"
-	"github.com/ryan053857/mygoravel/vector"
-	"github.com/ryan053857/mygoravel/vector/vectortest"
+	"github.com/go-tenon/tenon/ai/aitest"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/operation"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/queue/queuetest"
+	"github.com/go-tenon/tenon/vector"
+	"github.com/go-tenon/tenon/vector/vectortest"
 )
 
 const dims = 32

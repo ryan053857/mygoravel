@@ -18,8 +18,8 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
-	"github.com/ryan053857/mygoravel/filesystem"
-	s3disk "github.com/ryan053857/mygoravel/filesystem/s3"
+	"github.com/go-tenon/tenon/filesystem"
+	s3disk "github.com/go-tenon/tenon/filesystem/s3"
 )
 
 // newFakeDisk 通过真实 SDK 连接内存 S3 服务。

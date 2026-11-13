@@ -9,8 +9,8 @@ import (
 
 	"trpc.group/trpc-go/trpc-agent-go/model"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/go-tenon/tenon/ai"
+	"github.com/go-tenon/tenon/ai/chat"
 )
 
 // failingServer 总是返回 500，并让客户端几乎不等待就重试；返回请求计数。

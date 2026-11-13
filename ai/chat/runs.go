@@ -19,8 +19,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/logging"
 )
 
 var (

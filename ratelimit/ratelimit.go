@@ -6,7 +6,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // ErrExceeded 表示 key 的配额已用完。错误实例带 errorx.RetryAfter，

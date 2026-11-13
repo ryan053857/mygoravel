@@ -10,9 +10,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/lock"
-	"github.com/ryan053857/mygoravel/lock/locktest"
-	"github.com/ryan053857/mygoravel/schedule"
+	"github.com/go-tenon/tenon/lock"
+	"github.com/go-tenon/tenon/lock/locktest"
+	"github.com/go-tenon/tenon/schedule"
 )
 
 func TestTasks(t *testing.T) {

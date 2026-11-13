@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/form"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/form"
 )
 
 // ErrBadForm 表示请求体不是可以解析的表单。

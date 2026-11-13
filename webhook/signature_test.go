@@ -8,7 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/webhook"
+	"github.com/go-tenon/tenon/webhook"
 )
 
 // Standard Webhooks 规范附带的测试向量。

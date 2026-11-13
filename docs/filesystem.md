@@ -78,7 +78,7 @@ filesystem:
 把 `filesystem.Config` 放进应用的根配置结构体即可：
 
 ```go
-import "github.com/ryan053857/mygoravel/filesystem"
+import "github.com/go-tenon/tenon/filesystem"
 
 type Config struct {
     Database   database.Config   `yaml:"database"`
@@ -537,8 +537,8 @@ import (
 
     "github.com/danielgtaylor/huma/v2"
 
-    "github.com/ryan053857/mygoravel/filesystem"
-    "github.com/ryan053857/mygoravel/httpx/rest"
+    "github.com/go-tenon/tenon/filesystem"
+    "github.com/go-tenon/tenon/httpx/rest"
 )
 
 // Register 注册文件模块的全部路由。
@@ -625,7 +625,7 @@ package file
 
 import (
     "github.com/google/uuid"
-    "github.com/ryan053857/mygoravel/filesystem"
+    "github.com/go-tenon/tenon/filesystem"
 )
 
 type FileIDInput struct {
@@ -664,8 +664,8 @@ import (
     "context"
 
     "github.com/danielgtaylor/huma/v2"
-    "github.com/ryan053857/mygoravel/filesystem"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/filesystem"
+    "github.com/go-tenon/tenon/identity"
 )
 
 type UploadInput struct {
@@ -733,8 +733,8 @@ import (
     "context"
 
     "github.com/google/uuid"
-    "github.com/ryan053857/mygoravel/filesystem"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/filesystem"
+    "github.com/go-tenon/tenon/identity"
 )
 
 type PrepareFileInput struct {

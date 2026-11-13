@@ -9,8 +9,8 @@ import (
 
 	"github.com/centrifugal/centrifuge"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // connection 是一个连接的身份。

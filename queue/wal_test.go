@@ -12,8 +12,8 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/queue/queuetest"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/queue/queuetest"
 )
 
 // 只有提交的任务被发布：事务回滚、保存点回滚中的任务都不会出现；不在事务中发布时立即生效。

@@ -7,7 +7,7 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 type basicUserKey struct{}

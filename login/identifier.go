@@ -13,7 +13,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // 内置的登录标识类型。第三方登录的类型是应用声明的提供方名称，例如 "google"、"wechat"。

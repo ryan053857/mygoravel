@@ -16,8 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/ses"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/ses"
 )
 
 // request 是假 SES 端点收到的一次 SendEmail 请求。

@@ -20,9 +20,9 @@
 <a id="introduction"></a>
 ## 简介
 
-mygoravel 在设计时就考虑了测试。由于所有依赖都是显式传入的，你可以在测试中轻松构造 API、action 和命令，而不需要启动整个应用。
+Tenon 在设计时就考虑了测试。由于所有依赖都是显式传入的，你可以在测试中轻松构造 API、action 和命令，而不需要启动整个应用。
 
-mygoravel 不引入额外的测试框架，直接使用 Go 标准库的 `testing`、`net/http/httptest` 和 `go test` 命令。需要断言日志时，使用 `logging/logtest` 捕获，见[测试日志](logging.md#testing-logs)。代码请求外部 HTTP 服务时，用 `outbound/outboundtest` 登记响应并检查发出的请求，见[出站请求](outbound.md#testing)。测试登录流程时，用 `login/logintest` 读取发出的验证码、计算二次验证的数字，见[登录与注册](login.md#testing)。
+Tenon 不引入额外的测试框架，直接使用 Go 标准库的 `testing`、`net/http/httptest` 和 `go test` 命令。需要断言日志时，使用 `logging/logtest` 捕获，见[测试日志](logging.md#testing-logs)。代码请求外部 HTTP 服务时，用 `outbound/outboundtest` 登记响应并检查发出的请求，见[出站请求](outbound.md#testing)。测试登录流程时，用 `login/logintest` 读取发出的验证码、计算二次验证的数字，见[登录与注册](login.md#testing)。
 
 <a id="running-tests"></a>
 ## 运行测试
@@ -61,8 +61,8 @@ import (
     "example.com/blog/internal/article"
     "example.com/blog/internal/auth"
     "example.com/blog/internal/user"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/identity"
 )
 
 func newTestAPI() *rest.API {
@@ -156,11 +156,11 @@ import (
     "example.com/blog/internal/article/articleweb"
     "example.com/blog/internal/user"
     "example.com/blog/migrations"
-    "github.com/ryan053857/mygoravel/database/dbtest"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/web"
-    "github.com/ryan053857/mygoravel/web/ui"
-    "github.com/ryan053857/mygoravel/web/webtest"
+    "github.com/go-tenon/tenon/database/dbtest"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/web"
+    "github.com/go-tenon/tenon/web/ui"
+    "github.com/go-tenon/tenon/web/webtest"
 )
 
 func TestPages(t *testing.T) {
@@ -226,8 +226,8 @@ import (
     "example.com/blog/internal/article"
     "example.com/blog/internal/user"
     "example.com/blog/migrations"
-    "github.com/ryan053857/mygoravel/database/dbtest"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/database/dbtest"
+    "github.com/go-tenon/tenon/identity"
 )
 
 func TestDraftVisibilityAndPublishing(t *testing.T) {
@@ -286,9 +286,9 @@ import (
     "example.com/blog/internal/article"
     "example.com/blog/internal/user"
     "example.com/blog/migrations"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/database/dbtest"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/database/dbtest"
+    "github.com/go-tenon/tenon/identity"
 )
 
 func TestPublishCommand(t *testing.T) {
@@ -330,7 +330,7 @@ func TestPublishCommand(t *testing.T) {
 <a id="test-data"></a>
 ## 准备测试数据
 
-测试数据通过 action 创建，这样数据一定满足业务规则，测试不会用到线上不可能出现的数据。mygoravel 没有 Laravel 那样的模型工厂，许多测试都要用的数据，在测试文件中写一个带默认值的函数，例如 `internal/article/helpers_test.go`：
+测试数据通过 action 创建，这样数据一定满足业务规则，测试不会用到线上不可能出现的数据。Tenon 没有 Laravel 那样的模型工厂，许多测试都要用的数据，在测试文件中写一个带默认值的函数，例如 `internal/article/helpers_test.go`：
 
 ```go
 // newArticle 以 author 的身份创建一篇草稿。edit 修改默认内容，不需要时传 nil。
@@ -519,7 +519,7 @@ import (
     "testing"
 
     "example.com/blog/internal/cli"
-    "github.com/ryan053857/mygoravel/command"
+    "github.com/go-tenon/tenon/command"
 )
 
 func run(args ...string) (string, error) {

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/command/migratecmd"
-	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/command/migratecmd"
+	"github.com/go-tenon/tenon/database/migrate"
 )
 
 func TestPublishWithoutConfigurationOrDatabase(t *testing.T) {

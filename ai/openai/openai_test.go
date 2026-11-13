@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/openai"
+	"github.com/go-tenon/tenon/ai"
+	"github.com/go-tenon/tenon/ai/openai"
 )
 
 // pngData 是一张 1x1 的 PNG。
@@ -190,14 +190,14 @@ func TestTranscribe(t *testing.T) {
 	text, err := s.client("whisper-1").Transcribe(t.Context(), ai.TranscriptionRequest{
 		Audio:    ai.Media{Data: []byte("audio"), MIME: "audio/webm;codecs=opus"},
 		Language: "zh",
-		Prompt:   "mygoravel",
+		Prompt:   "tenon",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "你好世界", text)
 
 	r := s.last()
 	assert.Equal(t, "/v1/audio/transcriptions", r.Path)
-	assert.Equal(t, map[string]string{"model": "whisper-1", "language": "zh", "prompt": "mygoravel"}, r.Form)
+	assert.Equal(t, map[string]string{"model": "whisper-1", "language": "zh", "prompt": "tenon"}, r.Form)
 	assert.Equal(t, map[string]string{"file": "audio.webm|audio/webm;codecs=opus"}, r.Files)
 
 	_, err = s.client("whisper-1").Transcribe(t.Context(), ai.TranscriptionRequest{})

@@ -28,10 +28,10 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/login"
+	"github.com/go-tenon/tenon/crypt"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/login"
 )
 
 // Kind 是 passkey 在 login.Realm 中的登录标识类型。应用的第三方登录提供方不要使用这个名称。

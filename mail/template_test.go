@@ -6,8 +6,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/mail"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/mail"
 )
 
 func templatesFS() fstest.MapFS {

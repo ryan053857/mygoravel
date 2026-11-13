@@ -9,14 +9,14 @@ import (
 
 	"golang.org/x/text/encoding"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/csv"
-	"github.com/ryan053857/mygoravel/document/convert/docx"
-	"github.com/ryan053857/mygoravel/document/convert/html"
-	"github.com/ryan053857/mygoravel/document/convert/pdf"
-	"github.com/ryan053857/mygoravel/document/convert/pptx"
-	"github.com/ryan053857/mygoravel/document/convert/text"
-	"github.com/ryan053857/mygoravel/document/convert/xlsx"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/csv"
+	"github.com/go-tenon/tenon/document/convert/docx"
+	"github.com/go-tenon/tenon/document/convert/html"
+	"github.com/go-tenon/tenon/document/convert/pdf"
+	"github.com/go-tenon/tenon/document/convert/pptx"
+	"github.com/go-tenon/tenon/document/convert/text"
+	"github.com/go-tenon/tenon/document/convert/xlsx"
 )
 
 // Options 配置全部内置转换器。某个转换器自己的 Limits 中为零的字段取 Limits 中的对应值；

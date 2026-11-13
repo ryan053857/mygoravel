@@ -12,9 +12,9 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/logging/logtest"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/logging/logtest"
 )
 
 func openItems(t *testing.T) *bun.DB {

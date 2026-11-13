@@ -14,12 +14,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/operation"
-	"github.com/ryan053857/mygoravel/page"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/search"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/operation"
+	"github.com/go-tenon/tenon/page"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/search"
 )
 
 // articleDocV2 是修改之后的文档类型：去掉了租户和部分过滤字段，加了 lang 和 score。

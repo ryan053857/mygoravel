@@ -124,7 +124,7 @@ attempts := redislimit.New(rdb, "blog:passcode", ratelimit.Config{Rate: 5, Inter
 多个实例共享配额时使用 Redis 限流器。`redislimit.New` 接收[入口中创建的客户端](redis.md#connecting) `rdb`，第二个参数 `name` 区分不同的限流器：同名的限流器共享配额，所以每个 `name` 应该只对应一种配额。
 
 ```go
-import "github.com/ryan053857/mygoravel/ratelimit/redislimit"
+import "github.com/go-tenon/tenon/ratelimit/redislimit"
 
 attempts := redislimit.New(rdb, "blog:passcode", ratelimit.Config{Rate: 5, Interval: time.Minute, Burst: 5})
 ```

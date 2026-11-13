@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // Unit 是 Fanout 发布的一个单位，作为队列任务的 payload：所属的操作、单位的 ID 和业务数据。

@@ -15,9 +15,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/ratelimit"
 )
 
 func TestAssignRequestIDReusesOnlyValidInbound(t *testing.T) {

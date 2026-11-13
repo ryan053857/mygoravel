@@ -22,7 +22,7 @@
 <a id="introduction"></a>
 ## 简介
 
-一个接口可能遇到的失败，大致分为三类，mygoravel 对它们的处理方式各不相同：
+一个接口可能遇到的失败，大致分为三类，Tenon 对它们的处理方式各不相同：
 
 | 失败类型 | 例子 | 由谁处理 |
 | --- | --- | --- |
@@ -68,7 +68,7 @@ type UpdateInput struct {
 ```go
 package article
 
-import "github.com/ryan053857/mygoravel/errorx"
+import "github.com/go-tenon/tenon/errorx"
 
 var (
     ErrNotFound   = errorx.Define(errorx.NotFound, "article.not_found")
@@ -94,8 +94,8 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/errorx"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/errorx"
+    "github.com/go-tenon/tenon/identity"
 )
 
 type Update struct {
@@ -341,7 +341,7 @@ errorx.KindOf(err) // errorx.Conflict，不是业务错误时为 errorx.Internal
 <a id="response-format"></a>
 ### 响应格式
 
-错误响应直接使用 [Huma](https://huma.rocks) 的错误结构，即 [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) 格式，`Content-Type` 为 `application/problem+json`。mygoravel 只为业务错误增加了 `code` 字段：
+错误响应直接使用 [Huma](https://huma.rocks) 的错误结构，即 [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) 格式，`Content-Type` 为 `application/problem+json`。Tenon 只为业务错误增加了 `code` 字段：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -375,7 +375,7 @@ errorx.KindOf(err) // errorx.Conflict，不是业务错误时为 errorx.Internal
 <a id="reporting-errors"></a>
 ### 错误日志
 
-mygoravel 遵循“**只在边界记录一次**”的原则：业务代码只负责补充上下文并返回错误，不需要自己记录错误日志，否则同一个错误会在日志中出现很多遍。
+Tenon 遵循“**只在边界记录一次**”的原则：业务代码只负责补充上下文并返回错误，不需要自己记录错误日志，否则同一个错误会在日志中出现很多遍。
 
 | 日志 | 何时记录 | 内容 |
 | --- | --- | --- |

@@ -1,25 +1,25 @@
 # 安装
 
-- [认识 mygoravel](#meet-mygoravel)
-    - [为什么选择 mygoravel](#why-mygoravel)
+- [认识 Tenon](#meet-tenon)
+    - [为什么选择 Tenon](#why-tenon)
 - [创建应用](#creating-an-application)
     - [环境要求](#requirements)
-    - [安装 mygoravel](#installing-mygoravel)
+    - [安装 Tenon](#installing-tenon)
     - [编写入口文件](#entrypoint)
     - [启动服务](#running)
 - [下一步](#next-steps)
 
-<a id="meet-mygoravel"></a>
-## 认识 mygoravel
+<a id="meet-tenon"></a>
+## 认识 Tenon
 
-mygoravel 是一个用于构建 HTTP API 的 Go 应用框架。它为配置加载、路由、请求验证、错误响应、日志、认证、数据库访问、迁移和命令行工具提供了一套统一的约定，让你把精力放在业务本身，而不是反复拼装基础设施。
+Tenon 是一个用于构建 HTTP API 的 Go 应用框架。它为配置加载、路由、请求验证、错误响应、日志、认证、数据库访问、迁移和命令行工具提供了一套统一的约定，让你把精力放在业务本身，而不是反复拼装基础设施。
 
-和很多“大而全”的框架不同，mygoravel 不会把社区组件藏在自己的抽象后面。路由使用 [chi](https://github.com/go-chi/chi) 和 [Huma](https://huma.rocks)，日志使用标准库 `log/slog`，并通过 [slog-multi](https://github.com/samber/slog-multi)、[slog-formatter](https://github.com/samber/slog-formatter) 和 [slog-chi](https://github.com/samber/slog-chi) 扩展，数据库使用 [Bun](https://bun.uptrace.dev) 与 pgx，迁移使用 [goose](https://github.com/pressly/goose)，命令行使用 [Cobra](https://github.com/spf13/cobra)。mygoravel 负责把它们以一致的方式连接起来，你学到的每一项技能都是这些组件本身的技能。
+和很多“大而全”的框架不同，Tenon 不会把社区组件藏在自己的抽象后面。路由使用 [chi](https://github.com/go-chi/chi) 和 [Huma](https://huma.rocks)，日志使用标准库 `log/slog`，并通过 [slog-multi](https://github.com/samber/slog-multi)、[slog-formatter](https://github.com/samber/slog-formatter) 和 [slog-chi](https://github.com/samber/slog-chi) 扩展，数据库使用 [Bun](https://bun.uptrace.dev) 与 pgx，迁移使用 [goose](https://github.com/pressly/goose)，命令行使用 [Cobra](https://github.com/spf13/cobra)。Tenon 负责把它们以一致的方式连接起来，你学到的每一项技能都是这些组件本身的技能。
 
-<a id="why-mygoravel"></a>
-### 为什么选择 mygoravel
+<a id="why-tenon"></a>
+### 为什么选择 Tenon
 
-**依赖一目了然。** mygoravel 没有服务容器，也没有全局注册表。数据库连接、缓存都通过普通的 Go 构造函数参数传递，日志直接使用标准库的 `slog.Default()`，阅读入口文件就能知道应用由哪些部分组成。
+**依赖一目了然。** Tenon 没有服务容器，也没有全局注册表。数据库连接、缓存都通过普通的 Go 构造函数参数传递，日志直接使用标准库的 `slog.Default()`，阅读入口文件就能知道应用由哪些部分组成。
 
 **约定开箱即用。** 每个请求都会自动获得请求 ID；所有错误都使用统一的 [Problem Details](https://www.rfc-editor.org/rfc/rfc9457) 格式返回；每条路由都必须显式声明是公开的还是需要认证的——忘记声明会在启动时就报错，而不是上线后才发现接口没有受保护。
 
@@ -38,10 +38,10 @@ mygoravel 是一个用于构建 HTTP API 的 Go 应用框架。它为配置加�
 
 本章创建的最小 API 只需要 Go 工具链。
 
-<a id="installing-mygoravel"></a>
-### 安装 mygoravel
+<a id="installing-tenon"></a>
+### 安装 Tenon
 
-mygoravel 是一个普通的 Go module。首先为你的应用创建一个目录并初始化 module：
+Tenon 是一个普通的 Go module。首先为你的应用创建一个目录并初始化 module：
 
 ```bash
 mkdir hello-api
@@ -52,7 +52,7 @@ go mod init example.com/hello-api
 目录名和 module 路径可以按你的项目来取。接下来添加框架依赖：
 
 ```bash
-go get github.com/ryan053857/mygoravel@main
+go get github.com/go-tenon/tenon@main
 ```
 
 你也可以把 `@main` 换成某个具体的提交哈希或版本标签，让依赖版本固定下来。
@@ -75,9 +75,9 @@ import (
 
     "github.com/danielgtaylor/huma/v2"
     "github.com/go-chi/chi/v5"
-    "github.com/ryan053857/mygoravel/httpx"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/logging"
+    "github.com/go-tenon/tenon/httpx"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/logging"
 )
 
 type PingInput struct{}
@@ -165,9 +165,9 @@ X-Request-Id: 3UHKWQUZP5TTP24PG3SQNGA5EO
 
 `X-Request-Id` 是框架为每个请求生成的唯一 ID，排查问题时可以用它在日志中找到这个请求，见[请求](requests.md#request-id)。
 
-mygoravel 还为你生成了接口文档。在浏览器中打开 `http://localhost:8080/docs` 即可查看，原始的 OpenAPI 文档位于 `http://localhost:8080/openapi.json`。
+Tenon 还为你生成了接口文档。在浏览器中打开 `http://localhost:8080/docs` 即可查看，原始的 OpenAPI 文档位于 `http://localhost:8080/openapi.json`。
 
-恭喜！你的第一个 mygoravel 应用已经运行起来了。在服务终端按 Ctrl+C 即可停止它。
+恭喜！你的第一个 Tenon 应用已经运行起来了。在服务终端按 Ctrl+C 即可停止它。
 
 <a id="next-steps"></a>
 ## 下一步
@@ -180,4 +180,4 @@ mygoravel 还为你生成了接口文档。在浏览器中打开 `http://localho
 - 用[数据库](database.md)连接 PostgreSQL，用[迁移](migrations.md)管理表结构；
 - 用[命令行](commands.md)为应用加上 `serve`、`migrate`、`openapi`、`routes` 等子命令。
 
-如果想先了解一个 mygoravel 应用整体是如何组织的，可以阅读[目录结构](directory-structure.md)和[依赖装配](dependencies.md)。
+如果想先了解一个 Tenon 应用整体是如何组织的，可以阅读[目录结构](directory-structure.md)和[依赖装配](dependencies.md)。

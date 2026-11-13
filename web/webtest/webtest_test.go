@@ -11,10 +11,10 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/webtest"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/web"
+	"github.com/go-tenon/tenon/web/webtest"
 )
 
 func text(format string, args ...any) templ.Component {

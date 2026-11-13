@@ -13,12 +13,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/logging/logtest"
-	"github.com/ryan053857/mygoravel/mcpx"
-	"github.com/ryan053857/mygoravel/mcpx/mcpxtest"
-	"github.com/ryan053857/mygoravel/page"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/logging/logtest"
+	"github.com/go-tenon/tenon/mcpx"
+	"github.com/go-tenon/tenon/mcpx/mcpxtest"
+	"github.com/go-tenon/tenon/page"
 )
 
 var errAlreadyPublished = errorx.Define(errorx.Conflict, "article.already_published")

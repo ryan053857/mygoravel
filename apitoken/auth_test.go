@@ -13,9 +13,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/apitoken"
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/apitoken"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // signedIn 返回用 methods 刚登录的 alice。

@@ -28,9 +28,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // ErrNotFound 表示操作不存在，或者不是这个主体发起的。

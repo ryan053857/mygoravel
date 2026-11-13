@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/text"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/text"
 )
 
 func ExampleRegistry() {

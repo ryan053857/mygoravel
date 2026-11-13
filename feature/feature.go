@@ -15,8 +15,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // ErrInvalid 表示设置不合法，例如开关不在目录中、给租户或主体设置比例、比例不在 0 到 100 之间。

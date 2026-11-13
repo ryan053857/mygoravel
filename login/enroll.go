@@ -5,7 +5,7 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // purposeEnroll 是必须先启用二次验证的登录在 auth_challenges 中的用途，见 Outcome.Enroll。

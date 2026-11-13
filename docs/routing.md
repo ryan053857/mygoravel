@@ -23,7 +23,7 @@
 <a id="basic-routing"></a>
 ## 基本路由
 
-mygoravel 的路由建立在 [Huma](https://huma.rocks) 之上。每条路由由三部分组成：一个 `huma.Operation` 描述路由本身，一个**输入类型**描述请求，一个**输出类型**描述响应。下面是[安装](installation.md#entrypoint)一章中注册 `/ping` 的代码：
+Tenon 的路由建立在 [Huma](https://huma.rocks) 之上。每条路由由三部分组成：一个 `huma.Operation` 描述路由本身，一个**输入类型**描述请求，一个**输出类型**描述响应。下面是[安装](installation.md#entrypoint)一章中注册 `/ping` 的代码：
 
 ```go
 type PingInput struct{}
@@ -128,7 +128,7 @@ Huma 会把路径中的值转换为字段的类型（这里是 `github.com/googl
 <a id="access-policies"></a>
 ## 访问策略
 
-mygoravel 要求每条路由都**显式**声明访问策略，避免因为疏忽而把需要保护的接口暴露出去。
+Tenon 要求每条路由都**显式**声明访问策略，避免因为疏忽而把需要保护的接口暴露出去。
 
 公开路由在注册前调用 `rest.Public()`：
 
@@ -174,7 +174,7 @@ import (
     "github.com/danielgtaylor/huma/v2"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/httpx/rest"
+    "github.com/go-tenon/tenon/httpx/rest"
 )
 
 // Register 注册文章模块的全部路由。
@@ -231,7 +231,7 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/identity"
 )
 
 // Get 获取文章。
@@ -433,6 +433,6 @@ api.Router().Get("/livez", func(w http.ResponseWriter, r *http.Request) {
 <a id="native-huma-register"></a>
 ### 使用原生 huma.Register
 
-`rest.API` 内嵌了 `huma.API`，因此你也可以调用 Huma 原生的 `huma.Register`。不过这样做会绕过 mygoravel 的访问策略检查、业务错误转换和文档模式支持，这些都需要你自己处理。除非有特殊需求，否则推荐使用 `rest.Register`。
+`rest.API` 内嵌了 `huma.API`，因此你也可以调用 Huma 原生的 `huma.Register`。不过这样做会绕过 Tenon 的访问策略检查、业务错误转换和文档模式支持，这些都需要你自己处理。除非有特殊需求，否则推荐使用 `rest.Register`。
 
 `rest.New` 不安装任何中间件，中间件的安装方式请参阅[中间件](middleware.md)。

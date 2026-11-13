@@ -52,9 +52,9 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/page"
-    "github.com/ryan053857/mygoravel/queue"
-    "github.com/ryan053857/mygoravel/search"
+    "github.com/go-tenon/tenon/page"
+    "github.com/go-tenon/tenon/queue"
+    "github.com/go-tenon/tenon/search"
 )
 
 // SearchDoc 是文章在搜索索引中的文档，只放展示搜索结果需要的字段。

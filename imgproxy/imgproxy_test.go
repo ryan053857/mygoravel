@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/imgproxy"
+	"github.com/go-tenon/tenon/imgproxy"
 )
 
 // 密钥和盐取自 imgproxy 文档的签名示例；TestURLSigned 的签名已用 imgproxy 容器验证。

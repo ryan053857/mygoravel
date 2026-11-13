@@ -11,12 +11,12 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/broadcast/broadcasttest"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // 设置了 Options.Credentials 时，撤销 token 并发出提醒后 SSE 立即结束，不等 30 秒的定期校验。

@@ -11,9 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	slogformatter "github.com/samber/slog-formatter"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/logging"
-	"github.com/ryan053857/mygoravel/logging/logtest"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/logging"
+	"github.com/go-tenon/tenon/logging/logtest"
 )
 
 func serve(h http.Handler, method, path string) *httptest.ResponseRecorder {

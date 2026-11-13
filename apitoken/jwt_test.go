@@ -17,12 +17,12 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/ryan053857/mygoravel/apitoken"
-	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/apitoken"
+	"github.com/go-tenon/tenon/crypt"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/identity"
 )
 
 var appKey = crypt.GenerateKey()

@@ -10,7 +10,7 @@ import (
 	"github.com/centrifugal/centrifuge"
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // presenceTTL 是一条在线记录的有效期。连接每 25 秒续期一次，

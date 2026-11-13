@@ -11,7 +11,7 @@
 <a id="introduction"></a>
 ## 简介
 
-mygoravel 的配置是 YAML 文件，放在项目根目录的 `config` 目录中，加载到你定义的一个 Go 结构体中。加载完成后，你拿到的是一个类型明确、已经校验过的普通结构体，可以直接传给 action 和其他组件使用。
+Tenon 的配置是 YAML 文件，放在项目根目录的 `config` 目录中，加载到你定义的一个 Go 结构体中。加载完成后，你拿到的是一个类型明确、已经校验过的普通结构体，可以直接传给 action 和其他组件使用。
 
 配置在部署时决定，修改后要重启。站点名称、是否开放注册这类由管理员在运行时修改的值，请使用[设置](settings.md)。
 
@@ -46,9 +46,9 @@ database:
 package settings
 
 import (
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/httpx"
-    "github.com/ryan053857/mygoravel/logging"
+    "github.com/go-tenon/tenon/database"
+    "github.com/go-tenon/tenon/httpx"
+    "github.com/go-tenon/tenon/logging"
 )
 
 type Config struct {

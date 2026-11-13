@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/mailtest"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/mailtest"
 )
 
 func TestMailer(t *testing.T) {

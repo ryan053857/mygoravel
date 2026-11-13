@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/internal/mdwrite"
-	"github.com/ryan053857/mygoravel/document/internal/ooxml"
-	"github.com/ryan053857/mygoravel/document/internal/source"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/internal/mdwrite"
+	"github.com/go-tenon/tenon/document/internal/ooxml"
+	"github.com/go-tenon/tenon/document/internal/source"
 )
 
 // maxListDepth 是 Word 支持的最深列表级别，从 0 开始计。

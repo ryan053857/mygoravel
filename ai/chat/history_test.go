@@ -15,12 +15,12 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai/chat"
-	"github.com/ryan053857/mygoravel/ai/chat/chattest"
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/lock"
-	"github.com/ryan053857/mygoravel/lock/locktest"
+	"github.com/go-tenon/tenon/ai/chat"
+	"github.com/go-tenon/tenon/ai/chat/chattest"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/broadcast/broadcasttest"
+	"github.com/go-tenon/tenon/lock"
+	"github.com/go-tenon/tenon/lock/locktest"
 )
 
 // messageTable 模拟应用自己的消息表：seq 是写入顺序，after 是 Save 时带回的游标。

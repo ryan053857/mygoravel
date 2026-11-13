@@ -18,8 +18,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/mcpx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/mcpx"
 )
 
 // token 是测试连接使用的 bearer token。

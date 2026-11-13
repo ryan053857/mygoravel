@@ -16,8 +16,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // authParams 是授权请求中带到同意页（request 参数）、再随同意页的接口交回的参数。

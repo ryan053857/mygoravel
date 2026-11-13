@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/go-tenon/tenon/broadcast"
 )
 
 // Backend 是测试用的内存 broadcast.Backend：同一个 Backend 上的多个 Hub 互相收到消息，相当于多个实例。

@@ -10,13 +10,13 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/hashing"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/login"
-	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/go-tenon/tenon/crypt"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/hashing"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/login"
+	"github.com/go-tenon/tenon/ratelimit"
 )
 
 const customer identity.SubjectType = "customer"

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/search"
+	"github.com/go-tenon/tenon/search"
 )
 
 func TestDocumentSparse(t *testing.T) {

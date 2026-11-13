@@ -46,11 +46,11 @@ type Mailer interface {
 
 ```go
 import (
-    "github.com/ryan053857/mygoravel/mail"
-    "github.com/ryan053857/mygoravel/mail/logmail"
-    "github.com/ryan053857/mygoravel/mail/resend"
-    "github.com/ryan053857/mygoravel/mail/ses"
-    "github.com/ryan053857/mygoravel/mail/smtp"
+    "github.com/go-tenon/tenon/mail"
+    "github.com/go-tenon/tenon/mail/logmail"
+    "github.com/go-tenon/tenon/mail/resend"
+    "github.com/go-tenon/tenon/mail/ses"
+    "github.com/go-tenon/tenon/mail/smtp"
 )
 
 type MailConfig struct {

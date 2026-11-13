@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/web"
 )
 
 // flashTrigger 解析 HX-Trigger 中的提示事件。

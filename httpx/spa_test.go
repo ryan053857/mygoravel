@@ -9,7 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 const immutable = "public, max-age=31536000, immutable"

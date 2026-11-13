@@ -3,8 +3,8 @@ package realtimetest_test
 import (
 	"testing"
 
-	"github.com/ryan053857/mygoravel/realtime"
-	"github.com/ryan053857/mygoravel/realtime/realtimetest"
+	"github.com/go-tenon/tenon/realtime"
+	"github.com/go-tenon/tenon/realtime/realtimetest"
 )
 
 func TestPresence(t *testing.T) {

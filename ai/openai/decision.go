@@ -9,7 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/ai"
+	"github.com/go-tenon/tenon/ai"
 )
 
 var _ ai.Decider = (*Client)(nil)

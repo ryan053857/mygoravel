@@ -15,8 +15,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // ErrInvalid 表示租户 ID 为空或包含空白。

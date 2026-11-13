@@ -3,7 +3,7 @@ package httpx
 import (
 	"net/http"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // StatusOf 把错误的 errorx.Kind 映射为 HTTP 状态码；不是业务错误时返回 500。

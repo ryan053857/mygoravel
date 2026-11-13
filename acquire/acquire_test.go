@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/acquire"
+	"github.com/go-tenon/tenon/acquire"
 )
 
 func TestTimeout(t *testing.T) {

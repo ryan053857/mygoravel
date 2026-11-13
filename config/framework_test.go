@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/logging"
-	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/logging"
+	"github.com/go-tenon/tenon/ratelimit"
 )
 
 type frameworkConfig struct {

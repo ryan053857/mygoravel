@@ -12,7 +12,7 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // Document 是一份 PDF：一个 HTML 页面和它引用的文件。

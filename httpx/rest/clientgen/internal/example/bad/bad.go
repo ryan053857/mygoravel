@@ -6,7 +6,7 @@ import (
 
 	"github.com/uptrace/bun"
 
-	other "github.com/ryan053857/mygoravel/httpx/rest/clientgen/internal/example/bad/article"
+	other "github.com/go-tenon/tenon/httpx/rest/clientgen/internal/example/bad/article"
 )
 
 // Money 自定义了 JSON 编码，复制字段得不到相同的 JSON。

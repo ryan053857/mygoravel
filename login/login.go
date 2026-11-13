@@ -10,11 +10,11 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/hashing"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/go-tenon/tenon/crypt"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/hashing"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/ratelimit"
 )
 
 var (
@@ -124,7 +124,7 @@ func New(db bun.IDB, opts Options) *Realm {
 		codeKeys:     opts.Crypt.Derive("mygoravel login code v1"),
 		recoveryKeys: opts.Crypt.Derive("mygoravel login recovery v1"),
 		dummy: sync.OnceValue(func() string {
-			h, _ := hasher.Make("mygoravel login dummy password")
+			h, _ := hasher.Make("tenon login dummy password")
 			return h
 		}),
 		now: time.Now,

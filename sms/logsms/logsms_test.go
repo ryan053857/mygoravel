@@ -6,9 +6,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/logging/logtest"
-	"github.com/ryan053857/mygoravel/sms"
-	"github.com/ryan053857/mygoravel/sms/logsms"
+	"github.com/go-tenon/tenon/logging/logtest"
+	"github.com/go-tenon/tenon/sms"
+	"github.com/go-tenon/tenon/sms/logsms"
 )
 
 func TestSend(t *testing.T) {

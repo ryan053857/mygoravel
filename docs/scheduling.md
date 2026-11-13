@@ -78,8 +78,8 @@ import (
 
     "example.com/blog/internal/article"
     "example.com/blog/internal/settings"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/schedule"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/schedule"
 )
 
 // tasks 创建调度器并注册全部定时任务。

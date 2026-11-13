@@ -15,10 +15,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // toolName 是工具名的格式：小写字母开头，小写字母、数字和下划线，例如 article_publish。

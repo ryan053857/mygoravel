@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 // startServer 用 httpx.Serve 运行 handler，返回地址和停止函数（返回 Serve 用时）。

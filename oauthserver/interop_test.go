@@ -11,7 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ryan053857/mygoravel/oauthserver"
+	"github.com/go-tenon/tenon/oauthserver"
 )
 
 // handlerTransport 把请求交给 h，不监听端口：官方 SDK 的客户端经它访问授权服务器和 MCP 服务。

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/form"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/form"
 )
 
 // ErrBadQuery 表示 URL 查询参数不符合规则，例如 ?page=0。公开字段 field、message 是第一个出错的参数及其提示。

@@ -12,10 +12,10 @@ import (
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/authz"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/authz"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // openMemcached 连接 MEMCACHED_TEST_ADDR 指向的 Memcached。

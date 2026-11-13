@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/ryan053857/mygoravel/ai"
+	"github.com/go-tenon/tenon/ai"
 )
 
 // validPrefix 是 collection 名称前缀的格式。

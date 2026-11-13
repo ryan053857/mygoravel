@@ -15,8 +15,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/mcpx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/mcpx"
 )
 
 // rpc 以 editor 的身份向 h 发送一个 JSON-RPC 请求，ctx 是 HTTP 请求的 context。
@@ -71,7 +71,7 @@ func TestTelemetry(t *testing.T) {
 
 	var mcpSpans []sdktrace.ReadOnlySpan
 	for _, s := range spans.Ended() {
-		if s.InstrumentationScope().Name == "github.com/ryan053857/mygoravel/mcpx" {
+		if s.InstrumentationScope().Name == "github.com/go-tenon/tenon/mcpx" {
 			mcpSpans = append(mcpSpans, s)
 		}
 	}

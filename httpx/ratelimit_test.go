@@ -15,8 +15,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/ratelimit"
 )
 
 func send(h http.Handler, remote string) *httptest.ResponseRecorder {

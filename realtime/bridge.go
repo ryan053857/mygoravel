@@ -8,7 +8,7 @@ import (
 
 	"github.com/centrifugal/centrifuge"
 
-	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/go-tenon/tenon/broadcast"
 )
 
 // internalTopic 是 realtime 在 Hub 上使用的主题：节点之间的控制消息、客户端发布的消息和 join/leave。

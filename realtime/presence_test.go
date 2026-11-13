@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/broadcast/redisbroadcast"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/internal/redistest"
-	"github.com/ryan053857/mygoravel/realtime"
-	"github.com/ryan053857/mygoravel/realtime/realtimetest"
-	"github.com/ryan053857/mygoravel/realtime/redispresence"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/broadcast/broadcasttest"
+	"github.com/go-tenon/tenon/broadcast/redisbroadcast"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/internal/redistest"
+	"github.com/go-tenon/tenon/realtime"
+	"github.com/go-tenon/tenon/realtime/realtimetest"
+	"github.com/go-tenon/tenon/realtime/redispresence"
 )
 
 // editors 是测试用的 presence 规则：carol 不能加入，其他人以自己的名字加入。

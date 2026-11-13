@@ -5,7 +5,7 @@ import (
 	"html"
 	"strings"
 
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 // fallbacks 是本包的文案 id 和英文的 fallback：context 中没有语言（没有经过 httpx.Locale）时使用。

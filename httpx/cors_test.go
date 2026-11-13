@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 func corsHandler(t *testing.T, origins ...string) (http.Handler, *int) {

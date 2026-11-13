@@ -3,7 +3,7 @@ package identity_test
 import (
 	"testing"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 func TestRef(t *testing.T) {

@@ -11,9 +11,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/openai"
-	"github.com/ryan053857/mygoravel/ai/systemone"
+	"github.com/go-tenon/tenon/ai"
+	"github.com/go-tenon/tenon/ai/openai"
+	"github.com/go-tenon/tenon/ai/systemone"
 )
 
 const defaultBaseURL = "https://openrouter.ai/api/v1"

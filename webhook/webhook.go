@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // Deliver 是投递任务的 topic，payload 是投递记录的 ID。由 Event.Send 和 Resend 发布，Deliverer 处理。

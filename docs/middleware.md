@@ -24,7 +24,7 @@
 
 中间件提供了一种方便的机制，用来检查和处理进入应用的 HTTP 请求。例如，为每个请求生成请求 ID、记录访问日志、限制请求体大小等。
 
-mygoravel 的中间件都是标准的 `func(http.Handler) http.Handler`，安装在 chi Router 上。`rest.New` 不会替你安装任何中间件。
+Tenon 的中间件都是标准的 `func(http.Handler) http.Handler`，安装在 chi Router 上。`rest.New` 不会替你安装任何中间件。
 
 **一个中间件是否生效，只取决于代码里有没有安装它。** 配置文件只提供参数，任何配置值都不会开启或关闭中间件。反过来，安装中间件时参数不合法（例如超时为 0、日志器为 `nil`），构造时就会 panic，而不是静默跳过。
 

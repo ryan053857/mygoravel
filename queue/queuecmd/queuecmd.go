@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // errorWidth 是 queue failed 显示的错误信息的最大长度（字符）。

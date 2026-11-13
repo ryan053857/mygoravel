@@ -12,8 +12,8 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/web"
 )
 
 // text 是一个输出转义文本的组件。

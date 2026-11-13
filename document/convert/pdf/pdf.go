@@ -31,9 +31,9 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/experimental"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/internal/mdwrite"
-	"github.com/ryan053857/mygoravel/document/internal/source"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/internal/mdwrite"
+	"github.com/go-tenon/tenon/document/internal/source"
 )
 
 // 标题识别：标题行的字号至少是正文的 headingScale 倍，并且最多 headingMaxRunes 个字符；

@@ -22,10 +22,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 
-	"github.com/ryan053857/mygoravel/internal/aliyunapi"
-	"github.com/ryan053857/mygoravel/outbound"
-	"github.com/ryan053857/mygoravel/push"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/internal/aliyunapi"
+	"github.com/go-tenon/tenon/outbound"
+	"github.com/go-tenon/tenon/push"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // DefaultEndpoint 是 Config.Endpoint 为空时调用的接口域名，国内和海外的应用都使用它。

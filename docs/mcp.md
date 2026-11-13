@@ -119,7 +119,7 @@ package article
 import (
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/mcpx"
+    "github.com/go-tenon/tenon/mcpx"
 )
 
 // Tools 登记文章模块的 MCP 工具。

@@ -11,7 +11,7 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/web"
 )
 
 func TestScriptsAreServed(t *testing.T) {

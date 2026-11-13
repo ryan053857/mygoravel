@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/database/migrate"
 )
 
 // Make 创建 make 子命令，在 --dir 中按命名约定新建迁移文件，例如

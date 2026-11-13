@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 func TestAccounts(t *testing.T) {

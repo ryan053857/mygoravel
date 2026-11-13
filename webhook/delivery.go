@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // ErrDeliveryNotFound 表示投递记录不存在或属于其他租户。

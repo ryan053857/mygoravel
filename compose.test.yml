@@ -1,6 +1,6 @@
 # 集成测试用的临时服务，用法见 docs/contributions.md#integration-tests。
 # 版本与 CI 一致；数据放在 tmpfs 中，down -v 之后不留任何东西。
-name: mygoravel-test
+name: tenon-test
 
 services:
   postgres:

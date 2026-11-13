@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/web/docs"
-	"github.com/ryan053857/mygoravel/web/webtest"
+	"github.com/go-tenon/tenon/web/docs"
+	"github.com/go-tenon/tenon/web/webtest"
 )
 
 // partial 模拟顶栏搜索框发出的 htmx 请求：目标是结果弹层。

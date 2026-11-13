@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/ratelimit"
 )
 
 // testLimiter 检查任意 Limiter 实现的共同行为。newLimiter 以 cfg 创建限流器。

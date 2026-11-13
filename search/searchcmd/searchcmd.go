@@ -12,10 +12,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/operation"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/operation"
 )
 
 // Index 是可以重建的索引，*search.Index[D] 和 *vector.Index[D] 都实现了它。

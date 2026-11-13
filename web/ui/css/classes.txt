@@ -24985,9 +24985,9 @@ github.com/axadrn/shadcn-templ/v2/components/toast
 github.com/axadrn/shadcn-templ/v2/components/toggle
 github.com/axadrn/shadcn-templ/v2/components/tooltip
 github.com/axadrn/shadcn-templ/v2/utils
-github.com/ryan053857/mygoravel/queue
-github.com/ryan053857/mygoravel/web
-github.com/ryan053857/mygoravel/web/ui
+github.com/go-tenon/tenon/queue
+github.com/go-tenon/tenon/web
+github.com/go-tenon/tenon/web/ui
 gitlab
 given
 given,

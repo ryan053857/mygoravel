@@ -15,9 +15,9 @@ import (
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/operation"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/search"
+	"github.com/go-tenon/tenon/operation"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/search"
 )
 
 // validName 是索引名称的格式，它也是 collection 名称和同步任务 topic 的一部分。

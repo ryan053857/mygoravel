@@ -14,7 +14,7 @@
 <a id="introduction"></a>
 ## 简介
 
-本章面向 mygoravel 框架本身的开发者。如果你只是在自己的应用中使用 mygoravel，可以跳过这一章，应用的测试方法请参阅[测试](testing.md)。
+本章面向 Tenon 框架本身的开发者。如果你只是在自己的应用中使用 Tenon，可以跳过这一章，应用的测试方法请参阅[测试](testing.md)。
 
 <a id="development-environment"></a>
 ## 开发环境

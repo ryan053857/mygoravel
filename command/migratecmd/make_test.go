@@ -7,8 +7,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/command/migratecmd"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/command/migratecmd"
 )
 
 func TestMakeWithoutConfiguration(t *testing.T) {

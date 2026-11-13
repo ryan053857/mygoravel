@@ -10,7 +10,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/go-tenon/tenon/ratelimit"
 )
 
 // failing 返回预先设定的错误。

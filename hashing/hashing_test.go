@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/ryan053857/mygoravel/hashing"
+	"github.com/go-tenon/tenon/hashing"
 )
 
 // cheap 返回参数最小的配置，让测试保持快速。

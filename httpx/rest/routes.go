@@ -9,7 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 // AccessBearer 是 RequireBearer 路由在路由表中的访问策略；RequireAuth 声明的其他方案取其方案名。

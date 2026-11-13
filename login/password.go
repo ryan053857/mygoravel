@@ -8,8 +8,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/hashing"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/hashing"
+	"github.com/go-tenon/tenon/identity"
 )
 
 type passwordRow struct {

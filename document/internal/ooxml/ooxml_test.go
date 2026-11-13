@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/internal/ooxml"
-	"github.com/ryan053857/mygoravel/document/internal/ooxmltest"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/internal/ooxml"
+	"github.com/go-tenon/tenon/document/internal/ooxmltest"
 )
 
 // open 在 maxExpanded 下打开一个含有 part.xml 的包。

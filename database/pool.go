@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/ryan053857/mygoravel/acquire"
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/acquire"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // ErrBusy 表示连接池在 acquire.WithTimeout 设置的时限内没有空闲连接：数据库连接已经用满，请求过载。

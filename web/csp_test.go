@@ -9,7 +9,7 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/web"
 )
 
 // TestPagesSetCSP 检查页面路由和路由之外的错误页都带有内容安全策略，且 nonce 与 templ context 中的一致。

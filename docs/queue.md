@@ -76,8 +76,8 @@ migrationCmd.AddCommand(migratecmd.Publish(
 package mailjob
 
 import (
-    "github.com/ryan053857/mygoravel/mail"
-    "github.com/ryan053857/mygoravel/queue"
+    "github.com/go-tenon/tenon/mail"
+    "github.com/go-tenon/tenon/queue"
 )
 
 // Send 把邮件交给 worker 发送。
@@ -182,8 +182,8 @@ import (
 
     "example.com/blog/internal/mailjob"
     "example.com/blog/internal/settings"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/queue"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/queue"
 )
 
 // Worker 装配队列 worker，返回的函数转发并处理队列任务，直到 ctx 被取消。

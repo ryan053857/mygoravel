@@ -1,4 +1,4 @@
-module github.com/ryan053857/mygoravel
+module github.com/go-tenon/tenon
 
 go 1.27.3
 

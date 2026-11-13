@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/ai"
-	"github.com/ryan053857/mygoravel/ai/openrouter"
-	"github.com/ryan053857/mygoravel/ai/systemone"
+	"github.com/go-tenon/tenon/ai"
+	"github.com/go-tenon/tenon/ai/openrouter"
+	"github.com/go-tenon/tenon/ai/systemone"
 )
 
 type recorded struct {

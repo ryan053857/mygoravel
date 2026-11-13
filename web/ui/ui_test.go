@@ -16,9 +16,9 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/ui"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/web"
+	"github.com/go-tenon/tenon/web/ui"
 )
 
 // 资源必须按 go.mod 中的 shadcn-templ 生成：升级版本后要运行 go generate ./web/ui。

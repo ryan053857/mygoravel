@@ -27,8 +27,8 @@
 
 ```go
 import (
-    "github.com/ryan053857/mygoravel/lock"
-    "github.com/ryan053857/mygoravel/lock/redislock"
+    "github.com/go-tenon/tenon/lock"
+    "github.com/go-tenon/tenon/lock/redislock"
 )
 
 locker := lock.New(redislock.New(rdb))
@@ -135,7 +135,7 @@ type Store interface {
 `locktest.NewStore()` 是测试用的内存存储，只在同一个进程内互斥，不需要 Redis：
 
 ```go
-import "github.com/ryan053857/mygoravel/lock/locktest"
+import "github.com/go-tenon/tenon/lock/locktest"
 
 locker := lock.New(locktest.NewStore())
 ```

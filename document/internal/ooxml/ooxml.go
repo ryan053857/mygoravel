@@ -14,7 +14,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/ryan053857/mygoravel/document/convert"
+	"github.com/go-tenon/tenon/document/convert"
 )
 
 // relationshipNamespaces 是 Transitional 和 Strict 文档中关系属性的命名空间；这类属性的键带 "r:" 前缀。

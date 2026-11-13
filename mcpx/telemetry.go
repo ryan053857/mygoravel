@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/go-tenon/tenon/logging"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/ryan053857/mygoravel/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -17,7 +17,7 @@ import (
 )
 
 // scopeName 是 MCP 指标和链路的 instrumentation scope。
-const scopeName = "github.com/ryan053857/mygoravel/mcpx"
+const scopeName = "github.com/go-tenon/tenon/mcpx"
 
 // durationBuckets 是 OpenTelemetry MCP 语义约定规定的耗时分桶（秒）。
 var durationBuckets = []float64{0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 30, 60, 120, 300}

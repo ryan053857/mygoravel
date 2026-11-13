@@ -20,7 +20,7 @@
 <a id="introduction"></a>
 ## 简介
 
-mygoravel 推荐把业务逻辑写成 **action**：每个业务动作是一个类型，单独放在一个文件中，例如“发布文章”就是 `internal/article/publish.go` 中的 `article.Publish`。这个文件包含这个动作的全部代码：依赖、业务规则，以及 HTTP 接口、队列任务等各个入口。
+Tenon 推荐把业务逻辑写成 **action**：每个业务动作是一个类型，单独放在一个文件中，例如“发布文章”就是 `internal/article/publish.go` 中的 `article.Publish`。这个文件包含这个动作的全部代码：依赖、业务规则，以及 HTTP 接口、队列任务等各个入口。
 
 这个模式借鉴自 Laravel 的 [laravel-actions](https://github.com/lorisleiva/laravel-actions)，但不需要任何框架支持：没有 `Action` 接口，没有反射，也不靠方法名约定自动发现。入口方法就是普通的 Go 方法，在注册路由或任务时作为方法值传进去，签名由编译器检查。
 
@@ -43,8 +43,8 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/database"
+    "github.com/go-tenon/tenon/identity"
 )
 
 // Publish 发布文章。
@@ -250,7 +250,7 @@ import (
     "github.com/spf13/cobra"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/command"
+    "github.com/go-tenon/tenon/command"
 )
 
 // Commands 声明 article 模块的命令，bootstrap.Commands 调用它。
@@ -275,10 +275,10 @@ import (
     "github.com/spf13/cobra"
 
     "example.com/blog/internal/article"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/queue/queuecmd"
-    "github.com/ryan053857/mygoravel/schedule/schedulecmd"
-    "github.com/ryan053857/mygoravel/search/searchcmd"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/queue/queuecmd"
+    "github.com/go-tenon/tenon/schedule/schedulecmd"
+    "github.com/go-tenon/tenon/search/searchcmd"
 )
 
 // Commands 返回需要 App 的命令，执行时才装配 App。
@@ -349,7 +349,7 @@ func NewImport(create *Create) *Import {
 <a id="follow-ups"></a>
 ## 同步的后续动作
 
-一个动作完成后，其他模块常常要跟着做点什么，例如文章发布后，积分模块给作者加积分。Laravel 用事件和监听器解耦它们，mygoravel 没有事件分发器：action 声明一个钩子类型，bootstrap 把其他模块的函数传进来。`article` 不导入 `points`，发布文章会触发什么都写在装配代码里，不需要到处查找监听器。
+一个动作完成后，其他模块常常要跟着做点什么，例如文章发布后，积分模块给作者加积分。Laravel 用事件和监听器解耦它们，Tenon 没有事件分发器：action 声明一个钩子类型，bootstrap 把其他模块的函数传进来。`article` 不导入 `points`，发布文章会触发什么都写在装配代码里，不需要到处查找监听器。
 
 <a id="declaring-hooks"></a>
 ### 声明钩子
@@ -438,7 +438,7 @@ article.Commands(a.db, onPublished)
 <a id="data-objects"></a>
 ## 数据对象
 
-Laravel 的 [laravel-data](https://github.com/spatie/laravel-data) 用一个类同时描述验证规则、请求数据和响应数据。在 mygoravel 中，这些由普通的 Go 结构体完成：
+Laravel 的 [laravel-data](https://github.com/spatie/laravel-data) 用一个类同时描述验证规则、请求数据和响应数据。在 Tenon 中，这些由普通的 Go 结构体完成：
 
 | 用途 | 写法 |
 | --- | --- |

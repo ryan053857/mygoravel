@@ -12,9 +12,9 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // 本文件实现 Vercel AI SDK 的 UI 消息流协议（https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol），

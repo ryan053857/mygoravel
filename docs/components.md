@@ -69,7 +69,7 @@ router.Handle(web.AssetsPath+"*", web.Assets())
 router.Handle(ui.AssetsPath+"*", ui.Assets())
 ```
 
-`ui` 是 `github.com/ryan053857/mygoravel/web/ui`。`ui.ErrorPage` 用主题渲染错误页，也可以换成自己的组件。`ui.ThemeToggle()` 是暗色模式的开关按钮，页面上任何带 `data-web-ui-theme-toggle` 属性的元素也都是开关。
+`ui` 是 `github.com/go-tenon/tenon/web/ui`。`ui.ErrorPage` 用主题渲染错误页，也可以换成自己的组件。`ui.ThemeToggle()` 是暗色模式的开关按钮，页面上任何带 `data-web-ui-theme-toggle` 属性的元素也都是开关。
 
 <a id="layouts"></a>
 ## 布局
@@ -79,7 +79,7 @@ router.Handle(ui.AssetsPath+"*", ui.Assets())
 ```templ
 package web
 
-import "github.com/ryan053857/mygoravel/web/ui"
+import "github.com/go-tenon/tenon/web/ui"
 
 templ Layout(title string) {
 	@ui.Page(ui.PageProps{Title: title}) {

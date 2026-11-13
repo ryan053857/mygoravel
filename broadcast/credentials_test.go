@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/broadcast/broadcasttest"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // signaled 检查 ch 在 wait 内收到（want 为 true）或没有收到信号。

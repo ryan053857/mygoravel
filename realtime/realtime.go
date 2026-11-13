@@ -14,10 +14,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // credentialInterval 是连接期间重新校验凭据的间隔，与 SSE 相同。

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ryan053857/mygoravel/login"
+	"github.com/go-tenon/tenon/login"
 )
 
 // Outbox 记录发出的验证码，Send 可以直接作为 login.Options.Send。可并发使用。

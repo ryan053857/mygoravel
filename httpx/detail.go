@@ -7,8 +7,8 @@ import (
 
 	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 // ErrorDetail 返回面向用户的错误描述。

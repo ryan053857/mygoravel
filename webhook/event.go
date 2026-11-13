@@ -6,7 +6,7 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // Event 声明一种事件：Name 是事件类型，端点按它订阅；T 是事件内容，编码为 JSON 后放在请求体的 data 中。

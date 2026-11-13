@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 var (

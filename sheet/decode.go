@@ -9,8 +9,8 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/form"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/form"
 )
 
 // Record 是 Decode 解码出的一行。

@@ -14,15 +14,15 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai/chat"
-	"github.com/ryan053857/mygoravel/ai/chat/chattest"
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/broadcast/redisbroadcast"
-	"github.com/ryan053857/mygoravel/internal/redistest"
-	"github.com/ryan053857/mygoravel/lock"
-	"github.com/ryan053857/mygoravel/lock/locktest"
-	"github.com/ryan053857/mygoravel/lock/redislock"
+	"github.com/go-tenon/tenon/ai/chat"
+	"github.com/go-tenon/tenon/ai/chat/chattest"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/broadcast/broadcasttest"
+	"github.com/go-tenon/tenon/broadcast/redisbroadcast"
+	"github.com/go-tenon/tenon/internal/redistest"
+	"github.com/go-tenon/tenon/lock"
+	"github.com/go-tenon/tenon/lock/locktest"
+	"github.com/go-tenon/tenon/lock/redislock"
 )
 
 // twoInstances 创建共用会话存储、广播和锁的两个 Runs，相当于同一个应用的两个实例。

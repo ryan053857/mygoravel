@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/ai"
+	"github.com/go-tenon/tenon/ai"
 )
 
 var ticketQuestions = []ai.Question{

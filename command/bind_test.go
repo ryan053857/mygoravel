@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/cleanup"
-	"github.com/ryan053857/mygoravel/command"
+	"github.com/go-tenon/tenon/cleanup"
+	"github.com/go-tenon/tenon/command"
 )
 
 // greeter 是测试用的 action：构造函数只保存依赖。

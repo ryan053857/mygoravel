@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/captcha"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/outbound/outboundtest"
+	"github.com/go-tenon/tenon/captcha"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/outbound/outboundtest"
 )
 
 const siteverify = "POST " + captcha.Turnstile

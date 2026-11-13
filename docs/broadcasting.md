@@ -146,7 +146,7 @@ Redis Pub/Sub 不保存消息：订阅连接中断，或者集群把频道所在
 `broadcasttest.NewBackend()` 是测试用的内存后端，不需要数据库。同一个后端上的多个 Hub 互相收到消息，相当于多个实例；Hub 开始接收时会先收到后端创建以来发布的全部消息，所以刚创建 Hub 就发布的消息也不会错过：
 
 ```go
-import "github.com/ryan053857/mygoravel/broadcast/broadcasttest"
+import "github.com/go-tenon/tenon/broadcast/broadcasttest"
 
 hub := broadcast.New(broadcasttest.NewBackend(), nil)
 sub := hub.Subscribe("articles")

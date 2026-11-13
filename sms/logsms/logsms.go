@@ -5,7 +5,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/ryan053857/mygoravel/sms"
+	"github.com/go-tenon/tenon/sms"
 )
 
 // Sender 以 Info 级别记录每条短信的号码、模板和变量，开发时可以从日志里看到验证码。

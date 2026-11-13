@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	slogchi "github.com/samber/slog-chi"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // AccessLog 在请求结束后用 slog-chi 记录一条消息为 "http request" 的访问日志：

@@ -3,7 +3,7 @@ package mdwrite
 import (
 	"strings"
 
-	"github.com/ryan053857/mygoravel/document/convert"
+	"github.com/go-tenon/tenon/document/convert"
 )
 
 // lineEndings 把 CRLF 和单独的 CR 转为 LF，并去掉 NUL 字节。

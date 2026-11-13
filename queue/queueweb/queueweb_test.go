@@ -16,14 +16,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/queue/queuetest"
-	"github.com/ryan053857/mygoravel/queue/queueweb"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/ui"
-	"github.com/ryan053857/mygoravel/web/webtest"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/queue/queuetest"
+	"github.com/go-tenon/tenon/queue/queueweb"
+	"github.com/go-tenon/tenon/web"
+	"github.com/go-tenon/tenon/web/ui"
+	"github.com/go-tenon/tenon/web/webtest"
 )
 
 func insertFailed(t *testing.T, db bun.IDB, topic string, age time.Duration) uuid.UUID {

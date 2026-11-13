@@ -15,14 +15,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/notification"
-	"github.com/ryan053857/mygoravel/push"
-	"github.com/ryan053857/mygoravel/push/pushtest"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/queue/queuetest"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/notification"
+	"github.com/go-tenon/tenon/push"
+	"github.com/go-tenon/tenon/push/pushtest"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/queue/queuetest"
 )
 
 var (

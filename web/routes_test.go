@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/web"
 )
 
 func TestRoutesRejectNilHandler(t *testing.T) {

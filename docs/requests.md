@@ -14,7 +14,7 @@
 <a id="introduction"></a>
 ## 简介
 
-在 mygoravel 中，你不需要手动读取 `http.Request`。每条路由都有一个**输入类型**——一个普通的 Go 结构体，字段上的标签说明这个值从哪里来。Huma 会在调用处理器之前读取请求、转换类型并完成[验证](validation.md)，你的处理器拿到的就是一个已经填好的结构体。
+在 Tenon 中，你不需要手动读取 `http.Request`。每条路由都有一个**输入类型**——一个普通的 Go 结构体，字段上的标签说明这个值从哪里来。Huma 会在调用处理器之前读取请求、转换类型并完成[验证](validation.md)，你的处理器拿到的就是一个已经填好的结构体。
 
 例如，在[获取文章](routing.md#http-actions)的 `Get.HTTP` 方法中，输入已经完成类型转换。它和 `GetInput` 一起定义在 `internal/article/get.go` 中；共享的 `ArticleOutput` 定义在同包的 `dto.go` 中。下面只展示方法签名和读取输入的位置：
 

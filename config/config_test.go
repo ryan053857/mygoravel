@@ -11,7 +11,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/config"
+	"github.com/go-tenon/tenon/config"
 )
 
 type httpConfig struct {
@@ -156,16 +156,16 @@ func TestMissingFile(t *testing.T) {
 }
 
 func TestEnvExpansion(t *testing.T) {
-	t.Setenv("MYGORAVEL_TEST_PORT", "9100")
-	t.Setenv("MYGORAVEL_TEST_EMPTY", "")
-	t.Setenv("MYGORAVEL_TEST_PASSWORD", "p@ss #word: {x}")
+	t.Setenv("TENON_TEST_PORT", "9100")
+	t.Setenv("TENON_TEST_EMPTY", "")
+	t.Setenv("TENON_TEST_PASSWORD", "p@ss #word: {x}")
 	cfg := mustLoad(t, `
 http:
-  port: ${MYGORAVEL_TEST_PORT}
-  addr: ${MYGORAVEL_TEST_EMPTY:-:7000}
+  port: ${TENON_TEST_PORT}
+  addr: ${TENON_TEST_EMPTY:-:7000}
 db:
-  dsn: ${MYGORAVEL_TEST_UNSET:-}
-  password: ${MYGORAVEL_TEST_PASSWORD}
+  dsn: ${TENON_TEST_UNSET:-}
+  password: ${TENON_TEST_PASSWORD}
 `)
 	if cfg.HTTP.Port != 9100 || cfg.HTTP.Addr != ":7000" || cfg.DB.DSN != "" || cfg.DB.Password != "p@ss #word: {x}" {
 		t.Fatalf("got %+v password=%q", cfg, cfg.DB.Password)
@@ -173,15 +173,15 @@ db:
 }
 
 func TestMissingEnvFails(t *testing.T) {
-	_, err := load[appConfig](t, "db:\n  dsn: ${MYGORAVEL_TEST_UNSET}\n")
-	if err == nil || !strings.Contains(err.Error(), "MYGORAVEL_TEST_UNSET") {
+	_, err := load[appConfig](t, "db:\n  dsn: ${TENON_TEST_UNSET}\n")
+	if err == nil || !strings.Contains(err.Error(), "TENON_TEST_UNSET") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 func TestEnvCannotChangeStructure(t *testing.T) {
-	t.Setenv("MYGORAVEL_TEST_EVIL", "x\nport: 1")
-	cfg := mustLoad(t, "http:\n  addr: ${MYGORAVEL_TEST_EVIL}\n")
+	t.Setenv("TENON_TEST_EVIL", "x\nport: 1")
+	cfg := mustLoad(t, "http:\n  addr: ${TENON_TEST_EVIL}\n")
 	if cfg.HTTP.Port != 8080 || cfg.HTTP.Addr != "x\nport: 1" {
 		t.Fatalf("structure changed: %+v", cfg.HTTP)
 	}
@@ -195,14 +195,14 @@ func TestEscapedReference(t *testing.T) {
 }
 
 func TestAliasesExpandOnce(t *testing.T) {
-	t.Setenv("MYGORAVEL_TEST_PORT", "123")
+	t.Setenv("TENON_TEST_PORT", "123")
 	type section struct {
 		Port int `yaml:"port"`
 	}
 	cfg, err := load[struct {
 		One section `yaml:"one"`
 		Two section `yaml:"two"`
-	}](t, "one: &shared\n  port: ${MYGORAVEL_TEST_PORT}\ntwo: *shared\n")
+	}](t, "one: &shared\n  port: ${TENON_TEST_PORT}\ntwo: *shared\n")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import (
 	xhtml "golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 
-	"github.com/ryan053857/mygoravel/document/convert"
+	"github.com/go-tenon/tenon/document/convert"
 )
 
 // HTML 标准规定的合并上限，更大的值会被浏览器截断。

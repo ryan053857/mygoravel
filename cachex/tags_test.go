@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/cachex"
+	"github.com/go-tenon/tenon/cachex"
 )
 
 // Invalidate 一个 tag 后，带有它的值重新加载；其他 tag 不受影响，tag 在 Cache 之间共享。

@@ -13,8 +13,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/session/inmemory"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai/chat"
-	"github.com/ryan053857/mygoravel/ai/chat/chattest"
+	"github.com/go-tenon/tenon/ai/chat"
+	"github.com/go-tenon/tenon/ai/chat/chattest"
 )
 
 // employees 模拟按对话选择 AI 员工：每个对话对应一个 agent，可以随时替换。

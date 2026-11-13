@@ -13,8 +13,8 @@ import (
 
 	resendsdk "github.com/resend/resend-go/v3"
 
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/resend"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/resend"
 )
 
 type request struct {

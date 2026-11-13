@@ -5,8 +5,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/sms"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/sms"
 )
 
 func TestValidate(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/page"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/page"
 )
 
 func TestOffsetParams(t *testing.T) {

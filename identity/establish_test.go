@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/identity"
 )
 
 var support = identity.Ref{Type: "staff", ID: "support"}

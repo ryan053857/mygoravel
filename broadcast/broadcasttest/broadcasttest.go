@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/broadcast"
+	"github.com/go-tenon/tenon/broadcast"
 )
 
 // TestBackend 检查 Backend 的共同行为。newBackends 返回连到同一个后端（同一张表、同一个频道）的

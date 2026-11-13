@@ -9,9 +9,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // TokenValidator 校验 bearer token 并返回主体。ctx 是请求的 context。
@@ -22,8 +22,8 @@ type TokenValidator func(ctx context.Context, token string) (identity.Subject, e
 type Authenticator func(ctx huma.Context) (identity.Subject, error)
 
 const (
-	authMetadata    = "mygoravel.auth"
-	confirmMetadata = "mygoravel.confirmed"
+	authMetadata    = "tenon.auth"
+	confirmMetadata = "tenon.confirmed"
 )
 
 // RequireBearer 要求请求携带有效的 Authorization: Bearer token，校验器返回有效主体，

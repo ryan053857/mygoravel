@@ -22,7 +22,7 @@
 <a id="introduction"></a>
 ## 简介
 
-几乎每个 API 都需要与数据库交互。mygoravel 只支持 PostgreSQL，并使用以下组件：
+几乎每个 API 都需要与数据库交互。Tenon 只支持 PostgreSQL，并使用以下组件：
 
 - [pgx](https://github.com/jackc/pgx)：PostgreSQL 驱动；
 - [Bun](https://bun.uptrace.dev)：SQL 优先的 Go ORM，负责查询构建和模型映射；
@@ -94,7 +94,7 @@ package storage
 import (
     "context"
 
-    "github.com/ryan053857/mygoravel/database"
+    "github.com/go-tenon/tenon/database"
 )
 
 func Check(ctx context.Context, dsn string) error {
@@ -159,12 +159,12 @@ type Article struct {
 
 `Slug` 是文章在网址中的标识，例如 `/blog/hello-world` 中的 `hello-world`，它在所有文章中必须唯一。文章创建时是草稿（`draft`），发布后变为 `published`，并记录发布时间。
 
-模型声明字段映射和下面介绍的 Bun 行为，表结构本身由[迁移](migrations.md#migration-structure)管理。mygoravel 不会统一添加 `created_at`、`updated_at`、`deleted_at`，你可以按需在模型和迁移中声明它们。本文的 `Article` 示例同时使用时间戳和软删除。
+模型声明字段映射和下面介绍的 Bun 行为，表结构本身由[迁移](migrations.md#migration-structure)管理。Tenon 不会统一添加 `created_at`、`updated_at`、`deleted_at`，你可以按需在模型和迁移中声明它们。本文的 `Article` 示例同时使用时间戳和软删除。
 
 <a id="primary-keys"></a>
 ### 主键
 
-mygoravel 约定主键使用 UUIDv7，由应用在插入前生成，迁移中声明为 `id uuid PRIMARY KEY`：
+Tenon 约定主键使用 UUIDv7，由应用在插入前生成，迁移中声明为 `id uuid PRIMARY KEY`：
 
 ```go
 item := &Article{ID: uuid.Must(uuid.NewV7()), AuthorID: subject.ID}

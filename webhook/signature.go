@@ -13,7 +13,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // ErrInvalidSignature 表示收到的 webhook 缺少签名请求头、签名不匹配或时间戳超出 Tolerance。

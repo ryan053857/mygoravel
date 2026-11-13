@@ -15,7 +15,7 @@ import (
 
 	"github.com/go-ego/gse"
 
-	"github.com/ryan053857/mygoravel/search"
+	"github.com/go-tenon/tenon/search"
 )
 
 // Tokenizer 按词语切分中文，其他文字的切分与 search.Bigram 相同。词典在第一次分词时加载，所有索引共用。

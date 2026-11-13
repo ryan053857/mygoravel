@@ -10,7 +10,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // DefaultCheckTimeout 是 ReadyOptions.Timeout 不大于 0 时每项检查的超时。

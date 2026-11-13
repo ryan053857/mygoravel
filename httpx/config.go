@@ -10,7 +10,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/ratelimit"
+	"github.com/go-tenon/tenon/ratelimit"
 )
 
 // Config 是 HTTP 配置，对应配置文件的 http 段：顶层是服务器参数，

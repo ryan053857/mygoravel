@@ -15,8 +15,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/apitoken"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/apitoken"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // tokenError 是令牌端点的错误响应（RFC 6749 5.2）。

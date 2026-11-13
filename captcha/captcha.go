@@ -22,8 +22,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/outbound"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/outbound"
 )
 
 var (

@@ -12,7 +12,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // ErrUnavailable 表示 Open 时数据库连不上。它属于 errorx.Unavailable 分类，

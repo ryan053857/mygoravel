@@ -13,9 +13,9 @@ import (
 	tpg "trpc.group/trpc-go/trpc-agent-go/session/postgres"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai/chat"
-	"github.com/ryan053857/mygoravel/ai/chat/chattest"
-	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/go-tenon/tenon/ai/chat"
+	"github.com/go-tenon/tenon/ai/chat/chattest"
+	"github.com/go-tenon/tenon/database/dbtest"
 )
 
 // newSessions 创建会话存储；initSchema 为 true 时让 trpc-agent-go 自己建表。

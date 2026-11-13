@@ -1,6 +1,6 @@
-# mygoravel
+# Tenon
 
-mygoravel 是一个用于构建 HTTP API 的 Go 应用框架：后台和用户端是调用 API 的单页应用或 App，官网、帮助中心这类公开页面可以在服务端渲染。它为配置、路由、验证、错误处理、日志、认证、数据库、迁移和命令行提供一套统一的约定，同时让你直接使用社区组件的原生能力：chi 与 Huma、templ、htmx 与 shadcn-templ、slog 与 slog-multi / slog-formatter / slog-chi、Bun 与 pgx、goose、Cobra、go-i18n 和 cockroachdb/errors。
+Tenon 是一个用于构建 HTTP API 的 Go 应用框架：后台和用户端是调用 API 的单页应用或 App，官网、帮助中心这类公开页面可以在服务端渲染。它为配置、路由、验证、错误处理、日志、认证、数据库、迁移和命令行提供一套统一的约定，同时让你直接使用社区组件的原生能力：chi 与 Huma、templ、htmx 与 shadcn-templ、slog 与 slog-multi / slog-formatter / slog-chi、Bun 与 pgx、goose、Cobra、go-i18n 和 cockroachdb/errors。
 
 - **依赖一目了然**：没有服务容器和全局状态，所有依赖都通过普通的构造函数显式传递。
 - **一个动作一个文件**：业务逻辑写成 action，HTTP 接口、队列任务、定时任务和命令行都是它的入口方法。
@@ -11,7 +11,7 @@ mygoravel 是一个用于构建 HTTP API 的 Go 应用框架：后台和用户�
 ## 快速开始
 
 ```bash
-go get github.com/ryan053857/mygoravel@main
+go get github.com/go-tenon/tenon@main
 ```
 
 需要 Go 1.27.3 或更高版本。基础设施是固定的一套，每个组件只做最擅长的事：PostgreSQL 保存业务数据，[Memcached](docs/cache.md) 做缓存，[Redis](docs/redis.md) 做锁、限流和广播，[NSQ](docs/queue.md) 做任务队列。框架的包分为基础、基础设施、入口、功能四层，每个包都可以单独使用，见[框架包一览](docs/directory-structure.md#framework-packages)。从[安装](docs/installation.md)开始，几分钟即可运行第一个接口。
@@ -57,4 +57,4 @@ go get github.com/ryan053857/mygoravel@main
 
 ## 参与开发
 
-欢迎参与 mygoravel 的开发！运行测试、CI 和文档写作约定请参阅[贡献指南](docs/contributions.md)。
+欢迎参与 Tenon 的开发！运行测试、CI 和文档写作约定请参阅[贡献指南](docs/contributions.md)。

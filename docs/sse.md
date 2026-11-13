@@ -12,7 +12,7 @@
 <a id="introduction"></a>
 ## 简介
 
-有些界面需要服务端主动推送内容：长时间任务的进度、其他人刚发布的文章、聊天消息。mygoravel 使用 [Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_events)（SSE）：服务端保持一个 HTTP 响应不结束，持续写出事件，每个事件的数据是一行 JSON。
+有些界面需要服务端主动推送内容：长时间任务的进度、其他人刚发布的文章、聊天消息。Tenon 使用 [Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_events)（SSE）：服务端保持一个 HTTP 响应不结束，持续写出事件，每个事件的数据是一行 JSON。
 
 SSE 只负责服务端到客户端。客户端发给服务端的仍然是普通请求，所以认证、验证和限流都和其他接口一样。需要在线成员、「正在输入」或移动端 SDK 时，使用基于 WebSocket 的[实时频道](realtime.md)。
 

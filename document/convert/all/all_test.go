@@ -11,12 +11,12 @@ import (
 	"github.com/xuri/excelize/v2"
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/all"
-	"github.com/ryan053857/mygoravel/document/convert/docx"
-	"github.com/ryan053857/mygoravel/document/convert/pptx"
-	"github.com/ryan053857/mygoravel/document/internal/pdftest"
-	"github.com/ryan053857/mygoravel/document/split"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/all"
+	"github.com/go-tenon/tenon/document/convert/docx"
+	"github.com/go-tenon/tenon/document/convert/pptx"
+	"github.com/go-tenon/tenon/document/internal/pdftest"
+	"github.com/go-tenon/tenon/document/split"
 )
 
 func TestFormats(t *testing.T) {

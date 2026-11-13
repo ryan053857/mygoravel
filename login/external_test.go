@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/login"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/login"
 )
 
 func TestExternal(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/ui"
+	"github.com/go-tenon/tenon/web"
+	"github.com/go-tenon/tenon/web/ui"
 )
 
 // Options 配置 New。

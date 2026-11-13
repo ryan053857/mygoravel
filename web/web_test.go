@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/web"
 )
 
 func TestRender(t *testing.T) {

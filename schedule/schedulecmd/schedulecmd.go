@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/schedule"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/schedule"
 )
 
 // New 返回 schedules 命令，按注册顺序列出每个任务的名称、表达式、下一次执行的时间、距现在多久、

@@ -9,7 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/page"
+	"github.com/go-tenon/tenon/page"
 )
 
 // DefaultPerPage 是 Query.Page.PerPage 不大于 0 时每页的条数。

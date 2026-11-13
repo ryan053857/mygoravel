@@ -15,9 +15,9 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/tool"
 
-	"github.com/ryan053857/mygoravel/ai/chat"
-	"github.com/ryan053857/mygoravel/ai/chat/chattest"
-	"github.com/ryan053857/mygoravel/httpx/rest"
+	"github.com/go-tenon/tenon/ai/chat"
+	"github.com/go-tenon/tenon/ai/chat/chattest"
+	"github.com/go-tenon/tenon/httpx/rest"
 )
 
 type chatInput struct {

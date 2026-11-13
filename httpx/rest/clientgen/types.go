@@ -207,7 +207,7 @@ func (g *generator) importable(p string) bool {
 	return false
 }
 
-// copyable 报告包是否属于应用模块或 mygoravel，它的类型复制到客户端。
+// copyable 报告包是否属于应用模块或 Tenon，它的类型复制到客户端。
 func (g *generator) copyable(pkgPath string) bool {
 	p := g.pkgs[pkgPath]
 	return p != nil && p.Module != nil && g.modules[p.Module.Path]

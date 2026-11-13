@@ -18,7 +18,7 @@
 <a id="introduction"></a>
 ## 简介
 
-mygoravel 不要求固定的目录结构，也不会根据目录位置自动发现任何东西。一个小型应用完全可以只有一个 `main.go`，就像[安装](installation.md)中的示例那样。
+Tenon 不要求固定的目录结构，也不会根据目录位置自动发现任何东西。一个小型应用完全可以只有一个 `main.go`，就像[安装](installation.md)中的示例那样。
 
 随着业务增长，你会希望把代码拆分到多个包中。本章介绍一种推荐的结构，它适合大多数中小型 API 项目。你可以从它开始，再根据团队习惯调整。
 
@@ -92,7 +92,7 @@ blog/
 <a id="the-bootstrap-directory"></a>
 ### internal/bootstrap 目录
 
-`bootstrap` 包负责把应用“组装”起来：安装全局日志器、打开数据库连接、注册路由、启动队列和调度器。在 mygoravel 中，这些工作都由普通的 Go 代码显式完成，[依赖装配](dependencies.md)一章会详细介绍。
+`bootstrap` 包负责把应用“组装”起来：安装全局日志器、打开数据库连接、注册路由、启动队列和调度器。在 Tenon 中，这些工作都由普通的 Go 代码显式完成，[依赖装配](dependencies.md)一章会详细介绍。
 
 <a id="business-packages"></a>
 ### 业务包
@@ -108,7 +108,7 @@ blog/
 
 动作很多、一个目录难以浏览时，可以按子领域拆分业务包，例如把评论拆到 `internal/comment`，而不是在包内再建子目录。
 
-这些是推荐的组织与命名约定，不是框架限制。mygoravel 不会扫描目录，也不要求实现 `Action` 接口；简单的接口可以直接用函数作为处理器。
+这些是推荐的组织与命名约定，不是框架限制。Tenon 不会扫描目录，也不要求实现 `Action` 接口；简单的接口可以直接用函数作为处理器。
 
 查看应用全部路由时，可以使用 [routes 命令](commands.md#routes-command)。它从同一份注册代码生成全局路由表，模块内部仍然保留自己的 `routes.go`。
 
@@ -145,7 +145,7 @@ blog/
 <a id="framework-packages"></a>
 ## 框架包一览
 
-mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包分为四层，包只引用同层或更低层的包：
+Tenon 的每个包都可以单独使用，按需引入即可。顶层的包分为四层，包只引用同层或更低层的包：
 
 ```text
 功能        apitoken  login  oauthserver  authz  notification  push  activity  feature  settings  operation  webhook  search  vector  sheet/imports  sheet/exports  ai

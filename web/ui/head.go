@@ -12,7 +12,7 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/web"
 )
 
 // Class 返回 <html> 的 class：选择当前主题（web.ThemeFrom）的风格，Mode 为 dark 时加上 dark。

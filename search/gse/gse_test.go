@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/search"
-	"github.com/ryan053857/mygoravel/search/gse"
+	"github.com/go-tenon/tenon/search"
+	"github.com/go-tenon/tenon/search/gse"
 )
 
 func texts(tokens []search.Token) []string {

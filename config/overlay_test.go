@@ -9,7 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/config"
+	"github.com/go-tenon/tenon/config"
 )
 
 // loadFiles 在临时目录写入 files，按 order 的顺序加载。
@@ -58,7 +58,7 @@ func TestOverlayMergesMapsAndReplacesSlices(t *testing.T) {
 func TestOverlayErrorsNameTheFile(t *testing.T) {
 	for name, files := range map[string]map[string]string{
 		"unknown field": {"app.yaml": "http:\n  port: 1\n", "prod.yaml": "http:\n  prot: 2\n"},
-		"missing env":   {"app.yaml": "http:\n  port: 1\n", "prod.yaml": "db:\n  dsn: ${MYGORAVEL_TEST_UNSET}\n"},
+		"missing env":   {"app.yaml": "http:\n  port: 1\n", "prod.yaml": "db:\n  dsn: ${TENON_TEST_UNSET}\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadFiles(t, files, "app.yaml", "prod.yaml")
@@ -104,11 +104,11 @@ func unsetEnv(t *testing.T, keys ...string) {
 }
 
 func TestLoadEnv(t *testing.T) {
-	unsetEnv(t, "MYGORAVEL_TEST_ADDR", "MYGORAVEL_TEST_PASSWORD")
-	t.Setenv("MYGORAVEL_TEST_KEEP", "") // 已设置的变量（包括空字符串）不被覆盖
+	unsetEnv(t, "TENON_TEST_ADDR", "TENON_TEST_PASSWORD")
+	t.Setenv("TENON_TEST_KEEP", "") // 已设置的变量（包括空字符串）不被覆盖
 	dir := writeFiles(t, map[string]string{
-		".env":     "# comment\nexport MYGORAVEL_TEST_ADDR=:7001\nMYGORAVEL_TEST_PASSWORD='s3cr$ET value'\nMYGORAVEL_TEST_KEEP=from-file\n",
-		"app.yaml": "http:\n  addr: ${MYGORAVEL_TEST_ADDR}\ndb:\n  password: ${MYGORAVEL_TEST_PASSWORD}\n  dsn: x${MYGORAVEL_TEST_KEEP}\n",
+		".env":     "# comment\nexport TENON_TEST_ADDR=:7001\nTENON_TEST_PASSWORD='s3cr$ET value'\nTENON_TEST_KEEP=from-file\n",
+		"app.yaml": "http:\n  addr: ${TENON_TEST_ADDR}\ndb:\n  password: ${TENON_TEST_PASSWORD}\n  dsn: x${TENON_TEST_KEEP}\n",
 	})
 	if err := config.LoadEnv(filepath.Join(dir, ".env")); err != nil {
 		t.Fatal(err)

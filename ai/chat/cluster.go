@@ -13,8 +13,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/session"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/lock"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/lock"
 )
 
 // 多实例协作的时间参数，测试中可以调小。

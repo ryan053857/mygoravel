@@ -5,7 +5,7 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
 
-	"github.com/ryan053857/mygoravel/ai"
+	"github.com/go-tenon/tenon/ai"
 )
 
 // NewModel 按配置创建模型，opts 原样传给 openai.New。其他接口的模型直接使用 trpc-agent-go 的对应包创建。

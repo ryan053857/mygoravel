@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/login"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/login"
 )
 
 // RFC 6238 附录 B 中 SHA1 的测试向量，取后 6 位。

@@ -13,11 +13,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/command/httpcmd"
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/command/httpcmd"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/web"
 )
 
 func newRoot(cmds ...*cobra.Command) *cobra.Command {

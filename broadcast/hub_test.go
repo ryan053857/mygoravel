@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/broadcast/broadcasttest"
 )
 
 func TestHubDeliversAcrossInstances(t *testing.T) {

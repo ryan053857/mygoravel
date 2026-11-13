@@ -11,8 +11,8 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/unicode"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/text"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/text"
 )
 
 // convertBytes 用 c 转换 data。

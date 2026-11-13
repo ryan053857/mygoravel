@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/command/devcmd"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/command/devcmd"
 )
 
 type settings struct {

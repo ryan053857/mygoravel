@@ -10,7 +10,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/qdrant/go-client/qdrant"
 
-	"github.com/ryan053857/mygoravel/search"
+	"github.com/go-tenon/tenon/search"
 )
 
 var (

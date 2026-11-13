@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -13,7 +13,7 @@ import (
 )
 
 // scopeName 是调度器指标和链路的 instrumentation scope。
-const scopeName = "github.com/ryan053857/mygoravel/schedule"
+const scopeName = "github.com/go-tenon/tenon/schedule"
 
 // 指标和 span 的属性名。
 const (

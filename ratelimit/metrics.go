@@ -9,7 +9,7 @@ import (
 )
 
 // scopeName 是限流指标的 instrumentation scope。
-const scopeName = "github.com/ryan053857/mygoravel/ratelimit"
+const scopeName = "github.com/go-tenon/tenon/ratelimit"
 
 // 指标的属性名。
 const (

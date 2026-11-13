@@ -15,11 +15,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/cachex"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/cachex"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // AllTenants 是分配角色时表示“所有租户”的域，例如让运营人员在每个租户中都有只读支持权限。

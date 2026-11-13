@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/feature"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/feature"
+	"github.com/go-tenon/tenon/identity"
 )
 
 var (

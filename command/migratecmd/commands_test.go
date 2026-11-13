@@ -7,8 +7,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ryan053857/mygoravel/command/migratecmd"
-	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/go-tenon/tenon/command/migratecmd"
+	"github.com/go-tenon/tenon/database/dbtest"
 )
 
 // TestMigrateCommands 在一个空数据库上依次检查 status、up、down 的输出。

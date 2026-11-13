@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/lock"
-	"github.com/ryan053857/mygoravel/lock/locktest"
-	"github.com/ryan053857/mygoravel/schedule"
-	"github.com/ryan053857/mygoravel/schedule/schedulecmd"
+	"github.com/go-tenon/tenon/lock"
+	"github.com/go-tenon/tenon/lock/locktest"
+	"github.com/go-tenon/tenon/schedule"
+	"github.com/go-tenon/tenon/schedule/schedulecmd"
 )
 
 func TestSchedules(t *testing.T) {

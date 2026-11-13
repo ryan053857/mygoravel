@@ -10,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/database/migrate"
 )
 
 func TestNonTransactionalMigrationRequiresManualRecovery(t *testing.T) {

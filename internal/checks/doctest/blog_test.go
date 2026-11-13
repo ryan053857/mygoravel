@@ -66,8 +66,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // system 在文档中与 Job 一起给出。
@@ -80,12 +80,12 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/sheet"
+	"github.com/go-tenon/tenon/sheet"
 )
 `},
 	{"internal/article/list_query.go", "responses.md", "type ListQuery struct", `package article
 
-import "github.com/ryan053857/mygoravel/page"
+import "github.com/go-tenon/tenon/page"
 `},
 	{"internal/article/list.go", "responses.md", "// orders 是", `package article
 
@@ -95,8 +95,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/page"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/page"
 )
 
 // List 和 toDTOs 在文档中没有给出。
@@ -117,7 +117,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ryan053857/mygoravel/vector"
+	"github.com/go-tenon/tenon/vector"
 )
 `},
 	{"internal/article/publish_tool.go", "mcp.md", "type PublishArgs struct", `package article
@@ -127,7 +127,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 `},
 	{"internal/article/search_tool.go", "mcp.md", "type SearchArgs struct", `package article
@@ -135,19 +135,19 @@ import (
 import (
 	"context"
 
-	"github.com/ryan053857/mygoravel/page"
-	"github.com/ryan053857/mygoravel/search"
+	"github.com/go-tenon/tenon/page"
+	"github.com/go-tenon/tenon/search"
 )
 `},
 	{"internal/bootstrap/mailer.go", "mail.md", "func newMailer(", `package bootstrap
 
 import (
 	"example.com/blog/internal/settings"
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/logmail"
-	"github.com/ryan053857/mygoravel/mail/resend"
-	"github.com/ryan053857/mygoravel/mail/ses"
-	"github.com/ryan053857/mygoravel/mail/smtp"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/logmail"
+	"github.com/go-tenon/tenon/mail/resend"
+	"github.com/go-tenon/tenon/mail/ses"
+	"github.com/go-tenon/tenon/mail/smtp"
 )
 `},
 }
@@ -173,7 +173,7 @@ func TestBlogExampleCompiles(t *testing.T) {
 		writeFile(t, dir, f.path, f.header+"\n"+fragment(t, root, f.doc, f.prefix))
 	}
 
-	gomod := "module example.com/blog\n\ngo 1.27.3\n\nrequire github.com/ryan053857/mygoravel v0.0.0\n\nreplace github.com/ryan053857/mygoravel => " + root + "\n"
+	gomod := "module example.com/blog\n\ngo 1.27.3\n\nrequire github.com/go-tenon/tenon v0.0.0\n\nreplace github.com/go-tenon/tenon => " + root + "\n"
 	writeFile(t, dir, "go.mod", gomod)
 	sum, err := os.ReadFile(filepath.Join(root, "go.sum"))
 	if err != nil {

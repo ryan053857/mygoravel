@@ -9,9 +9,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/mcpx"
-	"github.com/ryan053857/mygoravel/mcpx/mcpcmd"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/mcpx"
+	"github.com/go-tenon/tenon/mcpx/mcpcmd"
 )
 
 var ops = identity.Subject{Type: identity.System, ID: "ops", Tenant: "acme", Permissions: []string{"articles:read"}}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/document/convert"
+	"github.com/go-tenon/tenon/document/convert"
 )
 
 // countingReader 提供 size 字节的数据，并记录读取了多少。

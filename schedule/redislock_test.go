@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/internal/redistest"
-	"github.com/ryan053857/mygoravel/lock"
-	"github.com/ryan053857/mygoravel/lock/redislock"
-	"github.com/ryan053857/mygoravel/schedule"
+	"github.com/go-tenon/tenon/internal/redistest"
+	"github.com/go-tenon/tenon/lock"
+	"github.com/go-tenon/tenon/lock/redislock"
+	"github.com/go-tenon/tenon/schedule"
 )
 
 // 多个实例共用 Redis 锁时，每次触发只执行一次。

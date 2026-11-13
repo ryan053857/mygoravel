@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/filesystem"
-	"github.com/ryan053857/mygoravel/filesystem/local"
+	"github.com/go-tenon/tenon/filesystem"
+	"github.com/go-tenon/tenon/filesystem/local"
 )
 
 func openDisk(t *testing.T, publicURL string) (*local.Disk, string) {

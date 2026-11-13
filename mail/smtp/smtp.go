@@ -9,8 +9,8 @@ import (
 	"github.com/cockroachdb/errors"
 	gomail "github.com/wneessen/go-mail"
 
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/internal/mimemsg"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/internal/mimemsg"
 )
 
 // TLS 取值。

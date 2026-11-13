@@ -14,7 +14,7 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/ryan053857/mygoravel/ai"
+	"github.com/go-tenon/tenon/ai"
 )
 
 // PNG 是一张 1x1 的透明 PNG，Imager 默认返回它。

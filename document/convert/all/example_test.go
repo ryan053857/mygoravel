@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/all"
-	"github.com/ryan053857/mygoravel/document/split"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/all"
+	"github.com/go-tenon/tenon/document/split"
 )
 
 func Example() {

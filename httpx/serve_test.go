@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/cleanup"
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/cleanup"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 func TestServeDrainsBeforeCleanup(t *testing.T) {

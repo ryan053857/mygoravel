@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 func TestParseFormat(t *testing.T) {

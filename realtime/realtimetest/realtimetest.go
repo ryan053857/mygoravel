@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/realtime"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/realtime"
 )
 
 var (

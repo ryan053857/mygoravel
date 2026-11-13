@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/ryan053857/mygoravel/sms"
+	"github.com/go-tenon/tenon/sms"
 )
 
 // Sender 记录每条通过 Validate 的短信，可并发使用。

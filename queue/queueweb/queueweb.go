@@ -29,12 +29,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/logging"
-	"github.com/ryan053857/mygoravel/page"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/ui"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/logging"
+	"github.com/go-tenon/tenon/page"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/web"
+	"github.com/go-tenon/tenon/web/ui"
 )
 
 // bulkBatch 是全部重试、全部删除每批处理的条数。

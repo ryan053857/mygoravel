@@ -11,7 +11,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"go.opentelemetry.io/otel/propagation"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // emitBatch 是一条语句写入 WAL 的最多任务数。

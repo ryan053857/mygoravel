@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const module = "github.com/ryan053857/mygoravel"
+const module = "github.com/go-tenon/tenon"
 
 // layer 是框架包所在的层。包只能引用同层或更低层的包，并且引用必须列在 rules 中。
 type layer int

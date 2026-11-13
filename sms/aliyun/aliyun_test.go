@@ -6,9 +6,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/outbound/outboundtest"
-	"github.com/ryan053857/mygoravel/sms"
-	"github.com/ryan053857/mygoravel/sms/aliyun"
+	"github.com/go-tenon/tenon/outbound/outboundtest"
+	"github.com/go-tenon/tenon/sms"
+	"github.com/go-tenon/tenon/sms/aliyun"
 )
 
 const api = "POST https://dysmsapi.aliyuncs.com/"

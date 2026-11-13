@@ -4,7 +4,7 @@ package mdwrite
 import (
 	"strings"
 
-	"github.com/ryan053857/mygoravel/document/convert"
+	"github.com/go-tenon/tenon/document/convert"
 )
 
 // Writer 累积 Markdown。超出输出上限后保留错误，忽略之后的写入。

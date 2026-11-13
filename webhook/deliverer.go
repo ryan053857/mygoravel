@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/outbound"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/outbound"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // DefaultTimeout 是 Options.Timeout 不大于 0 时每次请求的超时。

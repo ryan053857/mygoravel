@@ -19,7 +19,7 @@
 
 迁移就像是数据库的版本控制：它记录了表结构的每一次变化，让团队成员和每个部署环境都能把数据库升级到相同的结构。
 
-mygoravel 使用 [goose](https://github.com/pressly/goose) 管理迁移。迁移是应用目录中的普通 SQL 文件，它们会被嵌入到二进制中，在发布时通过命令显式执行——API 服务启动时**不会**自动执行迁移。
+Tenon 使用 [goose](https://github.com/pressly/goose) 管理迁移。迁移是应用目录中的普通 SQL 文件，它们会被嵌入到二进制中，在发布时通过命令显式执行——API 服务启动时**不会**自动执行迁移。
 
 <a id="writing-migrations"></a>
 ## 编写迁移
@@ -132,10 +132,10 @@ go run ./cmd/api migrate publish --dir migrations
 package main
 
 import (
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/command/migratecmd"
-    "github.com/ryan053857/mygoravel/database/migrate"
-    "github.com/ryan053857/mygoravel/filesystem"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/command/migratecmd"
+    "github.com/go-tenon/tenon/database/migrate"
+    "github.com/go-tenon/tenon/filesystem"
 )
 
 func main() {
@@ -220,8 +220,8 @@ import (
 
     "example.com/blog/internal/article"
     "example.com/blog/internal/user"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/identity"
 )
 
 func seed(db *bun.DB) *cobra.Command {

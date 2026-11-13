@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // Record 是一条捕获的日志。

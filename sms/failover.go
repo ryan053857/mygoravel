@@ -8,7 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // DefaultCooldown 是 FailoverOptions.Cooldown 不大于 0 时，一个服务商失败后被排到最后的时长。

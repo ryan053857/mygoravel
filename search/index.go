@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/operation"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/operation"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // validName 是索引名称的格式，它也是同步任务 topic 的一部分。

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/outbound"
+	"github.com/go-tenon/tenon/outbound"
 )
 
 func server(t *testing.T, h http.HandlerFunc) *httptest.Server {

@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/logging"
 )
 
 var errSlugTaken = errorx.Define(errorx.Internal, "article.slug_taken")

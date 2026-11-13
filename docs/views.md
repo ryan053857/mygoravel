@@ -50,7 +50,7 @@ go get -tool github.com/a-h/templ/cmd/templ
 ```templ
 package web
 
-import "github.com/ryan053857/mygoravel/web/ui"
+import "github.com/go-tenon/tenon/web/ui"
 
 templ Layout(title string) {
 	@ui.Page(ui.PageProps{Title: title}) {

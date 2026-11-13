@@ -13,8 +13,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/lock"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/lock"
+	"github.com/go-tenon/tenon/logging"
 )
 
 const (

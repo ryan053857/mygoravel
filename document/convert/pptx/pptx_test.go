@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/pptx"
-	"github.com/ryan053857/mygoravel/document/internal/ooxmltest"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/pptx"
+	"github.com/go-tenon/tenon/document/internal/ooxmltest"
 )
 
 const ns = `xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"`

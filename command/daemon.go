@@ -17,7 +17,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/coreos/go-systemd/v22/daemon"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // DaemonPIDFile 是 Daemon 在 systemd 的 RuntimeDirectory 中写入的 PID 文件名，

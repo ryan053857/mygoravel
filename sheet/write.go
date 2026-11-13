@@ -12,7 +12,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // ErrUnknownColumn 表示 Columns.Select 收到了不存在的列，公开参数 column 是这个列的 Key。

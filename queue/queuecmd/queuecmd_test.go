@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/queue/queuecmd"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/queue/queuecmd"
 )
 
 // run 执行命令，返回每行按空白分隔的字段。

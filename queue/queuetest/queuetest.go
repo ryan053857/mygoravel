@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // 测试 nsqd 的地址所在的环境变量：EnvAddr 是 TCP 地址，例如 127.0.0.1:4150；EnvHTTP 是 HTTP 地址，

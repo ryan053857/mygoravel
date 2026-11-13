@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/pdf"
-	"github.com/ryan053857/mygoravel/document/internal/pdftest"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/pdf"
+	"github.com/go-tenon/tenon/document/internal/pdftest"
 )
 
 // converter 在整个包的测试中共用，PDFium 只启动一次。

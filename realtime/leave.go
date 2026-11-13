@@ -8,7 +8,7 @@ import (
 
 	"github.com/centrifugal/centrifuge"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // DefaultPresenceGrace 是 Options.PresenceGrace 为零时的宽限期。

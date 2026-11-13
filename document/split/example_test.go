@@ -3,7 +3,7 @@ package split_test
 import (
 	"fmt"
 
-	"github.com/ryan053857/mygoravel/document/split"
+	"github.com/go-tenon/tenon/document/split"
 )
 
 func Example() {

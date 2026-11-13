@@ -8,7 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/validation"
 
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 // FieldError 是翻译后的一条验证错误。

@@ -9,7 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // bufferSize 是每个订阅的缓冲区大小，满了就以 ErrSlow 结束订阅。

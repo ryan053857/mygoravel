@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/httpx/rest/clientgen"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/httpx/rest/clientgen"
 )
 
 const exampleTSOut = "internal/example/ts"

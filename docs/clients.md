@@ -261,7 +261,7 @@ if errors.Is(err, article.ErrSlugTaken) {
 把 `client` 命令加入命令行，参数和 [openapi 命令](commands.md#openapi-command)相同：
 
 ```go
-import "github.com/ryan053857/mygoravel/httpx/rest/clientgen"
+import "github.com/go-tenon/tenon/httpx/rest/clientgen"
 
 root.AddCommand(clientgen.Command(bootstrap.API, bootstrap.DocRoutes))
 ```
@@ -427,7 +427,7 @@ uploaded, err := c.File.Upload(ctx, file.UploadInputForm{
 <a id="copied-types"></a>
 ### 复制的类型
 
-接口用到的类型复制到客户端：字段、tag、注释、泛型参数和同一个包中这个类型的常量都会保留，方法不复制，`json:"-"` 和未导出的字段去掉。只有应用模块和 mygoravel 的类型会复制；标准库和 `github.com/google/uuid` 的类型直接导入。
+接口用到的类型复制到客户端：字段、tag、注释、泛型参数和同一个包中这个类型的常量都会保留，方法不复制，`json:"-"` 和未导出的字段去掉。只有应用模块和 Tenon 的类型会复制；标准库和 `github.com/google/uuid` 的类型直接导入。
 
 | 情况 | 结果 |
 | --- | --- |

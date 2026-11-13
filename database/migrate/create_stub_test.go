@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/database/migrate"
 )
 
 // 建表骨架和空骨架不经修改即可执行。

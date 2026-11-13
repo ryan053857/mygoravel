@@ -16,8 +16,8 @@ import (
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/ryan053857/mygoravel/logging"
-	"github.com/ryan053857/mygoravel/telemetry"
+	"github.com/go-tenon/tenon/logging"
+	"github.com/go-tenon/tenon/telemetry"
 )
 
 // receiver 是记录每个路径收到的请求体和认证头的 OTLP/HTTP 接收端。

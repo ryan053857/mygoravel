@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	"github.com/ryan053857/mygoravel/document/convert/csv"
+	"github.com/go-tenon/tenon/document/convert"
+	"github.com/go-tenon/tenon/document/convert/csv"
 )
 
 // run 用 opts 转换 src。

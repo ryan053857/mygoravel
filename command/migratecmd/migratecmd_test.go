@@ -13,10 +13,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/command/migratecmd"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/command/migratecmd"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
 )
 
 type settings struct {

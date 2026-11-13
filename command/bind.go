@@ -7,7 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/cleanup"
+	"github.com/go-tenon/tenon/cleanup"
 )
 
 // Bind 返回 declare 声明的命令，它们的依赖推迟到执行时才装配。

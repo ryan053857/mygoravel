@@ -45,7 +45,7 @@ migratecmd.Publish(
 <a id="connecting"></a>
 ## 连接 Qdrant
 
-mygoravel 不封装 Qdrant 客户端，直接使用官方的 [go-client](https://github.com/qdrant/go-client)，它走 gRPC 端口 6334。配置由应用自己定义：
+Tenon 不封装 Qdrant 客户端，直接使用官方的 [go-client](https://github.com/qdrant/go-client)，它走 gRPC 端口 6334。配置由应用自己定义：
 
 ```go
 type QdrantConfig struct {
@@ -99,8 +99,8 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/queue"
-    "github.com/ryan053857/mygoravel/vector"
+    "github.com/go-tenon/tenon/queue"
+    "github.com/go-tenon/tenon/vector"
 )
 
 // ChunkDoc 是一个分段在向量索引中的文档，只放回答问题需要的字段。

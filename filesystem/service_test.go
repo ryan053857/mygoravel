@@ -21,11 +21,11 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/filesystem"
-	"github.com/ryan053857/mygoravel/filesystem/local"
-	s3disk "github.com/ryan053857/mygoravel/filesystem/s3"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/filesystem"
+	"github.com/go-tenon/tenon/filesystem/local"
+	s3disk "github.com/go-tenon/tenon/filesystem/s3"
+	"github.com/go-tenon/tenon/identity"
 )
 
 var (

@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/crypt"
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/crypt"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 func parse(t *testing.T, raw string) *url.URL {

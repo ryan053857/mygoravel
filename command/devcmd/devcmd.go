@@ -37,7 +37,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
+	"github.com/go-tenon/tenon/command"
 )
 
 // Options 配置 dev 命令。
@@ -117,7 +117,7 @@ func Tailwind(input, output string) Tool {
 	}
 }
 
-const framework = "github.com/ryan053857/mygoravel"
+const framework = "github.com/go-tenon/tenon"
 
 // copyUI 把框架的 web/ui/css 复制到 dst，替换已有的内容。框架的位置由 go list 给出（通常在模块缓存中）。
 func copyUI(dst string) error {

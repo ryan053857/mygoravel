@@ -18,9 +18,9 @@ import (
 	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/acquire"
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/acquire"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // Defaults 返回每个应用都应安装的基础中间件，按执行顺序排列：

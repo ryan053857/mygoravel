@@ -39,10 +39,10 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/errorx"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/login"
+    "github.com/go-tenon/tenon/database"
+    "github.com/go-tenon/tenon/errorx"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/login"
 )
 
 // Type 是编辑这套账号体系。
@@ -126,11 +126,11 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/apitoken"
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/errorx"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/login"
+    "github.com/go-tenon/tenon/apitoken"
+    "github.com/go-tenon/tenon/database"
+    "github.com/go-tenon/tenon/errorx"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/login"
 )
 
 // Type 是读者这套账号体系。
@@ -230,15 +230,15 @@ import (
 
     "example.com/blog/internal/editor"
     "example.com/blog/internal/reader"
-    "github.com/ryan053857/mygoravel/apitoken"
-    "github.com/ryan053857/mygoravel/crypt"
-    "github.com/ryan053857/mygoravel/hashing"
-    "github.com/ryan053857/mygoravel/login"
-    "github.com/ryan053857/mygoravel/login/oauth"
-    "github.com/ryan053857/mygoravel/mail"
-    "github.com/ryan053857/mygoravel/ratelimit"
-    "github.com/ryan053857/mygoravel/ratelimit/redislimit"
-    "github.com/ryan053857/mygoravel/sms"
+    "github.com/go-tenon/tenon/apitoken"
+    "github.com/go-tenon/tenon/crypt"
+    "github.com/go-tenon/tenon/hashing"
+    "github.com/go-tenon/tenon/login"
+    "github.com/go-tenon/tenon/login/oauth"
+    "github.com/go-tenon/tenon/mail"
+    "github.com/go-tenon/tenon/ratelimit"
+    "github.com/go-tenon/tenon/ratelimit/redislimit"
+    "github.com/go-tenon/tenon/sms"
 )
 
 type Config struct {
@@ -360,10 +360,10 @@ import (
 
     "example.com/blog/internal/accounts"
     "example.com/blog/internal/editor"
-    "github.com/ryan053857/mygoravel/apitoken"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/login"
+    "github.com/go-tenon/tenon/apitoken"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/login"
 )
 
 type LoginInput struct {
@@ -652,10 +652,10 @@ import (
 
     "example.com/blog/internal/accounts"
     "example.com/blog/internal/reader"
-    "github.com/ryan053857/mygoravel/apitoken"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/login"
+    "github.com/go-tenon/tenon/apitoken"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/login"
 )
 
 type SendCodeInput struct {

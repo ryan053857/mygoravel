@@ -12,7 +12,7 @@
 <a id="introduction"></a>
 ## 简介
 
-mygoravel 中每个组件只做它最擅长的事：业务数据在 PostgreSQL，缓存在 [Memcached](cache.md)，任务在[队列](queue.md)。Redis 用它的数据结构做多个实例之间的协调：[原子锁](locks.md)、[限流](rate-limiting.md)、[实时推送](realtime.md)的在线成员和[广播](broadcasting.md)，以及计数器这类需要原子更新的小数据。
+Tenon 中每个组件只做它最擅长的事：业务数据在 PostgreSQL，缓存在 [Memcached](cache.md)，任务在[队列](queue.md)。Redis 用它的数据结构做多个实例之间的协调：[原子锁](locks.md)、[限流](rate-limiting.md)、[实时推送](realtime.md)的在线成员和[广播](broadcasting.md)，以及计数器这类需要原子更新的小数据。
 
 这些数据被淘汰就会出错，例如锁被挤掉后两个实例同时执行任务。所以 Redis 要配置为内存满时拒绝写入，而不是淘汰键：
 
@@ -22,7 +22,7 @@ maxmemory-policy noeviction
 
 也因为这个原因，缓存不放在这个 Redis 里：缓存需要内存满时淘汰旧数据，两种策略不能共用一个实例。
 
-mygoravel 不封装 Redis 客户端，约定统一使用 [rueidis](https://github.com/redis/rueidis)。[实时推送](realtime.md)依赖的 Centrifuge 也使用它，整个应用只有一个 Redis 客户端库。和数据库一样，客户端在入口创建一次，通过构造函数传给需要它的服务。
+Tenon 不封装 Redis 客户端，约定统一使用 [rueidis](https://github.com/redis/rueidis)。[实时推送](realtime.md)依赖的 Centrifuge 也使用它，整个应用只有一个 Redis 客户端库。和数据库一样，客户端在入口创建一次，通过构造函数传给需要它的服务。
 
 <a id="installation"></a>
 ## 安装

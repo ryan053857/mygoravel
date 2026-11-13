@@ -7,7 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // Credentials 通知所有实例上的长连接立即重新校验凭据，实现 httpx.CredentialWatcher。

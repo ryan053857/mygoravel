@@ -15,11 +15,11 @@
 <a id="introduction"></a>
 ## 简介
 
-mygoravel 的本地化功能可以让同一个 API 根据请求的语言返回不同语言的提示文案，最常见的用途就是翻译错误响应中的 `detail` 字段。
+Tenon 的本地化功能可以让同一个 API 根据请求的语言返回不同语言的提示文案，最常见的用途就是翻译错误响应中的 `detail` 字段。
 
 在开始之前，有一点需要明确：本地化只影响**展示文案**。错误码、错误分类等业务语义永远保持不变，客户端应当始终根据 `code` 判断错误，而把 `detail` 直接展示给用户。
 
-mygoravel 的本地化基于 [go-i18n](https://github.com/nicksnyder/go-i18n)。`i18n` 包负责把框架内置的消息和你的翻译文件组合成一个原生的 go-i18n `Bundle`，并在请求的 context 中携带协商出的语言。
+Tenon 的本地化基于 [go-i18n](https://github.com/nicksnyder/go-i18n)。`i18n` 包负责把框架内置的消息和你的翻译文件组合成一个原生的 go-i18n `Bundle`，并在请求的 context 中携带协商出的语言。
 
 <a id="enabling-localization"></a>
 ## 启用本地化

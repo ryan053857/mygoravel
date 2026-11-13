@@ -24,8 +24,8 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"golang.org/x/oauth2"
 
-	"github.com/ryan053857/mygoravel/login"
-	"github.com/ryan053857/mygoravel/login/oauth"
+	"github.com/go-tenon/tenon/login"
+	"github.com/go-tenon/tenon/login/oauth"
 )
 
 const (

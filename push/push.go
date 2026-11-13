@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/identity"
 )
 
 // ErrInvalidDevice 表示注册的设备不合法：平台不是 Android、IOS、HarmonyOS 之一，或者 token 为空、过长。

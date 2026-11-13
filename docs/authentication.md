@@ -15,13 +15,13 @@
 <a id="introduction"></a>
 ## 简介
 
-很多 API 都需要知道“是谁在调用”。mygoravel 内置了基于 Bearer Token 的认证：客户端在请求头中携带 `Authorization: Bearer <token>`，框架调用你提供的校验函数确认身份，然后把身份信息交给处理器。
+很多 API 都需要知道“是谁在调用”。Tenon 内置了基于 Bearer Token 的认证：客户端在请求头中携带 `Authorization: Bearer <token>`，框架调用你提供的校验函数确认身份，然后把身份信息交给处理器。
 
 JSON API 只使用 Bearer token，不使用会话。需要登录的一端，无论是后台、网页、桌面客户端还是移动端，都调用 JSON API；网页和后台是[单页应用](spa.md)。服务端渲染的[页面](views.md)只用于不需要登录的公开内容。
 
 本章讲每个请求如何确认调用者。用户如何用密码或验证码登录、注册和找回密码，见[登录与注册](login.md)；运营后台和用户 App 两套账号的完整代码见[完整示例](account-examples.md)。
 
-mygoravel 不限定 token 的种类和来源。它可以是数据库中的 API Key，也可以是由认证服务签发的 JWT——你只需要写一个函数，告诉框架这个 token 对应谁。
+Tenon 不限定 token 的种类和来源。它可以是数据库中的 API Key，也可以是由认证服务签发的 JWT——你只需要写一个函数，告诉框架这个 token 对应谁。
 
 > [!NOTE]
 > 认证回答的是“调用者是谁”，而“调用者能不能做这件事”属于授权，请参阅[授权](authorization.md)。
@@ -86,9 +86,9 @@ import (
     "errors"
 
     "example.com/blog/internal/user"
-    "github.com/ryan053857/mygoravel/errorx"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/errorx"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/identity"
 )
 
 var ErrUnauthenticated = errorx.Define(errorx.Unauthenticated, "auth.unauthenticated")

@@ -8,7 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/command"
+	"github.com/go-tenon/tenon/command"
 )
 
 // blocking 一直运行到 ctx 取消，然后返回 result，并记录是否被取消。

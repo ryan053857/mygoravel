@@ -20,7 +20,7 @@ import (
 	oa "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 
-	"github.com/ryan053857/mygoravel/ai"
+	"github.com/go-tenon/tenon/ai"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1/"

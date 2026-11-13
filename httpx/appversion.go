@@ -11,7 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"golang.org/x/mod/semver"
 
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 // AppVersionHeader 是 App 报告平台和版本的请求头，值为“平台/版本”，例如 ios/1.4.2。

@@ -11,10 +11,10 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/httpx/rest/clientgen"
-	"github.com/ryan053857/mygoravel/httpx/rest/clientgen/internal/example/article"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/httpx/rest/clientgen"
+	"github.com/go-tenon/tenon/httpx/rest/clientgen/internal/example/article"
 )
 
 func runClient(t *testing.T, args ...string) (string, error) {

@@ -13,8 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/internal/mimemsg"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/internal/mimemsg"
 )
 
 // Config 是 SES 发送配置。AccessKey 为空时使用 AWS 默认凭证链（环境变量、共享配置、

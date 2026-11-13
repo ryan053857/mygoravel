@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/web"
 )
 
 type articleInput struct {

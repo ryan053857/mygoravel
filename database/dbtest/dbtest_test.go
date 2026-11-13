@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
 )
 
 // 测试结束时，数据库连同它的逻辑复制槽一起删除。

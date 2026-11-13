@@ -20,7 +20,7 @@
 
 缓存放在 [Memcached](https://memcached.org) 中。它只做缓存一件事：内存满时淘汰最久没用的数据，多个实例共享同一份缓存，重启后清空，丢了可以从数据库重建。锁、限流这类不能被淘汰的数据放在 [Redis](redis.md) 中。
 
-mygoravel 不封装 Memcached 客户端，约定使用 [gomemcache](https://github.com/bradfitz/gomemcache)。和数据库一样，客户端在入口创建，通过构造函数传给 [action](actions.md)。在它之上，框架的 `cachex` 提供「先读缓存、没有就查库再写回」的读取方式，并处理热点键过期、集中过期和不存在的数据，业务代码通过它读写。
+Tenon 不封装 Memcached 客户端，约定使用 [gomemcache](https://github.com/bradfitz/gomemcache)。和数据库一样，客户端在入口创建，通过构造函数传给 [action](actions.md)。在它之上，框架的 `cachex` 提供「先读缓存、没有就查库再写回」的读取方式，并处理热点键过期、集中过期和不存在的数据，业务代码通过它读写。
 
 本章为博客应用的文章详情加上缓存：在入口装配缓存，让“获取文章”先读缓存、再查数据库，并在文章发布后删除旧缓存。
 

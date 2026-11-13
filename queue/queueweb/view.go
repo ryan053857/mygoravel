@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/page"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/page"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/web"
 )
 
 // defaultPerPage 与 page.OffsetParams 的默认每页条数相同。

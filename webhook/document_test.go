@@ -8,7 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/webhook"
+	"github.com/go-tenon/tenon/webhook"
 )
 
 type publishedHook struct {

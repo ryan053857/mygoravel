@@ -27,11 +27,11 @@ import (
 	goi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/filesystem"
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/operation"
-	"github.com/ryan053857/mygoravel/sheet"
+	"github.com/go-tenon/tenon/filesystem"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/operation"
+	"github.com/go-tenon/tenon/sheet"
 )
 
 // Import 是一次后台导入：嵌入的 Operation 是它的状态和进度，一行是一个单位；

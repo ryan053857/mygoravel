@@ -8,8 +8,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/ryan053857/mygoravel/apitoken"
-	"github.com/ryan053857/mygoravel/identity"
+	"github.com/go-tenon/tenon/apitoken"
+	"github.com/go-tenon/tenon/identity"
 )
 
 const mcpResource = "https://blog.example.com/mcp"

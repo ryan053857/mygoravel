@@ -11,9 +11,9 @@
 <a id="introduction"></a>
 ## 简介
 
-很多框架使用“服务容器”来管理依赖：你把服务注册到容器中，框架在需要时自动创建并注入。mygoravel 选择了另一种方式——**显式装配**。
+很多框架使用“服务容器”来管理依赖：你把服务注册到容器中，框架在需要时自动创建并注入。Tenon 选择了另一种方式——**显式装配**。
 
-在 mygoravel 中，没有容器、没有全局注册表，也没有基于反射的自动注入。每个 [action](actions.md) 和服务通过构造函数参数声明它需要什么，应用的入口负责按顺序创建这些依赖并把它们传进去。这种方式的好处是：
+在 Tenon 中，没有容器、没有全局注册表，也没有基于反射的自动注入。每个 [action](actions.md) 和服务通过构造函数参数声明它需要什么，应用的入口负责按顺序创建这些依赖并把它们传进去。这种方式的好处是：
 
 - 阅读入口代码就能看清应用由哪些部分组成、它们是如何连接的；
 - 编译器会检查每一个依赖，缺少依赖的代码无法通过编译；
@@ -38,7 +38,7 @@ func NewGet(db *bun.DB) *Get {
 }
 ```
 
-注意这里直接接收的是 Bun 的 `*bun.DB`，而不是框架包装过的类型。在 mygoravel 中，你使用的始终是社区组件的原生对象。
+注意这里直接接收的是 Bun 的 `*bun.DB`，而不是框架包装过的类型。在 Tenon 中，你使用的始终是社区组件的原生对象。
 
 它的方法通过第一个参数 `ctx context.Context` 接收请求的取消信号和截止时间，并把它继续传给数据库查询等下游调用：
 
@@ -65,14 +65,14 @@ import (
     "log/slog"
 
     "example.com/blog/internal/settings"
-    "github.com/ryan053857/mygoravel/cleanup"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/lock"
-    "github.com/ryan053857/mygoravel/lock/redislock"
-    "github.com/ryan053857/mygoravel/logging"
-    "github.com/ryan053857/mygoravel/queue"
-    "github.com/ryan053857/mygoravel/telemetry"
+    "github.com/go-tenon/tenon/cleanup"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/database"
+    "github.com/go-tenon/tenon/lock"
+    "github.com/go-tenon/tenon/lock/redislock"
+    "github.com/go-tenon/tenon/logging"
+    "github.com/go-tenon/tenon/queue"
+    "github.com/go-tenon/tenon/telemetry"
     "github.com/redis/rueidis"
     "github.com/uptrace/bun"
     "go.opentelemetry.io/otel/metric"
@@ -182,10 +182,10 @@ import (
     "example.com/blog/internal/auth"
     "example.com/blog/internal/user"
     "github.com/go-chi/chi/v5"
-    "github.com/ryan053857/mygoravel/command"
-    "github.com/ryan053857/mygoravel/httpx"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/identity"
+    "github.com/go-tenon/tenon/command"
+    "github.com/go-tenon/tenon/httpx"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/identity"
     "github.com/uptrace/bun"
 )
 
@@ -258,8 +258,8 @@ package bootstrap
 import (
     "context"
 
-    "github.com/ryan053857/mygoravel/cleanup"
-    "github.com/ryan053857/mygoravel/database"
+    "github.com/go-tenon/tenon/cleanup"
+    "github.com/go-tenon/tenon/database"
     "github.com/uptrace/bun"
 )
 
@@ -299,7 +299,7 @@ func WithDatabase(ctx context.Context, cfg database.Config,
 <a id="replacing-dependencies-in-tests"></a>
 ## 在测试中替换依赖
 
-在 mygoravel 中，大多数测试可以直接使用真实的依赖，例如用 `dbtest` 创建一个真实的测试数据库（见[测试](testing.md#database-tests)）。
+在 Tenon 中，大多数测试可以直接使用真实的依赖，例如用 `dbtest` 创建一个真实的测试数据库（见[测试](testing.md#database-tests)）。
 
 当你确实需要替换某个依赖时（例如把文章配图上传到对象存储），遵循 Go 的惯例：**由使用方定义接口**。在业务包中声明一个只包含所需方法的小接口，action 的构造函数接收这个接口：
 

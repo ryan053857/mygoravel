@@ -14,7 +14,7 @@ import (
 	"github.com/axadrn/shadcn-templ/v2/components/icon"
 	"github.com/axadrn/shadcn-templ/v2/components/input"
 	"github.com/axadrn/shadcn-templ/v2/components/sidebar"
-	"github.com/ryan053857/mygoravel/web/ui"
+	"github.com/go-tenon/tenon/web/ui"
 )
 
 // layout 是文档页的外壳：左侧是目录导航，顶栏是展开侧边栏的按钮、搜索框和 Actions，main 是正文区域。

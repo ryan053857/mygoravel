@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/web"
 )
 
 var errLocked = errorx.Define(errorx.Conflict, "auth.forbidden") // 借用内置译文

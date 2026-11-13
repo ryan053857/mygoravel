@@ -17,7 +17,7 @@
 
 用户需要知道和自己有关的事：文章被发布了、被评论了、被邀请加入团队了。`notification` 包是站内通知的收件箱：每条通知是 `notifications` 表中的一行，属于某个租户中的某个主体，带有已读状态。
 
-Laravel 的通知把站内信、邮件、广播放在一个 `Notification` 类里，由 `via()` 决定发往哪些渠道。mygoravel 只提供其中缺少的收件箱，其他渠道已经有各自的包：[邮件](mail.md)、[移动推送](push.md)、[队列](queue.md)、[广播](broadcasting.md)。一次通知发往哪些渠道，由 action 显式写出来，读代码就能看到会发生什么。
+Laravel 的通知把站内信、邮件、广播放在一个 `Notification` 类里，由 `via()` 决定发往哪些渠道。Tenon 只提供其中缺少的收件箱，其他渠道已经有各自的包：[邮件](mail.md)、[移动推送](push.md)、[队列](queue.md)、[广播](broadcasting.md)。一次通知发往哪些渠道，由 action 显式写出来，读代码就能看到会发生什么。
 
 本章的例子：管理员替作者发布文章后，通知作者。
 

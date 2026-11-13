@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/config"
-	"github.com/ryan053857/mygoravel/filesystem"
+	"github.com/go-tenon/tenon/config"
+	"github.com/go-tenon/tenon/filesystem"
 )
 
 func TestByteSize(t *testing.T) {

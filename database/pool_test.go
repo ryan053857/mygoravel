@@ -12,10 +12,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
-	"github.com/ryan053857/mygoravel/acquire"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/acquire"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // openPool 打开一个最多 n 个连接、报告指标的连接池。

@@ -8,7 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	resendsdk "github.com/resend/resend-go/v3"
 
-	"github.com/ryan053857/mygoravel/mail"
+	"github.com/go-tenon/tenon/mail"
 )
 
 // Config 是 Resend 发送配置。

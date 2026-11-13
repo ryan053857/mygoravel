@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/smtp"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/smtp"
 )
 
 // session 是假服务器收到的一次 SMTP 会话。

@@ -10,8 +10,8 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/agent"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 var (

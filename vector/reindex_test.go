@@ -9,14 +9,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/ai/aitest"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/operation"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/queue/queuetest"
-	"github.com/ryan053857/mygoravel/search/searchcmd"
-	"github.com/ryan053857/mygoravel/vector"
+	"github.com/go-tenon/tenon/ai/aitest"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/operation"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/queue/queuetest"
+	"github.com/go-tenon/tenon/search/searchcmd"
+	"github.com/go-tenon/tenon/vector"
 )
 
 var system = identity.Subject{Type: identity.System, ID: "test"}

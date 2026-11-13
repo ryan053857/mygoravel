@@ -21,8 +21,8 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/login"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/login"
 )
 
 var (

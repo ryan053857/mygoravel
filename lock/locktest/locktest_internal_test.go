@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/lock"
+	"github.com/go-tenon/tenon/lock"
 )
 
 func TestContract(t *testing.T) {

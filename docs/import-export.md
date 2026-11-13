@@ -60,9 +60,9 @@ import (
     "github.com/cockroachdb/errors"
     "github.com/danielgtaylor/huma/v2"
 
-    "github.com/ryan053857/mygoravel/i18n"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/sheet"
+    "github.com/go-tenon/tenon/i18n"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/sheet"
 )
 
 // Import 从表格批量创建文章。
@@ -234,8 +234,8 @@ import (
     "github.com/danielgtaylor/huma/v2"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/sheet"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/sheet"
 )
 
 // exportColumns 是可以导出的列。
@@ -378,15 +378,15 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/broadcast"
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/httpx"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/sheet/imports"
-    "github.com/ryan053857/mygoravel/notification"
-    "github.com/ryan053857/mygoravel/queue"
-    "github.com/ryan053857/mygoravel/sheet"
+    "github.com/go-tenon/tenon/broadcast"
+    "github.com/go-tenon/tenon/database"
+    "github.com/go-tenon/tenon/httpx"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/sheet/imports"
+    "github.com/go-tenon/tenon/notification"
+    "github.com/go-tenon/tenon/queue"
+    "github.com/go-tenon/tenon/sheet"
 )
 
 // ImportJob 是后台导入文章的任务，payload 是导入的 ID。
@@ -634,15 +634,15 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/broadcast"
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/sheet/exports"
-    "github.com/ryan053857/mygoravel/httpx"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/notification"
-    "github.com/ryan053857/mygoravel/queue"
-    "github.com/ryan053857/mygoravel/sheet"
+    "github.com/go-tenon/tenon/broadcast"
+    "github.com/go-tenon/tenon/database"
+    "github.com/go-tenon/tenon/sheet/exports"
+    "github.com/go-tenon/tenon/httpx"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/notification"
+    "github.com/go-tenon/tenon/queue"
+    "github.com/go-tenon/tenon/sheet"
 )
 
 // ExportRequest 是后台导出的任务：哪一次导出、谁在导出、导出哪些列。

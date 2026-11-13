@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/mcpx"
+	"github.com/go-tenon/tenon/mcpx"
 )
 
 func TestResource(t *testing.T) {

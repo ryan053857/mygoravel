@@ -8,9 +8,9 @@ import (
 
 	"github.com/redis/rueidis"
 
-	"github.com/ryan053857/mygoravel/internal/redistest"
-	"github.com/ryan053857/mygoravel/ratelimit"
-	"github.com/ryan053857/mygoravel/ratelimit/redislimit"
+	"github.com/go-tenon/tenon/internal/redistest"
+	"github.com/go-tenon/tenon/ratelimit"
+	"github.com/go-tenon/tenon/ratelimit/redislimit"
 )
 
 // 每个限流器使用随机 name，测试之间的键互不影响，不需要清空 Redis。

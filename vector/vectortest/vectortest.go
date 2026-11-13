@@ -17,7 +17,7 @@ import (
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/vector"
+	"github.com/go-tenon/tenon/vector"
 )
 
 // EnvAddr 是测试 Qdrant 的 gRPC 地址所在的环境变量，例如 127.0.0.1:6334。

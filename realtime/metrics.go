@@ -8,7 +8,7 @@ import (
 )
 
 // scopeName 是实时频道指标的 instrumentation scope。
-const scopeName = "github.com/ryan053857/mygoravel/realtime"
+const scopeName = "github.com/go-tenon/tenon/realtime"
 
 // observe 登记两个指标：realtime.connections 是本实例当前的连接数，realtime.subscriptions 是这些连接的订阅数。
 func (rt *Realtime) observe(mp metric.MeterProvider) (metric.Registration, error) {

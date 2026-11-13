@@ -38,7 +38,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // Format 是规范化的文件扩展名：小写、不带点、别名已经换成标准名称。用 ParseFormat 或 FormatOf 得到它。

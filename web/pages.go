@@ -10,10 +10,10 @@ import (
 	"github.com/a-h/templ"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/logging"
 )
 
 // ErrNotFound 是页面不存在的错误，Pages.NotFound 呈现它。

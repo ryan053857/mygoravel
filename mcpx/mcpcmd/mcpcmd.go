@@ -10,9 +10,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/mcpx"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/mcpx"
 )
 
 // New 返回 mcp 命令：

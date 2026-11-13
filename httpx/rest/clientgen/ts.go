@@ -16,7 +16,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"golang.org/x/tools/go/packages"
 
-	"github.com/ryan053857/mygoravel/httpx/rest"
+	"github.com/go-tenon/tenon/httpx/rest"
 )
 
 //go:embed ts/runtime.ts
@@ -24,7 +24,7 @@ var tsRuntime string
 
 // TSOptions 配置 TypeScript 客户端的生成。
 type TSOptions struct {
-	// Main 与 Options.Main 相同：在主包依赖的、属于应用模块和 mygoravel 的包中查找 errorx.Define 定义的错误码。
+	// Main 与 Options.Main 相同：在主包依赖的、属于应用模块和 Tenon 的包中查找 errorx.Define 定义的错误码。
 	Main string
 	// Dir 是加载源码的工作目录，空表示当前目录。
 	Dir string

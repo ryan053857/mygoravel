@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/docs"
-	"github.com/ryan053857/mygoravel/web/ui"
-	"github.com/ryan053857/mygoravel/web/webtest"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/web"
+	"github.com/go-tenon/tenon/web/docs"
+	"github.com/go-tenon/tenon/web/ui"
+	"github.com/go-tenon/tenon/web/webtest"
 )
 
 // help 是测试用的帮助中心：首页、顶层页面、有正文的目录、只有标题的目录和其中的子目录。

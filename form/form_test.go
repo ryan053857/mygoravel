@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/form"
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/form"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 type input struct {

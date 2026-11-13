@@ -11,10 +11,10 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/page"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/ui"
+	"github.com/go-tenon/tenon/i18n"
+	"github.com/go-tenon/tenon/page"
+	"github.com/go-tenon/tenon/web"
+	"github.com/go-tenon/tenon/web/ui"
 )
 
 type articleForm struct {

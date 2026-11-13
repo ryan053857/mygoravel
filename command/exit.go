@@ -3,7 +3,7 @@ package command
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // 进程退出码。

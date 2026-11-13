@@ -14,7 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 
-	"github.com/ryan053857/mygoravel/oauthserver"
+	"github.com/go-tenon/tenon/oauthserver"
 )
 
 func withDCR(o *oauthserver.Options) { o.DynamicRegistration = true }

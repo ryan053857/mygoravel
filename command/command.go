@@ -11,7 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/config"
+	"github.com/go-tenon/tenon/config"
 )
 
 const configFlag = "config"

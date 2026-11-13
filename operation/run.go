@@ -8,9 +8,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/queue"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/queue"
 )
 
 // errChanged 表示操作已被另一次执行保存过，例如任务的租约过期后被重新领取。本次执行停下，由队列稍后重试。

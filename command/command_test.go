@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 type settings struct {
@@ -257,11 +257,11 @@ func TestConfigFiles(t *testing.T) {
 }
 
 func TestDotEnvInWorkingDirectory(t *testing.T) {
-	t.Setenv("MYGORAVEL_TEST_NAME", "")
-	os.Unsetenv("MYGORAVEL_TEST_NAME")
+	t.Setenv("TENON_TEST_NAME", "")
+	os.Unsetenv("TENON_TEST_NAME")
 	projectDir(t, map[string]string{
-		".env":            "MYGORAVEL_TEST_NAME=from-dotenv\n",
-		"config/app.yaml": "name: ${MYGORAVEL_TEST_NAME}\n",
+		".env":            "TENON_TEST_NAME=from-dotenv\n",
+		"config/app.yaml": "name: ${TENON_TEST_NAME}\n",
 	})
 	if got := loadedName(t); got != "from-dotenv" {
 		t.Fatalf("name=%q", got)
@@ -269,10 +269,10 @@ func TestDotEnvInWorkingDirectory(t *testing.T) {
 }
 
 func TestProcessEnvOverridesDotEnv(t *testing.T) {
-	t.Setenv("MYGORAVEL_TEST_NAME", "from-process")
+	t.Setenv("TENON_TEST_NAME", "from-process")
 	projectDir(t, map[string]string{
-		".env":            "MYGORAVEL_TEST_NAME=from-dotenv\n",
-		"config/app.yaml": "name: ${MYGORAVEL_TEST_NAME}\n",
+		".env":            "TENON_TEST_NAME=from-dotenv\n",
+		"config/app.yaml": "name: ${TENON_TEST_NAME}\n",
 	})
 	if got := loadedName(t); got != "from-process" {
 		t.Fatalf("name=%q", got)

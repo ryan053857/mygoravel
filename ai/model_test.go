@@ -3,7 +3,7 @@ package ai_test
 import (
 	"testing"
 
-	"github.com/ryan053857/mygoravel/ai"
+	"github.com/go-tenon/tenon/ai"
 )
 
 func TestModelConfigValidate(t *testing.T) {

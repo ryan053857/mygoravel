@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 //go:embed assets
@@ -33,7 +33,7 @@ func Assets() http.Handler {
 		for _, dep := range info.Deps {
 			if dep.Path == shadcnTemplModule && dep.Replace == nil && dep.Version != ShadcnTemplVersion {
 				panic("ui: the program uses " + shadcnTemplModule + " " + dep.Version + ", but the assets were generated for " +
-					ShadcnTemplVersion + "; use the version required by mygoravel")
+					ShadcnTemplVersion + "; use the version required by Tenon")
 			}
 		}
 	}

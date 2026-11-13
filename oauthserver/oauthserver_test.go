@@ -22,13 +22,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/apitoken"
-	"github.com/ryan053857/mygoravel/database/dbtest"
-	"github.com/ryan053857/mygoravel/httpx/rest"
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/mcpx"
-	"github.com/ryan053857/mygoravel/oauthserver"
-	"github.com/ryan053857/mygoravel/outbound/outboundtest"
+	"github.com/go-tenon/tenon/apitoken"
+	"github.com/go-tenon/tenon/database/dbtest"
+	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/mcpx"
+	"github.com/go-tenon/tenon/oauthserver"
+	"github.com/go-tenon/tenon/outbound/outboundtest"
 )
 
 const (

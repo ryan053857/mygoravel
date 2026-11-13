@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/document/convert"
-	convertpdf "github.com/ryan053857/mygoravel/document/convert/pdf"
-	"github.com/ryan053857/mygoravel/pdf"
-	"github.com/ryan053857/mygoravel/pdf/pdftest"
+	"github.com/go-tenon/tenon/document/convert"
+	convertpdf "github.com/go-tenon/tenon/document/convert/pdf"
+	"github.com/go-tenon/tenon/pdf"
+	"github.com/go-tenon/tenon/pdf/pdftest"
 )
 
 func html(s string) templ.Component {

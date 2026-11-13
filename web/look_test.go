@@ -12,7 +12,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ryan053857/mygoravel/web"
+	"github.com/go-tenon/tenon/web"
 )
 
 // 没有 ErrorFragment 时，局部请求的错误不替换页面内容，作为提示送达；译文中的非 ASCII 字符在响应头中转义。

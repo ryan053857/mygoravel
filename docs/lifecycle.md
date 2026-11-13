@@ -10,7 +10,7 @@
 <a id="introduction"></a>
 ## 简介
 
-使用任何工具时，如果了解它的工作原理，用起来就会更加得心应手。本章将从整体上介绍一个 mygoravel 应用从启动、处理请求到停止的完整过程。
+使用任何工具时，如果了解它的工作原理，用起来就会更加得心应手。本章将从整体上介绍一个 Tenon 应用从启动、处理请求到停止的完整过程。
 
 如果有些概念现在还不太理解，不必担心，先建立一个整体印象即可。后续章节会逐一深入介绍。
 
@@ -20,7 +20,7 @@
 <a id="startup"></a>
 ### 启动
 
-一个 mygoravel 应用的入口拥有所有运行时资源。对于需要数据库的 API，启动过程通常是这样的：
+一个 Tenon 应用的入口拥有所有运行时资源。对于需要数据库的 API，启动过程通常是这样的：
 
 1. 读取并校验当前命令需要的[配置](configuration.md)；
 2. 打开数据库等资源，每成功打开一个，就登记对应的关闭操作；
@@ -92,7 +92,7 @@ return httpx.Serve(ctx, a.cfg.HTTP, ln, api.Handler(), httpx.ServeOptions{
 - **存活检查**（liveness）：进程是否还能响应，失败时平台重启它。只需要返回成功，不要检查依赖：数据库故障时重启应用无济于事。
 - **就绪检查**（readiness）：应用现在能否处理请求，失败时停止向它转发流量。它检查是否正在排空，以及必需的依赖是否可用。
 
-mygoravel 不会自动注册这两个路由，路径由部署环境决定。就绪检查用 `httpx.Ready`，下面注册在 `/readyz`。其中 `draining` 与上面 `ServeOptions.OnDraining` 使用的是同一个 `httpx.Draining`：
+Tenon 不会自动注册这两个路由，路径由部署环境决定。就绪检查用 `httpx.Ready`，下面注册在 `/readyz`。其中 `draining` 与上面 `ServeOptions.OnDraining` 使用的是同一个 `httpx.Draining`：
 
 ```go
 var draining httpx.Draining

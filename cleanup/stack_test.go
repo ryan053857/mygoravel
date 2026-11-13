@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/cleanup"
+	"github.com/go-tenon/tenon/cleanup"
 )
 
 func TestLIFOAndIdempotentClose(t *testing.T) {

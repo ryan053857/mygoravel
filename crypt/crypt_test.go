@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/crypt"
+	"github.com/go-tenon/tenon/crypt"
 )
 
 func newCrypt(t *testing.T, key string, previous ...string) *crypt.Crypt {

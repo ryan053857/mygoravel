@@ -14,8 +14,8 @@ import (
 
 	"github.com/axadrn/shadcn-templ/v2/components/button"
 	"github.com/axadrn/shadcn-templ/v2/components/icon"
-	"github.com/ryan053857/mygoravel/queue"
-	"github.com/ryan053857/mygoravel/web/ui"
+	"github.com/go-tenon/tenon/queue"
+	"github.com/go-tenon/tenon/web/ui"
 )
 
 func layout(f frame, body templ.Component) templ.Component {

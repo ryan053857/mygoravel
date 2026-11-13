@@ -14,9 +14,9 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/migrate"
 )
 
 // Option 调整 New 构造的命令。

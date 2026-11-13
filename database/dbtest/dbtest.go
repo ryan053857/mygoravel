@@ -15,8 +15,8 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/database"
-	"github.com/ryan053857/mygoravel/database/migrate"
+	"github.com/go-tenon/tenon/database"
+	"github.com/go-tenon/tenon/database/migrate"
 )
 
 // EnvURL 是测试服务器管理员连接所在的环境变量。

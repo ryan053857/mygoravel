@@ -9,8 +9,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/config"
-	"github.com/ryan053857/mygoravel/mail"
+	"github.com/go-tenon/tenon/config"
+	"github.com/go-tenon/tenon/mail"
 )
 
 func TestAddressText(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/httpx/rest"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/httpx/rest"
 )
 
 // Command 构造 client 命令：以文档模式创建 API、调用 register 注册路由，在 --out 目录生成 Go 客户端，

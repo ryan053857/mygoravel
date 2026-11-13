@@ -47,9 +47,9 @@ import (
     "golang.org/x/oauth2"
     "golang.org/x/oauth2/github"
 
-    "github.com/ryan053857/mygoravel/errorx"
-    "github.com/ryan053857/mygoravel/login"
-    "github.com/ryan053857/mygoravel/login/oauth"
+    "github.com/go-tenon/tenon/errorx"
+    "github.com/go-tenon/tenon/login"
+    "github.com/go-tenon/tenon/login/oauth"
 )
 
 var (
@@ -216,10 +216,10 @@ import (
     "github.com/danielgtaylor/huma/v2"
 
     "example.com/blog/internal/auth/social"
-    "github.com/ryan053857/mygoravel/apitoken"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/login"
-    "github.com/ryan053857/mygoravel/login/oauth"
+    "github.com/go-tenon/tenon/apitoken"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/login"
+    "github.com/go-tenon/tenon/login/oauth"
 )
 
 type StartInput struct {
@@ -344,10 +344,10 @@ import (
     "github.com/danielgtaylor/huma/v2"
 
     "example.com/blog/internal/auth/social"
-    "github.com/ryan053857/mygoravel/apitoken"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/login"
-    "github.com/ryan053857/mygoravel/login/oauth"
+    "github.com/go-tenon/tenon/apitoken"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/login"
+    "github.com/go-tenon/tenon/login/oauth"
 )
 
 type SocialTokenInput struct {

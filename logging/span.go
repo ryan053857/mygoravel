@@ -8,7 +8,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/ryan053857/mygoravel/errorx"
+	"github.com/go-tenon/tenon/errorx"
 )
 
 // RecordError 把 err 记录为 span 上的 exception 事件，字段与 ErrorFormatter 的对应：

@@ -4,7 +4,7 @@ import (
 	"hash/fnv"
 	"slices"
 
-	"github.com/ryan053857/mygoravel/search"
+	"github.com/go-tenon/tenon/search"
 )
 
 // 混合索引的 point 有两个命名向量：模型计算的稠密向量，以及由分词结果得到的稀疏向量。

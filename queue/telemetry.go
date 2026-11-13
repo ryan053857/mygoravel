@@ -7,7 +7,7 @@ import (
 )
 
 // scopeName 是队列指标和链路的 instrumentation scope。
-const scopeName = "github.com/ryan053857/mygoravel/queue"
+const scopeName = "github.com/go-tenon/tenon/queue"
 
 // 指标和 span 的属性名。消息系统和 topic 沿用 OpenTelemetry 消息语义约定的名称，指标和链路按同一个字段筛选。
 const (

@@ -6,7 +6,7 @@ import (
 
 	gomail "github.com/wneessen/go-mail"
 
-	"github.com/ryan053857/mygoravel/mail"
+	"github.com/go-tenon/tenon/mail"
 )
 
 // Build 生成带 Message-ID 和 Date 的消息。Bcc 只记录为收件人，写出时不会出现在头部。

@@ -10,7 +10,7 @@ import (
 
 	"github.com/redis/rueidis"
 
-	"github.com/ryan053857/mygoravel/lock"
+	"github.com/go-tenon/tenon/lock"
 )
 
 var _ lock.Store = (*Store)(nil)

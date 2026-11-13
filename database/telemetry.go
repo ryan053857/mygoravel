@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/go-tenon/tenon/logging"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/ryan053857/mygoravel/logging"
 	"github.com/uptrace/bun"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -18,7 +18,7 @@ import (
 )
 
 // scopeName 是数据库指标和链路的 instrumentation scope。
-const scopeName = "github.com/ryan053857/mygoravel/database"
+const scopeName = "github.com/go-tenon/tenon/database"
 
 // durationBuckets 是 OpenTelemetry 数据库语义约定建议的耗时分桶（秒）。
 var durationBuckets = []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10}

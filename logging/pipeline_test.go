@@ -13,9 +13,9 @@ import (
 	slogformatter "github.com/samber/slog-formatter"
 	slogmulti "github.com/samber/slog-multi"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/logging"
-	"github.com/ryan053857/mygoravel/logging/logtest"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/logging"
+	"github.com/go-tenon/tenon/logging/logtest"
 )
 
 func decode(t *testing.T, b []byte) map[string]any {

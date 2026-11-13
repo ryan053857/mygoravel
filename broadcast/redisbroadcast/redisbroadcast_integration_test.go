@@ -13,10 +13,10 @@ import (
 
 	"github.com/redis/rueidis"
 
-	"github.com/ryan053857/mygoravel/broadcast"
-	"github.com/ryan053857/mygoravel/broadcast/broadcasttest"
-	"github.com/ryan053857/mygoravel/broadcast/redisbroadcast"
-	"github.com/ryan053857/mygoravel/internal/redistest"
+	"github.com/go-tenon/tenon/broadcast"
+	"github.com/go-tenon/tenon/broadcast/broadcasttest"
+	"github.com/go-tenon/tenon/broadcast/redisbroadcast"
+	"github.com/go-tenon/tenon/internal/redistest"
 )
 
 func TestBackend(t *testing.T) {

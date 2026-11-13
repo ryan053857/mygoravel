@@ -14,7 +14,7 @@ import (
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 var bigJSON = `{"items":[` + strings.Repeat(`{"title":"hello world"},`, 200) + `{}]}`

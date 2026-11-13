@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/pdf"
-	"github.com/ryan053857/mygoravel/pdf/gotenberg"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/pdf"
+	"github.com/go-tenon/tenon/pdf/gotenberg"
 )
 
 func html(s string) templ.Component {

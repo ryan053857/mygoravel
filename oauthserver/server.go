@@ -15,12 +15,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/uptrace/bun"
 
-	"github.com/ryan053857/mygoravel/apitoken"
-	"github.com/ryan053857/mygoravel/errorx"
-	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/logging"
-	"github.com/ryan053857/mygoravel/mcpx"
-	"github.com/ryan053857/mygoravel/outbound"
+	"github.com/go-tenon/tenon/apitoken"
+	"github.com/go-tenon/tenon/errorx"
+	"github.com/go-tenon/tenon/httpx"
+	"github.com/go-tenon/tenon/logging"
+	"github.com/go-tenon/tenon/mcpx"
+	"github.com/go-tenon/tenon/outbound"
 )
 
 // 授权请求本身有问题、不能跳回客户端时的错误：授权端点把错误码交给同意页（ConsentURL?error=…），同意页的接口返回 422。

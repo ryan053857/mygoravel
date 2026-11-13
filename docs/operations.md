@@ -54,15 +54,15 @@ import (
     "github.com/google/uuid"
     "github.com/uptrace/bun"
 
-    "github.com/ryan053857/mygoravel/broadcast"
-    "github.com/ryan053857/mygoravel/database"
-    "github.com/ryan053857/mygoravel/errorx"
-    "github.com/ryan053857/mygoravel/httpx"
-    "github.com/ryan053857/mygoravel/httpx/rest"
-    "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/notification"
-    "github.com/ryan053857/mygoravel/operation"
-    "github.com/ryan053857/mygoravel/queue"
+    "github.com/go-tenon/tenon/broadcast"
+    "github.com/go-tenon/tenon/database"
+    "github.com/go-tenon/tenon/errorx"
+    "github.com/go-tenon/tenon/httpx"
+    "github.com/go-tenon/tenon/httpx/rest"
+    "github.com/go-tenon/tenon/identity"
+    "github.com/go-tenon/tenon/notification"
+    "github.com/go-tenon/tenon/operation"
+    "github.com/go-tenon/tenon/queue"
 )
 
 // BulkPublishRequest 是批量发布的任务：哪一个操作、谁发起的、发布哪些文章。

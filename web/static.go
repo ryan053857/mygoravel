@@ -16,7 +16,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 // StaticPath 是应用静态资源的挂载路径：router.Handle(web.StaticPath+"*", static)。

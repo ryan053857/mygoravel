@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/login"
+	"github.com/go-tenon/tenon/identity"
+	"github.com/go-tenon/tenon/login"
 )
 
 // 必须使用二次验证的账号还没有启用时，登录先引导启用，启用后才得到主体。策略按租户不同。

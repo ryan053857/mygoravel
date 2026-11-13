@@ -10,9 +10,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/ryan053857/mygoravel/logging/logtest"
-	"github.com/ryan053857/mygoravel/mail"
-	"github.com/ryan053857/mygoravel/mail/mailtest"
+	"github.com/go-tenon/tenon/logging/logtest"
+	"github.com/go-tenon/tenon/mail"
+	"github.com/go-tenon/tenon/mail/mailtest"
 )
 
 func message() mail.Message {

@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryan053857/mygoravel/command"
-	"github.com/ryan053857/mygoravel/httpx"
+	"github.com/go-tenon/tenon/command"
+	"github.com/go-tenon/tenon/httpx"
 )
 
 // TestMain 在设置了 daemonHelperEnv 时作为被升级的常驻进程运行，见 daemonHelper。

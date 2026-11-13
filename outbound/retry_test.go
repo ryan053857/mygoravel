@@ -13,8 +13,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/ryan053857/mygoravel/outbound"
-	"github.com/ryan053857/mygoravel/outbound/outboundtest"
+	"github.com/go-tenon/tenon/outbound"
+	"github.com/go-tenon/tenon/outbound/outboundtest"
 )
 
 // retrying 返回经过 Retry 的 fake 客户端。

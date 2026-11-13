@@ -10,7 +10,7 @@ import (
 
 	"trpc.group/trpc-go/trpc-agent-go/log"
 
-	"github.com/ryan053857/mygoravel/ai/chat"
+	"github.com/go-tenon/tenon/ai/chat"
 )
 
 // trpcLog 收集 trpc-agent-go 的日志。SetLogger 改的是进程级全局变量，trpc-agent-go

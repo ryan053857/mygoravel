@@ -33,7 +33,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/singleflight"
 
-	"github.com/ryan053857/mygoravel/logging"
+	"github.com/go-tenon/tenon/logging"
 )
 
 const (

@@ -17,7 +17,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ryan053857/mygoravel/i18n"
+	"github.com/go-tenon/tenon/i18n"
 )
 
 // Decode 按 T 的 Huma 标签转换、验证 values 并解码为 T。

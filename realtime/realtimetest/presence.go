@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ryan053857/mygoravel/realtime"
+	"github.com/go-tenon/tenon/realtime"
 )
 
 var _ realtime.PresenceStore = (*Presence)(nil)
