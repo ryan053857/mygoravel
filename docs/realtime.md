@@ -86,7 +86,7 @@ rt.Channel("t:{tenant}:articles", realtime.Private(func(_ context.Context, sub i
 <a id="subscribing"></a>
 ## 在浏览器中订阅
 
-编辑后台的单页应用安装 [centrifuge-js](https://github.com/centrifugal/centrifuge-js)（`npm install centrifuge`），带上登录 token 连接并订阅，认证见[下一节](#authentication)：
+编辑后台的单页应用安装 [centrifuge-js](https://github.com/centrifugal/centrifuge-js)（`bun add centrifuge`），带上登录 token 连接并订阅，认证见[下一节](#authentication)：
 
 ```js
 import { Centrifuge } from 'centrifuge';

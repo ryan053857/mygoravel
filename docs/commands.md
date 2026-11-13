@@ -64,7 +64,10 @@ func New() *cobra.Command {
         devcmd.New(devcmd.Options{
             Main:   "./cmd/api",
             Static: "internal/web/static",
-            Tools:  []devcmd.Tool{devcmd.Tailwind("internal/web/app.css", "internal/web/static/css/app.css")},
+            Tools: []devcmd.Tool{
+                devcmd.Vite("frontend"),
+                devcmd.Tailwind("internal/web/app.css", "internal/web/static/css/app.css"),
+            },
         }, httpAddr),
     )
     root.AddCommand(bootstrap.Commands()...)
@@ -104,7 +107,7 @@ func main() {
 | `httpcmd.OpenAPI(opts, register)` | `openapi` | 否 |
 | `httpcmd.Routes(router)` | `routes` | 否 |
 | `clientgen.Command(opts, register)` | `client`，生成 Go 客户端，见 [Go 客户端](clients.md#generating-go-client) | 否 |
-| `devcmd.New(opts, addr)` | `dev`，开发页面时监听文件变化并刷新浏览器，见 [dev 命令](#dev-command) | 是 |
+| `devcmd.New(opts, addr)` | `dev`，开发时运行应用和前端工具，修改代码后重新编译、重启，见 [dev 命令](#dev-command) | 是 |
 | `command.Bind(open, declare)` | 应用声明的命令，例如 `article publish`，见[从命令行运行 action](actions.md#as-commands) | 是 |
 | `queuecmd.New(db)` | `queue status`、`queue failed`、`queue slot recreate`，在 `command.Bind` 中声明，见[队列状态](queue.md#stats-command) | 是 |
 | `schedulecmd.New(tasks, m)` | `schedules`，在 `command.Bind` 中声明，见[列出任务的命令](scheduling.md#schedules-command) | 是 |
@@ -223,23 +226,37 @@ Huma 自动注册的 `/docs`、`/openapi.json`、`/schemas/{schema}` 等文档�
 <a id="dev-command"></a>
 ### dev 命令
 
-开发[服务端渲染的公开页面](views.md)时，修改模板或样式后需要重新生成代码、重启应用、刷新浏览器。`dev` 命令把这些合成一条命令：
+开发时，`dev` 命令把应用和前端工具合成一条命令：
 
 ```bash
 go run ./cmd/api dev --config config/app.yaml,config/local.yaml
 ```
 
-然后打开 http://localhost:7331。它同时运行：
+它同时运行：
 
-- `go tool templ generate --watch`：修改 `.templ` 或 `.go` 后重新生成代码，用 `go run ./cmd/api serve` 重启应用，`--config` 与 `dev` 相同。templ 在 7331 端口代理应用，并注入自动刷新的脚本；
-- `Tools` 中每个工具的监听命令，例如 `devcmd.Tailwind` 运行 `tailwindcss --watch`。启动前，它把框架内置的组件样式源复制到入口旁边的 `.web-ui` 目录，见[用 Tailwind 编写样式](assets.md#tailwind)。只用内置样式表、不写 Tailwind 的应用不需要它；
-- 监视 `Static` 目录：其中的文件变化时（例如 Tailwind 重新生成了样式表）刷新浏览器。
+- **应用**：编译 `Main` 到临时目录，运行 `serve`，`--config` 与 `dev` 相同。模块中的 `.go` 文件（测试除外）、`go.mod`、`go.sum` 变化后重新编译：成功时平滑停止旧进程（`SIGTERM`），启动新的；失败时打印编译错误，旧进程继续运行，改好后再重启。
+- **`Tools` 中每个工具的监听命令**：
+  - `devcmd.Vite("frontend")` 运行 `bun --cwd frontend run dev`，见[单页应用的开发](spa.md#development)。启动前没有 `node_modules` 时先 `bun install`，没有 `dist` 时先构建一次；
+  - `devcmd.Tailwind` 运行 `tailwindcss --watch`。启动前，它把框架内置的组件样式源复制到入口旁边的 `.web-ui` 目录，见[用 Tailwind 编写样式](assets.md#tailwind)。只用内置样式表、不写 Tailwind 的应用不需要它。
+- **服务端渲染的页面**（模块中有 `.templ` 文件时）：
+  - `go tool templ generate --watch`：修改 `.templ` 后重新生成代码；只改了文字时不必重新编译。templ 在 7331 端口代理应用，并注入自动刷新的脚本，这时打开 http://localhost:7331；
+  - 监视 `Static` 目录：其中的文件变化时（例如 Tailwind 重新生成了样式表）刷新浏览器。`config/local.yaml` 设置 `static_dir`，让应用直接读取磁盘上的静态文件，见[前端资源](assets.md#development)。
 
-`addr` 从配置中取出应用的监听地址，代理据此访问应用。`config/local.yaml` 设置 `static_dir`，让应用直接读取磁盘上的静态文件，见[前端资源](assets.md#development)。
+  没有 `.templ` 文件时不运行 templ，打开应用自己的地址。
 
-`dev` 启动前检查 templ（`go get -tool github.com/a-h/templ/cmd/templ`）和各工具是否已安装。按 `Ctrl-C` 停止后，它会运行 `templ generate` 和各工具的生成命令，例如 `tailwindcss --minify`，把监听模式的输出恢复为正式版本，可以直接提交。
+`addr` 从配置中取出应用的监听地址。`Generate` 是每次重新编译成功后，用编译出的程序运行一次的子命令，例如重新生成 [Go 客户端](clients.md#go)，App 的代码随接口一起更新：
 
-其他生成工具写成 `devcmd.Tool`，`Watch` 是开发时的监听命令，`Build` 是停止后的生成命令，`Prepare` 在启动监听命令之前运行一次。例如用 esbuild 打包应用自己的脚本：
+```go
+devcmd.New(devcmd.Options{
+    Main:     "./cmd/api",
+    Tools:    []devcmd.Tool{devcmd.Vite("frontend")},
+    Generate: []string{"client", "--out", "../api"},
+}, httpAddr)
+```
+
+`dev` 启动前检查用到的命令是否已安装：Bun、templ（`go get -tool github.com/a-h/templ/cmd/templ`）、Tailwind。按 `Ctrl-C` 停止后，它平滑停止应用，再运行 `templ generate` 和各工具的生成命令，例如 `bun run build`、`tailwindcss --minify`，把监听模式的输出恢复为正式版本。
+
+其他工具写成 `devcmd.Tool`，`Watch` 是开发时的监听命令，`Build` 是停止后的生成命令，`Prepare` 在启动监听命令之前运行一次。例如用 esbuild 打包应用自己的脚本：
 
 ```go
 devcmd.Tool{

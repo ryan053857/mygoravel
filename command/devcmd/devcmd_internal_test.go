@@ -3,7 +3,6 @@ package devcmd
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -29,23 +28,6 @@ func TestProxyTarget(t *testing.T) {
 	}
 }
 
-// serveCommand 由 templ 交给 shell 执行：带空格、引号的配置路径要原样传到应用。
-func TestServeCommandQuoting(t *testing.T) {
-	d := dev{opts: Options{Main: "./cmd/api", Serve: "serve"}, configs: []string{"config/app.yaml", "my config/it's.yaml"}}
-	cmd := d.serveCommand()
-	if !strings.HasPrefix(cmd, "go run ./cmd/api serve --config=config/app.yaml ") {
-		t.Errorf("command = %s", cmd)
-	}
-	out, err := exec.Command("/bin/sh", "-c", strings.Replace(cmd, "go run", "printf '%s\\n'", 1)).Output()
-	if err != nil {
-		t.Skip("no /bin/sh")
-	}
-	want := "./cmd/api\nserve\n--config=config/app.yaml\n--config=my config/it's.yaml\n"
-	if string(out) != want {
-		t.Errorf("shell saw %q", out)
-	}
-}
-
 func TestCommands(t *testing.T) {
 	d := dev{
 		opts: Options{
@@ -57,19 +39,54 @@ func TestCommands(t *testing.T) {
 		},
 		configs: []string{"config/app.yaml"},
 		target:  "http://localhost:8080",
+		templ:   true,
 	}
-	cmds := d.commands()
 	want := [][]string{
-		{"go", "tool", "templ", "generate", "--watch", "--proxy=http://localhost:8080", "--proxyport=7331", "--open-browser=false", "--cmd=go run ./cmd/api serve --config=config/app.yaml"},
+		{"go", "tool", "templ", "generate", "--watch", "--proxy=http://localhost:8080", "--proxyport=7331", "--open-browser=false"},
 		{"tailwindcss", "-i", "web/app.css", "-o", "web/static/app.css", "--watch=always"},
 		{"shadcn-templ", "bundle", "--watch"},
 	}
-	if !slices.EqualFunc(cmds, want, slices.Equal) {
+	if cmds := d.commands(); !slices.EqualFunc(cmds, want, slices.Equal) {
 		t.Errorf("commands = %q", cmds)
 	}
-	d.opts.Tools = nil
-	if n := len(d.commands()); n != 1 {
-		t.Errorf("without tools: %d commands", n)
+	// 没有 .templ 文件时不运行 templ。
+	d.templ, d.opts.Tools = false, []Tool{Vite("frontend")}
+	if cmds := d.commands(); !slices.EqualFunc(cmds, [][]string{{"bun", "--cwd", "frontend", "run", "dev"}}, slices.Equal) {
+		t.Errorf("spa commands = %q", cmds)
+	}
+}
+
+// 应用的源码：.go（测试除外）、go.mod、go.sum；跳过隐藏目录、node_modules、testdata、dist。
+func TestGoSourceSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"main.go", "go.mod", "go.sum", "a_test.go", "README.md", "internal/x.go",
+		".git/x.go", "frontend/node_modules/y.go", "testdata/z.go", "frontend/dist/w.go", "frontend/frontend.go"} {
+		path := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snap := snapshot(dir, goSource)
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(snap), "\n") {
+		rel, _ := filepath.Rel(dir, strings.Fields(line)[0])
+		files = append(files, rel)
+	}
+	want := []string{"frontend/frontend.go", "go.mod", "go.sum", "internal/x.go", "main.go"}
+	if !slices.Equal(files, want) {
+		t.Errorf("files = %q", files)
+	}
+	if hasTempl(dir) {
+		t.Error("found templ without .templ files")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "page.templ"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !hasTempl(dir) {
+		t.Error("templ file not found")
 	}
 }
 
@@ -78,7 +95,8 @@ func TestWatch(t *testing.T) {
 	var n atomic.Int32
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error)
-	go func() { done <- watch(ctx, filepath.Join(dir, "static"), 10*time.Millisecond, func() { n.Add(1) }) }()
+	state := func() string { return snapshot(filepath.Join(dir, "static"), nil) }
+	go func() { done <- watch(ctx, state, 10*time.Millisecond, func() { n.Add(1) }) }()
 
 	time.Sleep(40 * time.Millisecond)
 	if n.Load() != 0 {

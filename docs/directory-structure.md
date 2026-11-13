@@ -226,7 +226,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `realtime` | 嵌入 Centrifuge 的 WebSocket 实时频道：公开、私有与 presence 频道，频道就是广播的主题；`realtime/redispresence` 是在线成员的 Redis 存储，`realtime/realtimetest` 是测试用的内存存储与存储的契约测试 | [实时频道](realtime.md) |
 | `mcpx` | 把 action 作为 MCP 工具提供给 AI 客户端：Bearer 认证、按权限筛选工具、按 Huma 规则校验参数；`mcpx/mcpxtest` 在测试中以指定的主体调用工具；`mcpx/mcpcmd` 是以 stdio 运行服务、列出工具的 `mcp` 命令 | [MCP 服务](mcp.md) |
 | `command` | 根命令、`Run`、`Bind`、`config` 命令、退出码 | [命令行](commands.md) |
-| `command/devcmd` | `dev` 命令：开发页面时监听文件变化、重启应用、刷新浏览器 | [dev 命令](commands.md#dev-command) |
+| `command/devcmd` | `dev` 命令：一起运行应用和前端工具（Vite、templ、Tailwind），修改 Go 代码后重新编译、重启 | [dev 命令](commands.md#dev-command) |
 | `command/httpcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
 | `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
 | `queue/queueweb` | 队列面板：复制槽和延迟任务的状态、失败任务的查看、重试和删除 | [队列面板](queue.md#panel) |

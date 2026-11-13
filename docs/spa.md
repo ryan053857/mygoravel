@@ -14,12 +14,12 @@
 
 单页应用调用 [JSON API](routing.md)，请求带 Bearer token（access token 只在内存中，refresh token 在 HttpOnly cookie 中，见[单页应用的登录](api-tokens.md#single-page-applications)），类型由 OpenAPI 文档生成，见[客户端代码](clients.md)。后台和用户端都是单页应用；不需要登录的公开页面可以[在服务端渲染](views.md)，两者共用一个 Router。
 
-本章给博客加上读者使用的前端：React 加 TanStack Router，放在应用根目录的 `frontend` 中，是一个普通的 Vite 项目。
+本章给博客加上读者使用的前端：React 加 TanStack Router，放在应用根目录的 `frontend` 中，是一个普通的 Vite 项目。依赖和脚本用 [Bun](https://bun.sh) 管理，构建工具仍然是 Vite。
 
 <a id="embedding"></a>
 ## 嵌入构建产物
 
-`npm run build` 把前端构建到 `frontend/dist`。在 `frontend` 目录中加一个 Go 文件，把它嵌入程序，下面是 `frontend/frontend.go`：
+`bun run build` 把前端构建到 `frontend/dist`。在 `frontend` 目录中加一个 Go 文件，把它嵌入程序，下面是 `frontend/frontend.go`：
 
 ```go
 package frontend
@@ -104,14 +104,22 @@ type Config struct {
 frontend_dev_server: http://localhost:5173
 ```
 
-然后分别启动两者，打开 http://localhost:8080：
+然后用 [dev 命令](commands.md#dev-command)一起启动 Vite 和应用，打开 http://localhost:8080：
 
 ```bash
-npm --prefix frontend run dev
-go run ./cmd/api serve --config config/app.yaml,config/local.yaml
+go run ./cmd/api dev --config config/app.yaml,config/local.yaml
 ```
 
-设置了 `DevServer` 时，`NewSPA` 不读取构建产物，但 `dist` 仍然要存在，程序才能编译：第一次开发前运行一次 `npm --prefix frontend run build`。Vite 没有启动时，页面返回 `502`，内容是连接错误。
+命令行中加上 `devcmd.Vite("frontend")`，它运行 `bun --cwd frontend run dev`；修改 Go 代码后应用自动重新编译、重启，前端的热更新不受影响：
+
+```go
+devcmd.New(devcmd.Options{
+    Main:  "./cmd/api",
+    Tools: []devcmd.Tool{devcmd.Vite("frontend")},
+}, httpAddr)
+```
+
+设置了 `DevServer` 时，`NewSPA` 不读取构建产物，但 `dist` 仍然要存在，程序才能编译。`dev` 第一次启动时，没有 `node_modules` 就先运行 `bun install`，没有 `dist` 就先构建一次；停止后再构建一次，`dist` 总是最新的。Vite 没有启动时，页面返回 `502`，内容是连接错误。
 
 <a id="building"></a>
 ## 构建与发布
@@ -119,20 +127,22 @@ go run ./cmd/api serve --config config/app.yaml,config/local.yaml
 先构建前端，再构建 Go：
 
 ```bash
-npm --prefix frontend ci
-npm --prefix frontend run build
+bun --cwd frontend install --frozen-lockfile
+bun --cwd frontend run build
 go build -trimpath -o bin/api ./cmd/api
 ```
 
-[Docker 镜像](deployment.md#docker)中加一个 Node 阶段，把它的产物复制进 Go 的构建阶段：
+`--frozen-lockfile` 要求 `bun.lock` 与 `package.json` 一致，CI 中安装的依赖与本地完全相同。CI 用 [setup-bun](https://github.com/oven-sh/setup-bun) 安装 Bun。
+
+[Docker 镜像](deployment.md#docker)中加一个 Bun 阶段，把它的产物复制进 Go 的构建阶段：
 
 ```dockerfile
-FROM node:22 AS frontend
+FROM oven/bun:1 AS frontend
 WORKDIR /src/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+COPY frontend/package.json frontend/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY frontend .
-RUN npm run build
+RUN bun run build
 
 FROM golang:1.27 AS build
 WORKDIR /src

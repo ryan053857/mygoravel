@@ -55,9 +55,9 @@
 ### 生成类型
 
 ```bash
-npm i openapi-fetch
-npm i -D openapi-typescript typescript
-npx openapi-typescript openapi.json -o src/api.d.ts \
+bun add openapi-fetch
+bun add -d openapi-typescript typescript
+bunx openapi-typescript openapi.json -o src/api.d.ts \
     --root-types --root-types-no-schema-prefix --root-types-keep-casing
 ```
 
@@ -201,7 +201,7 @@ URL.revokeObjectURL(url)
 React 应用用 [TanStack Query](https://tanstack.com/query) 管理接口数据时，用 [openapi-react-query](https://openapi-ts.dev/openapi-react-query/) 把上面的 `api` 包装成 hooks。它按方法、路径和参数生成 query key，类型照旧来自 `api.d.ts`：
 
 ```bash
-npm i @tanstack/react-query openapi-react-query
+bun add @tanstack/react-query openapi-react-query
 ```
 
 ```ts
