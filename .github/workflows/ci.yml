@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
 
-# 检查和测试是两个并行的 job：检查不需要服务容器，测试不等检查做完。
+# 检查、测试和脚手架是并行的 job：检查不需要服务容器，测试不等检查做完。
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -30,6 +30,26 @@ jobs:
       # 提交的 templ 代码必须是最新生成的。
       - name: Generated code
         run: cd web/ui && go tool templ generate && git diff --exit-code -- .
+
+  # tenon init 生成的项目能安装、生成客户端、类型检查、构建并运行（cmd/tenon 的 TestInitEndToEnd）。
+  # 单独一个 job：编译和安装依赖很占 CPU，放在 test 中会干扰计时的测试。
+  scaffold:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Scaffold
+        run: go test -count=1 -run TestInitEndToEnd -v ./cmd/tenon/
+        env:
+          TENON_SCAFFOLD_TEST: "1"
 
   test:
     runs-on: ubuntu-latest

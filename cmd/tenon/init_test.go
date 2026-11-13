@@ -16,16 +16,13 @@ import (
 )
 
 // TestInitEndToEnd 用 init 生成项目（指向本地的框架），然后类型检查、tenon build、运行二进制，
-// 通过 HTTP 走一遍页面和待办事项的增删改查。需要 bun 和网络（安装 npm 依赖），本地没有 bun 时跳过。
+// 通过 HTTP 走一遍页面和待办事项的增删改查。它需要 bun 和网络，编译、安装依赖很占 CPU，会干扰其他包中
+// 计时的测试，所以只在设置了 TENON_SCAFFOLD_TEST=1 时运行（CI 的 scaffold 任务）：
+//
+//	TENON_SCAFFOLD_TEST=1 go test -run TestInitEndToEnd ./cmd/tenon/
 func TestInitEndToEnd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow")
-	}
-	if _, err := exec.LookPath("bun"); err != nil {
-		if os.Getenv("CI") != "" {
-			t.Fatal("bun is required in CI")
-		}
-		t.Skip("bun not installed")
+	if os.Getenv("TENON_SCAFFOLD_TEST") != "1" {
+		t.Skip("set TENON_SCAFFOLD_TEST=1 to run")
 	}
 	framework, err := filepath.Abs("../..")
 	if err != nil {
