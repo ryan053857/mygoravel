@@ -86,6 +86,7 @@
 - [登录与注册](login.md)
 - [API 令牌](api-tokens.md)
 - [第三方登录](social-login.md)
+- [企业单点登录](enterprise-sso.md)
 - [OAuth 授权服务器](oauth-server.md)
 - [完整示例：编辑后台与读者 App](account-examples.md)
 - [多租户](tenancy.md)

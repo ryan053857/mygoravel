@@ -21,14 +21,18 @@ type passwordRow struct {
 	ChangedAt   time.Time `bun:"changed_at,notnull"`
 }
 
-// Password 用登录标识和密码登录。标识的类型必须在 Options.PasswordKinds 中。
+// Password 用登录标识和密码登录。标识的类型必须在 Policy.PasswordKinds 中。
 //
 // 同一个标识每次尝试都消耗 Options.Attempts 的一次配额，成功后清零，所以只有连续的失败受到限制；
 // 超出时返回 ratelimit.ErrExceeded。标识不存在、没有密码或密码不正确都返回 ErrInvalidCredentials，耗时相同。
 // 成功后如果哈希参数已过时，按当前配置重新哈希。账号启用了二次验证时返回 Outcome.Pending，交给 TwoFactor 完成登录。
 func (r *Realm) Password(ctx context.Context, id Identifier, password string) (Outcome, error) {
-	id, err := id.Normalize()
-	if err != nil || !containsKind(r.opts.PasswordKinds, id.Kind) {
+	p, err := r.allow(ctx, MethodPassword)
+	if err != nil {
+		return Outcome{}, err
+	}
+	id, err = id.Normalize()
+	if err != nil || !containsKind(p.PasswordKinds, id.Kind) {
 		return Outcome{}, ErrInvalidCredentials.New()
 	}
 	tenant := r.tenant(ctx)
@@ -80,10 +84,10 @@ func (r *Realm) passwordHash(ctx context.Context, db bun.IDB, subjectID string) 
 	return hash, errors.Wrap(err, "login: find password")
 }
 
-// storePassword 哈希并保存主体的密码。policy 为 true 时先按 Options.PasswordPolicy 检查。
+// storePassword 哈希并保存主体的密码。policy 为 true 时先按 Policy.PasswordPolicy 检查。
 func (r *Realm) storePassword(ctx context.Context, db bun.IDB, subjectID, password string, policy bool) error {
 	if policy {
-		if err := r.opts.PasswordPolicy(password); err != nil {
+		if err := r.checkPassword(ctx, password); err != nil {
 			return err
 		}
 	}
@@ -99,7 +103,16 @@ func (r *Realm) storePassword(ctx context.Context, db bun.IDB, subjectID, passwo
 	return errors.Wrap(err, "login: save password")
 }
 
-// SetPassword 设置或修改 ref 的密码，按 Options.PasswordPolicy 检查，不符合时返回它的错误。
+// checkPassword 按登录策略的 PasswordPolicy 检查新密码。
+func (r *Realm) checkPassword(ctx context.Context, password string) error {
+	p, err := r.policy(ctx)
+	if err != nil {
+		return err
+	}
+	return p.PasswordPolicy(password)
+}
+
+// SetPassword 设置或修改 ref 的密码，按 Policy.PasswordPolicy 检查，不符合时返回它的错误。
 // 修改密码后，应用通常还要撤销 ref 的其他 token。
 func (r *Realm) SetPassword(ctx context.Context, db bun.IDB, ref identity.Ref, password string) error {
 	if err := r.check(ref); err != nil {
@@ -118,7 +131,11 @@ func (r *Realm) RemovePassword(ctx context.Context, db bun.IDB, ref identity.Ref
 	if err != nil {
 		return err
 	}
-	if !r.canSignIn(ids, false) {
+	can, err := r.canSignIn(ctx, ids, false)
+	if err != nil {
+		return err
+	}
+	if !can {
 		hash, err := r.passwordHash(ctx, db, ref.ID)
 		if err == nil && hash != "" {
 			err = ErrLastMethod.New()

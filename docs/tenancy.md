@@ -277,7 +277,7 @@ err = roles.Assign(ctx, staff, authz.AllTenants, support.ID)
 - **租户内账号**：每个租户的客户是独立的账号，同一个邮箱在两个租户中各注册一次。它们通常是单独的一张表、单独的一套[账号体系](authentication.md#account-systems)，例如 `customer.Type`。客户的 App 和网页调用一个只接受客户的 API。客户的 [`login.Realm`](login.md#identifiers) 设置 `PerTenant: true`，邮箱和手机号就在租户内唯一，登录得到的主体带有请求所在的租户，签发的令牌只能在这个租户中使用：
 
 ```go
-customers := login.New(a.db, login.Options{Type: customer.Type, PerTenant: true, Register: true /* 其余字段见登录与注册 */})
+customers := login.New(a.db, login.Options{Type: customer.Type, PerTenant: true, Policy: login.Policy{Register: true} /* 其余字段见登录与注册 */})
 
 out, err := customers.Password(ctx, login.Email(in.Body.Email), in.Body.Password)
 if err != nil {

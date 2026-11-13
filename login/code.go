@@ -25,7 +25,7 @@ import (
 type Purpose string
 
 const (
-	// SignIn 用验证码登录：标识已注册时验证后直接登录；未注册且 Options.Register 为 true 时，
+	// SignIn 用验证码登录：标识已注册时验证后直接登录；未注册且 Policy.Register 为 true 时，
 	// 验证后得到注册用的完成凭证，交给 Register。
 	SignIn Purpose = "sign_in"
 	// Reset 找回或首次设置密码：只向已注册的标识发送，验证后得到完成凭证，交给 ResetPassword。
@@ -74,7 +74,7 @@ func (c *challengeRow) identifier() Identifier { return Identifier{Kind: c.Kind,
 // SendCode 生成 purpose 用途的验证码，调用 Options.Send 发送给标识 id，返回请求 ID。
 //
 // 为了不暴露哪些标识已注册，不发送时也返回一个请求 ID，用它验证必然失败：
-// Reset 不发送给未注册的标识；SignIn 在 Options.Register 为 false 时不发送给未注册的标识。
+// Reset 不发送给未注册的标识；SignIn 在 Policy.Register 为 false 时不发送给未注册的标识。
 // 同一个标识的发送次数由 Options.Sends 限制，超出时返回 ratelimit.ErrExceeded。
 func (r *Realm) SendCode(ctx context.Context, purpose Purpose, id Identifier) (string, error) {
 	if r.opts.Send == nil {
@@ -83,12 +83,22 @@ func (r *Realm) SendCode(ctx context.Context, purpose Purpose, id Identifier) (s
 	if !slices.Contains([]Purpose{SignIn, Reset, Verify}, purpose) {
 		return "", errors.Newf("login: SendCode does not send purpose %q", purpose)
 	}
+	var p Policy
+	if purpose == SignIn {
+		normalized, err := id.Normalize()
+		if err != nil {
+			return "", err
+		}
+		if p, err = r.allow(ctx, normalized.Kind); err != nil {
+			return "", err
+		}
+	}
 	id, tenant, owner, err := r.sending(ctx, id)
 	if err != nil {
 		return "", err
 	}
 	switch {
-	case purpose == Reset && owner == "", purpose == SignIn && owner == "" && !r.opts.Register:
+	case purpose == Reset && owner == "", purpose == SignIn && owner == "" && !p.Register:
 		requestID, err := uuid.NewV7()
 		return requestID.String(), errors.Wrap(err, "login: new id")
 	}
@@ -182,6 +192,9 @@ func (r *Realm) VerifyCode(ctx context.Context, requestID, code string) (Outcome
 		return Outcome{}, err
 	}
 	if c.Purpose == SignIn && c.SubjectID != "" {
+		if _, err := r.allow(ctx, c.Kind); err != nil {
+			return Outcome{}, err
+		}
 		if err := r.use(ctx, c); err != nil {
 			return Outcome{}, err
 		}
@@ -293,14 +306,14 @@ type registration struct {
 	password string
 }
 
-// WithPassword 在注册时同时设置密码，按 Options.PasswordPolicy 检查。
+// WithPassword 在注册时同时设置密码，按 Policy.PasswordPolicy 检查。
 func WithPassword(password string) RegisterOption {
 	return func(reg *registration) { reg.password = password }
 }
 
 // Register 用 SignIn、Verify 或 External 的完成凭证，把已验证的标识写给应用刚创建的主体 ref，返回 Outcome：
 // 通常是可以签发凭据的 Outcome.Subject，它的 Auth 记下注册时验证的方式（标识的类型或第三方提供方）；
-// Options.RequireTwoFactor 要求二次验证时是 Outcome.Enroll，先启用二次验证再签发凭据。
+// Policy.RequireTwoFactor 要求二次验证时是 Outcome.Enroll，先启用二次验证再签发凭据。
 // External 的凭证写入第三方账号，以及对方确认过的邮箱。
 //
 // 应用的注册 action 在自己的事务中先创建账号行，再调用 Register 并传入同一个事务 db；
@@ -314,7 +327,7 @@ func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref iden
 		opt(&reg)
 	}
 	if reg.password != "" {
-		if err := r.opts.PasswordPolicy(reg.password); err != nil {
+		if err := r.checkPassword(ctx, reg.password); err != nil {
 			return Outcome{}, err
 		}
 	}
@@ -349,11 +362,11 @@ func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref iden
 	return r.authenticated(ctx, db, ref.ID, c.Tenant, false, c.Kind)
 }
 
-// ResetPassword 用 Reset 的完成凭证设置新密码，按 Options.PasswordPolicy 检查；接收验证码的标识同时标为已验证，
+// ResetPassword 用 Reset 的完成凭证设置新密码，按 Policy.PasswordPolicy 检查；接收验证码的标识同时标为已验证，
 // 它的密码登录失败计数清零。返回密码所属的主体，应用通常接着撤销它的全部 token。
 // 它不登录：用户接着用新密码登录，启用了二次验证的账号仍然需要二次验证。
 func (r *Realm) ResetPassword(ctx context.Context, proof, password string) (identity.Ref, error) {
-	if err := r.opts.PasswordPolicy(password); err != nil {
+	if err := r.checkPassword(ctx, password); err != nil {
 		return identity.Ref{}, err
 	}
 	var c *challengeRow

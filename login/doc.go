@@ -4,7 +4,7 @@
 // 数据保存在 auth_* 表中，按 identity.Ref 引用应用自己的账号行。Realm 只回答“这是谁”，
 // 得到 identity.Subject 后由 API 签发凭据：tokens.Login 或 JWT.Login。
 //
-//	customers := login.New(db, login.Options{Type: customer.Type, PerTenant: true, Register: true,
+//	customers := login.New(db, login.Options{Type: customer.Type, PerTenant: true, Policy: login.Policy{Register: true},
 //		Hasher: hasher, Crypt: crypt, Send: sendCode})
 //	out, err := customers.Password(ctx, login.Email(email), password)
 //

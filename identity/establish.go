@@ -22,6 +22,9 @@ var (
 	// ErrTwoFactorRequired 表示操作要求这次登录经过二次验证（Auth.TwoFactor），例如租户要求成员使用二次验证：
 	// 客户端让用户完成二次验证并确认身份后重试；账号还没有启用二次验证时，先去启用。
 	ErrTwoFactorRequired = errorx.Define(errorx.PermissionDenied, "auth.two_factor_required")
+	// ErrMethodRequired 表示操作要求这次登录使用特定的方式（Auth.Methods），例如租户要求成员用租户的企业 IdP 登录：
+	// 公开参数 methods 列出可以用的方式，客户端据此让用户用其中一种重新登录。
+	ErrMethodRequired = errorx.Define(errorx.PermissionDenied, "auth.method_required")
 )
 
 // Authenticator 识别调用者，返回凭据给出的主体。没有凭据或凭据无效时返回 ID 为空的主体或 4xx 类错误；

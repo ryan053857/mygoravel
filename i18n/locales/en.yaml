@@ -2,6 +2,7 @@ auth.unauthenticated: Authentication required
 auth.forbidden: Permission denied
 auth.confirm_required: Please confirm your identity first
 auth.two_factor_required: Two-factor authentication is required
+auth.method_required: Sign in again with a required method
 url.invalid_signature: Invalid link
 url.expired: This link has expired
 pdf.unavailable: PDF service is temporarily unavailable, please try again later
@@ -23,10 +24,11 @@ login.invalid_proof: The verification has expired, please request a new code
 login.invalid_identifier: Invalid format
 login.weak_password: The password must be 8 to 128 characters without leading or trailing spaces
 login.identifier_taken: Already used by another account
-login.last_identifier: The last way to sign in cannot be removed
+login.last_method: The last way to sign in cannot be removed
 login.not_found: Account not found
 login.two_factor_enabled: Two-factor authentication is already enabled
 login.two_factor_disabled: Two-factor authentication is not enabled
+login.method_not_allowed: This sign-in method is not allowed
 oauth.invalid: Third-party sign-in failed, please try again
 oauth.denied: Third-party sign-in was canceled
 oauth.invalid_client: The application requesting access could not be identified

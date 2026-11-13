@@ -32,6 +32,13 @@ type External struct {
 	// 各家 IdP 的写法不同，框架不自己解读。设置后这次登录的 Auth.Methods 记为 [提供方, idp_mfa]，计入二次验证。
 	// 只对应用信任其 MFA 的提供方设置，例如租户自己的企业 IdP。
 	TwoFactor bool
+	// TrustEmail 表示提供方对 Email 有管理权：第三方账号还没有绑定、EmailVerified 并且 Email 已属于当前租户的某个账号时，
+	// 直接把第三方账号绑定给那个账号并登录，而不是返回注册凭证。用于租户验证过邮箱域名的企业 IdP，
+	// 例如公司改用 SSO 后员工原来的密码账号自动关联。
+	//
+	// 只在应用确认“这个连接属于当前租户，并且租户验证过 Email 的域名”（例如 DNS TXT 记录）时设置。
+	// Google、GitHub 等公共提供方永远不要设置：否则任何人都能用一个声称别人邮箱的账号登录别人的账号。
+	TrustEmail bool
 }
 
 // externalData 是保存在注册凭证中的、对方确认过的邮箱。
@@ -58,17 +65,25 @@ func (ext External) Identifier() (Identifier, error) {
 // 还没有绑定时返回 Outcome.Proof：交给 Register 注册新账号（对方确认过的邮箱同时作为登录标识），
 // 或者交给 Link 绑定到已登录的账号。
 //
-// 框架不按邮箱把第三方账号自动关联到已有账号：别人可以用一个声称同一邮箱的第三方账号借此登录。
+// 框架不按邮箱把第三方账号自动关联到已有账号（ext.TrustEmail 除外）：别人可以用一个声称同一邮箱的第三方账号借此登录。
 // 邮箱已属于其他账号时 Register 返回 ErrTaken，应用提示用户先用原来的方式登录，再绑定第三方账号。
 func (r *Realm) External(ctx context.Context, ext External) (Outcome, error) {
 	id, err := ext.Identifier()
 	if err != nil {
 		return Outcome{}, err
 	}
+	if _, err := r.allow(ctx, id.Kind); err != nil {
+		return Outcome{}, err
+	}
 	tenant := r.tenant(ctx)
 	owner, err := r.owner(ctx, r.db, tenant, id)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if owner == "" && ext.TrustEmail && ext.EmailVerified {
+		if owner, err = r.linkByEmail(ctx, tenant, id, ext.Email); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if owner != "" {
 		methods := []string{id.Kind}
@@ -103,6 +118,22 @@ func (r *Realm) External(ctx context.Context, ext External) (Outcome, error) {
 		return Outcome{}, errors.Wrap(err, "login: save external account")
 	}
 	return Outcome{Proof: rid.String() + "." + secret}, nil
+}
+
+// linkByEmail 把第三方账号 id 绑定给邮箱 email 在 tenant 中所属的账号，返回这个账号；邮箱没有注册时返回空字符串。
+func (r *Realm) linkByEmail(ctx context.Context, tenant string, id Identifier, email string) (string, error) {
+	addr, err := Email(email).Normalize()
+	if err != nil {
+		return "", nil
+	}
+	owner, err := r.owner(ctx, r.db, tenant, addr)
+	if err != nil || owner == "" {
+		return "", err
+	}
+	if err := r.attach(ctx, r.db, tenant, id, owner, true); err != nil {
+		return "", err
+	}
+	return owner, r.markVerified(ctx, r.db, tenant, addr)
 }
 
 // proven 返回完成凭证证明的全部登录标识：验证码证明的标识；第三方账号，以及对方确认过的邮箱。

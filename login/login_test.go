@@ -455,7 +455,7 @@ func TestConcurrentVerify(t *testing.T) {
 func TestRegister(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	e := newRealm(t, login.Options{Register: true})
+	e := newRealm(t, login.Options{Policy: login.Policy{Register: true}})
 	email := login.Email("new@example.com")
 	requestID, c := e.code(t, ctx, login.SignIn, email)
 	if c.Registered {
@@ -551,7 +551,7 @@ func TestUnregisteredGetsNoCode(t *testing.T) {
 func TestSendFailure(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	e := newRealm(t, login.Options{Register: true})
+	e := newRealm(t, login.Options{Policy: login.Policy{Register: true}})
 	e.mail.fail = errors.New("smtp down")
 	_, err := e.realm.SendCode(ctx, login.SignIn, login.Email("a@example.com"))
 	is(t, err, e.mail.fail)
@@ -567,7 +567,7 @@ func TestSendFailure(t *testing.T) {
 func TestSendLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	e := newRealm(t, login.Options{Register: true, Sends: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
+	e := newRealm(t, login.Options{Policy: login.Policy{Register: true}, Sends: ratelimit.NewMemory(ratelimit.Config{Rate: 2, Interval: time.Hour, Burst: 2})})
 	for range 2 {
 		e.code(t, ctx, login.SignIn, login.Email("a@example.com"))
 	}
@@ -676,7 +676,7 @@ func TestPerTenant(t *testing.T) {
 	t.Parallel()
 	acme := identity.WithTenant(context.Background(), "acme")
 	globex := identity.WithTenant(context.Background(), "globex")
-	e := newRealm(t, login.Options{PerTenant: true, Register: true})
+	e := newRealm(t, login.Options{PerTenant: true, Policy: login.Policy{Register: true}})
 	email := login.Email("alice@example.com")
 	e.account(t, acme, "acme:1", "alice@example.com", "acme password")
 	e.account(t, globex, "globex:1", "alice@example.com", "globex password")
@@ -715,7 +715,7 @@ func TestPerTenant(t *testing.T) {
 func TestDetachAndForget(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	e := newRealm(t, login.Options{Register: true})
+	e := newRealm(t, login.Options{Policy: login.Policy{Register: true}})
 	e.account(t, ctx, "c1", "alice@example.com", "correct horse")
 	phone := login.Phone("+8613800138000")
 	if err := e.realm.Attach(ctx, e.db, ref("c1"), phone, true); err != nil {
@@ -829,7 +829,7 @@ func TestLastMethod(t *testing.T) {
 func TestCleanup(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	e := newRealm(t, login.Options{Register: true})
+	e := newRealm(t, login.Options{Policy: login.Policy{Register: true}})
 	e.account(t, ctx, "c1", "alice@example.com", "")
 	used, c := e.code(t, ctx, login.SignIn, login.Email("alice@example.com"))
 	if _, err := e.realm.VerifyCode(ctx, used, c.Code); err != nil {
@@ -852,7 +852,7 @@ func TestCleanup(t *testing.T) {
 func TestCodeSurvivesKeyRotation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	e := newRealm(t, login.Options{Register: true})
+	e := newRealm(t, login.Options{Policy: login.Policy{Register: true}})
 	requestID, c := e.code(t, ctx, login.SignIn, login.Email("a@example.com"))
 	rotated := login.New(e.db, login.Options{Type: customer, Hasher: hasher(4),
 		Crypt:    crypt.New(crypt.Config{Key: crypt.GenerateKey(), PreviousKeys: []string{appKey}}),

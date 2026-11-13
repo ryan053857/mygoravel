@@ -257,7 +257,7 @@ func TestTOTPReplay(t *testing.T) {
 func TestAuthMethods(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	e := newRealm(t, login.Options{Register: true})
+	e := newRealm(t, login.Options{Policy: login.Policy{Register: true}})
 	methodsOf := func(e *env) func(login.Outcome, error) string {
 		return func(out login.Outcome, err error) string {
 			t.Helper()

@@ -191,6 +191,8 @@ out, err := users.External(ctx, ext)
 
 **框架不按邮箱把第三方账号自动关联到已有账号。** 否则任何人都可以在一个不验证邮箱的第三方平台上填上别人的邮箱，借此登录别人的账号。注册时邮箱已属于其他账号，`Register` 返回 `login.ErrTaken`：提示用户先用原来的方式登录，再绑定这个第三方账号。
 
+例外是租户验证过邮箱域名的企业 IdP：应用确认这个连接属于当前租户、租户验证过 `ext.Email` 的域名之后，设置 `ext.TrustEmail = true`，`External` 就把第三方账号直接绑定给这个邮箱已有的账号并登录。公司改用 SSO 后，员工原来的账号因此自动关联。Google、GitHub 等公共提供方永远不要设置它，见[企业单点登录](enterprise-sso.md)。
+
 <a id="spa-login"></a>
 ## 在单页应用中登录
 

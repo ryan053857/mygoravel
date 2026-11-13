@@ -226,8 +226,11 @@ func (r *Realm) Detach(ctx context.Context, db bun.IDB, ref identity.Ref, id Ide
 	if err != nil {
 		return err
 	}
-	if !r.canSignIn(rest, hash != "") {
-		return ErrLastMethod.New()
+	if can, err := r.canSignIn(ctx, rest, hash != ""); err != nil || !can {
+		if err == nil {
+			err = ErrLastMethod.New()
+		}
+		return err
 	}
 	_, err = db.NewDelete().Model((*identifierRow)(nil)).
 		Where("subject_type = ? AND subject_id = ? AND kind = ? AND value = ?", ref.Type, ref.ID, id.Kind, id.Value).Exec(ctx)
@@ -253,20 +256,24 @@ func (r *Realm) lockIdentifiers(ctx context.Context, db bun.IDB, subjectID strin
 // canSignIn 报告拥有登录标识 ids 的主体是否还能登录：第三方账号和 passkey 可以；
 // 设置了 Options.Send 时，邮箱和手机号可以用验证码登录；有密码时，PasswordKinds 中的标识可以用密码登录。
 // 只有用户名而没有密码的主体无法登录。
-func (r *Realm) canSignIn(ids []Identifier, hasPassword bool) bool {
+func (r *Realm) canSignIn(ctx context.Context, ids []Identifier, hasPassword bool) (bool, error) {
+	p, err := r.policy(ctx)
+	if err != nil {
+		return false, err
+	}
 	for _, id := range ids {
 		switch {
-		case hasPassword && containsKind(r.opts.PasswordKinds, id.Kind):
-			return true
+		case hasPassword && containsKind(p.PasswordKinds, id.Kind):
+			return true, nil
 		case id.Kind == KindEmail || id.Kind == KindPhone:
 			if r.opts.Send != nil {
-				return true
+				return true, nil
 			}
 		case id.Kind != KindUsername:
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // Forget 删除 ref 的全部登录凭据：标识、密码、二次验证和未完成的验证码，用于注销账号。

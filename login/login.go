@@ -26,7 +26,7 @@ var (
 	ErrInvalidProof = errorx.Define(errorx.InvalidArgument, "login.invalid_proof")
 	// ErrInvalidIdentifier 表示登录标识的格式不正确，例如手机号不是 E.164。
 	ErrInvalidIdentifier = errorx.Define(errorx.InvalidArgument, "login.invalid_identifier")
-	// ErrWeakPassword 表示密码不符合 Options.PasswordPolicy。
+	// ErrWeakPassword 表示密码不符合 Policy.PasswordPolicy。
 	ErrWeakPassword = errorx.Define(errorx.InvalidArgument, "login.weak_password")
 	// ErrTaken 表示登录标识已属于另一个主体。
 	ErrTaken = errorx.Define(errorx.Conflict, "login.identifier_taken")
@@ -36,6 +36,9 @@ var (
 	ErrNotFound = errorx.Define(errorx.NotFound, "login.not_found")
 	// ErrTwoFactorEnabled 表示已经启用了二次验证。
 	ErrTwoFactorEnabled = errorx.Define(errorx.Conflict, "login.two_factor_enabled")
+	// ErrMethodNotAllowed 表示登录策略（Policy.Methods）不允许这种登录方式，例如租户只允许用企业 IdP 登录。
+	// 公开参数 method 是这种方式。
+	ErrMethodNotAllowed = errorx.Define(errorx.PermissionDenied, "login.method_not_allowed")
 	// ErrTwoFactorDisabled 表示没有启用二次验证。
 	ErrTwoFactorDisabled = errorx.Define(errorx.Conflict, "login.two_factor_disabled")
 )
@@ -48,9 +51,6 @@ type Options struct {
 	// 登录得到的主体带有这个 Tenant，签发的 token 只能在这个租户中使用。
 	// 为 false 时登录标识全平台唯一，主体的 Tenant 为空。
 	PerTenant bool
-	// Register 为 true 时开放自助注册：向未注册的标识发送 SignIn 验证码，验证后得到注册用的完成凭证。
-	// 为 false 时未注册的标识与找回密码一样不发送验证码，也不暴露它未注册。
-	Register bool
 	// Hasher 哈希和校验密码。
 	Hasher *hashing.Hasher
 	// Crypt 派生验证码的 HMAC 密钥，验证码随应用密钥轮换。
@@ -59,20 +59,15 @@ type Options struct {
 	Send func(ctx context.Context, c Code) error
 	// Issuer 是 TOTP 验证器中显示的发行者，通常是应用的名称，见 SetupTOTP。
 	Issuer string
-	// RequireTwoFactor 报告 sub（Type、ID、Tenant）是否必须使用二次验证，例如运营人员，或者要求成员使用二次验证的租户；
-	// 为 nil 时不要求。要求而这次登录没有经过二次验证（passkey 登录本身就算）时不签发凭据：账号已经启用二次验证的，
-	// 返回 Outcome.Pending，第三方登录也是如此；还没有启用的，返回 Outcome.Enroll，先启用再登录，见 EnrollTOTP。
-	RequireTwoFactor func(ctx context.Context, sub identity.Subject) (bool, error)
+	// Policy 是登录策略：是否开放注册、密码规则、是否强制二次验证、允许哪些登录方式。设置了 PolicyFor 时不使用。
+	Policy Policy
+	// PolicyFor 按 ctx 返回登录策略，用于各租户不同的策略，例如读取租户的设置（settings.Group）。
+	// PerTenant 时 ctx 中带有登录的租户（identity.TenantFromContext）。返回的错误原样交给调用方。为 nil 时使用 Policy。
+	PolicyFor func(ctx context.Context) (Policy, error)
 	// Resolve 在登录成功、签发凭据之前调用一次，通常与入口的 identity.Accounts 中这套账号的 Resolver 相同：
 	// 返回错误（例如账号已停用）时登录失败，返回的 Permissions 等字段带入 Outcome.Subject。
 	// Type、ID、Tenant 不能被它修改。为 nil 时不调用。
 	Resolve identity.Resolver
-	// PasswordKinds 是可以与密码一起登录的标识类型，默认 email、phone、username。
-	PasswordKinds []string
-	// PasswordPolicy 检查新密码，不符合时返回错误（通常是 ErrWeakPassword）。
-	// 默认要求 8 到 128 个字符，并且首尾没有空白。已设置的密码不受之后修改的策略影响。
-	// Hasher 使用 bcrypt 时，超过 72 字节的密码同样返回 ErrWeakPassword。
-	PasswordPolicy func(password string) error
 	// CodeLength 是验证码的位数（数字），默认 6。
 	CodeLength int
 	// CodeTTL 是验证码的有效期，默认 15 分钟。
@@ -115,12 +110,6 @@ func New(db bun.IDB, opts Options) *Realm {
 	if err := opts.Type.Validate(); err != nil {
 		panic(errors.Wrap(err, "login: Options.Type"))
 	}
-	if opts.PasswordKinds == nil {
-		opts.PasswordKinds = []string{KindEmail, KindPhone, KindUsername}
-	}
-	if opts.PasswordPolicy == nil {
-		opts.PasswordPolicy = defaultPolicy
-	}
 	opts.CodeLength = cmp(opts.CodeLength, 6)
 	opts.CodeTTL = cmp(opts.CodeTTL, 15*time.Minute)
 	opts.CodeAttempts = cmp(opts.CodeAttempts, 3)
@@ -158,6 +147,58 @@ func defaultPolicy(password string) error {
 	return nil
 }
 
+// Policy 是一套账号体系的登录策略，见 Options.Policy 和 Options.PolicyFor。零值表示：不开放注册，
+// email、phone、username 都可以与密码一起登录，默认的密码规则，不强制二次验证，不限制登录方式。
+type Policy struct {
+	// Register 为 true 时开放自助注册：向未注册的标识发送 SignIn 验证码，验证后得到注册用的完成凭证。
+	// 为 false 时未注册的标识与找回密码一样不发送验证码，也不暴露它未注册。
+	Register bool
+	// PasswordKinds 是可以与密码一起登录的标识类型，默认 email、phone、username。
+	PasswordKinds []string
+	// PasswordPolicy 检查新密码，不符合时返回错误（通常是 ErrWeakPassword）。
+	// 默认要求 8 到 128 个字符，并且首尾没有空白。已设置的密码不受之后修改的策略影响。
+	// Hasher 使用 bcrypt 时，超过 72 字节的密码同样返回 ErrWeakPassword。
+	PasswordPolicy func(password string) error
+	// RequireTwoFactor 为 true 时必须使用二次验证，例如运营人员，或者要求成员使用二次验证的租户。
+	// 这次登录没有经过二次验证（passkey 登录、External.TwoFactor 本身就算）时不签发凭据：账号已经启用二次验证的，
+	// 返回 Outcome.Pending，第三方登录也是如此；还没有启用的，返回 Outcome.Enroll，先启用再登录，见 EnrollTOTP。
+	RequireTwoFactor bool
+	// Methods 是允许的登录方式，名称与 identity.Auth.Methods 相同：password、email、phone、第三方提供方的名称、passkey。
+	// nil 表示不限制；例如租户要求只用自己的企业 IdP 登录时，只列出这个提供方。不允许的方式返回 ErrMethodNotAllowed：
+	// Password、SendCode（SignIn）、VerifyCode（登录）和 External 都检查它。二次验证的第二步不受限制。
+	Methods []string
+}
+
+// policy 返回 ctx 的登录策略，补上默认值。
+func (r *Realm) policy(ctx context.Context) (Policy, error) {
+	p := r.opts.Policy
+	if r.opts.PolicyFor != nil {
+		var err error
+		if p, err = r.opts.PolicyFor(ctx); err != nil {
+			return Policy{}, err
+		}
+	}
+	if p.PasswordKinds == nil {
+		p.PasswordKinds = []string{KindEmail, KindPhone, KindUsername}
+	}
+	if p.PasswordPolicy == nil {
+		p.PasswordPolicy = defaultPolicy
+	}
+	return p, nil
+}
+
+// allow 确认 ctx 的登录策略允许 method，不允许时返回 ErrMethodNotAllowed。
+func (r *Realm) allow(ctx context.Context, method string) (Policy, error) {
+	p, err := r.policy(ctx)
+	if err != nil {
+		return Policy{}, err
+	}
+	if p.Methods != nil && !slices.Contains(p.Methods, method) {
+		return Policy{}, ErrMethodNotAllowed.New(errorx.Public("method", method))
+	}
+	return p, nil
+}
+
 // Outcome 是一次身份证明的结果，四者只有一个不为零值。
 type Outcome struct {
 	// Subject 是登录成功的主体：Type、ID，PerTenant 时还有 Tenant，Auth 记下这次通过的验证方式（见 MethodPassword），
@@ -169,7 +210,7 @@ type Outcome struct {
 	// Proof 是需要应用继续完成的一次性完成凭证：标识未注册时交给 Register，找回密码时交给 ResetPassword，
 	// 绑定标识时交给 Link。
 	Proof string
-	// Enroll 表示身份已经得到证明，但 Options.RequireTwoFactor 要求二次验证而账号还没有启用：把它交给客户端，
+	// Enroll 表示身份已经得到证明，但 Policy.RequireTwoFactor 要求二次验证而账号还没有启用：把它交给客户端，
 	// 客户端用 EnrollTOTP 取得二维码，再用 CompleteEnroll 提交验证器上的数字，启用后登录成功。
 	Enroll string
 }

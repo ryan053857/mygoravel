@@ -273,7 +273,7 @@ type pendingData struct {
 
 // authenticated 在身份得到证明后调用，决定是登录成功，还是先完成二次验证（Outcome.Pending）或先启用它（Outcome.Enroll）。
 // methods 是已经通过的验证方式；local 表示由本 Realm 验证（密码、验证码），这时只要启用了二次验证就要求第二步，
-// 第三方登录只在 Options.RequireTwoFactor 要求时才要求。db 是保存待完成登录的数据库，注册时是应用的事务。
+// 第三方登录只在 Policy.RequireTwoFactor 要求时才要求。db 是保存待完成登录的数据库，注册时是应用的事务。
 func (r *Realm) authenticated(ctx context.Context, db bun.IDB, subjectID, tenant string, local bool, methods ...string) (Outcome, error) {
 	if (identity.Auth{Methods: methods}).TwoFactor() {
 		return r.signedIn(ctx, subjectID, tenant, methods...)
@@ -282,12 +282,11 @@ func (r *Realm) authenticated(ctx context.Context, db bun.IDB, subjectID, tenant
 	if err != nil {
 		return Outcome{}, err
 	}
-	required := false
-	if !enabled || !local {
-		if required, err = r.requireTwoFactor(ctx, subjectID, tenant); err != nil {
-			return Outcome{}, err
-		}
+	p, err := r.policy(ctx)
+	if err != nil {
+		return Outcome{}, err
 	}
+	required := p.RequireTwoFactor
 	switch {
 	case enabled && (local || required):
 		pending, err := r.challenge(ctx, db, purposeTwoFactor, subjectID, tenant, methods)
@@ -297,14 +296,6 @@ func (r *Realm) authenticated(ctx context.Context, db bun.IDB, subjectID, tenant
 		return Outcome{Enroll: enroll}, err
 	}
 	return r.signedIn(ctx, subjectID, tenant, methods...)
-}
-
-// requireTwoFactor 调用 Options.RequireTwoFactor。
-func (r *Realm) requireTwoFactor(ctx context.Context, subjectID, tenant string) (bool, error) {
-	if r.opts.RequireTwoFactor == nil {
-		return false, nil
-	}
-	return r.opts.RequireTwoFactor(ctx, identity.Subject{Type: r.opts.Type, ID: subjectID, Tenant: tenant})
 }
 
 // challenge 保存一次待完成的登录（二次验证或启用二次验证），记下已经通过的验证方式，返回交给客户端的凭证。

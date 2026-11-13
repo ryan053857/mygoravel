@@ -233,7 +233,6 @@ import (
     "github.com/ryan053857/mygoravel/apitoken"
     "github.com/ryan053857/mygoravel/crypt"
     "github.com/ryan053857/mygoravel/hashing"
-    "github.com/ryan053857/mygoravel/identity"
     "github.com/ryan053857/mygoravel/login"
     "github.com/ryan053857/mygoravel/login/oauth"
     "github.com/ryan053857/mygoravel/mail"
@@ -269,15 +268,14 @@ type Accounts struct {
 func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher *hashing.Hasher, c *crypt.Crypt, mailer mail.Mailer, texts sms.Sender) (*Accounts, error) {
     every15 := ratelimit.Config{Rate: 5, Interval: 15 * time.Minute, Burst: 5}
     editors := login.New(db, login.Options{
-        Type:          editor.Type,
-        Hasher:        hasher,
-        Crypt:         c,
-        Issuer:        "Blog 编辑后台",
-        PasswordKinds: []string{login.KindEmail},
-        Resolve:       editor.Resolve(db),
-        // 编辑必须使用二次验证：还没有启用的，登录时先启用。
-        RequireTwoFactor: func(context.Context, identity.Subject) (bool, error) { return true, nil },
-        Attempts:      redislimit.New(rdb, "blog:login:editor:attempts", every15),
+        Type:    editor.Type,
+        Hasher:  hasher,
+        Crypt:   c,
+        Issuer:  "Blog 编辑后台",
+        Resolve: editor.Resolve(db),
+        // 编辑只用邮箱和密码登录，必须使用二次验证：还没有启用的，登录时先启用。
+        Policy:   login.Policy{PasswordKinds: []string{login.KindEmail}, RequireTwoFactor: true},
+        Attempts: redislimit.New(rdb, "blog:login:editor:attempts", every15),
         Sends:         redislimit.New(rdb, "blog:login:editor:sends", every15),
         Send: func(ctx context.Context, code login.Code) error {
             link := cfg.PasswordURL + "?" + url.Values{"request": {code.RequestID}, "code": {code.Code}}.Encode()
@@ -290,7 +288,7 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
     })
     readers := login.New(db, login.Options{
         Type:     reader.Type,
-        Register: true,
+        Policy:   login.Policy{Register: true},
         Hasher:   hasher,
         Crypt:    c,
         Resolve:  reader.Resolve(db),
@@ -340,7 +338,7 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
 3. 启用：`POST /auth/two-factor/enroll` 得到二维码，扫码后 `POST /auth/two-factor/enroll/confirm` 提交验证器上的数字，得到 token 和恢复码；
 4. 邀请其他编辑（`POST /editors`）要求 15 分钟内确认过身份。超过时返回 `403 auth.confirm_required`，单页应用弹出密码框，`POST /account/confirm` 之后重试。
 
-“必须启用二次验证”由 `accounts` 中的 `RequireTwoFactor` 保证：没有经过二次验证的编辑拿不到 token。下面是完整的 `internal/editor/editorapi/routes.go`：
+“必须启用二次验证”由 `accounts` 中的 `Policy.RequireTwoFactor` 保证：没有经过二次验证的编辑拿不到 token。下面是完整的 `internal/editor/editorapi/routes.go`：
 
 ```go
 package editorapi
@@ -827,7 +825,7 @@ func (h *handlers) confirm(ctx context.Context, ref identity.Ref, in *ConfirmInp
 几点说明：
 
 - 读者没有启用二次验证，`VerifyCode` 和 `External` 不会返回 `Pending`。需要时与[编辑后台](#editor-api)一样处理。
-- 发送验证码对未注册的手机号同样发送（`Register: true`），所以第 2 步才知道要注册；同一个手机号 15 分钟内最多发 5 次，见[限流与防探测](login.md#limits)。
+- 发送验证码对未注册的手机号同样发送（`Policy.Register` 为 `true`），所以第 2 步才知道要注册；同一个手机号 15 分钟内最多发 5 次，见[限流与防探测](login.md#limits)。
 - Apple 的 `Nonce` 应当由服务器下发，见 [App 原生登录](social-login.md#native-sign-in)。Apple 账号对方确认过的邮箱会一并写入，所以邮箱已被其他读者使用时注册返回 `login.ErrTaken`。
 - 退出登录撤销的是这次登录的 refresh token，已签发的 access token 在 10 分钟内过期；注销账号还会让这个读者的全部登录立即无法刷新。
 - 读者没有密码，注销前用验证码或重新登录 Apple [确认身份](login.md#confirming)。确认用的验证码只发给读者自己的手机号，不能用来登录。

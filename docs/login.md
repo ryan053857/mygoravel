@@ -10,6 +10,7 @@
 - [二次验证](#two-factor)
     - [强制二次验证](#requiring-two-factor)
 - [Passkey](#passkeys)
+- [按租户的登录策略](#policies)
 - [确认身份](#confirming)
 - [后台创建账号](#admin-accounts)
 - [注销账号](#forget)
@@ -46,7 +47,7 @@ migrationCmd.AddCommand(migratecmd.Publish(
 every15 := ratelimit.Config{Rate: 5, Interval: 15 * time.Minute, Burst: 5}
 users := login.New(a.db, login.Options{
     Type:     user.Type,
-    Register: true,
+    Policy:   login.Policy{Register: true},
     Hasher:   hashing.New(a.cfg.Hashing),
     Crypt:    a.crypt,
     Send:     sendCode(mailer, emails),
@@ -59,11 +60,21 @@ users := login.New(a.db, login.Options{
 | 选项 | 含义 |
 | --- | --- |
 | `Type` | 这套账号体系，`Realm` 只管理这个类型的主体 |
-| `Register` | 是否开放自助注册：为 `true` 时验证码也发给未注册的邮箱或手机号，验证后可以注册 |
+| `Policy` | 登录策略，见下表；各租户的策略不同时改用 `PolicyFor`，见[按租户的登录策略](#policies) |
 | `Send` | 发送验证码，邮件和短信的内容、通道由应用决定，见[邮件](mail.md)和[短信](sms.md) |
 | `Resolve` | 登录成功、签发凭据之前调用一次，通常就是入口的 [Resolver](authentication.md#resolving-subjects)：账号已停用时返回错误，登录失败 |
 | `PerTenant` | 登录标识在租户内唯一，见[登录标识](#identifiers) |
 | `Attempts`、`Sends` | 密码登录失败和发送验证码的[限流器](#limits)，必填 |
+
+`login.Policy` 的字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `Register` | 是否开放自助注册：为 `true` 时验证码也发给未注册的邮箱或手机号，验证后可以注册 |
+| `PasswordKinds` | 可以配合密码登录的标识类型，默认邮箱、手机号和用户名 |
+| `PasswordPolicy` | 检查新密码，默认要求 8 到 128 个字符、首尾没有空白 |
+| `RequireTwoFactor` | 强制[二次验证](#requiring-two-factor) |
+| `Methods` | 允许的登录方式，`nil` 表示不限制，见[按租户的登录策略](#policies) |
 
 验证码默认 6 位数字、15 分钟有效、最多试 3 次，都可以在 `Options` 中修改。`Send` 收到的 `login.Code` 带有用途、接收的标识和验证码，下面用[邮件模板](mail.md#writing-templates)发送：
 
@@ -114,7 +125,7 @@ plain, err := tokens.Login(ctx, out.Subject, device)
 
 完整的接口见 [API 令牌的登录与登出](api-tokens.md#login-and-logout)。邮箱不存在、没有设置密码、密码错误都返回 `login.ErrInvalidCredentials`，响应 `401`。连续失败太多次时返回 `ratelimit.ErrExceeded`，响应 `429`，见[限流与防探测](#limits)。
 
-允许用哪些标识配合密码登录由 `Options.PasswordKinds` 决定，默认是邮箱、手机号和用户名。登录成功时，如果密码哈希是用旧的算法或参数生成的，会按当前配置[重新哈希](hashing.md#rehashing)。
+允许用哪些标识配合密码登录由 `Policy.PasswordKinds` 决定，默认是邮箱、手机号和用户名。登录成功时，如果密码哈希是用旧的算法或参数生成的，会按当前配置[重新哈希](hashing.md#rehashing)。
 
 <a id="codes"></a>
 ## 验证码登录与注册
@@ -160,7 +171,7 @@ func (a *SignUp) Handle(ctx context.Context, in SignUpInput) (identity.Subject, 
 
 [第三方登录](social-login.md#signing-in)得到的注册凭证也交给同一个注册 action。注册需要什么资料、要不要同意协议都由应用决定。任何一步失败，账号行和凭证的使用一起回滚，客户端可以修正后用同一个凭证重试。两个人同时用同一个邮箱注册时，后完成的得到 `login.ErrTaken`。`WithPassword` 可以省略，只用验证码登录的账号没有密码。
 
-`Register` 为 `false` 时不开放自助注册：未注册的邮箱收不到验证码。为了不暴露哪些邮箱注册过，`SendCode` 照样返回请求 ID，只是用它验证必然失败。
+`Policy.Register` 为 `false` 时不开放自助注册：未注册的邮箱收不到验证码。为了不暴露哪些邮箱注册过，`SendCode` 照样返回请求 ID，只是用它验证必然失败。
 
 验证码也可以放进链接：模板中的链接同时带上 `RequestID` 和 `Code`，链接打开的页面把两者交给 `VerifyCode`。
 
@@ -185,7 +196,7 @@ if _, err := tokens.RevokeSubject(ctx, who); err != nil {
 }
 ```
 
-新密码按 `Options.PasswordPolicy` 检查，默认要求 8 到 128 个字符、首尾没有空白，不符合时返回 `login.ErrWeakPassword`。接收验证码的邮箱同时标为已验证，它的登录失败计数清零。找回密码后通常撤销这个账号的全部 token，见[撤销令牌](api-tokens.md#revoking-tokens)。`ResetPassword` 不登录，用户接着用新密码登录，启用了[二次验证](#two-factor)的账号仍然要通过二次验证，所以只拿到邮箱不能绕过它。没有设置过密码的账号同样可以用这个流程设置密码。
+新密码按 `Policy.PasswordPolicy` 检查，默认要求 8 到 128 个字符、首尾没有空白，不符合时返回 `login.ErrWeakPassword`。接收验证码的邮箱同时标为已验证，它的登录失败计数清零。找回密码后通常撤销这个账号的全部 token，见[撤销令牌](api-tokens.md#revoking-tokens)。`ResetPassword` 不登录，用户接着用新密码登录，启用了[二次验证](#two-factor)的账号仍然要通过二次验证，所以只拿到邮箱不能绕过它。没有设置过密码的账号同样可以用这个流程设置密码。
 
 <a id="managing"></a>
 ## 管理登录方式
@@ -259,12 +270,12 @@ plain, err := tokens.Login(ctx, out.Subject, device)
 <a id="requiring-two-factor"></a>
 ### 强制二次验证
 
-运营后台通常要求员工都启用二次验证。在这套账号的 `Options` 中设置 `RequireTwoFactor`：
+运营后台通常要求员工都启用二次验证。在这套账号的登录策略中设置 `RequireTwoFactor`：
 
 ```go
 staff := login.New(db, login.Options{
     // ……
-    RequireTwoFactor: func(context.Context, identity.Subject) (bool, error) { return true, nil },
+    Policy: login.Policy{RequireTwoFactor: true},
 })
 ```
 
@@ -278,7 +289,7 @@ plain, err := tokens.Login(ctx, out.Subject, device)
 
 `Enroll` 与 `Pending` 一样 15 分钟内有效，最多输错 5 次。passkey 登录本身就算二次验证，直接成功；`Register` 注册的新账号同样先启用。完整的写法见[编辑后台](account-examples.md#editor-api)。
 
-`RequireTwoFactor` 收到的主体带有登录时的租户，[按租户登录](#identifiers)的账号体系可以按租户的设置决定。一套账号在多个租户中使用、只有部分租户要求二次验证时，登录时还不知道要进哪个租户，改由这些租户的 Resolver 检查：`!sub.Auth.TwoFactor()` 时返回 `identity.ErrTwoFactorRequired`，请求得到 `403 auth.two_factor_required`。客户端让用户输入验证器上的数字，`CheckTwoFactor` 校验后用 token 的 `Confirm` 补上这次的方式（见[确认身份](#confirming)），再重试；账号还没有启用二次验证的，先到账号设置中启用。
+[按租户登录](#identifiers)的账号体系可以按租户的设置决定，见[按租户的登录策略](#policies)。一套账号在多个租户中使用、只有部分租户要求二次验证时，登录时还不知道要进哪个租户，改由这些租户的 Resolver 检查：`!sub.Auth.TwoFactor()` 时返回 `identity.ErrTwoFactorRequired`，请求得到 `403 auth.two_factor_required`。客户端让用户输入验证器上的数字，`CheckTwoFactor` 校验后用 token 的 `Confirm` 补上这次的方式（见[确认身份](#confirming)），再重试；账号还没有启用二次验证的，先到账号设置中启用。
 
 <a id="passkeys"></a>
 ## Passkey
@@ -334,6 +345,49 @@ err = users.Link(ctx, a.db, sub.Ref(), proof)
 `email` 是系统在保存 passkey 时显示的账号名，`in.Body.Name` 是给这个 passkey 起的名称，例如“iPhone”。同一个账号已有的 passkey 不会在同一个设备上重复创建。
 
 账号设置中，`List` 列出账号的 passkey（名称、是否在设备之间同步、最近使用时间），`Rename` 改名，`Remove` 移除；不能移除最后一种登录方式。签名计数倒退（疑似 passkey 被复制）时登录失败。创建后没有绑定到账号的 passkey，以及账号[注销](#forget)后留下的公钥，由 `passkeys.Cleanup` 定时删除。
+
+<a id="policies"></a>
+## 按租户的登录策略
+
+`Options.Policy` 对整套账号体系生效。[按租户登录](#identifiers)（`PerTenant`）的账号体系，各租户可以有不同的策略，例如 A 租户开放注册，B 租户只能用自己的企业 IdP 登录，C 租户强制二次验证。这时设置 `PolicyFor`，它按 context 中的租户返回策略，通常读取租户的[设置](settings.md)：
+
+```go
+type LoginSettings struct {
+    Register         bool     `json:"register"`
+    RequireTwoFactor bool     `json:"require_two_factor"`
+    Methods          []string `json:"methods"` // 例如 ["acme_sso"]；空表示不限制
+}
+
+loginSettings := settings.New(a.db, "login", LoginSettings{Register: true})
+
+customers := login.New(a.db, login.Options{
+    Type:      customer.Type,
+    PerTenant: true,
+    PolicyFor: func(ctx context.Context) (login.Policy, error) {
+        s, err := loginSettings.Tenant(identity.TenantFromContext(ctx)).Get(ctx)
+        if err != nil {
+            return login.Policy{}, err
+        }
+        return login.Policy{Register: s.Register, RequireTwoFactor: s.RequireTwoFactor, Methods: s.Methods}, nil
+    },
+    // ……
+})
+```
+
+`Methods` 列出允许的登录方式，名称与 `sub.Auth.Methods` 相同：`password`、`email`、`phone`、第三方提供方的名称、`passkey`。不允许的方式在 `Password`、`SendCode`（`SignIn`）、`VerifyCode` 和 `External` 中返回 `403 login.method_not_allowed`，公开参数 `method` 是这种方式。找回密码、二次验证的第二步不受限制。
+
+一套账号在多个租户中使用（不设置 `PerTenant`）时，登录时还不知道要进哪个租户，`PolicyFor` 拿不到租户。这时由租户的 Resolver 在进入租户时检查这次登录用的方式：
+
+```go
+if cfg.RequireSSO && !slices.Contains(sub.Auth.Methods, cfg.Connection) {
+    return identity.Subject{}, identity.ErrMethodRequired.New(errorx.Public("methods", []string{cfg.Connection}))
+}
+if cfg.RequireTwoFactor && !sub.Auth.TwoFactor() {
+    return identity.Subject{}, identity.ErrTwoFactorRequired.New()
+}
+```
+
+请求得到 `403 auth.method_required`，公开参数 `methods` 列出可以用的方式，客户端让用户用其中一种重新登录。企业 SSO 的完整写法见[企业单点登录](enterprise-sso.md)。
 
 <a id="confirming"></a>
 ## 确认身份
