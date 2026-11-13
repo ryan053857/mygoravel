@@ -9,6 +9,7 @@
     - [访问日志](#access-log)
 - [限流](#rate-limiting)
 - [跨域请求](#cors)
+- [HTTP Basic 认证](#basic-auth)
 - [App 最低版本](#app-version)
 - [响应压缩](#compression)
 - [指标](#metrics)
@@ -266,6 +267,37 @@ http:
 API 只用 [Bearer token](api-tokens.md) 认证，不使用 cookie，所以 `CORS` 从不允许携带凭据：其他网站的网页拿不到用户的 token，允许任何来源也是安全的。请求头按预检请求声明的原样允许，`Authorization` 不需要单独配置。
 
 预检请求（`OPTIONS`）直接以 `204` 应答，不进入路由、认证和限流，所以要把 `CORS` 安装在它们之前。`401`、`429` 等错误响应同样带有 CORS 头，前端能读到错误内容。
+
+<a id="basic-auth"></a>
+## HTTP Basic 认证
+
+[队列面板](queue.md#panel)、内部的[文档页](doc-pages.md)这类给运维和团队成员看的页面，不值得接入应用的账号体系，用 `httpx.BasicAuth` 保护：浏览器弹出登录框，之后的请求自动带上用户名和密码。
+
+账号写在配置中，密码保存为[哈希](hashing.md)，用 `hashing.Hasher` 生成和校验：
+
+```go
+type Config struct {
+    // ……
+    Ops map[string]string `yaml:"ops"` // 运维账号：用户名 → 密码哈希
+}
+
+func (a *App) verifyOps(_ context.Context, user, password string) (bool, error) {
+    hash, ok := a.cfg.Ops[user]
+    return ok && a.hasher.Check(password, hash), nil
+}
+```
+
+```go
+ops := router.With(
+    httpx.RateLimit(opsLimiter, httpx.KeyByIP), // 限制暴力尝试，见限流
+    httpx.BasicAuth("ops", a.verifyOps),
+)
+```
+
+- 没有凭据或校验不通过时返回 `401` 和 `WWW-Authenticate: Basic realm="ops"`；`verify` 返回错误时返回 `503`，记录一条 Error 日志。
+- 认证通过后，`httpx.BasicUser(ctx)` 返回用户名，用来在日志中记下操作者。
+- Basic 认证在每个请求中发送明文密码，只能用于 HTTPS。
+- 浏览器会给跨站请求自动带上 Basic 凭据：页面中有 `POST` 等修改数据的请求时，用 `http.CrossOriginProtection` 拒绝跨站请求。队列面板已经这样做了。
 
 <a id="app-version"></a>
 ## App 最低版本

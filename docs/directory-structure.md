@@ -216,7 +216,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
-| `httpx` | HTTP 中间件、平滑停机、就绪检查、单页应用 | [中间件](middleware.md)、[请求生命周期](lifecycle.md)、[单页应用](spa.md) |
+| `httpx` | HTTP 中间件（含 HTTP Basic 认证）、平滑停机、就绪检查、单页应用 | [中间件](middleware.md)、[请求生命周期](lifecycle.md)、[单页应用](spa.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
 | `httpx/rest/clientgen` | 从路由生成 Go 客户端的 `client` 命令 | [Go 客户端](clients.md#go) |
 | `web` | 服务端渲染的公开页面：渲染组件、错误页、表单、主题、内容安全策略、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md) |
@@ -229,6 +229,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | `command/devcmd` | `dev` 命令：开发页面时监听文件变化、重启应用、刷新浏览器 | [dev 命令](commands.md#dev-command) |
 | `command/httpcmd` | `openapi`、`routes` 命令 | [openapi 命令](commands.md#openapi-command) |
 | `command/migratecmd` | `migrate` 命令 | [migrate 命令](commands.md#migrate-command) |
+| `queue/queueweb` | 队列面板：复制槽和延迟任务的状态、失败任务的查看、重试和删除 | [队列面板](queue.md#panel) |
 | `queue/queuecmd` | `queue failed` 命令：列出失败任务 | [队列状态](queue.md#stats-command) |
 | `schedule/schedulecmd` | `schedules` 命令：列出定时任务、下一次执行的时间、是否正在执行和上一次的结果 | [列出任务的命令](scheduling.md#schedules-command) |
 

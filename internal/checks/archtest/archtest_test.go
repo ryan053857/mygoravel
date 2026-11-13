@@ -80,6 +80,7 @@ var rules = map[string]rule{
 	"command/httpcmd":      {layerEntry, []string{"command", "httpx"}},
 	"command/migratecmd":   {layerEntry, []string{"command", "database"}},
 	"queue/queuecmd":       {layerEntry, []string{"command", "queue"}},
+	"queue/queueweb":       {layerEntry, []string{"httpx", "i18n", "logging", "page", "queue", "web"}},
 	"schedule/schedulecmd": {layerEntry, []string{"command", "schedule"}},
 
 	"apitoken":          {layerFeature, []string{"crypt", "errorx", "identity"}},

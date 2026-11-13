@@ -16,6 +16,7 @@
     - [指标](#metrics)
     - [任务事件](#job-events)
     - [队列状态](#stats-command)
+    - [队列面板](#panel)
 - [测试](#testing)
 
 <a id="introduction"></a>
@@ -448,6 +449,35 @@ next scheduled  2026-11-14 09:00:00
 ID                                    TOPIC      ATTEMPTS  FAILED AT            ERROR
 0193e7b1-2c4f-7d8e-9a1b-5f6c7d8e9f01  mail.send  5         2026-11-12 09:41:07  send mail: dial tcp 10.0.0.12:587: connection refused
 ```
+
+<a id="panel"></a>
+### 队列面板
+
+`queue/queueweb` 把同样的内容做成网页，相当于 Laravel 的 Horizon，但只读写队列已有的数据：
+
+- **概览**：复制槽是否有 worker 在转发、WAL 状态和积压、`queue_scheduled` 中的任务数和最早的执行时间、各 topic 的失败任务数，每 5 秒刷新一次；
+- **失败任务**：按 topic 筛选、翻页；详情页显示格式化的 payload、元数据、完整的错误和堆栈；单条重试或删除，按 topic 全部重试或全部删除；
+- **延迟任务**：`queue_scheduled` 中等待的任务，按执行时间排列。
+
+吞吐、耗时等[指标](#metrics)交给 Grafana，各 topic 的积压和消费者交给 nsqadmin，面板只在页头放它们的链接；重建复制槽只能用 `queue slot recreate`。面板不新增任何表。
+
+面板是框架自带的[服务端渲染页面](views.md)，认证由应用决定，通常是 [HTTP Basic 认证](middleware.md#basic-auth)。挂在 HTTP 进程的路由上：
+
+```go
+router.Handle(web.AssetsPath+"*", web.Assets())
+router.Handle(ui.AssetsPath+"*", ui.Assets())
+
+ops := router.With(httpx.BasicAuth("ops", a.verifyOps))
+queueweb.Register(ops, "/ops/queue", a.db, queueweb.Options{
+    Links: map[string]string{"Grafana": a.cfg.GrafanaURL, "nsqadmin": a.cfg.NSQAdminURL},
+})
+```
+
+`a.verifyOps` 校验运维账号，见 [HTTP Basic 认证](middleware.md#basic-auth)。`Options.Theme` 可以设置面板的[主题](components.md#themes)。
+
+- 全部重试只处理点击之前失败的任务：重试后马上又失败的任务不会在这一轮里被反复放回。它分批处理，每批 1000 条，直到处理完。
+- 每次重试和删除记一条 Info 日志，带上操作者（Basic 认证的用户名）、topic 和条数。
+- 浏览器会给跨站请求自动带上 Basic 凭据，所以面板拒绝跨站的 `POST`（`http.CrossOriginProtection`），不需要 CSRF token。
 
 <a id="testing"></a>
 ## 测试

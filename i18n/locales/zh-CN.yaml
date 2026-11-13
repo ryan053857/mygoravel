@@ -102,3 +102,37 @@ validation.pattern_description: 必须是{{.Description}}
 validation.type: 类型不正确
 validation.unexpected: 不支持这个字段
 validation.failed: 提交的内容有误
+queueweb.all_topics: 全部
+queueweb.attempts: 执行次数
+queueweb.available_at: 执行时间
+queueweb.cannot_undo: 删除后无法恢复。
+queueweb.confirm_delete: 删除这条失败任务？
+queueweb.confirm_delete_all: 删除这些失败任务？
+queueweb.confirm_retry_all: 重新发布这些失败任务？
+queueweb.confirm_retry_all_description: 此刻之前失败的任务会重新发布，执行次数从 0 开始。
+queueweb.count: 条数
+queueweb.delete: 删除
+queueweb.delete_all: 全部删除
+queueweb.deleted: 已删除 {{.n}} 条失败任务
+queueweb.details: 详情
+queueweb.error: 错误
+queueweb.failed: 失败任务
+queueweb.failed_at: 失败时间
+queueweb.idle: 没有 Worker 在转发
+queueweb.lag: 积压
+queueweb.next: 最早执行
+queueweb.no_failed: 没有失败任务
+queueweb.no_scheduled: 没有延迟任务
+queueweb.overview: 概览
+queueweb.relay: 转发
+queueweb.relaying: 正在转发
+queueweb.retried: 已重新发布 {{.n}} 条失败任务
+queueweb.retry: 重试
+queueweb.retry_all: 全部重试
+queueweb.scheduled: 延迟任务
+queueweb.slot: 复制槽
+queueweb.slot_missing: 不存在：运行 queue slot recreate
+queueweb.slot_name: 名称
+queueweb.title: 队列
+queueweb.view: 查看
+queueweb.wal_status: WAL 状态

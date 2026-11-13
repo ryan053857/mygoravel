@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -74,4 +75,49 @@ func (w *Worker) dispatch(ctx context.Context) (int, error) {
 		return nil
 	})
 	return n, errors.Wrap(err, "queue: dispatch scheduled jobs")
+}
+
+// ScheduledJob 是 queue_scheduled 中等待的任务：执行时间离现在超过 Config.MaxDefer，快到时间时才交给 NSQ。
+type ScheduledJob struct {
+	ID      uuid.UUID
+	Topic   string
+	Payload json.RawMessage
+	// Metadata 是发布时附带的元数据，例如链路信息。
+	Metadata map[string]string
+	// AvailableAt 是任务的执行时间，CreatedAt 是写入这张表的时间。
+	AvailableAt time.Time
+	CreatedAt   time.Time
+}
+
+// ScheduledQuery 是 ListScheduled 的条件。
+type ScheduledQuery struct {
+	// Topic 为空时列出全部 topic。
+	Topic string
+	// Limit 是最多返回的条数，0 表示 100。
+	Limit  int
+	Offset int
+}
+
+// ListScheduled 按执行时间从早到晚列出 db 中等待的延迟任务，只读。总数见 ReadStatus 的 Scheduled。
+func ListScheduled(ctx context.Context, db bun.IDB, q ScheduledQuery) ([]ScheduledJob, error) {
+	if q.Limit <= 0 {
+		q.Limit = 100
+	}
+	var rows []scheduledRow
+	sel := db.NewSelect().Model(&rows).OrderExpr("s.available_at, s.id").Limit(int64(q.Limit)).Offset(int64(max(q.Offset, 0)))
+	if q.Topic != "" {
+		sel = sel.Where("s.topic = ?", q.Topic)
+	}
+	if err := sel.Scan(ctx); err != nil {
+		return nil, errors.Wrap(err, "queue: list scheduled jobs")
+	}
+	jobs := make([]ScheduledJob, len(rows))
+	for i, r := range rows {
+		jobs[i] = ScheduledJob{ID: r.ID, Topic: r.Topic, AvailableAt: r.AvailableAt, CreatedAt: r.CreatedAt}
+		var env envelope
+		if json.Unmarshal(r.Body, &env) == nil {
+			jobs[i].Payload, jobs[i].Metadata = env.Payload, env.Metadata
+		}
+	}
+	return jobs, nil
 }

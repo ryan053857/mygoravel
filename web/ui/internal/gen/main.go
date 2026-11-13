@@ -1,11 +1,11 @@
 // gen 从 go.mod 中固定版本的 shadcn-templ 生成 web/ui 的前端资源，在 web/ui 目录中运行：go generate。
 // 需要 tailwindcss（standalone CLI）。只有升级 shadcn-templ，或修改 css/ui.css、css/safelist.css、css/docs.css、
-// js/glue.js、web/ui 和 web/docs 的 templ 组件中的类名后才需要运行。
+// js/glue.js、web/ui、web/docs 和 queue/queueweb 的 templ 组件中的类名后才需要运行。
 //
 // 生成：
 //
 //   - css/vendor/：上游的 tw-animate.css、shadcn-tailwind.css 和 8 套风格 styles/style-*.css；
-//   - css/classes.txt：shadcn-templ 组件与 web/ui、web/docs 组件中的类名候选，供 Tailwind 扫描；
+//   - css/classes.txt：shadcn-templ 组件与 web/ui、web/docs、queue/queueweb 组件中的类名候选，供 Tailwind 扫描；
 //   - css/docs-chroma.css：web/docs 代码块的高亮颜色；
 //   - css/style-<风格>.css：每套风格的样式入口，导入 ui.css 和该风格；
 //   - assets/：gzip 压缩的资源，文件名带内容哈希：
@@ -130,7 +130,8 @@ func writeClasses(dir string) {
 	files, _ := filepath.Glob(filepath.Join(dir, "components/*/*"))
 	own, _ := filepath.Glob("*.templ")
 	docs, _ := filepath.Glob("../docs/*.templ")
-	own = append(own, docs...)
+	panels, _ := filepath.Glob("../../queue/queueweb/*.templ") // 框架自带的运维面板
+	own = append(append(own, docs...), panels...)
 	seen := map[string]bool{}
 	for _, f := range append(files, own...) {
 		ext := filepath.Ext(f)

@@ -266,3 +266,18 @@ func republish(ctx context.Context, tx bun.IDB, rows []failedJob) error {
 	}
 	return nil
 }
+
+// TopicCount 是一个 topic 中失败任务的条数。
+type TopicCount struct {
+	Topic string
+	Count int
+}
+
+// Counts 返回每个 topic 中失败任务的条数，条数多的在前。没有失败任务的 topic 不出现。
+func (f *FailedJobs) Counts(ctx context.Context) ([]TopicCount, error) {
+	var counts []TopicCount
+	err := f.db.NewSelect().Model((*failedJob)(nil)).
+		ColumnExpr("f.topic, count(*) AS count").Group("f.topic").OrderExpr("count DESC, f.topic").
+		Scan(ctx, &counts)
+	return counts, errors.Wrap(err, "queue: count failed jobs")
+}

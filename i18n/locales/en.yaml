@@ -102,3 +102,37 @@ validation.pattern_description: Must be {{.Description}}
 validation.type: Wrong type
 validation.unexpected: Unknown field
 validation.failed: Validation failed
+queueweb.all_topics: All
+queueweb.attempts: Attempts
+queueweb.available_at: Runs at
+queueweb.cannot_undo: This cannot be undone.
+queueweb.confirm_delete: Delete this failed job?
+queueweb.confirm_delete_all: Delete these failed jobs?
+queueweb.confirm_retry_all: Retry these failed jobs?
+queueweb.confirm_retry_all_description: Jobs that failed before now are published again.
+queueweb.count: Count
+queueweb.delete: Delete
+queueweb.delete_all: Delete all
+queueweb.deleted: Deleted {{.n}} failed jobs
+queueweb.details: Details
+queueweb.error: Error
+queueweb.failed: Failed jobs
+queueweb.failed_at: Failed at
+queueweb.idle: No worker relaying
+queueweb.lag: Lag
+queueweb.next: Next
+queueweb.no_failed: No failed jobs
+queueweb.no_scheduled: No scheduled jobs
+queueweb.overview: Overview
+queueweb.relay: Relay
+queueweb.relaying: Relaying
+queueweb.retried: Retried {{.n}} failed jobs
+queueweb.retry: Retry
+queueweb.retry_all: Retry all
+queueweb.scheduled: Scheduled jobs
+queueweb.slot: Replication slot
+queueweb.slot_missing: "Missing: run queue slot recreate"
+queueweb.slot_name: Name
+queueweb.title: Queue
+queueweb.view: View
+queueweb.wal_status: WAL status

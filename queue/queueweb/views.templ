@@ -1,0 +1,227 @@
+package queueweb
+
+import (
+	"strconv"
+
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/icon"
+	"github.com/ryan053857/mygoravel/queue"
+	"github.com/ryan053857/mygoravel/web/ui"
+)
+
+templ layout(f frame, body templ.Component) {
+	@ui.Page(ui.PageProps{Title: t(ctx, "queueweb.title", "Queue")}) {
+		<header class="border-b">
+			<div class="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
+				<a href={ templ.SafeURL(f.base + "/") } class="font-semibold">{ t(ctx, "queueweb.title", "Queue") }</a>
+				<nav class="flex gap-4 text-sm">
+					@navLink(f, navOverview, f.base+"/", t(ctx, "queueweb.overview", "Overview"))
+					@navLink(f, navFailed, f.base+"/failed", t(ctx, "queueweb.failed", "Failed jobs"))
+					@navLink(f, navScheduled, f.base+"/scheduled", t(ctx, "queueweb.scheduled", "Scheduled jobs"))
+				</nav>
+				<div class="ml-auto flex items-center gap-4 text-sm">
+					for _, l := range f.links {
+						<a href={ templ.SafeURL(l.url) } target="_blank" rel="noopener" class="text-muted-foreground hover:text-foreground">{ l.name }</a>
+					}
+					@ui.ThemeToggle()
+				</div>
+			</div>
+		</header>
+		<main class="mx-auto max-w-6xl p-6">
+			@body
+		</main>
+		@ui.Confirm()
+		@ui.Toaster()
+	}
+}
+
+templ navLink(f frame, n nav, href, label string) {
+	if f.current == n {
+		<a href={ templ.SafeURL(href) } class="font-medium text-foreground" aria-current="page">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) } class="text-muted-foreground hover:text-foreground">{ label }</a>
+	}
+}
+
+templ card(title string) {
+	<section class="rounded-lg border p-4">
+		<h2 class="mb-3 text-sm font-medium text-muted-foreground">{ title }</h2>
+		{ children... }
+	</section>
+}
+
+templ row(label, value string) {
+	<div class="flex justify-between gap-4 py-1 text-sm">
+		<span class="text-muted-foreground">{ label }</span>
+		<span class="font-mono">{ value }</span>
+	</div>
+}
+
+// overviewSection 每 5 秒刷新一次自己。
+templ overviewSection(v overviewView) {
+	<section id="overview" class="grid gap-4 md:grid-cols-3" hx-get={ v.base + "/" } hx-trigger="every 5s" hx-swap="outerHTML">
+		@card(t(ctx, "queueweb.slot", "Replication slot")) {
+			@row(t(ctx, "queueweb.slot_name", "Name"), v.status.Slot)
+			if !v.status.Exists {
+				<p class="py-1 text-sm text-destructive">{ t(ctx, "queueweb.slot_missing", "Missing: run queue slot recreate") }</p>
+			} else {
+				if v.status.Active {
+					@row(t(ctx, "queueweb.relay", "Relay"), t(ctx, "queueweb.relaying", "Relaying")+" (pid "+strconv.Itoa(v.status.ActivePID)+")")
+				} else {
+					@row(t(ctx, "queueweb.relay", "Relay"), t(ctx, "queueweb.idle", "No worker relaying"))
+				}
+				@row(t(ctx, "queueweb.wal_status", "WAL status"), v.status.WALStatus)
+				@row(t(ctx, "queueweb.lag", "Lag"), formatBytes(v.status.Lag))
+			}
+		}
+		@card(t(ctx, "queueweb.scheduled", "Scheduled jobs")) {
+			@row(t(ctx, "queueweb.count", "Count"), strconv.Itoa(v.status.Scheduled))
+			@row(t(ctx, "queueweb.next", "Next"), formatTime(v.status.NextScheduled))
+			<a href={ templ.SafeURL(v.base + "/scheduled") } class="mt-2 inline-block text-sm underline">{ t(ctx, "queueweb.view", "View") }</a>
+		}
+		@card(t(ctx, "queueweb.failed", "Failed jobs")) {
+			if len(v.counts) == 0 {
+				<p class="py-1 text-sm text-muted-foreground">{ t(ctx, "queueweb.no_failed", "No failed jobs") }</p>
+			}
+			for _, c := range v.counts {
+				<a href={ templ.SafeURL(failedView{base: v.base}.topicURL(c.Topic)) } class="flex justify-between gap-4 py-1 text-sm hover:underline">
+					<span class="font-mono">{ c.Topic }</span>
+					<span class="font-mono">{ strconv.Itoa(c.Count) }</span>
+				</a>
+			}
+		}
+	</section>
+}
+
+templ failedSection(v failedView) {
+	<section id="failed" class="flex flex-col gap-4" hx-target:inherited="this" hx-swap:inherited="outerHTML">
+		<div class="flex flex-wrap items-center gap-2 text-sm">
+			@topicLink(v, "", t(ctx, "queueweb.all_topics", "All")+" "+strconv.Itoa(total(v.counts)))
+			for _, c := range v.counts {
+				@topicLink(v, c.Topic, c.Topic+" "+strconv.Itoa(c.Count))
+			}
+			if v.list.Total > 0 {
+				<div class="ml-auto flex gap-2">
+					@button.Button(button.Props{Variant: button.VariantOutline, Size: button.SizeSm, Attributes: templ.Attributes{
+						"hx-post":                  v.bulkURL("retry"),
+						"hx-confirm":               t(ctx, "queueweb.confirm_retry_all", "Retry these failed jobs?"),
+						"data-confirm-description": t(ctx, "queueweb.confirm_retry_all_description", "Jobs that failed before now are published again."),
+					}}) {
+						{ t(ctx, "queueweb.retry_all", "Retry all") }
+					}
+					@button.Button(button.Props{Variant: button.VariantDestructive, Size: button.SizeSm, Attributes: templ.Attributes{
+						"hx-post":                  v.bulkURL("delete"),
+						"hx-confirm":               t(ctx, "queueweb.confirm_delete_all", "Delete these failed jobs?"),
+						"data-confirm-description": t(ctx, "queueweb.cannot_undo", "This cannot be undone."),
+						"data-confirm-variant":     "destructive",
+					}}) {
+						{ t(ctx, "queueweb.delete_all", "Delete all") }
+					}
+				</div>
+			}
+		</div>
+		if v.notice != "" {
+			<p class="rounded-md border px-3 py-2 text-sm" role="status">{ v.notice }</p>
+		}
+		if len(v.list.Items) == 0 {
+			@ui.Empty(ui.EmptyProps{Icon: icon.CircleCheck, Title: t(ctx, "queueweb.no_failed", "No failed jobs")})
+		} else {
+			<table class="w-full text-sm">
+				<thead>
+					<tr class="border-b text-left text-muted-foreground">
+						<th class="py-2 pr-4 font-medium">{ t(ctx, "queueweb.failed_at", "Failed at") }</th>
+						<th class="py-2 pr-4 font-medium">Topic</th>
+						<th class="py-2 pr-4 font-medium">{ t(ctx, "queueweb.attempts", "Attempts") }</th>
+						<th class="py-2 font-medium">{ t(ctx, "queueweb.error", "Error") }</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, j := range v.list.Items {
+						<tr class="border-b align-top">
+							<td class="py-2 pr-4 whitespace-nowrap"><a href={ templ.SafeURL(v.base + "/failed/" + j.ID.String()) } class="underline">{ formatTime(j.FailedAt) }</a></td>
+							<td class="py-2 pr-4 font-mono">{ j.Topic }</td>
+							<td class="py-2 pr-4">{ strconv.Itoa(j.Attempts) }</td>
+							<td class="py-2 break-all font-mono text-xs">{ firstLine(j.Error) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		@ui.Pagination(v.list, ui.PaginationProps{URL: v.pageURL, HTMX: true})
+	</section>
+}
+
+templ topicLink(v failedView, topic, label string) {
+	if v.query.Topic == topic {
+		<span class="rounded-md bg-muted px-2 py-1 font-medium">{ label }</span>
+	} else {
+		<a href={ templ.SafeURL(v.topicURL(topic)) } hx-get={ v.topicURL(topic) } class="rounded-md px-2 py-1 hover:bg-muted">{ label }</a>
+	}
+}
+
+templ jobDetail(base string, j queue.FailedJob, payload string) {
+	<article class="flex flex-col gap-4">
+		<div class="flex items-center gap-2">
+			<h1 class="font-mono text-lg">{ j.Topic }</h1>
+			<span class="text-sm text-muted-foreground">{ j.ID.String() }</span>
+			<div class="ml-auto flex gap-2">
+				@button.Button(button.Props{Variant: button.VariantOutline, Size: button.SizeSm, Attributes: templ.Attributes{
+					"hx-post": base + "/failed/" + j.ID.String() + "/retry",
+				}}) {
+					{ t(ctx, "queueweb.retry", "Retry") }
+				}
+				@button.Button(button.Props{Variant: button.VariantDestructive, Size: button.SizeSm, Attributes: templ.Attributes{
+					"hx-post":                  base + "/failed/" + j.ID.String() + "/delete",
+					"hx-confirm":               t(ctx, "queueweb.confirm_delete", "Delete this failed job?"),
+					"data-confirm-description": t(ctx, "queueweb.cannot_undo", "This cannot be undone."),
+					"data-confirm-variant":     "destructive",
+				}}) {
+					{ t(ctx, "queueweb.delete", "Delete") }
+				}
+			</div>
+		</div>
+		@card(t(ctx, "queueweb.details", "Details")) {
+			@row(t(ctx, "queueweb.failed_at", "Failed at"), formatTime(j.FailedAt))
+			@row(t(ctx, "queueweb.attempts", "Attempts"), strconv.Itoa(j.Attempts))
+			for k, val := range j.Metadata {
+				@row(k, val)
+			}
+		}
+		@card("Payload") {
+			<pre class="overflow-x-auto text-xs">{ payload }</pre>
+		}
+		@card(t(ctx, "queueweb.error", "Error")) {
+			<pre class="overflow-x-auto text-xs whitespace-pre-wrap">{ j.Error }</pre>
+		}
+	</article>
+}
+
+templ scheduledSection(v scheduledView) {
+	<section class="flex flex-col gap-4">
+		if len(v.list.Items) == 0 {
+			@ui.Empty(ui.EmptyProps{Icon: icon.Clock, Title: t(ctx, "queueweb.no_scheduled", "No scheduled jobs")})
+		} else {
+			<table class="w-full text-sm">
+				<thead>
+					<tr class="border-b text-left text-muted-foreground">
+						<th class="py-2 pr-4 font-medium">{ t(ctx, "queueweb.available_at", "Runs at") }</th>
+						<th class="py-2 pr-4 font-medium">Topic</th>
+						<th class="py-2 pr-4 font-medium">ID</th>
+						<th class="py-2 font-medium">Payload</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, j := range v.list.Items {
+						<tr class="border-b align-top">
+							<td class="py-2 pr-4 whitespace-nowrap">{ formatTime(j.AvailableAt) }</td>
+							<td class="py-2 pr-4 font-mono">{ j.Topic }</td>
+							<td class="py-2 pr-4 font-mono text-xs">{ j.ID.String() }</td>
+							<td class="py-2 break-all font-mono text-xs">{ firstLine(string(j.Payload)) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		@ui.Pagination(v.list, ui.PaginationProps{URL: v.pageURL})
+	</section>
+}
