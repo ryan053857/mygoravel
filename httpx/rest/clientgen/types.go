@@ -360,6 +360,34 @@ func (g *generator) consts(obj *types.TypeName, named *types.Named) string {
 
 // scanCodes 在主包依赖的应用和框架包中查找 var ErrX = errorx.Define(kind, "code")，写入镜像包。
 func (g *generator) scanCodes() error {
+	groups, err := g.collectCodes()
+	if err != nil {
+		return err
+	}
+	for _, grp := range groups {
+		m, err := g.mirrorOf(grp.pkg)
+		if err != nil {
+			return err
+		}
+		for _, c := range grp.codes {
+			m.codes = append(m.codes, comment(c.doc)+c.name+" wire.Code = "+strconv.Quote(c.value)+"\n")
+		}
+	}
+	return nil
+}
+
+// codeGroup 是一个包中 errorx.Define 定义的错误码。
+type codeGroup struct {
+	pkg   *types.Package
+	codes []codeDecl
+}
+
+type codeDecl struct {
+	name, value, doc string
+}
+
+// collectCodes 按包路径的顺序返回应用模块和框架中导出的错误码变量。
+func (g *generator) collectCodes() ([]codeGroup, error) {
 	paths := make([]string, 0, len(g.pkgs))
 	for p := range g.pkgs {
 		if g.copyable(p) {
@@ -367,9 +395,10 @@ func (g *generator) scanCodes() error {
 		}
 	}
 	sort.Strings(paths)
+	var groups []codeGroup
 	for _, p := range paths {
 		pkg := g.pkgs[p]
-		var codes []string
+		var codes []codeDecl
 		for _, f := range pkg.Syntax {
 			for _, d := range f.Decls {
 				gd, ok := d.(*ast.GenDecl)
@@ -386,22 +415,16 @@ func (g *generator) scanCodes() error {
 						if !ok {
 							continue
 						}
-						codes = append(codes, comment(g.doc(pkg.Types, name.Pos()))+
-							name.Name+" wire.Code = "+strconv.Quote(code)+"\n")
+						codes = append(codes, codeDecl{name: name.Name, value: code, doc: g.doc(pkg.Types, name.Pos())})
 					}
 				}
 			}
 		}
-		if len(codes) == 0 {
-			continue
+		if len(codes) > 0 {
+			groups = append(groups, codeGroup{pkg: pkg.Types, codes: codes})
 		}
-		m, err := g.mirrorOf(pkg.Types)
-		if err != nil {
-			return err
-		}
-		m.codes = codes
 	}
-	return nil
+	return groups, nil
 }
 
 // defined 报告表达式是否是以字符串常量为错误码的 errorx.Define 调用。

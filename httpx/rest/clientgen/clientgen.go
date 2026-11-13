@@ -1,9 +1,12 @@
-// Package clientgen 从 rest 登记的端点生成 Go 客户端。
+// Package clientgen 从 rest 登记的端点生成 Go 和 TypeScript 客户端。
 //
 // 生成的客户端按 operationId 分组（article-publish 生成 Client.Article.Publish），
 // 接口用到的类型按服务端的包复制（internal/article.Changes 生成为 <out>/article.Changes），
 // errorx.Define 定义的错误码生成为可以用 errors.Is 判断的常量。生成的代码只依赖标准库、
 // 允许直接导入的包（默认 github.com/google/uuid）和随代码生成的运行时 <out>/wire，不依赖 mygoravel。
+//
+// GenerateTS 生成 TypeScript 客户端：类型取自 OpenAPI 文档，分组和错误码与 Go 客户端相同，运行时随代码生成，
+// 不依赖任何 npm 包。
 package clientgen
 
 import (

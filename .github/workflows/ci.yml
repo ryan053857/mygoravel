@@ -104,5 +104,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # 生成的 TypeScript 客户端用 bun 做类型检查和往返测试（httpx/rest/clientgen）。
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
       - name: Test
         run: go test ./...

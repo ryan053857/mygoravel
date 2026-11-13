@@ -90,9 +90,9 @@ rt.Channel("t:{tenant}:articles", realtime.Private(func(_ context.Context, sub i
 
 ```js
 import { Centrifuge } from 'centrifuge';
-import { currentAccessToken } from './client'; // API 客户端，见 clients.md
+import { api } from './client'; // API 客户端，见 clients.md
 
-const centrifuge = new Centrifuge(`wss://${location.host}/realtime`, { token: currentAccessToken() });
+const centrifuge = new Centrifuge(`wss://${location.host}/realtime`, { token: api.getAccessToken() });
 
 const articles = centrifuge.newSubscription('articles');
 articles.on('publication', (ctx) => {
@@ -141,16 +141,16 @@ token 无效、属于其他账号体系，或 Resolver 拒绝主体时，连接�
 使用 [JWT 模式](api-tokens.md#jwt)时，SDK 传入 access token，并设置 `getToken`：
 
 ```js
-import { currentAccessToken, refresh } from './client';
+import { api } from './client';
 
 const centrifuge = new Centrifuge('wss://api.example.com/realtime', {
-    token: currentAccessToken(),
+    token: api.getAccessToken(),
     // 刷新后返回新的 access token；返回空字符串表示需要重新登录
-    getToken: async () => (await refresh()) ? currentAccessToken() : '',
+    getToken: async () => (await api.refresh()) ? api.getAccessToken() : '',
 });
 ```
 
-`currentAccessToken` 和 `refresh` 来自 [API 客户端](clients.md#creating-the-client)，后者用 refresh token 换新的 access token。断线一段时间后重连，access token 可能已经过期，这时连接返回 109（token 已过期），SDK 调用 `getToken` 换新的再连。已经建立的连接不受 access token 过期的影响：复查只检查这次登录是否已被撤销。
+`api` 是[生成的 API 客户端](clients.md#creating-the-client)，`refresh` 用 refresh token 换新的 access token。断线一段时间后重连，access token 可能已经过期，这时连接返回 109（token 已过期），SDK 调用 `getToken` 换新的再连。已经建立的连接不受 access token 过期的影响：复查只检查这次登录是否已被撤销。
 
 这个处理不限于 JWT：`Authenticate` 返回的错误匹配 `identity.ErrExpired` 时，连接返回 109；连接期间复查遇到它时以 3005 断开，SDK 重连时同样换新的 token。
 

@@ -75,3 +75,28 @@ func TestCommandRequiresOut(t *testing.T) {
 		t.Fatalf("%#v", err)
 	}
 }
+
+// --ts 生成 TypeScript 客户端，删除上次生成、这次不再生成的 .ts 文件，保留手写的文件。
+func TestCommandWritesTSClient(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "api")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"old.ts": clientgen.Header + "\n", "query.ts": "export {}\n"} {
+		if err := os.WriteFile(filepath.Join(out, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stderr, err := runClient(t, "client", "--ts", out, "--main", exampleMain)
+	if err != nil || stderr != "" {
+		t.Fatal(err, stderr)
+	}
+	for _, name := range []string{"api.ts", "errors.ts", "runtime.ts", "query.ts"} {
+		if _, err := os.Stat(filepath.Join(out, name)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(out, "old.ts")); !os.IsNotExist(err) {
+		t.Error("stale generated file must be removed", err)
+	}
+}

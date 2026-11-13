@@ -12,7 +12,7 @@
 
 用 React、Vue 等写的单页应用，可以和 API 打进同一个二进制：Vite 的构建产物通过 `embed` 嵌入程序，由 `httpx.SPA` 提供。页面和 API 同源，不需要配置 CORS，部署时仍然只有一个二进制文件。
 
-单页应用调用 [JSON API](routing.md)，请求带 Bearer token（access token 只在内存中，refresh token 在 HttpOnly cookie 中，见[单页应用的登录](api-tokens.md#single-page-applications)），类型由 OpenAPI 文档生成，见[客户端代码](clients.md)。后台和用户端都是单页应用；不需要登录的公开页面可以[在服务端渲染](views.md)，两者共用一个 Router。
+单页应用调用 [JSON API](routing.md)，请求带 Bearer token（access token 只在内存中，refresh token 在 HttpOnly cookie 中，见[单页应用的登录](api-tokens.md#single-page-applications)），客户端由 `client --ts` 从路由生成，见[客户端代码](clients.md#typescript)。后台和用户端都是单页应用；不需要登录的公开页面可以[在服务端渲染](views.md)，两者共用一个 Router。
 
 本章给博客加上读者使用的前端：React 加 TanStack Router，放在应用根目录的 `frontend` 中，是一个普通的 Vite 项目。依赖和脚本用 [Bun](https://bun.sh) 管理，构建工具仍然是 Vite。
 
@@ -110,12 +110,13 @@ frontend_dev_server: http://localhost:5173
 go run ./cmd/api dev --config config/app.yaml,config/local.yaml
 ```
 
-命令行中加上 `devcmd.Vite("frontend")`，它运行 `bun --cwd frontend run dev`；修改 Go 代码后应用自动重新编译、重启，前端的热更新不受影响：
+命令行中加上 `devcmd.Vite("frontend")`，它运行 `bun --cwd frontend run dev`；修改 Go 代码后应用自动重新编译、重启，并重新生成 [TypeScript 客户端](clients.md#typescript)，前端的热更新不受影响：
 
 ```go
 devcmd.New(devcmd.Options{
-    Main:  "./cmd/api",
-    Tools: []devcmd.Tool{devcmd.Vite("frontend")},
+    Main:     "./cmd/api",
+    Tools:    []devcmd.Tool{devcmd.Vite("frontend")},
+    Generate: []string{"client", "--ts", "frontend/src/api"},
 }, httpAddr)
 ```
 

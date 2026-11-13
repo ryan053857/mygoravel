@@ -218,7 +218,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 | --- | --- | --- |
 | `httpx` | HTTP 中间件（含 HTTP Basic 认证）、平滑停机、就绪检查、单页应用 | [中间件](middleware.md)、[请求生命周期](lifecycle.md)、[单页应用](spa.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
-| `httpx/rest/clientgen` | 从路由生成 Go 客户端的 `client` 命令 | [Go 客户端](clients.md#go) |
+| `httpx/rest/clientgen` | 从路由生成 TypeScript 和 Go 客户端的 `client` 命令 | [TypeScript](clients.md#typescript)、[Go 客户端](clients.md#go) |
 | `web` | 服务端渲染的公开页面：渲染组件、错误页、表单、主题、内容安全策略、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md) |
 | `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载；表单字段、分页、确认对话框与错误提示的衔接 | [界面组件](components.md) |
 | `web/docs` | 把目录中的 Markdown 变成带侧边栏、本页目录和站内搜索的文档页，例如帮助中心 | [文档页](doc-pages.md) |

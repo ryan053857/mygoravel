@@ -170,6 +170,7 @@ sched.Add("oauth:cleanup-clients", "@daily", schedule.Cleanup(oauth.CleanupClien
 ```tsx
 import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import { isApiError } from "../../api/api"
 import { api } from "../../client"
 
 export const Route = createFileRoute("/oauth/consent")({
@@ -185,22 +186,17 @@ function Consent() {
   const consent = useQuery({
     queryKey: ["oauth-consent", request],
     enabled: request !== "",
-    queryFn: async () => {
-      const { data, error } = await api.GET("/oauth/consent", { params: { query: { request } } })
-      if (error) throw error
-      return data
-    },
+    queryFn: () => api.oauth.consentGet({ request }),
   })
   const decide = useMutation({
     mutationFn: async (approve: boolean) => {
-      const { data, error } = await api.POST("/oauth/consent", { body: { request, approve } })
-      if (error) throw error
-      location.assign(data.url) // 回到 Claude；整页跳转，不经过前端路由
+      const { url } = await api.oauth.consentDecide({ request, approve })
+      location.assign(url) // 回到 Claude；整页跳转，不经过前端路由
     },
   })
 
   if (error) return <p>无法授权（{error}）</p> // 错误码，例如 oauth.invalid_client
-  if (consent.error) return <p>{consent.error.detail}</p>
+  if (consent.error) return <p>{isApiError(consent.error) ? consent.error.detail : "出错了"}</p>
   if (!consent.data) return null
   const c = consent.data
   return (

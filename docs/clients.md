@@ -3,13 +3,15 @@
 - [简介](#introduction)
 - [生成的名称](#generated-names)
 - [TypeScript](#typescript)
-    - [生成类型](#generating-types)
+    - [生成客户端](#generating-types)
     - [创建客户端](#creating-the-client)
     - [调用接口](#calling-endpoints)
+    - [错误](#ts-errors)
     - [事件流](#event-streams)
     - [上传文件](#uploading-files)
     - [下载文件](#downloading-files)
     - [TanStack Query](#tanstack)
+    - [其他工具](#other-ts-tools)
 - [Go 客户端](#go)
     - [生成客户端](#generating-go-client)
     - [调用接口](#calling-go-client)
@@ -25,7 +27,7 @@
 <a id="introduction"></a>
 ## 简介
 
-前端和 App 调用 JSON API 时，请求和响应的类型不需要手写。[openapi 命令](commands.md#openapi-command)导出的 OpenAPI 文档描述了每个接口的路径、参数、请求体、响应和错误，各语言的生成器据此生成类型或客户端代码。文档和服务端出自同一份路由声明，任何支持 OpenAPI 的生成器都可以使用。用 Go 写的调用方不经过 OpenAPI，[直接从路由生成客户端](#go)。
+前端和 App 调用 JSON API 时，请求和响应的类型不需要手写。[openapi 命令](commands.md#openapi-command)导出的 OpenAPI 文档描述了每个接口的路径、参数、请求体、响应和错误，各语言的生成器据此生成类型或客户端代码。文档和服务端出自同一份路由声明，任何支持 OpenAPI 的生成器都可以使用。TypeScript 和 Go 的调用方用 `client` 命令直接从路由生成客户端：[TypeScript](#typescript) 的类型取自同一份 OpenAPI 文档，[Go](#go) 的类型从源码复制。
 
 ```bash
 ./bin/api openapi > openapi.json
@@ -49,213 +51,194 @@
 <a id="typescript"></a>
 ## TypeScript
 
-推荐 [openapi-typescript](https://openapi-ts.dev/) 加 [openapi-fetch](https://openapi-ts.dev/openapi-fetch/)：前者只生成类型，后者是几 KB 的 `fetch` 封装，按路径调用接口，参数、请求体、响应和错误都有类型。重新生成时只有类型文件变化，没有生成的函数需要维护。
-
 <a id="generating-types"></a>
-### 生成类型
+### 生成客户端
+
+`client` 命令的 `--ts` 从路由生成 TypeScript 客户端，与 [Go 客户端](#generating-go-client)是同一个命令，在服务端的源码目录中运行：
 
 ```bash
-bun add openapi-fetch
-bun add -d openapi-typescript typescript
-bunx openapi-typescript openapi.json -o src/api.d.ts \
-    --root-types --root-types-no-schema-prefix --root-types-keep-casing
+go run ./cmd/api client --ts frontend/src/api
 ```
 
-后三个选项把 schema 导出为同名类型，可以直接 `import type { ArticleDTO } from "./api"`。CI 中加上 `--check`，`api.d.ts` 与 `openapi.json` 不一致时失败。
+| 文件 | 内容 |
+| --- | --- |
+| `api.ts` | OpenAPI 中的全部类型、每个接口的输入类型、事件流的事件类型，以及 `createClient` |
+| `errors.ts` | 服务端用 [`errorx.Define`](errors.md#defining-errors) 定义的错误码，按包分组，例如 `ArticleErrors.SlugTaken` |
+| `runtime.ts` | 发送请求、刷新 access token、`ApiError`、事件流和下载 |
+
+生成的代码不依赖任何 npm 包，也不需要 Node 或 Bun 参与生成。重新生成时只删除带生成标记的文件，目录中手写的文件保持不变。把它们提交到仓库，CI 中重新生成后用 `git diff --exit-code` 检查是否忘了更新。
+
+开发时交给 [dev 命令](commands.md#dev-command)，改了 Go 接口，前端的类型随之更新：
+
+```go
+devcmd.New(devcmd.Options{
+    Main:     "./cmd/api",
+    Tools:    []devcmd.Tool{devcmd.Vite("frontend")},
+    Generate: []string{"client", "--ts", "frontend/src/api"},
+}, httpAddr)
+```
 
 <a id="creating-the-client"></a>
 ### 创建客户端
 
-博客的单页应用用 [JWT 模式](api-tokens.md#jwt)登录，refresh token 保存在 [HttpOnly cookie](api-tokens.md#single-page-applications) 中：access token 只放在内存里，请求带上它；收到 `401` 时用 cookie 换一个新的，再重试请求。这个逻辑放在传给 openapi-fetch 的 `fetch` 中，所有接口都会经过它：
+博客的单页应用用 [JWT 模式](api-tokens.md#jwt)登录，refresh token 保存在 [HttpOnly cookie](api-tokens.md#single-page-applications) 中。access token 只放在内存里，由客户端保管：请求自动带上它；受保护的接口返回 `401` 时调用一次 `auth.refresh` 换新的，再重试请求。下面是 `frontend/src/client.ts`：
 
 ```ts
-import createClient from "openapi-fetch"
-import type { paths } from "./api"
+import { createClient } from "./api/api"
+import { router } from "./router"
 
-let accessToken = "" // 只在内存中；refresh token 在 HttpOnly cookie 中，页面上的脚本读不到
+// 刷新接口靠 cookie 认证，不带 access token。单页应用与 API 在不同的子域名时需要 credentials: "include"。
+const plain = createClient({ baseURL: "/api", credentials: "include" })
 
-// 刷新接口靠 cookie 认证。单页应用与 API 在不同的子域名时需要 credentials: "include"，同源时可以省略。
-const plain = createClient<paths>({ baseUrl: "/api", credentials: "include" })
-let refreshing: Promise<boolean> | null = null
-
-// refresh 用 cookie 换新的 access token，返回 false 表示没有登录或登录已失效。
-// 打开页面（包括刷新页面、新标签页）时先调用一次，决定显示登录页还是应用。
-export function refresh(): Promise<boolean> {
-  refreshing ??= plain
-    .POST("/auth/refresh", { body: {} })
-    .then(({ data }) => {
-      accessToken = data?.access_token ?? ""
-      return accessToken !== ""
-    })
-    .finally(() => (refreshing = null))
-  return refreshing
-}
-
-// signedIn 在登录接口（请求体带 cookie: true）返回后调用。
-export function signedIn(access: string) {
-  accessToken = access
-}
-
-export const currentAccessToken = () => accessToken
-
-async function authFetch(request: Request): Promise<Response> {
-  const retry = request.clone()
-  const res = await fetch(withToken(request))
-  if (res.status !== 401) return res
-  return (await refresh()) ? fetch(withToken(retry)) : res
-}
-
-function withToken(request: Request): Request {
-  request.headers.set("Authorization", `Bearer ${accessToken}`)
-  return request
-}
-
-export const api = createClient<paths>({ baseUrl: "/api", fetch: authFetch })
+export const api = createClient({
+  baseURL: "/api",
+  credentials: "include",
+  auth: {
+    refresh: async () => (await plain.auth.refresh({})).access_token,
+    onSignedOut: () => router.navigate({ to: "/login" }),
+  },
+  // 403 auth.confirm_required（rest.Confirmed）：弹出密码框，确认成功后重试原请求
+  onConfirmRequired: () => confirmDialog.open(),
+})
 ```
 
-`/auth/login`、`/auth/refresh` 是博客自己注册的公开接口，写法见[单页应用](api-tokens.md#single-page-applications)。几个请求同时收到 `401` 时，`refreshing` 让它们等待同一次刷新。各个标签页共用同一个 cookie，一个标签页刷新后，其他标签页下次刷新时拿到的就是新的 refresh token；几个标签页同时刷新时，由服务端的[宽限期](api-tokens.md#jwt)兜住。登出调用 `DELETE /auth/session`，服务端撤销这次登录并清除 cookie，单页应用把 `accessToken` 清空。
+- 打开页面（包括刷新页面、新标签页）时先调用一次 `await api.refresh()`，返回 `true` 表示已经登录，决定显示登录页还是应用。
+- 登录接口返回后调用 `api.setAccessToken(out.access_token)`；登出调用 `DELETE /auth/session`，服务端撤销这次登录并清除 cookie，再调用 `api.setAccessToken("")`。
+- 几个请求同时收到 `401` 时，只调用一次 `refresh`，它们都等这一次的结果。刷新失败（返回空值或抛出错误）时调用 `onSignedOut`，原来的 `401` 抛给调用方。
+- 公开的接口（[`rest.Public`](routing.md#access-policies)）从不带 token，`401` 时也不刷新。
+- 请求带上 `Accept-Language`（默认是浏览器的语言，`language` 可以覆盖），错误的 `detail` 按它翻译。App 的 WebView 设置 `appVersion`，作为 [`X-App-Version`](#app-version) 发送。
 
-App、桌面端（Electron、Tauri）和小程序不用 cookie：登录时不传 `cookie`，refresh token 在响应体中，保存在系统的钥匙串中，刷新时放进请求体。
+`/auth/login`、`/auth/refresh` 是博客自己注册的公开接口，写法见[单页应用](api-tokens.md#single-page-applications)。App、桌面端（Electron、Tauri）和小程序不用 cookie：登录时不传 `cookie`，refresh token 在响应体中，保存在系统的钥匙串中，`refresh` 把它放进请求体。
 
 <a id="calling-endpoints"></a>
 ### 调用接口
 
-```ts
-import { api } from "./client"
+接口按 operationId 分组，与 Go 客户端的规则相同：`article-publish` 生成 `api.article.publish`，只有一段的 `ping` 生成 `api.ping`。
 
-const { data, error } = await api.POST("/articles/{id}/publish", {
-  params: { path: { id } },
-})
-if (error) {
-  if (error.code === "article.forbidden") return showReadOnly()
-  return toast(error.detail ?? "操作失败")
-}
-render(data) // ArticleDTO
+```ts
+const article = await api.article.get(id) // ArticleDTO
+const list = await api.article.list({ q: "go", page: 2 }) // 查询参数，类型是 ArticleListInput
+await api.article.publish(id, { idempotencyKey: crypto.randomUUID() }) // 请求头
+const created = await api.article.create({ title: "Hello", slug: "hello" })
+created.body.id
+created.headers.location // 有响应头的接口返回 { body, headers }
 ```
 
-路径参数写错、缺少必填字段，`tsc` 都会报错。`error` 是 `ErrorModel`：[业务错误](errors.md)带 `code`，按它决定怎么处理；`detail` 是可以展示给用户的文案；输入格式错误时没有 `code`，`errors` 中是每个字段的错误。
+| 服务端 | 客户端 |
+| --- | --- |
+| 路径参数 | 按在路径中出现的顺序作为参数 |
+| 只有请求体 | 请求体的类型作为最后一个参数 |
+| 有查询参数或请求头 | 最后一个参数是 `<OperationId>Input`，查询参数用原名，请求头转为 camelCase，请求体在 `body` 中 |
+| 响应体 | 返回它的类型；`204` 返回 `void` |
+| 响应头 | 返回 `{ body, headers }` |
+
+方法的注释来自路由的 `Summary` 和 `Description`，类型的注释来自字段的 `doc` 标签和 Go 注释，在编辑器中悬停即可看到。
+
+<a id="ts-errors"></a>
+### 错误
+
+非 2xx 的响应抛出 `ApiError`：`status` 是状态码，`code` 是业务错误码，`detail` 是可以展示给用户的说明，`fields` 是 `422` 时每个字段的问题（[翻译后的提示和规则 `code`](validation.md#validation-error-response)），`requestId` 用来报告问题。业务错误码用 `errors.ts` 中的常量判断：
+
+```ts
+import { ArticleErrors, isApiError } from "./api/api"
+
+try {
+  await api.article.create(changes)
+} catch (err) {
+  if (isApiError(err, ArticleErrors.SlugTaken)) return form.setError("slug", err.detail)
+  if (isApiError(err) && err.status === 422) {
+    for (const f of err.fields) form.setError(f.location?.replace(/^body\./, "") ?? "", f.message)
+    return
+  }
+  throw err
+}
+```
+
+框架自带的错误码同样会生成，例如 `IdentityErrors.ConfirmRequired`、`RatelimitErrors.Exceeded`。
 
 <a id="event-streams"></a>
 ### 事件流
 
-[`rest.RegisterSSE`](sse.md) 注册的接口在文档中列出了每种事件的数据类型。浏览器的 `EventSource` 不能带 `Authorization` 请求头，所以用 `parseAs: "stream"` 取得响应流，交给 [eventsource-parser](https://github.com/rexxars/eventsource-parser) 解析：
+[`rest.RegisterSSE`](sse.md) 注册的接口返回异步迭代器。事件是按 `event` 区分的联合类型，`data` 的类型随之确定：
 
 ```ts
-import { EventSourceParserStream } from "eventsource-parser/stream"
-import type { ArticlePublishProgress } from "./api"
-
-const { response, error } = await api.POST("/articles/publish", {
-  body: { ids },
-  parseAs: "stream",
-})
-if (error || !response.body) return
-
-const events = response.body
-  .pipeThrough(new TextDecoderStream())
-  .pipeThrough(new EventSourceParserStream())
-  .getReader()
-for (;;) {
-  const { done, value } = await events.read()
-  if (done) break
-  if (value.event === "progress") {
-    const p: ArticlePublishProgress = JSON.parse(value.data)
-    showProgress(p)
-  }
+for await (const ev of api.article.publishBatch({ ids })) {
+  if (ev.event === "progress") showProgress(ev.data) // ev.data: PublishProgress
 }
 ```
 
-推送开始之前的错误照常是 `ErrorModel`，在 `error` 中。
+迭代器建立在 `fetch` 上，所以能带 Bearer token，`401` 时同样刷新。推送开始之前的错误照常抛出 `ApiError`。服务端新增的、客户端还不认识的事件被跳过。最后一个参数可以传 `signal` 停止接收，以及 `lastEventId` 接着上次的位置继续：
+
+```ts
+const stop = new AbortController()
+for await (const ev of api.article.events({}, { signal: stop.signal, lastEventId })) {
+  lastEventId = ev.id ?? lastEventId
+}
+```
 
 <a id="uploading-files"></a>
 ### 上传文件
 
-[服务端上传接口](filesystem.md#rest-upload)接收 `multipart/form-data`。直接传 `FormData`，openapi-fetch 会原样发送：
+[服务端上传接口](filesystem.md#rest-upload)的表单字段生成为 `<OperationId>Form`，文件字段的类型是 `Blob`，`File` 可以直接传入：
 
 ```ts
-const form = new FormData()
-form.append("file", file)
-const { data } = await api.POST("/files", {
-  body: form as unknown as { file: string }, // 生成的类型把文件写作 string
-})
+const uploaded = await api.file.upload({ file: input.files[0] })
 ```
 
 <a id="downloading-files"></a>
 ### 下载文件
 
-[文件存储](filesystem.md)中的文件有公开地址，`<a href>`、`<img src>` 直接使用。需要登录才能下载的内容，例如[导入失败的行](import-export.md)，链接带不了 `Authorization` 请求头，用 `fetch` 取回后交给浏览器保存：
+[文件存储](filesystem.md)中的文件有公开地址，`<a href>`、`<img src>` 直接使用。返回 `huma.StreamResponse` 的接口生成为下载，例如[导入失败的行](import-export.md)，返回 `{ blob, filename }`，`saveBlob` 让浏览器保存它：
 
 ```ts
-const { response } = await api.GET("/articles/imports/{id}/failures", {
-  params: { path: { id }, query: { format: "xlsx" } },
-  parseAs: "blob",
-})
-const url = URL.createObjectURL(await response.blob())
-const a = Object.assign(document.createElement("a"), { href: url, download: "failures.xlsx" })
-a.click()
-URL.revokeObjectURL(url)
+import { saveBlob } from "./api/api"
+
+const { blob, filename } = await api.article.failures(id, { format: "xlsx" })
+saveBlob(blob, filename || "failures.xlsx")
 ```
 
 <a id="tanstack"></a>
 ### TanStack Query
 
-React 应用用 [TanStack Query](https://tanstack.com/query) 管理接口数据时，用 [openapi-react-query](https://openapi-ts.dev/openapi-react-query/) 把上面的 `api` 包装成 hooks。它按方法、路径和参数生成 query key，类型照旧来自 `api.d.ts`：
-
-```bash
-bun add @tanstack/react-query openapi-react-query
-```
-
-```ts
-import { QueryClient } from "@tanstack/react-query"
-import createQueryClient from "openapi-react-query"
-import { api } from "./client"
-
-export const $api = createQueryClient(api)
-export const queryClient = new QueryClient()
-```
-
-query key 是 `[方法, 路径, 参数]`，例如 `["get", "/articles/{id}", { params: { path: { id } } }]`。修改数据后按前缀让相关的查询失效：
+客户端的方法直接作为 `queryFn`、`mutationFn`，错误抛出 `ApiError`，TanStack Query 照常处理。修改数据后按前缀让相关的查询失效：
 
 ```tsx
 function Article({ id }: { id: string }) {
-  const { data, error } = $api.useQuery("get", "/articles/{id}", { params: { path: { id } } })
-  const publish = $api.useMutation("post", "/articles/{id}/publish", {
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["get", "/articles"] })      // 文章列表
-      queryClient.invalidateQueries({ queryKey: ["get", "/articles/{id}"] }) // 所有文章详情
-    },
+  const { data, error } = useQuery({ queryKey: ["article", id], queryFn: () => api.article.get(id) })
+  const publish = useMutation({
+    mutationFn: () => api.article.publish(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["article"] }), // 文章列表和所有文章详情
   })
   // ……
 }
 ```
 
-`error` 同样是 `ErrorModel`，按 `code` 处理。
-
 [实时频道](realtime.md#subscribing)收到消息后，让对应的查询失效，由 TanStack Query 重新获取，不要把消息内容合并进缓存：
 
 ```ts
-articles.on("publication", () => queryClient.invalidateQueries({ queryKey: ["get", "/articles"] }))
+articles.on("publication", () => queryClient.invalidateQueries({ queryKey: ["article"] }))
 ```
 
 [固定分页](responses.md#offset-pagination)的列表由服务端分页。TanStack Table 的 `pageIndex` 从 0 开始，`page` 从 1 开始；把 `items` 和 `total` 交给表格，并开启 `manualPagination`：
 
 ```ts
-const { data } = $api.useQuery(
-  "get", "/articles",
-  { params: { query: { page: pagination.pageIndex + 1, per_page: pagination.pageSize } } },
-  { placeholderData: keepPreviousData }, // 翻页时保留上一页，表格不闪烁
-)
+const { data } = useQuery({
+  queryKey: ["article", "list", pagination],
+  queryFn: () => api.article.list({ page: pagination.pageIndex + 1, per_page: pagination.pageSize }),
+  placeholderData: keepPreviousData, // 翻页时保留上一页，表格不闪烁
+})
 // 表格：data = data?.items ?? []，rowCount = data?.total，manualPagination = true
 ```
 
-[游标分页](responses.md#cursor-pagination)的列表用 `$api.useInfiniteQuery`：`pageParamName` 为 `"cursor"`，`initialPageParam` 为 `""`，`getNextPageParam` 返回上一页的 `next_cursor`。
+列表的查询参数放进路由的 search params 时，用生成的 `ArticleListInput` 作为 `validateSearch` 的类型，地址和接口的参数是同一个类型。
 
-[验证错误](validation.md#validation-error-response)的 `errors[].location` 去掉 `body.` 就是字段名，`message` 已经按请求的语言翻译。TanStack Form 在 `validators.onSubmitAsync` 中提交，把它们作为字段错误返回：
+<a id="other-ts-tools"></a>
+### 其他工具
 
-```ts
-const { error } = await api.POST("/articles", { body: value })
-if (error?.errors) {
-  return { fields: Object.fromEntries(error.errors.map((e) => [e.location?.replace(/^body\./, ""), e.message])) }
-}
+`openapi.json` 仍然是公开的契约。已经在用 [openapi-typescript](https://openapi-ts.dev) 加 openapi-fetch、或者其他基于 OpenAPI 的工具时，照常从它生成：
+
+```bash
+bunx openapi-typescript openapi.json -o src/api.d.ts --root-types --root-types-no-schema-prefix --root-types-keep-casing
 ```
 
 <a id="go"></a>
