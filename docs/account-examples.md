@@ -15,7 +15,7 @@
 | | 编辑后台 | 读者 App |
 | --- | --- | --- |
 | 账号体系 | `editor.Type`，`editors` 表 | `reader.Type`，`readers` 表 |
-| 入口 | 单页应用调用 `/admin` 下的 JSON API，不透明的登录 token | JSON API，JWT access token + refresh token |
+| 入口 | 单页应用调用 `/admin` 下的 JSON API，JWT：access token 在内存中，refresh token 在 HttpOnly cookie 中 | JSON API，JWT access token + refresh token（在请求体中传递） |
 | 账号怎么来 | 管理员邀请，编辑通过邮件中的链接设置密码 | 手机验证码自助注册，或 Sign in with Apple |
 | 怎么登录 | 邮箱 + 密码，**必须**启用 TOTP 二次验证 | 手机验证码，或 Apple |
 | 敏感操作 | 邀请编辑前 15 分钟内输入过一次自己的密码 | 注销账号前用验证码或重新登录 Apple 确认身份 |
@@ -259,6 +259,9 @@ type Apple struct {
 type Accounts struct {
     Editors      *login.Realm
     EditorTokens *apitoken.Store
+    EditorJWT    *apitoken.JWT
+    // EditorCookie 保存编辑后台单页应用的 refresh token，只发给 /admin/api/auth 下的接口。
+    EditorCookie apitoken.RefreshCookie
     Readers      *login.Realm
     ReaderTokens *apitoken.Store
     ReaderJWT    *apitoken.JWT
@@ -314,10 +317,13 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
     if err != nil {
         return nil, err
     }
+    editorTokens := apitoken.NewStore(db, cfg.EditorToken)
     tokens := apitoken.NewStore(db, cfg.ReaderToken)
     return &Accounts{
         Editors:      editors,
-        EditorTokens: apitoken.NewStore(db, cfg.EditorToken),
+        EditorTokens: editorTokens,
+        EditorJWT:    apitoken.NewJWT(editorTokens, apitoken.JWTConfig{Keys: apitoken.HMACKeys(c)}),
+        EditorCookie: apitoken.RefreshCookie{Name: "editor_refresh", Path: "/admin/api/auth"},
         Readers:      readers,
         ReaderTokens: tokens,
         ReaderJWT:    apitoken.NewJWT(tokens, apitoken.JWTConfig{Keys: apitoken.HMACKeys(c)}),
@@ -331,12 +337,13 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
 <a id="editor-api"></a>
 ## 编辑后台
 
-编辑后台是[单页应用](spa.md)，调用 `/admin` 下的接口：
+编辑后台是[单页应用](spa.md)，调用 `/admin/api` 下的接口，登录用 [JWT 模式](api-tokens.md#jwt)：access token 只在单页应用的内存中，refresh token 在只发给 `/admin/api/auth` 的 [HttpOnly cookie](api-tokens.md#single-page-applications) 中。
 
 1. 编辑收到邀请邮件，打开单页应用中的设置密码页。页面把链接中的 `request` 和 `code` 交给 `POST /auth/password/verify`，得到完成凭证，再带着它和新密码调用 `POST /auth/password`；
-2. 用邮箱和密码登录（`POST /auth/login`），得到三种结果之一：`token`，登录成功；`pending`，带着它和验证器上的数字调用 `POST /auth/two-factor`；`enroll`，还没有启用二次验证，先启用；
-3. 启用：`POST /auth/two-factor/enroll` 得到二维码，扫码后 `POST /auth/two-factor/enroll/confirm` 提交验证器上的数字，得到 token 和恢复码；
-4. 邀请其他编辑（`POST /editors`）要求 15 分钟内确认过身份。超过时返回 `403 auth.confirm_required`，单页应用弹出密码框，`POST /account/confirm` 之后重试。
+2. 用邮箱和密码登录（`POST /auth/login`），得到三种结果之一：`access_token`，登录成功，refresh token 写入 cookie；`pending`，带着它和验证器上的数字调用 `POST /auth/two-factor`；`enroll`，还没有启用二次验证，先启用；
+3. 启用：`POST /auth/two-factor/enroll` 得到二维码，扫码后 `POST /auth/two-factor/enroll/confirm` 提交验证器上的数字，得到 access token 和恢复码；
+4. 打开页面时和 access token 过期后 `POST /auth/refresh`，用 cookie 换新的 access token；退出登录 `DELETE /auth/session`，同时清除 cookie；
+5. 邀请其他编辑（`POST /editors`）要求 15 分钟内确认过身份。超过时返回 `403 auth.confirm_required`，单页应用弹出密码框，`POST /account/confirm` 得到新的 access token 后重试。
 
 “必须启用二次验证”由 `accounts` 中的 `Policy.RequireTwoFactor` 保证：没有经过二次验证的编辑拿不到 token。下面是完整的 `internal/editor/editorapi/routes.go`：
 
@@ -375,12 +382,13 @@ type TwoFactorInput struct {
     }
 }
 
-// LoginOutput 是登录的结果，三者只有一个不为空。
+// LoginOutput 是登录的结果，三者只有一个不为空；登录成功时 refresh token 写入 cookie。
 type LoginOutput struct {
-    Body struct {
-        Token   string `json:"token,omitempty"`
-        Pending string `json:"pending,omitempty" doc:"带着它和验证器上的数字调用 /auth/two-factor"`
-        Enroll  string `json:"enroll,omitempty" doc:"还没有启用二次验证：带着它调用 /auth/two-factor/enroll"`
+    SetCookie *http.Cookie `header:"Set-Cookie"`
+    Body      struct {
+        AccessToken string `json:"access_token,omitempty"`
+        Pending     string `json:"pending,omitempty" doc:"带着它和验证器上的数字调用 /auth/two-factor"`
+        Enroll      string `json:"enroll,omitempty" doc:"还没有启用二次验证：带着它调用 /auth/two-factor/enroll"`
     }
 }
 
@@ -406,10 +414,19 @@ type CompleteEnrollInput struct {
 }
 
 type CompleteEnrollOutput struct {
-    Body struct {
-        Token         string   `json:"token"`
+    SetCookie *http.Cookie `header:"Set-Cookie"`
+    Body      struct {
+        AccessToken   string   `json:"access_token"`
         RecoveryCodes []string `json:"recovery_codes"`
     }
+}
+
+type RefreshInput struct {
+    Cookie string `cookie:"editor_refresh"`
+}
+
+type LogoutOutput struct {
+    SetCookie *http.Cookie `header:"Set-Cookie"`
 }
 
 type VerifyLinkInput struct {
@@ -438,6 +455,12 @@ type ConfirmInput struct {
     }
 }
 
+type ConfirmOutput struct {
+    Body struct {
+        AccessToken string `json:"access_token" doc:"带有这次确认的新 access token，替换原来的"`
+    }
+}
+
 type InviteInput struct {
     Body struct {
         Name  string `json:"name" minLength:"1" maxLength:"50"`
@@ -448,11 +471,16 @@ type InviteInput struct {
 type handlers struct {
     logins *login.Realm
     tokens *apitoken.Store
+    jwt    *apitoken.JWT
+    cookie apitoken.RefreshCookie
     invite *editor.Invite
 }
 
 func Register(api *rest.API, db *bun.DB, acc *accounts.Accounts) {
-    h := &handlers{logins: acc.Editors, tokens: acc.EditorTokens, invite: editor.NewInvite(db, acc.Editors)}
+    h := &handlers{
+        logins: acc.Editors, tokens: acc.EditorTokens, jwt: acc.EditorJWT, cookie: acc.EditorCookie,
+        invite: editor.NewInvite(db, acc.Editors),
+    }
     op := func(id, method, path string, opts ...func(*huma.Operation)) huma.Operation {
         o := huma.Operation{OperationID: id, Method: method, Path: path}
         for _, opt := range opts {
@@ -461,17 +489,18 @@ func Register(api *rest.API, db *bun.DB, acc *accounts.Accounts) {
         return o
     }
     public := rest.Public()
-    signedIn := rest.RequireBearer(api, acc.EditorTokens.Validate)
+    signedIn := rest.RequireBearer(api, acc.EditorJWT.Validate)
     rest.Register(api, op("editor-login", http.MethodPost, "/auth/login", public), h.login)
     rest.Register(api, op("editor-two-factor", http.MethodPost, "/auth/two-factor", public), h.twoFactor)
     rest.Register(api, op("editor-enroll", http.MethodPost, "/auth/two-factor/enroll", public), h.enroll)
     rest.Register(api, op("editor-enroll-confirm", http.MethodPost, "/auth/two-factor/enroll/confirm", public), h.completeEnroll)
+    rest.Register(api, op("editor-refresh", http.MethodPost, "/auth/refresh", public), h.refresh)
     rest.Register(api, op("editor-password-verify", http.MethodPost, "/auth/password/verify", public), h.verifyLink)
     rest.Register(api, op("editor-password", http.MethodPost, "/auth/password", public), h.setPassword)
     rest.Register(api, op("editor-logout", http.MethodDelete, "/auth/session", signedIn), h.logout)
     rest.Register(api, op("editor-confirm", http.MethodPost, "/account/confirm", signedIn), h.confirm)
     rest.Register(api, op("editor-invite", http.MethodPost, "/editors",
-        rest.RequireBearer(api, acc.EditorTokens.Validate, "editors:invite"), rest.Confirmed(15*time.Minute)), h.inviteEditor)
+        rest.RequireBearer(api, acc.EditorJWT.Validate, "editors:invite"), rest.Confirmed(15*time.Minute)), h.inviteEditor)
 }
 
 func (h *handlers) login(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
@@ -479,12 +508,7 @@ func (h *handlers) login(ctx context.Context, in *LoginInput) (*LoginOutput, err
     if err != nil {
         return nil, err // 密码错误：login.ErrInvalidCredentials，401；连续失败太多次：ratelimit.ErrExceeded，429
     }
-    if out.Pending != "" || out.Enroll != "" {
-        resp := &LoginOutput{}
-        resp.Body.Pending, resp.Body.Enroll = out.Pending, out.Enroll
-        return resp, nil
-    }
-    return h.issue(ctx, out.Subject, in.UserAgent)
+    return h.issue(ctx, out, in.UserAgent)
 }
 
 func (h *handlers) twoFactor(ctx context.Context, in *TwoFactorInput) (*LoginOutput, error) {
@@ -492,7 +516,22 @@ func (h *handlers) twoFactor(ctx context.Context, in *TwoFactorInput) (*LoginOut
     if err != nil {
         return nil, err // 验证码不正确：login.ErrInvalidCode；输错太多次或超时：login.ErrInvalidProof，重新登录
     }
-    return h.issue(ctx, out.Subject, in.UserAgent)
+    return h.issue(ctx, out, in.UserAgent)
+}
+
+// issue 把登录的结果交给单页应用：需要二次验证或先启用时返回对应的凭证，登录成功时签发 JWT，refresh token 写入 cookie。
+func (h *handlers) issue(ctx context.Context, out login.Outcome, userAgent string) (*LoginOutput, error) {
+    resp := &LoginOutput{}
+    if out.Pending != "" || out.Enroll != "" {
+        resp.Body.Pending, resp.Body.Enroll = out.Pending, out.Enroll
+        return resp, nil
+    }
+    pair, err := h.jwt.Login(ctx, out.Subject, apitoken.Device{UserAgent: userAgent})
+    if err != nil {
+        return nil, err
+    }
+    resp.SetCookie, resp.Body.AccessToken = h.cookie.Set(pair), pair.Access
+    return resp, nil
 }
 
 func (h *handlers) enroll(ctx context.Context, in *EnrollInput) (*EnrollOutput, error) {
@@ -510,22 +549,23 @@ func (h *handlers) completeEnroll(ctx context.Context, in *CompleteEnrollInput) 
     if err != nil {
         return nil, err // 验证码不正确：login.ErrInvalidCode，重新扫码或再输一次
     }
-    token, err := h.tokens.Login(ctx, out.Subject, apitoken.Device{UserAgent: in.UserAgent})
+    pair, err := h.jwt.Login(ctx, out.Subject, apitoken.Device{UserAgent: in.UserAgent})
     if err != nil {
         return nil, err
     }
-    resp := &CompleteEnrollOutput{}
-    resp.Body.Token, resp.Body.RecoveryCodes = token, codes
+    resp := &CompleteEnrollOutput{SetCookie: h.cookie.Set(pair)}
+    resp.Body.AccessToken, resp.Body.RecoveryCodes = pair.Access, codes
     return resp, nil
 }
 
-func (h *handlers) issue(ctx context.Context, sub identity.Subject, userAgent string) (*LoginOutput, error) {
-    token, err := h.tokens.Login(ctx, sub, apitoken.Device{UserAgent: userAgent})
+// refresh 用 cookie 中的 refresh token 换新的 access token，并轮换 cookie。
+func (h *handlers) refresh(ctx context.Context, in *RefreshInput) (*LoginOutput, error) {
+    pair, err := h.jwt.Refresh(ctx, in.Cookie)
     if err != nil {
-        return nil, err
+        return nil, err // 401：没有登录或登录已失效，显示登录页
     }
-    resp := &LoginOutput{}
-    resp.Body.Token = token
+    resp := &LoginOutput{SetCookie: h.cookie.Set(pair)}
+    resp.Body.AccessToken = pair.Access
     return resp, nil
 }
 
@@ -547,18 +587,28 @@ func (h *handlers) setPassword(ctx context.Context, in *PasswordInput) (*struct{
     return nil, err
 }
 
-func (h *handlers) logout(ctx context.Context, _ *struct{}) (*struct{}, error) {
+// logout 撤销这次登录，并清除 cookie。
+func (h *handlers) logout(ctx context.Context, _ *struct{}) (*LogoutOutput, error) {
     sub, _ := identity.FromContext(ctx)
-    return nil, h.tokens.Revoke(ctx, sub, sub.Credential)
+    if err := h.tokens.Revoke(ctx, sub, sub.Credential); err != nil {
+        return nil, err
+    }
+    return &LogoutOutput{SetCookie: h.cookie.Clear()}, nil
 }
 
-// confirm 确认身份：校验密码后记下确认时间，之后 15 分钟内可以邀请编辑。
-func (h *handlers) confirm(ctx context.Context, in *ConfirmInput) (*struct{}, error) {
+// confirm 确认身份：校验密码后记下确认时间，返回带有这次确认的新 access token，之后 15 分钟内可以邀请编辑。
+func (h *handlers) confirm(ctx context.Context, in *ConfirmInput) (*ConfirmOutput, error) {
     sub, _ := identity.FromContext(ctx)
     if err := h.logins.Confirm(ctx, sub.Ref(), in.Body.Password); err != nil {
         return nil, err // 密码错误：login.ErrInvalidCredentials
     }
-    return nil, h.tokens.Confirm(ctx, sub, login.MethodPassword)
+    pair, err := h.jwt.Confirm(ctx, sub, login.MethodPassword)
+    if err != nil {
+        return nil, err
+    }
+    resp := &ConfirmOutput{}
+    resp.Body.AccessToken = pair.Access
+    return resp, nil
 }
 
 func (h *handlers) inviteEditor(ctx context.Context, in *InviteInput) (*struct{}, error) {
@@ -572,7 +622,8 @@ func (h *handlers) inviteEditor(ctx context.Context, in *InviteInput) (*struct{}
 - 待完成的登录（`pending`、`enroll`）由单页应用暂存，带到下一步的请求中；它们 15 分钟内有效，最多输错 5 次。
 - 启用二次验证在登录的过程中完成，之后签发的 token 已经经过了二次验证（`sub.Auth.TwoFactor()` 为 `true`）。Resolver 不需要再检查二次验证，也不存在“没有权限、只能去启用”的 token。
 - `EnrollTOTP` 的最后一个参数是验证器中显示的账号名，这里用固定的文字，也可以查出编辑的邮箱。`uri` 由单页应用渲染成二维码。
-- 邀请编辑用 `rest.Confirmed`：登录本身算一次确认，登录后 15 分钟内直接放行，之后先确认密码。读者注销账号则是在请求中直接带上验证码，两种写法见[确认身份](login.md#confirming)。
+- 编辑后台只有浏览器一种客户端，refresh token 只放在 cookie 中。同时服务浏览器和 App 的接口写法见[单页应用](api-tokens.md#single-page-applications)。
+- 邀请编辑用 `rest.Confirmed`：登录本身算一次确认，登录后 15 分钟内直接放行，之后先确认密码。JWT 模式的 access token 带着确认时间，所以 `confirm` 返回新的 access token。读者注销账号则是在请求中直接带上验证码，两种写法见[确认身份](login.md#confirming)。
 
 <a id="reader-api"></a>
 ## 读者 App

@@ -145,3 +145,25 @@ func TestCORSConfigValidate(t *testing.T) {
 		t.Error("positive max_age rejected")
 	}
 }
+
+// 允许携带凭据只用于保存 refresh token 的 cookie，来源必须逐个列出。
+func TestCORSCredentials(t *testing.T) {
+	t.Parallel()
+	cfg := httpx.DefaultCORSConfig()
+	cfg.Credentials = true
+	for _, origins := range [][]string{{"*"}, {"https://*.example.com"}} {
+		cfg.AllowedOrigins = origins
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("credentials with %v accepted", origins)
+		}
+	}
+	cfg.AllowedOrigins = []string{"https://app.example.com"}
+	h := httpx.CORS(cfg)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	rr := preflight(h, "https://app.example.com")
+	if rr.Header().Get("Access-Control-Allow-Credentials") != "true" || rr.Header().Get("Access-Control-Allow-Origin") != "https://app.example.com" {
+		t.Fatalf("preflight headers %v", rr.Header())
+	}
+	if rr := preflight(h, "https://evil.example.com"); rr.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("unlisted origin allowed: %v", rr.Header())
+	}
+}

@@ -263,8 +263,9 @@ http:
 | `allowed_origins` | 允许的来源，`scheme://host[:port]`，可以有一个 `*` 通配；单独的 `*` 允许任何来源 | `["*"]` |
 | `expose_headers` | 还要让前端读取的响应头，`X-Request-ID`、`Content-Language`、`Retry-After`、`Location`、`Content-Disposition` 总是暴露 | 空 |
 | `max_age` | 浏览器缓存预检结果的时间，Chrome 最多缓存 2 小时 | `2h` |
+| `credentials` | 允许携带 cookie，见下文；为 `true` 时 `allowed_origins` 必须逐个列出，不能有 `*` | `false` |
 
-API 只用 [Bearer token](api-tokens.md) 认证，不使用 cookie，所以 `CORS` 从不允许携带凭据：其他网站的网页拿不到用户的 token，允许任何来源也是安全的。请求头按预检请求声明的原样允许，`Authorization` 不需要单独配置。
+API 只用 [Bearer token](api-tokens.md) 认证，不使用 cookie，所以 `CORS` 默认不允许携带凭据：其他网站的网页拿不到用户的 token，允许任何来源也是安全的。唯一的例外是单页应用保存 refresh token 的 [cookie](api-tokens.md#single-page-applications)：单页应用与 API 在同一站点的不同子域名（`app.example.com` 与 `api.example.com`）时，设置 `credentials: true` 并列出单页应用的来源。cookie 的 `Path` 只包含刷新和登出接口，其他接口照常收不到 cookie。请求头按预检请求声明的原样允许，`Authorization` 不需要单独配置。
 
 预检请求（`OPTIONS`）直接以 `204` 应答，不进入路由、认证和限流，所以要把 `CORS` 安装在它们之前。`401`、`429` 等错误响应同样带有 CORS 头，前端能读到错误内容。
 
