@@ -155,31 +155,42 @@ rest.Register(api, op, revokeToken(tokens))
 <a id="personal-access-tokens"></a>
 ## 个人访问令牌
 
-用户可以为脚本或第三方集成创建令牌，并把它限制在部分权限内。下面是“API 令牌”[页面](views.md)的创建处理器，令牌明文只显示这一次：
+用户可以为脚本或第三方集成创建令牌，并把它限制在部分权限内。下面是单页应用“API 令牌”页面调用的创建接口，与[登录与登出](#login-and-logout)的接口放在同一个文件中，令牌明文只在响应中出现这一次：
 
 ```go
 type CreateTokenInput struct {
-    Name string `json:"name" minLength:"1" maxLength:"100"`
+    Body struct {
+        Name string `json:"name" minLength:"1" maxLength:"100"`
+    }
 }
 
-func (h *Handlers) CreateToken(w http.ResponseWriter, r *http.Request) error {
-    f, err := web.ParseForm[CreateTokenInput](r)
-    if err != nil {
-        return err
+type CreateTokenOutput struct {
+    Body struct {
+        Token string `json:"token" doc:"令牌明文，只返回这一次"`
     }
-    if !f.Valid() {
-        return web.Render(w, r, http.StatusUnprocessableEntity, views.NewToken(f))
-    }
-    sub, _ := identity.FromContext(r.Context())
-    plain, err := h.tokens.Create(r.Context(), sub, apitoken.Personal{
-        Name:   f.Data.Name,
-        Scopes: []string{"articles:read"},
-    })
-    if err != nil {
-        return err
-    }
-    return web.Render(w, r, http.StatusOK, views.TokenCreated(plain))
 }
+
+func createToken(tokens *apitoken.Store) func(context.Context, *CreateTokenInput) (*CreateTokenOutput, error) {
+    return func(ctx context.Context, in *CreateTokenInput) (*CreateTokenOutput, error) {
+        sub, _ := identity.FromContext(ctx)
+        plain, err := tokens.Create(ctx, sub, apitoken.Personal{
+            Name:   in.Body.Name,
+            Scopes: []string{"articles:read"},
+        })
+        if err != nil {
+            return nil, err
+        }
+        out := &CreateTokenOutput{}
+        out.Body.Token = plain
+        return out, nil
+    }
+}
+```
+
+```go
+op = huma.Operation{OperationID: "auth-personal-token-create", Method: http.MethodPost, Path: "/auth/personal-tokens"}
+rest.RequireBearer(api, tokens.Validate)(&op)
+rest.Register(api, op, createToken(tokens))
 ```
 
 `apitoken.Personal` 的字段：

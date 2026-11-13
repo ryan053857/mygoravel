@@ -315,6 +315,19 @@ func TestFlow(t *testing.T) {
 		t.Fatalf("personal token decide: %d %v", status, body)
 	}
 
+	// 代为登录的 token 不代表用户本人，客服不能替用户授权其他应用。
+	impersonated := identity.Subject{Type: editor.Type, ID: "e2", Impersonator: identity.Ref{Type: "staff", ID: "s1"}}
+	support, err := e.tokens.Login(context.Background(), impersonated, apitoken.Device{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := e.consent(support, request); status != http.StatusForbidden || body["code"] != "oauth.restricted_credential" {
+		t.Fatalf("impersonated consent: %d %v", status, body)
+	}
+	if status, body := e.decide(support, request, true); status != http.StatusForbidden || body["code"] != "oauth.restricted_credential" {
+		t.Fatalf("impersonated decide: %d %v", status, body)
+	}
+
 	// 同意：带着授权码、state 和 iss 跳回客户端。
 	back := e.approve(t, q, true)
 	if back.Scheme+"://"+back.Host+back.Path != callback || back.Query().Get("state") != "xyz" ||

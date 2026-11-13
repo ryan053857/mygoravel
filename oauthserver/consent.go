@@ -20,8 +20,8 @@ var (
 	// ErrInvalidRequest 表示授权请求的其他参数不合法，例如没有 PKCE、范围或资源未知。
 	// 授权端点已经把这类请求带着错误跳回客户端，同意页的接口只会在 request 被改动过时遇到它。
 	ErrInvalidRequest = errorx.Define(errorx.InvalidArgument, "oauth.invalid_request")
-	// ErrRestrictedCredential 表示调用同意页接口的凭据有权限限制（个人访问令牌、OAuth 令牌）：
-	// 只有登录凭据代表用户本人，才能授权其他应用。
+	// ErrRestrictedCredential 表示调用同意页接口的凭据不代表用户本人：有权限限制（个人访问令牌、OAuth 令牌），
+	// 或者是代为登录（identity.Subject.Impersonator 不为零值）。只有用户本人的登录凭据才能授权其他应用。
 	ErrRestrictedCredential = errorx.Define(errorx.PermissionDenied, "oauth.restricted_credential")
 )
 
@@ -66,7 +66,8 @@ type redirectOutput struct{ Body Redirect }
 //	GET  /oauth/consent?request=…  读取授权请求，显示在同意页上（oauth-consent-get）
 //	POST /oauth/consent            同意或拒绝，返回浏览器要跳转去的地址（oauth-consent-decide）
 //
-// 能授权的就是 auth 接受的账号体系。只接受登录凭据：主体的 Scopes 不为 nil（个人访问令牌、OAuth 令牌）时返回 ErrRestrictedCredential。
+// 能授权的就是 auth 接受的账号体系。只接受用户本人的登录凭据：主体的 Scopes 不为 nil（个人访问令牌、OAuth 令牌），
+// 或者是代为登录时，返回 ErrRestrictedCredential。客服代为登录排查问题时，不能替用户把其他应用连上账号。
 func (s *Server) Register(api *rest.API, auth func(*huma.Operation)) {
 	get := huma.Operation{
 		OperationID: "oauth-consent-get", Method: http.MethodGet, Path: ConsentPath,
@@ -116,7 +117,7 @@ func (s *Server) decide(ctx context.Context, in *decisionInput) (*redirectOutput
 // request 检查调用者的凭据，解析并校验同意页交回的授权请求。
 func (s *Server) request(ctx context.Context, raw string) (*authRequest, error) {
 	sub, ok := identity.FromContext(ctx)
-	if !ok || sub.Scopes != nil {
+	if !ok || sub.Scopes != nil || !sub.Impersonator.IsZero() {
 		return nil, ErrRestrictedCredential.New()
 	}
 	values, err := url.ParseQuery(raw)

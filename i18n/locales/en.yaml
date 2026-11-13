@@ -30,7 +30,7 @@ oauth.denied: Third-party sign-in was canceled
 oauth.invalid_client: The application requesting access could not be identified
 oauth.invalid_redirect_uri: The redirect address does not belong to this application
 oauth.invalid_request: The authorization request is invalid
-oauth.restricted_credential: Sign in to authorize; access tokens cannot be used
+oauth.restricted_credential: Sign in as yourself to authorize; access tokens and impersonation cannot be used
 passkey.invalid: Passkey verification failed, please try again
 passkey.not_found: Passkey not found
 authz.not_member: Not found or no access

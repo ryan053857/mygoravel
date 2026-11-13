@@ -30,7 +30,7 @@ oauth.denied: 已取消第三方登录
 oauth.invalid_client: 无法识别请求授权的应用
 oauth.invalid_redirect_uri: 授权后的跳转地址不属于这个应用
 oauth.invalid_request: 授权请求的参数不正确
-oauth.restricted_credential: 请登录后再授权，不能使用访问令牌
+oauth.restricted_credential: 请用本人账号登录后再授权，不能使用访问令牌或代为登录
 passkey.invalid: 通行密钥验证失败，请重试
 passkey.not_found: 通行密钥不存在
 authz.not_member: 不存在或没有访问权限

@@ -49,7 +49,7 @@ type Subject struct {
 | `Type` | 调用者所属的账号体系，例如 `user`、`staff`、`customer`，由应用声明；队列任务等系统自己的操作使用 `identity.System` |
 | `ID` | 调用者在这套账号体系中的标识，是一个不透明的字符串，例如用户表的主键 |
 | `Impersonator` | 代为登录时实际操作的人，例如客服；零值表示调用者本人，见[代为登录](#impersonation) |
-| `Method` | 认证方式，例如 `bearer` 或 `session` |
+| `Method` | 认证方式，例如 `bearer` |
 | `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)的 ID；用于在设备列表中标出当前设备、退出其他设备，可以为空 |
 | `Tenant` | 本次请求所在的租户，`""` 表示平台本身；由凭据设置时，凭据只能在这个租户中使用，见[多租户](#tenants) |
 | `Permissions` | 调用者拥有的权限，例如 `articles:write` |
@@ -372,7 +372,7 @@ plain, err := tokens.Login(ctx, target, device)
   ```
 
 - **谁可以被代为登录**：通常不允许代为登录其他运营人员，在 `Impersonate` 中用 `roles.Permissions(ctx, target.Ref(), "")` 确认目标在平台中没有角色；
-- **哪些操作不允许代为执行**：修改密码和邮箱、管理设备和令牌、付款等，在对应的 action 中拒绝 `!subject.Impersonator.IsZero()` 的主体。代为登录期间创建的[个人访问令牌](api-tokens.md#personal-access-tokens)会记录 `Impersonator`，令牌的每次使用都归于这个操作者；
+- **哪些操作不允许代为执行**：修改密码和邮箱、管理设备和令牌、付款等，在对应的 action 中拒绝 `!subject.Impersonator.IsZero()` 的主体。代为登录期间创建的[个人访问令牌](api-tokens.md#personal-access-tokens)会记录 `Impersonator`，令牌的每次使用都归于这个操作者。[OAuth 授权](oauth-server.md)的同意接口由框架注册，它已经拒绝代为登录的主体；
 - **审计**：[操作日志](activity.md)自动记下 `Impersonator`；自己写日志时同样同时写下两者，例如 `slog.InfoContext(ctx, "article published", "subject", subject.Ref().String(), "impersonator", subject.Impersonator.String())`。
 
 <a id="retrieving-the-subject"></a>
