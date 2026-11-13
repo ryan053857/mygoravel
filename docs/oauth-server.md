@@ -11,6 +11,7 @@
 - [令牌](#tokens)
 - [同意页](#consent-page)
 - [部署](#deployment)
+    - [部署在路径之下](#path-prefix)
 - [测试](#testing)
 
 <a id="introduction"></a>
@@ -51,13 +52,14 @@ oauth := oauthserver.New(a.db, tokens, oauthserver.Options{
     },
     ConsentURL: "/oauth/consent", // 编辑后台单页应用中的同意页
 })
+router.Handle(oauth.MetadataPath(), oauth.Metadata())
 oauth.Routes(router)
 oauth.Register(api, rest.RequireBearer(api, tokens.Validate))
 ```
 
 | 选项 | 说明 |
 | --- | --- |
-| `Issuer` | 授权服务器的地址，也是各端点的前缀。必须是没有路径的 https 地址，本机开发可以用 `http://localhost:8080` |
+| `Issuer` | 授权服务器的地址，也是各端点的前缀。必须是 https 地址，本机开发可以用 `http://localhost:8080`；部署在路径之下时带上路径，见[部署在路径之下](#path-prefix) |
 | `Resources` | 令牌可以用于的 MCP 服务地址，与用户在客户端中填写的完全相同 |
 | `Scopes` | 客户端可以申请的范围，见下一节 |
 | `Clients` | 预先登记的客户端，见[客户端](#clients) |
@@ -65,11 +67,10 @@ oauth.Register(api, rest.RequireBearer(api, tokens.Validate))
 | `ConsentURL` | 单页应用中同意页的地址，见[同意页](#consent-page)。通常是本站的路径；单页应用部署在别的地址时写完整的 https 地址 |
 | `TokenLifetime`、`TokenIdleTimeout` | 令牌的最长有效期和最长空闲时间，默认 1 年和 30 天 |
 
-`Routes` 注册客户端访问的端点：
+`Metadata` 是授权服务器元数据（RFC 8414），挂在 `MetadataPath()` 上，即 `/.well-known/oauth-authorization-server`。`Routes` 注册客户端访问的其他端点：
 
 | 端点 | 说明 |
 | --- | --- |
-| `GET /.well-known/oauth-authorization-server` | 授权服务器元数据 |
 | `GET /oauth/authorize` | 校验授权请求，跳到同意页 |
 | `POST /oauth/token` | 授权码换令牌 |
 | `POST /oauth/revoke` | 客户端交回令牌（RFC 7009） |
@@ -225,6 +226,35 @@ function Consent() {
 - 授权服务器和 MCP 服务都要能从公网访问。Claude 的请求来自 `160.79.104.0/21`，前面有防火墙时放行这个网段。
 - `Issuer` 和 `Resources` 是用户看到的地址，在反向代理之后也写对外的 https 地址。
 - 取回客户端元数据要访问 claude.ai 等地址，服务器需要能访问外网。
+
+<a id="path-prefix"></a>
+### 部署在路径之下
+
+应用和其他服务共用一个域名、只分到 `/blog` 这样的路径时，`Issuer` 和 `Resources` 都带上路径，`Routes` 挂在这个路径上：
+
+```go
+oauth := oauthserver.New(a.db, tokens, oauthserver.Options{
+    Issuer:     "https://example.com/blog",
+    Resources:  []string{"https://example.com/blog/mcp"},
+    ConsentURL: "/blog/oauth/consent",
+    // ……
+})
+router.Handle(oauth.MetadataPath(), oauth.Metadata()) // /.well-known/oauth-authorization-server/blog
+router.Route("/blog", func(r chi.Router) {
+    oauth.Routes(r) // /blog/oauth/authorize、/blog/oauth/token……
+})
+
+res := oauth.Resource("https://example.com/blog/mcp")
+router.Handle(res.MetadataPath(), mcpx.ResourceMetadata(res)) // /.well-known/oauth-protected-resource/blog/mcp
+```
+
+两份元数据仍然在域名的根上，路径插在 `.well-known` 之后（RFC 8414、RFC 9728）。MCP 客户端只按这个规则查找，所以反向代理除了 `/blog/`，还要把这两个地址转发给应用，转发时保留完整路径：
+
+```nginx
+location /blog/ { proxy_pass http://blog:8080; }
+location = /.well-known/oauth-authorization-server/blog { proxy_pass http://blog:8080; }
+location = /.well-known/oauth-protected-resource/blog/mcp { proxy_pass http://blog:8080; }
+```
 
 <a id="testing"></a>
 ## 测试

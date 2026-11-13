@@ -10,6 +10,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/ryan053857/mygoravel/oauthserver"
 )
 
 // handlerTransport 把请求交给 h，不监听端口：官方 SDK 的客户端经它访问授权服务器和 MCP 服务。
@@ -25,7 +27,15 @@ func (t handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // 按 Client ID Metadata Document 授权（浏览器中的同意由 approve 代替单页应用完成）→ 换取令牌 → 调用工具。
 func TestOfficialSDKClient(t *testing.T) {
 	t.Parallel()
-	e := setup(t)
+	for name, edit := range map[string]func(*oauthserver.Options){"root": nil, "path": withPath} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			officialSDKClient(t, setupWith(t, edit))
+		})
+	}
+}
+
+func officialSDKClient(t *testing.T, e *env) {
 	client := &http.Client{Transport: handlerTransport{e.router}}
 
 	handler, err := auth.NewAuthorizationCodeHandler(&auth.AuthorizationCodeHandlerConfig{
@@ -47,7 +57,7 @@ func TestOfficialSDKClient(t *testing.T) {
 
 	ctx := context.Background()
 	session, err := mcp.NewClient(&mcp.Implementation{Name: "interop", Version: "1"}, nil).Connect(ctx,
-		&mcp.StreamableClientTransport{Endpoint: resource, HTTPClient: client, OAuthHandler: handler}, nil)
+		&mcp.StreamableClientTransport{Endpoint: e.resource, HTTPClient: client, OAuthHandler: handler}, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

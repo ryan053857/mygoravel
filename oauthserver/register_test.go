@@ -34,7 +34,7 @@ func TestDynamicRegistration(t *testing.T) {
 	t.Parallel()
 	e := setupWith(t, withDCR)
 	var meta map[string]any
-	_ = json.Unmarshal(e.do(http.MethodGet, oauthserver.MetadataPath, "", nil).Body.Bytes(), &meta)
+	_ = json.Unmarshal(e.do(http.MethodGet, e.srv.MetadataPath(), "", nil).Body.Bytes(), &meta)
 	if meta["registration_endpoint"] != issuer+"/oauth/register" {
 		t.Fatalf("metadata %v", meta)
 	}
@@ -94,7 +94,7 @@ func TestDynamicRegistrationDisabled(t *testing.T) {
 	t.Parallel()
 	e := setup(t)
 	var meta map[string]any
-	_ = json.Unmarshal(e.do(http.MethodGet, oauthserver.MetadataPath, "", nil).Body.Bytes(), &meta)
+	_ = json.Unmarshal(e.do(http.MethodGet, e.srv.MetadataPath(), "", nil).Body.Bytes(), &meta)
 	if _, ok := meta["registration_endpoint"]; ok {
 		t.Fatalf("metadata %v", meta)
 	}

@@ -78,6 +78,8 @@ type env struct {
 	srv    *oauthserver.Server
 	// login 是 editor 在单页应用中登录得到的 token。
 	login string
+	// base 是 Issuer 的路径，Routes 和 API 挂在它下面；resource、consentPage 是这次的 MCP 地址和同意页路径。
+	base, resource, consentPage string
 }
 
 func setup(t *testing.T) *env {
@@ -111,13 +113,18 @@ func setupWith(t *testing.T, edit func(*oauthserver.Options)) *env {
 		edit(&opts)
 	}
 	srv := oauthserver.New(db, tokens, opts)
+	issuerURL, _ := url.Parse(opts.Issuer)
+	base := issuerURL.Path
 	router := chi.NewRouter()
-	srv.Routes(router)
+	router.Handle(srv.MetadataPath(), srv.Metadata())
 
 	apiRouter := chi.NewRouter()
-	api := rest.New(rest.Options{Router: apiRouter, BasePath: "/api", Accounts: identity.Accounts{"editor": editors}, Logger: slog.New(slog.DiscardHandler)})
+	api := rest.New(rest.Options{Router: apiRouter, BasePath: base + "/api", Accounts: identity.Accounts{"editor": editors}, Logger: slog.New(slog.DiscardHandler)})
 	srv.Register(api, rest.RequireBearer(api, tokens.Validate))
-	router.Mount("/api", apiRouter)
+	router.Route(base+"/", func(r chi.Router) {
+		srv.Routes(r)
+		r.Mount("/api", apiRouter)
+	})
 
 	tools := mcpx.New(mcpx.Options{Name: "blog"})
 	mcpx.Register(tools, mcpx.Tool{Name: "whoami", Description: "当前主体", Permissions: []string{"articles:read"}, ReadOnly: true},
@@ -125,16 +132,19 @@ func setupWith(t *testing.T, edit func(*oauthserver.Options)) *env {
 			sub, _ := identity.FromContext(ctx)
 			return map[string]any{"id": sub.ID, "scopes": sub.Scopes}, nil
 		})
-	res := srv.Resource(resource)
+	res := srv.Resource(opts.Resources[0])
 	router.Handle(res.MetadataPath(), mcpx.ResourceMetadata(res))
-	router.Handle("/mcp", mcpx.Handler(tools, mcpx.HandlerOptions{
+	resourceURL, _ := url.Parse(opts.Resources[0])
+	router.Handle(resourceURL.Path, mcpx.Handler(tools, mcpx.HandlerOptions{
 		Validate: tokens.ValidateFor(res.URL), Accounts: identity.Accounts{"editor": editors}, Resource: &res,
 	}))
 	login, err := tokens.Login(context.Background(), editor, apitoken.Device{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &env{db: db, tokens: tokens, fake: fake, router: router, srv: srv, login: login}
+	consentURL, _ := url.Parse(opts.ConsentURL)
+	return &env{db: db, tokens: tokens, fake: fake, router: router, srv: srv, login: login,
+		base: base, resource: opts.Resources[0], consentPage: consentURL.Path}
 }
 
 // do 发出请求；token 不为空时带上 Bearer，body 不为 nil 时编码为 JSON。
@@ -158,7 +168,7 @@ func (e *env) do(method, target, token string, body any) *httptest.ResponseRecor
 // authorize 访问授权端点，返回它跳转去的地址。
 func (e *env) authorize(t *testing.T, q url.Values) *url.URL {
 	t.Helper()
-	w := e.do(http.MethodGet, oauthserver.AuthorizePath+"?"+q.Encode(), "", nil)
+	w := e.do(http.MethodGet, e.base+oauthserver.AuthorizePath+"?"+q.Encode(), "", nil)
 	u, err := url.Parse(w.Header().Get("Location"))
 	if w.Code != http.StatusFound || err != nil {
 		t.Fatalf("authorize: %d %q", w.Code, w.Header().Get("Location"))
@@ -170,7 +180,7 @@ func (e *env) authorize(t *testing.T, q url.Values) *url.URL {
 func (e *env) request(t *testing.T, q url.Values) string {
 	t.Helper()
 	u := e.authorize(t, q)
-	if u.Path != consentPage || u.Query().Get("request") == "" {
+	if u.Path != e.consentPage || u.Query().Get("request") == "" {
 		t.Fatalf("not sent to the consent page: %s", u)
 	}
 	return u.Query().Get("request")
@@ -178,7 +188,7 @@ func (e *env) request(t *testing.T, q url.Values) string {
 
 // consent 以 token 读取同意页要显示的授权请求。
 func (e *env) consent(token, request string) (int, map[string]any) {
-	w := e.do(http.MethodGet, consentAPI+"?"+url.Values{"request": {request}}.Encode(), token, nil)
+	w := e.do(http.MethodGet, e.base+consentAPI+"?"+url.Values{"request": {request}}.Encode(), token, nil)
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	return w.Code, body
@@ -186,7 +196,7 @@ func (e *env) consent(token, request string) (int, map[string]any) {
 
 // decide 以 token 对 request 做出选择，返回状态码和响应体。
 func (e *env) decide(token, request string, approve bool) (int, map[string]any) {
-	w := e.do(http.MethodPost, consentAPI, token, map[string]any{"request": request, "approve": approve})
+	w := e.do(http.MethodPost, e.base+consentAPI, token, map[string]any{"request": request, "approve": approve})
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	return w.Code, body
@@ -218,7 +228,7 @@ func authorizeQuery(edit func(url.Values)) url.Values {
 
 func (e *env) exchange(t *testing.T, form url.Values) (int, map[string]any) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, issuer+oauthserver.TokenPath, strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, issuer+e.base+oauthserver.TokenPath, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	e.router.ServeHTTP(w, req)
@@ -268,7 +278,10 @@ func TestFlow(t *testing.T) {
 		fmt.Sprint(meta["authorization_servers"]) != "["+issuer+"]" || fmt.Sprint(meta["scopes_supported"]) != "[articles:read articles:write]" {
 		t.Fatalf("resource metadata %s", prm.Body)
 	}
-	as := e.do(http.MethodGet, oauthserver.MetadataPath, "", nil)
+	if e.srv.MetadataPath() != "/.well-known/oauth-authorization-server" {
+		t.Fatalf("metadata path %q", e.srv.MetadataPath())
+	}
+	as := e.do(http.MethodGet, e.srv.MetadataPath(), "", nil)
 	if err := json.Unmarshal(as.Body.Bytes(), &meta); err != nil || meta["issuer"] != issuer ||
 		meta["authorization_endpoint"] != issuer+"/oauth/authorize" ||
 		meta["token_endpoint"] != issuer+"/oauth/token" || meta["client_id_metadata_document_supported"] != true ||
@@ -478,7 +491,7 @@ func TestNewPanics(t *testing.T) {
 	tokens := apitoken.NewStore(db, apitoken.Config{Lifetime: time.Hour})
 	ok := oauthserver.Options{Issuer: issuer, Resources: []string{resource}, Scopes: []oauthserver.Scope{{Name: "articles:read"}}, ConsentURL: consentPage}
 	for name, edit := range map[string]func(*oauthserver.Options){
-		"issuer path":  func(o *oauthserver.Options) { o.Issuer = issuer + "/auth" },
+		"issuer query": func(o *oauthserver.Options) { o.Issuer = issuer + "?a=1" },
 		"http issuer":  func(o *oauthserver.Options) { o.Issuer = "http://example.com" },
 		"no resources": func(o *oauthserver.Options) { o.Resources = nil },
 		"bad resource": func(o *oauthserver.Options) { o.Resources = []string{"ftp://example.com/mcp"} },
@@ -544,4 +557,35 @@ func TestConsentURLWithQuery(t *testing.T) {
 	if u.Scheme+"://"+u.Host+u.Path != "https://app.example.com/consent" || u.Query().Get("lang") != "zh" || u.Query().Get("request") == "" {
 		t.Fatalf("consent URL %s", u)
 	}
+}
+
+// 应用部署在路径之下：端点在 Issuer 的路径上，元数据仍在域名的根上，路径插在 .well-known 之后（RFC 8414）。
+func TestIssuerWithPath(t *testing.T) {
+	t.Parallel()
+	e := setupWith(t, withPath)
+	if e.srv.MetadataPath() != "/.well-known/oauth-authorization-server/blog" {
+		t.Fatalf("metadata path %q", e.srv.MetadataPath())
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(e.do(http.MethodGet, e.srv.MetadataPath(), "", nil).Body.Bytes(), &meta); err != nil ||
+		meta["issuer"] != issuer+"/blog" || meta["authorization_endpoint"] != issuer+"/blog/oauth/authorize" ||
+		meta["token_endpoint"] != issuer+"/blog/oauth/token" || meta["revocation_endpoint"] != issuer+"/blog/oauth/revoke" {
+		t.Fatalf("metadata %v %v", meta, err)
+	}
+	q := authorizeQuery(func(q url.Values) { q.Set("resource", e.resource) })
+	back := e.approve(t, q, true)
+	if back.Query().Get("iss") != issuer+"/blog" {
+		t.Fatalf("iss %s", back)
+	}
+	form := tokenForm(back.Query().Get("code"))
+	form.Set("resource", e.resource)
+	if status, body := e.exchange(t, form); status != http.StatusOK || body["access_token"] == "" {
+		t.Fatalf("token: %d %v", status, body)
+	}
+}
+
+func withPath(o *oauthserver.Options) {
+	o.Issuer = issuer + "/blog"
+	o.Resources = []string{issuer + "/blog/mcp"}
+	o.ConsentURL = "/blog/oauth/consent"
 }

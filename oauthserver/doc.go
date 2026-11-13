@@ -15,6 +15,7 @@
 //	    Scopes:     []oauthserver.Scope{{Name: "articles:read", Description: "查看文章"}},
 //	    ConsentURL: "/oauth/consent",
 //	})
+//	router.Handle(srv.MetadataPath(), srv.Metadata())
 //	srv.Routes(router)
 //	srv.Register(api, rest.RequireBearer(api, tokens.Validate))
 //

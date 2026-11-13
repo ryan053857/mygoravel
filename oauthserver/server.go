@@ -31,9 +31,8 @@ var (
 	ErrInvalidRedirect = errorx.Define(errorx.InvalidArgument, "oauth.invalid_redirect_uri")
 )
 
-// 端点的路径，相对于挂载的路由。
+// 端点的路径，相对于 Routes 挂载的路由，也就是 Issuer 的路径。
 const (
-	MetadataPath  = "/.well-known/oauth-authorization-server"
 	AuthorizePath = "/oauth/authorize"
 	TokenPath     = "/oauth/token"
 	RevokePath    = "/oauth/revoke"
@@ -57,7 +56,8 @@ type Scope struct {
 // Options 是 New 的选项。
 type Options struct {
 	// Issuer 是授权服务器的标识，也是各端点的地址前缀，例如 https://blog.example.com。
-	// 必须是没有路径的 https 地址（本机开发可以用 http://localhost）；Routes 挂在这个地址的根上。
+	// 必须是 https 地址（本机开发可以用 http://localhost），不能带查询参数。应用部署在路径之下时带上路径，
+	// 例如 https://example.com/blog：Routes 挂在这个路径上，元数据仍然在域名的根上，见 MetadataPath。
 	Issuer string
 	// Resources 是令牌可以用于的资源，例如 MCP 服务的地址 https://blog.example.com/mcp，至少一个。
 	// 授权请求的 resource 参数必须是其中之一；只有一个时可以省略。
@@ -147,8 +147,8 @@ func consentURL(raw string) bool {
 func validate(opts Options) error {
 	u, err := url.Parse(opts.Issuer)
 	switch {
-	case err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || strings.TrimSuffix(u.Path, "/") != "":
-		return errors.Newf("issuer %q must be an origin such as https://blog.example.com", opts.Issuer)
+	case err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil:
+		return errors.Newf("issuer %q must be a URL such as https://blog.example.com, without query or fragment", opts.Issuer)
 	case u.Scheme != "https" && !(u.Scheme == "http" && loopback(u.Hostname())):
 		return errors.Newf("issuer %q must use https", opts.Issuer)
 	case len(opts.Resources) == 0:
@@ -178,16 +178,16 @@ func validate(opts Options) error {
 	return nil
 }
 
-// Routes 注册授权服务器的端点。r 是挂在 Issuer 根上的路由。同意页的接口由 Register 注册在 API 上。
+// Routes 注册授权服务器的端点。r 是 Issuer 的路径上的路由：Issuer 没有路径时是根路由，
+// 例如 https://example.com/blog 时是 router.Route("/blog", srv.Routes) 中的路由。
+// 元数据由 Metadata 挂在域名的根上，同意页的接口由 Register 注册在 API 上。
 //
-//	GET  /.well-known/oauth-authorization-server  元数据（RFC 8414）
-//	GET  /oauth/authorize                         校验授权请求，跳到 Options.ConsentURL
-//	POST /oauth/token                             授权码换令牌
-//	POST /oauth/revoke                            撤销令牌（RFC 7009）
-//	POST /oauth/register                          动态客户端注册（RFC 7591），Options.DynamicRegistration 为 true 时
+//	GET  /oauth/authorize  校验授权请求，跳到 Options.ConsentURL
+//	POST /oauth/token      授权码换令牌
+//	POST /oauth/revoke     撤销令牌（RFC 7009）
+//	POST /oauth/register   动态客户端注册（RFC 7591），Options.DynamicRegistration 为 true 时
 func (s *Server) Routes(r chi.Router) {
 	cors := httpx.CORS(httpx.DefaultCORSConfig())
-	r.With(cors).Get(MetadataPath, s.serveMetadata)
 	r.Get(AuthorizePath, s.authorize)
 	r.With(cors).Post(TokenPath, s.token)
 	r.With(cors).Post(RevokePath, s.revoke)
@@ -244,9 +244,23 @@ func (s *Server) encodeMetadata() []byte {
 	return data
 }
 
-func (s *Server) serveMetadata(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(s.metadata)
+// MetadataPath 返回授权服务器元数据（RFC 8414）的路径：在 Issuer 的路径前插入 /.well-known/oauth-authorization-server，
+// 例如 https://blog.example.com 得到 /.well-known/oauth-authorization-server，
+// https://example.com/blog 得到 /.well-known/oauth-authorization-server/blog。它总在域名的根上，
+// 与 mcpx.Resource.MetadataPath 相同：应用部署在路径之下时，反向代理要把它转发给应用。
+func (s *Server) MetadataPath() string {
+	u, _ := url.Parse(s.issuer)
+	return "/.well-known/oauth-authorization-server" + u.Path
+}
+
+// Metadata 返回授权服务器元数据的处理器，允许跨域读取，挂在 MetadataPath 上：
+//
+//	router.Handle(srv.MetadataPath(), srv.Metadata())
+func (s *Server) Metadata() http.Handler {
+	return httpx.CORS(httpx.DefaultCORSConfig())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(s.metadata)
+	}))
 }
 
 // Cleanup 删除最多 limit 个过期的授权码，返回删除的个数。由应用定时调用。
