@@ -30,6 +30,8 @@ oauth.invalid: Third-party sign-in failed, please try again
 oauth.denied: Third-party sign-in was canceled
 oauth.invalid_client: The application requesting access could not be identified
 oauth.invalid_redirect_uri: The redirect address does not belong to this application
+oauth.invalid_request: The authorization request is invalid
+oauth.restricted_credential: Sign in to authorize; access tokens cannot be used
 passkey.invalid: Passkey verification failed, please try again
 passkey.not_found: Passkey not found
 authz.not_member: Not found or no access
@@ -66,13 +68,6 @@ ui.theme.toggle: Toggle dark mode
 ui.file.remove: Remove
 ui.file.failed: Upload failed
 ui.file.too_large: The file must not be larger than
-ui.consent.description: requests access to your account
-ui.consent.account: Signed in as
-ui.consent.switch: Use another account
-ui.consent.scopes: It will be able to
-ui.consent.redirect: You will be redirected to
-ui.consent.allow: Allow
-ui.consent.deny: Deny
 docs.toc: On this page
 docs.previous: Previous
 docs.next: Next

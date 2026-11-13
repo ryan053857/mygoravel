@@ -11261,7 +11261,6 @@ ${width}px
 ?.querySelectorAll(
 ??
 ??=
-@AuthCard(AuthCardProps{Brand:
 @Chip()
 @Chip(ChipProps{Value:
 @Head()
@@ -12063,7 +12062,6 @@ Brackets
 Brain
 BrainCircuit
 BrainCog
-Brand
 Breadcrumb(props
 Brian
 BrickWall
@@ -12423,13 +12421,11 @@ Class
 Class(ctx)
 Class,
 Class:
-Claude。
 Clear
 Clears
 Click
 Clicks
 Clicks,
-ClientName
 ClientRect
 Clipboard
 ClipboardCheck
@@ -12576,12 +12572,6 @@ Confirm
 Confirm()
 ConfirmID
 ConfirmID})
-ConsentPage
-ConsentPage(p
-ConsentPage。
-ConsentProps
-ConsentProps)
-ConsentScope
 Constants
 Construct
 Construction
@@ -12779,7 +12769,6 @@ Defs:
 Delay
 Delete
 Delta
-Deny
 Derivable.
 Description
 Description(props
@@ -13033,7 +13022,6 @@ Fence
 FerrisWheel
 Field(props
 FieldLabel:
-Fields
 Figma
 File
 FileArchive
@@ -14916,7 +14904,6 @@ NumberOfMonths
 Numbers
 Nut
 NutOff
-OAuth
 OF
 OFFSET
 OFFSET;
@@ -15405,7 +15392,6 @@ RectangleHorizontal
 RectangleProps
 RectangleVertical
 Recycle
-RedirectHost
 Redo
 Redo2
 RedoDot
@@ -15592,7 +15578,6 @@ School
 Scissors
 ScissorsLineDashed
 Scooter
-Scopes
 ScreenShare
 ScreenShareOff
 Scroll
@@ -15794,7 +15779,6 @@ SignalLow
 SignalMedium
 SignalZero
 Signature
-Signed
 Signpost
 SignpostBig
 Since
@@ -16083,7 +16067,6 @@ Switch
 Switch(props
 Switch.Root
 Switch.Thumb,
-SwitchAccount
 SwitchCamera
 SwitchField
 SwitchField(f
@@ -16830,7 +16813,6 @@ ZoomOut
 []AreaProps
 []CellProps
 []ChoiceDefinition
-[]ConsentScope
 []Datum
 []Datum)
 []ItemData
@@ -17269,7 +17251,6 @@ abbreviationChar
 abbreviationIndex
 abbreviationIndex,
 abbreviationIndex;
-able
 abort.
 aborted
 about:config
@@ -17287,7 +17268,6 @@ accept={
 accepted
 accepted,
 accepted:
-access
 accessibility
 accessibilityLayer
 accessibilityLayer,omitempty
@@ -17308,7 +17288,6 @@ accordion.querySelectorAll(
 accordion:
 accordionItem
 accordionRoot
-account
 acquire(referenceElement)
 acquire:
 across
@@ -18939,7 +18918,6 @@ button.SizeSm,
 button.Type
 button.TypeButton
 button.TypeButton,
-button.TypeSubmit,
 button.Variant
 button.Variant(buttonVariant(p.IsActive)),
 button.VariantDefault,
@@ -19664,7 +19642,6 @@ classes,
 classes.
 classes;
 class。
-claude.ai，让用户确认去向。
 cleaned
 cleanly
 cleanly,
@@ -22272,7 +22249,6 @@ decides,
 decimals(step)
 decimals-arrow-left
 decimals-arrow-right
-decision
 decision.
 declaration
 declaration.
@@ -22390,8 +22366,6 @@ demo,
 demos
 demos.
 demos:
-deny
-deny。oauthserver
 dep
 dep,
 depends
@@ -27635,7 +27609,6 @@ len(it.Items)
 len(keys)
 len(layout)
 len(list)
-len(m))
 len(m.Series))
 len(p.Data))
 len(p.Modifiers)
@@ -28418,7 +28391,6 @@ map[string]bool{
 map[string]float64
 map[string]float64)
 map[string]string
-map[string]string)
 map[string]string{
 map[string]string{}
 mapped
@@ -30414,7 +30386,6 @@ orDefault(p.Next,
 orDefault(p.Previous,
 orDefault(p.Type,
 orDefault(s,
-orDefault(s.Description,
 orbit
 order
 order,
@@ -30675,7 +30646,6 @@ p-px
 p.Accept
 p.Accept}),
 p.AccessibilityLayer}
-p.Account
 p.Actions
 p.ActivateOnFocus
 p.ActiveIndex,
@@ -30702,7 +30672,6 @@ p.Background
 p.Behavior
 p.BodyClass
 p.Brand
-p.Brand,
 p.ButtonVariant
 p.ButtonVariant}),
 p.CaptionLayout
@@ -30712,8 +30681,6 @@ p.Class)
 p.Class),
 p.Class,
 p.Class})
-p.ClientName,
-p.ClientName})
 p.CloseDelay
 p.CloseDelay})
 p.CloseOnClick
@@ -30760,7 +30727,6 @@ p.Disabled,
 p.Disabled}
 p.Disabled})
 p.EndAngle,
-p.Fields[name]
 p.Files)
 p.Fill,
 p.FixedWeeks
@@ -30835,7 +30801,6 @@ p.Preview)
 p.Ratio
 p.ReadOnly
 p.ReadOnly,
-p.RedirectHost
 p.Render
 p.Required
 p.Required,
@@ -30843,7 +30808,6 @@ p.ResizeTargetMinimumSize.Coarse
 p.ResizeTargetMinimumSize.Fine
 p.Rows
 p.Rows,
-p.Scopes
 p.ScrollEdgeThreshold
 p.ScrollMargin
 p.ScrollPreviousItemPeek
@@ -30878,7 +30842,6 @@ p.StrokeWidth,
 p.Style
 p.SwipeDirection
 p.SwipeDirection,
-p.SwitchAccount
 p.Target
 p.TargetID
 p.Text
@@ -31917,7 +31880,6 @@ positions:
 positive
 positive).
 possible
-post
 post-touchend).
 pound-sterling
 power
@@ -32923,7 +32885,6 @@ rects:
 rectsAreEqual(a,
 rectsIntersect(a,
 recycle
-redirected
 redo
 redo-2
 redo-dot
@@ -33709,7 +33670,6 @@ s.Color
 s.Color,
 s.CornerRadius
 s.Curve
-s.Description
 s.Dot
 s.Fill
 s.FillOpacityPtr
@@ -33724,8 +33684,6 @@ s.Key})
 s.Label
 s.LabelList
 s.LabelLists
-s.Name
-s.Name)
 s.Radius
 s.StackID
 s.Stroke
@@ -35088,8 +35046,6 @@ sortDirection(current,
 sortHeadAttrs(current,
 sorted
 sortedAttr(dir))})
-sortedKeys(m
-sortedKeys(p.Fields)
 sortedRects
 sortedRects.length;
 sortedRects[i];
@@ -36741,9 +36697,7 @@ templ.NopComponent
 templ.SafeURL(
 templ.SafeURL(fi.URL)
 templ.SafeURL(orDefault(p.Home,
-templ.SafeURL(p.Action)
 templ.SafeURL(p.Href)
-templ.SafeURL(p.SwitchAccount)
 templ.SafeURL(v.home())
 templ.SafeURL(v.resultURL(r))
 templ.SafeURL(v.searchURL())
@@ -37761,13 +37715,6 @@ ui.PaginationProps{URL:
 ui.SortHeadProps{HTMX:
 ui.confirm.action
 ui.confirm.cancel
-ui.consent.account
-ui.consent.allow
-ui.consent.deny
-ui.consent.description
-ui.consent.redirect
-ui.consent.scopes
-ui.consent.switch
 ui.file.failed
 ui.file.remove
 ui.file.too_large
@@ -38646,9 +38593,11 @@ we
 web-ui-confirm
 web-ui-sidebar
 web-ui-user-menu
+web.ErrorReference
+web.ErrorReference(ctx);
 web.Flashes
 web.Flashes(ctx)
-web.Options.ErrorPage。
+web.Options.ErrorPage。5xx
 web.QueryURL
 web:flash（包括局部请求的错误）。放在布局的
 webcam
@@ -39365,18 +39314,14 @@ zooming
 后台
 图片显示缩略图，可以移除。表单提交的是文件
 字段在
-字段是
 导航按当前主体的权限过滤（NavItem.Permission），当前页面（web.CurrentPath）对应的项高亮。
 封面
 带当前主题的风格，<head>
 并回到第一页。
 并调用
-或
 或点击遮罩时放弃。
 或页面的任何位置。
 把服务端渲染的对话框放进来。
-授权的同意页：哪个应用、以哪个账号、申请哪些范围、授权后跳转到哪里，以及允许和拒绝两个按钮。
-提交的
 放在
 放在它之后：
 文档：<html>
@@ -39390,21 +39335,16 @@ zooming
 是上传文件的字段：用户选择文件后立即上传到
 是侧边栏中的一组。目录的首页有正文时，组的标题是它的链接。
 是切换暗色模式的按钮，选择记在浏览器中。放在
-是切换账号的地址，例如退出登录再回到这里；为空时不显示。
 是列表没有数据时的提示：图标、标题、说明，children
-是卡片上方的名称，通常是应用名。
 是原生的下拉选择。Placeholder
 是可以点击排序的表头：点击按
-是同意页上的一个范围。
 是后台常用的外壳：左侧是可以收起成图标的侧边栏（名称、分组导航、当前用户），
 是多行文本的
 是字段
 是对话框的标题；元素上可选的
 是带标签、说明和错误提示的输入框，值和错误取自
 是开关，标签在左侧，对应表单结构体中的布尔字段。
-是当前登录的账号，例如邮箱，让用户确认授权的是哪个账号。
 是当前的排序参数（key
-是授权后跳转到的主机名，例如
 是搜索结果的列表，搜索框的弹层和搜索页共用。
 是搜索页的正文区域：没有脚本时也能用，手机上从顶栏的搜索图标进入。
 是操作，例如「新建文章」按钮。
@@ -39412,13 +39352,9 @@ zooming
 是文档页的外壳：左侧是目录导航，顶栏是展开侧边栏的按钮、搜索框和
 是正文区域。
 是正文区域：htmx
-是申请的范围。
 是登录、注册、找回密码等页面的居中卡片：上方是名称，卡片中是标题、说明和
 是确认按钮的文字，
-是表单提交的地址，Fields
-是要原样提交回去的授权参数。
 是说明，data-confirm-action
-是请求授权的应用，例如
 是追加在
 是顶栏中的搜索框：输入时用
 显示提示：整页渲染时
@@ -39437,6 +39373,7 @@ zooming
 的内容。
 的文件在浏览器中直接提示。
 的浏览器原生确认框，放在布局的
+的请求编号。
 的选择器。打开对话框的元素用
 确认。
 让确认按钮显示为危险操作。点击确认后才发出请求；取消、按
@@ -39445,7 +39382,7 @@ zooming
 还没有文章
 邮箱
 配置
+错误还显示
 需要完全控制文档结构时不用
 非空时，第一项是值为空的这一项。
 页面中没有
-默认使用它。

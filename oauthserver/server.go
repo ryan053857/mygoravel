@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/a-h/templ"
 	"github.com/cockroachdb/errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/uptrace/bun"
@@ -19,15 +18,12 @@ import (
 	"github.com/ryan053857/mygoravel/apitoken"
 	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/logging"
 	"github.com/ryan053857/mygoravel/mcpx"
 	"github.com/ryan053857/mygoravel/outbound"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/ui"
 )
 
-// 授权请求本身有问题、不能跳回客户端时呈现的错误页。
+// 授权请求本身有问题、不能跳回客户端时的错误：授权端点把错误码交给同意页（ConsentURL?error=…），同意页的接口返回 422。
 var (
 	// ErrInvalidClient 表示 client_id 不是预先登记的客户端，也取不回有效的客户端元数据文档。
 	ErrInvalidClient = errorx.Define(errorx.InvalidArgument, "oauth.invalid_client")
@@ -54,8 +50,8 @@ const (
 
 // Scope 是客户端可以申请的一个范围，通常是权限目录中的一项权限，Description 显示在同意页上。
 type Scope struct {
-	Name        string
-	Description string
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // Options 是 New 的选项。
@@ -70,12 +66,10 @@ type Options struct {
 	Scopes []Scope
 	// Clients 是预先登记的客户端。https 地址形式的 client_id 不需要登记，按 Client ID Metadata Document 取回。
 	Clients []Client
-	// Brand 显示在同意页的上方，通常是应用名。
-	Brand string
-	// Account 返回同意页上显示的当前账号，例如邮箱；nil 时显示主体的 ID。
-	Account func(ctx context.Context, sub identity.Subject) string
-	// Consent 渲染同意页，nil 时使用 ui.ConsentPage。表单的提交方式见 ui.ConsentPage。
-	Consent func(r *http.Request, p ui.ConsentProps) templ.Component
+	// ConsentURL 是单页应用中同意页的地址，必须设置，例如 /oauth/consent，也可以是完整的 https 地址。
+	// 授权端点校验请求后跳到这里，附上 request 参数；请求无法跳回客户端时附上 error 参数（错误码，例如 oauth.invalid_client）。
+	// 同意页用 Register 注册的接口读取请求、提交用户的选择。
+	ConsentURL string
 	// DynamicRegistration 开启动态客户端注册（RFC 7591）：客户端在 POST /oauth/register 登记自己，得到 client_id。
 	// MCP 规范已把它标为过时，claude.ai 和 ChatGPT 都优先使用 Client ID Metadata Document，只在授权服务器不支持时才注册；
 	// 需要兼容只支持注册的客户端时开启。注册接口不需要认证，应当为它限流，并定时调用 CleanupClients。
@@ -90,7 +84,7 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-// Server 是 OAuth 2.1 授权服务器：用户在页面中登录并同意后，为 OAuth 客户端签发 apitoken 的 OAuth 令牌。可以并发使用。
+// Server 是 OAuth 2.1 授权服务器：用户在单页应用的同意页上同意后，为 OAuth 客户端签发 apitoken 的 OAuth 令牌。可以并发使用。
 type Server struct {
 	db       bun.IDB
 	tokens   *apitoken.Store
@@ -138,6 +132,18 @@ func New(db bun.IDB, tokens *apitoken.Store, opts Options) *Server {
 	return s
 }
 
+// consentURL 报告 raw 是本站的路径或 https 地址（本机开发可以用 http://localhost）。
+func consentURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || raw == "" || u.Fragment != "" {
+		return false
+	}
+	if u.Scheme == "" && u.Host == "" {
+		return strings.HasPrefix(u.Path, "/") && !strings.HasPrefix(u.Path, "//")
+	}
+	return u.Host != "" && (u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname()))
+}
+
 func validate(opts Options) error {
 	u, err := url.Parse(opts.Issuer)
 	switch {
@@ -149,6 +155,8 @@ func validate(opts Options) error {
 		return errors.New("at least one resource is required")
 	case len(opts.Scopes) == 0:
 		return errors.New("at least one scope is required")
+	case !consentURL(opts.ConsentURL):
+		return errors.Newf("consent URL %q must be a path such as /oauth/consent or an https URL", opts.ConsentURL)
 	}
 	for _, r := range opts.Resources {
 		if err := (mcpx.Resource{URL: r, AuthorizationServers: []string{opts.Issuer}}).Validate(); err != nil {
@@ -170,20 +178,17 @@ func validate(opts Options) error {
 	return nil
 }
 
-// Routes 注册授权服务器的端点。r 是挂在 Issuer 根上的路由；授权和同意页注册为 pages 中需要登录的页面，
-// 未登录的用户先跳到 pages 的登录页，登录后回到授权页。能授权的就是 pages 接受的账号体系。
+// Routes 注册授权服务器的端点。r 是挂在 Issuer 根上的路由。同意页的接口由 Register 注册在 API 上。
 //
 //	GET  /.well-known/oauth-authorization-server  元数据（RFC 8414）
-//	GET  /oauth/authorize                         同意页
-//	POST /oauth/authorize                         用户同意或拒绝
+//	GET  /oauth/authorize                         校验授权请求，跳到 Options.ConsentURL
 //	POST /oauth/token                             授权码换令牌
 //	POST /oauth/revoke                            撤销令牌（RFC 7009）
 //	POST /oauth/register                          动态客户端注册（RFC 7591），Options.DynamicRegistration 为 true 时
-func (s *Server) Routes(r chi.Router, pages *web.Pages) {
+func (s *Server) Routes(r chi.Router) {
 	cors := httpx.CORS(httpx.DefaultCORSConfig())
 	r.With(cors).Get(MetadataPath, s.serveMetadata)
-	pages.Routes(r, web.Require()).Get(AuthorizePath, s.authorize)
-	pages.Routes(r, web.Require()).Post(AuthorizePath, s.decide)
+	r.Get(AuthorizePath, s.authorize)
 	r.With(cors).Post(TokenPath, s.token)
 	r.With(cors).Post(RevokePath, s.revoke)
 	r.With(cors).Options(TokenPath, func(http.ResponseWriter, *http.Request) {})

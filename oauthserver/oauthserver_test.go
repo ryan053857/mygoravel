@@ -1,43 +1,41 @@
 package oauthserver_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"html"
-	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
-	"github.com/a-h/templ"
-	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/go-chi/chi/v5"
 	"github.com/uptrace/bun"
 
 	"github.com/ryan053857/mygoravel/apitoken"
 	"github.com/ryan053857/mygoravel/database/dbtest"
+	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
 	"github.com/ryan053857/mygoravel/mcpx"
 	"github.com/ryan053857/mygoravel/oauthserver"
 	"github.com/ryan053857/mygoravel/outbound/outboundtest"
-	"github.com/ryan053857/mygoravel/session"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/webtest"
 )
 
 const (
-	issuer      = webtest.Origin
-	resource    = webtest.Origin + "/mcp"
+	issuer      = "https://blog.example.com"
+	resource    = issuer + "/mcp"
+	consentPage = "/oauth/consent"
+	consentAPI  = "/api" + oauthserver.ConsentPath
 	cimd        = "https://client.example.com/oauth/client.json"
 	cimdPattern = "GET " + cimd
 	callback    = "https://client.example.com/callback"
@@ -72,21 +70,14 @@ func migrations(t *testing.T) fs.FS {
 	return merged
 }
 
-func textComponent(format string, args ...any) templ.Component {
-	return templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
-		_, err := io.WriteString(w, html.EscapeString(fmt.Sprintf(format, args...)))
-		return err
-	})
-}
-
 type env struct {
-	db      *bun.DB
-	tokens  *apitoken.Store
-	fake    *outboundtest.Transport
-	pages   *web.Pages
-	router  chi.Router
-	browser *webtest.Client
-	srv     *oauthserver.Server
+	db     *bun.DB
+	tokens *apitoken.Store
+	fake   *outboundtest.Transport
+	router chi.Router
+	srv    *oauthserver.Server
+	// login 是 editor 在单页应用中登录得到的 token。
+	login string
 }
 
 func setup(t *testing.T) *env {
@@ -103,26 +94,16 @@ func setupWith(t *testing.T, edit func(*oauthserver.Options)) *env {
 		"client_id": cimd, "client_name": "Claude", "redirect_uris": []string{callback},
 		"token_endpoint_auth_method": "none",
 	}))
-	var cfg session.Config
-	cfg.SetDefaults()
-	cfg.Cookie.Secure = false
 	editors := func(_ context.Context, sub identity.Subject) (identity.Subject, error) {
 		sub.Permissions = []string{"articles:*"}
 		return sub, nil
 	}
-	pages := web.New(web.Options{
-		Accounts:  identity.Accounts{"editor": editors},
-		Sessions:  session.New(cfg, memstore.New()),
-		Login:     "/login",
-		ErrorPage: func(status int, msg string) templ.Component { return textComponent("error %d %s", status, msg) },
-	})
 	opts := oauthserver.Options{
 		Issuer:     issuer,
 		Resources:  []string{resource},
 		Scopes:     []oauthserver.Scope{{Name: "articles:read", Description: "查看文章"}, {Name: "articles:write", Description: "修改文章"}},
 		Clients:    []oauthserver.Client{{ID: "agent", Name: "内部 agent", RedirectURIs: []string{"http://localhost/callback"}}},
-		Brand:      "Blog",
-		Account:    func(_ context.Context, sub identity.Subject) string { return sub.ID + "@example.com" },
+		ConsentURL: consentPage,
 		HTTPClient: fake.Client(),
 		Logger:     slog.New(slog.DiscardHandler),
 	}
@@ -131,7 +112,12 @@ func setupWith(t *testing.T, edit func(*oauthserver.Options)) *env {
 	}
 	srv := oauthserver.New(db, tokens, opts)
 	router := chi.NewRouter()
-	srv.Routes(router, pages)
+	srv.Routes(router)
+
+	apiRouter := chi.NewRouter()
+	api := rest.New(rest.Options{Router: apiRouter, BasePath: "/api", Accounts: identity.Accounts{"editor": editors}, Logger: slog.New(slog.DiscardHandler)})
+	srv.Register(api, rest.RequireBearer(api, tokens.Validate))
+	router.Mount("/api", apiRouter)
 
 	tools := mcpx.New(mcpx.Options{Name: "blog"})
 	mcpx.Register(tools, mcpx.Tool{Name: "whoami", Description: "当前主体", Permissions: []string{"articles:read"}, ReadOnly: true},
@@ -144,7 +130,78 @@ func setupWith(t *testing.T, edit func(*oauthserver.Options)) *env {
 	router.Handle("/mcp", mcpx.Handler(tools, mcpx.HandlerOptions{
 		Validate: tokens.ValidateFor(res.URL), Accounts: identity.Accounts{"editor": editors}, Resource: &res,
 	}))
-	return &env{db: db, tokens: tokens, fake: fake, pages: pages, router: router, browser: webtest.New(t, router), srv: srv}
+	login, err := tokens.Login(context.Background(), editor, apitoken.Device{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &env{db: db, tokens: tokens, fake: fake, router: router, srv: srv, login: login}
+}
+
+// do 发出请求；token 不为空时带上 Bearer，body 不为 nil 时编码为 JSON。
+func (e *env) do(method, target, token string, body any) *httptest.ResponseRecorder {
+	var buf bytes.Buffer
+	if body != nil {
+		_ = json.NewEncoder(&buf).Encode(body)
+	}
+	req := httptest.NewRequest(method, issuer+target, &buf)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	e.router.ServeHTTP(w, req)
+	return w
+}
+
+// authorize 访问授权端点，返回它跳转去的地址。
+func (e *env) authorize(t *testing.T, q url.Values) *url.URL {
+	t.Helper()
+	w := e.do(http.MethodGet, oauthserver.AuthorizePath+"?"+q.Encode(), "", nil)
+	u, err := url.Parse(w.Header().Get("Location"))
+	if w.Code != http.StatusFound || err != nil {
+		t.Fatalf("authorize: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	return u
+}
+
+// request 访问授权端点，返回同意页地址中的 request 参数。
+func (e *env) request(t *testing.T, q url.Values) string {
+	t.Helper()
+	u := e.authorize(t, q)
+	if u.Path != consentPage || u.Query().Get("request") == "" {
+		t.Fatalf("not sent to the consent page: %s", u)
+	}
+	return u.Query().Get("request")
+}
+
+// consent 以 token 读取同意页要显示的授权请求。
+func (e *env) consent(token, request string) (int, map[string]any) {
+	w := e.do(http.MethodGet, consentAPI+"?"+url.Values{"request": {request}}.Encode(), token, nil)
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	return w.Code, body
+}
+
+// decide 以 token 对 request 做出选择，返回状态码和响应体。
+func (e *env) decide(token, request string, approve bool) (int, map[string]any) {
+	w := e.do(http.MethodPost, consentAPI, token, map[string]any{"request": request, "approve": approve})
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	return w.Code, body
+}
+
+// approve 以 editor 的登录 token 对 q 的授权做出选择，返回跳回客户端的地址。
+func (e *env) approve(t *testing.T, q url.Values, approve bool) *url.URL {
+	t.Helper()
+	status, body := e.decide(e.login, e.request(t, q), approve)
+	raw, _ := body["url"].(string)
+	u, err := url.Parse(raw)
+	if status != http.StatusOK || raw == "" || err != nil {
+		t.Fatalf("decide: %d %v", status, body)
+	}
+	return u
 }
 
 func authorizeQuery(edit func(url.Values)) url.Values {
@@ -157,25 +214,6 @@ func authorizeQuery(edit func(url.Values)) url.Values {
 		edit(q)
 	}
 	return q
-}
-
-// approve 以已登录的用户同意 q 的授权，返回跳回客户端的地址。
-func (e *env) approve(t *testing.T, q url.Values, decision string) *url.URL {
-	t.Helper()
-	form := url.Values{}
-	for k, v := range q {
-		form[k] = v
-	}
-	form.Set("decision", decision)
-	res := e.browser.Post(oauthserver.AuthorizePath, form)
-	if res.Code != http.StatusFound {
-		t.Fatalf("decide: %d %s", res.Code, res.Text())
-	}
-	u, err := url.Parse(res.Redirect())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return u
 }
 
 func (e *env) exchange(t *testing.T, form url.Values) (int, map[string]any) {
@@ -224,38 +262,48 @@ func TestFlow(t *testing.T) {
 	if code != http.StatusUnauthorized || challengeHeader != `Bearer resource_metadata="`+issuer+`/.well-known/oauth-protected-resource/mcp"` {
 		t.Fatalf("unauthenticated: %d %q", code, challengeHeader)
 	}
-	prm := e.browser.Get("/.well-known/oauth-protected-resource/mcp")
+	prm := e.do(http.MethodGet, "/.well-known/oauth-protected-resource/mcp", "", nil)
 	var meta map[string]any
 	if err := json.Unmarshal(prm.Body.Bytes(), &meta); err != nil || meta["resource"] != resource ||
 		fmt.Sprint(meta["authorization_servers"]) != "["+issuer+"]" || fmt.Sprint(meta["scopes_supported"]) != "[articles:read articles:write]" {
-		t.Fatalf("resource metadata %s", prm.Text())
+		t.Fatalf("resource metadata %s", prm.Body)
 	}
-	as := e.browser.Get(oauthserver.MetadataPath)
+	as := e.do(http.MethodGet, oauthserver.MetadataPath, "", nil)
 	if err := json.Unmarshal(as.Body.Bytes(), &meta); err != nil || meta["issuer"] != issuer ||
+		meta["authorization_endpoint"] != issuer+"/oauth/authorize" ||
 		meta["token_endpoint"] != issuer+"/oauth/token" || meta["client_id_metadata_document_supported"] != true ||
 		fmt.Sprint(meta["token_endpoint_auth_methods_supported"]) != "[none]" || fmt.Sprint(meta["code_challenge_methods_supported"]) != "[S256]" {
-		t.Fatalf("server metadata %s", as.Text())
+		t.Fatalf("server metadata %s", as.Body)
 	}
 
-	// 没有登录时先去登录页，登录后回到授权页。
+	// 授权端点校验请求后跳到单页应用的同意页，附上 request。
 	q := authorizeQuery(nil)
-	res := e.browser.Get(oauthserver.AuthorizePath + "?" + q.Encode())
-	if res.Code != http.StatusSeeOther && res.Code != http.StatusFound || !strings.HasPrefix(res.Redirect(), "/login?") {
-		t.Fatalf("not logged in: %d %q", res.Code, res.Redirect())
+	request := e.request(t, q)
+
+	// 同意页用登录 token 读取请求：应用、范围、跳转去向和资源。没有登录时 401，由单页应用先去登录。
+	if status, _ := e.consent("", request); status != http.StatusUnauthorized {
+		t.Fatalf("not logged in: %d", status)
+	}
+	status, c := e.consent(e.login, request)
+	if status != http.StatusOK || c["client_id"] != cimd || c["client_name"] != "Claude" || c["redirect_host"] != "client.example.com" ||
+		c["resource"] != resource || fmt.Sprint(c["scopes"]) != "[map[description:查看文章 name:articles:read]]" {
+		t.Fatalf("consent: %d %v", status, c)
 	}
 
-	// 登录后看到同意页：应用、账号、范围和跳转去向；不能被嵌进其他网站的框架。
-	e.browser.Login(e.pages, editor)
-	res = e.browser.Get(oauthserver.AuthorizePath + "?" + q.Encode())
-	page := res.Text()
-	if res.Code != http.StatusOK || !strings.Contains(page, "Claude") || !strings.Contains(page, "e1@example.com") ||
-		!strings.Contains(page, "查看文章") || strings.Contains(page, "修改文章") || !strings.Contains(page, "client.example.com") ||
-		res.Header().Get("X-Frame-Options") != "DENY" {
-		t.Fatalf("consent: %d %s", res.Code, page)
+	// 个人访问令牌有权限限制，不代表用户本人，不能用来授权。
+	personal, err := e.tokens.Create(context.Background(), editor, apitoken.Personal{Name: "script", Scopes: []string{"*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := e.consent(personal, request); status != http.StatusForbidden || body["code"] != "oauth.restricted_credential" {
+		t.Fatalf("personal token consent: %d %v", status, body)
+	}
+	if status, body := e.decide(personal, request, true); status != http.StatusForbidden || body["code"] != "oauth.restricted_credential" {
+		t.Fatalf("personal token decide: %d %v", status, body)
 	}
 
 	// 同意：带着授权码、state 和 iss 跳回客户端。
-	back := e.approve(t, q, "allow")
+	back := e.approve(t, q, true)
 	if back.Scheme+"://"+back.Host+back.Path != callback || back.Query().Get("state") != "xyz" ||
 		back.Query().Get("iss") != issuer || back.Query().Get("code") == "" {
 		t.Fatalf("redirect %s", back)
@@ -281,9 +329,9 @@ func TestFlow(t *testing.T) {
 	if status, body := e.exchange(t, tokenForm(back.Query().Get("code"))); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
 		t.Fatalf("reused code: %d %v", status, body)
 	}
-	// 用户在“已连接的应用”中看到它。
+	// 用户在“已连接的应用”中看到它，与登录 token、个人访问令牌并列。
 	list, err := e.tokens.List(context.Background(), editor)
-	if err != nil || len(list) != 1 || list[0].ClientName != "Claude" || list[0].Kind != apitoken.KindOAuth {
+	if err != nil || len(list) != 3 || !slices.ContainsFunc(list, func(tk apitoken.Token) bool { return tk.Kind == apitoken.KindOAuth && tk.ClientName == "Claude" }) {
 		t.Fatalf("list %+v %v", list, err)
 	}
 
@@ -303,9 +351,8 @@ func TestFlow(t *testing.T) {
 func TestTokenErrors(t *testing.T) {
 	t.Parallel()
 	e := setup(t)
-	e.browser.Login(e.pages, editor)
 	issue := func() string {
-		return e.approve(t, authorizeQuery(nil), "allow").Query().Get("code")
+		return e.approve(t, authorizeQuery(nil), true).Query().Get("code")
 	}
 	for name, tc := range map[string]struct {
 		edit func(url.Values)
@@ -339,18 +386,24 @@ func TestTokenErrors(t *testing.T) {
 func TestAuthorizeErrors(t *testing.T) {
 	t.Parallel()
 	e := setup(t)
-	e.browser.Login(e.pages, editor)
 
-	// 不能确认回调地址属于这个客户端：呈现错误页，不跳回。
-	for name, edit := range map[string]func(url.Values){
-		"unknown client":    func(q url.Values) { q.Set("client_id", "nobody") },
-		"http metadata URL": func(q url.Values) { q.Set("client_id", "http://client.example.com/oauth/client.json") },
-		"foreign redirect":  func(q url.Values) { q.Set("redirect_uri", "https://evil.example.com/callback") },
-		"no redirect":       func(q url.Values) { q.Del("redirect_uri") },
+	// 不能确认回调地址属于这个客户端：不跳回，把错误码交给同意页。
+	for name, tc := range map[string]struct {
+		edit func(url.Values)
+		want string
+	}{
+		"unknown client":    {func(q url.Values) { q.Set("client_id", "nobody") }, "oauth.invalid_client"},
+		"http metadata URL": {func(q url.Values) { q.Set("client_id", "http://client.example.com/oauth/client.json") }, "oauth.invalid_client"},
+		"foreign redirect":  {func(q url.Values) { q.Set("redirect_uri", "https://evil.example.com/callback") }, "oauth.invalid_redirect_uri"},
+		"no redirect":       {func(q url.Values) { q.Del("redirect_uri") }, "oauth.invalid_redirect_uri"},
 	} {
-		res := e.browser.Get(oauthserver.AuthorizePath + "?" + authorizeQuery(edit).Encode())
-		if res.Code != http.StatusUnprocessableEntity || res.Redirect() != "" {
-			t.Errorf("%s: %d %s", name, res.Code, res.Text())
+		u := e.authorize(t, authorizeQuery(tc.edit))
+		if u.Path != consentPage || u.Query().Get("error") != tc.want || u.Query().Get("request") != "" {
+			t.Errorf("%s: %s", name, u)
+		}
+		// 改过的 request 交给同意页的接口同样被拒绝。
+		if status, body := e.consent(e.login, authorizeQuery(tc.edit).Encode()); status != http.StatusUnprocessableEntity || body["code"] != tc.want {
+			t.Errorf("%s: consent %d %v", name, status, body)
 		}
 	}
 
@@ -365,15 +418,17 @@ func TestAuthorizeErrors(t *testing.T) {
 		"unknown scope":  {func(q url.Values) { q.Set("scope", "articles:read admin") }, "invalid_scope"},
 		"other resource": {func(q url.Values) { q.Set("resource", "https://other.example.com/mcp") }, "invalid_target"},
 	} {
-		res := e.browser.Get(oauthserver.AuthorizePath + "?" + authorizeQuery(tc.edit).Encode())
-		u, _ := url.Parse(res.Redirect())
-		if res.Code != http.StatusFound || u == nil || u.Query().Get("error") != tc.want || u.Query().Get("state") != "xyz" || u.Query().Get("iss") != issuer {
-			t.Errorf("%s: %d %q", name, res.Code, res.Redirect())
+		u := e.authorize(t, authorizeQuery(tc.edit))
+		if u.Scheme+"://"+u.Host+u.Path != callback || u.Query().Get("error") != tc.want || u.Query().Get("state") != "xyz" || u.Query().Get("iss") != issuer {
+			t.Errorf("%s: %s", name, u)
+		}
+		if status, body := e.decide(e.login, authorizeQuery(tc.edit).Encode(), true); status != http.StatusUnprocessableEntity || body["code"] != "oauth.invalid_request" {
+			t.Errorf("%s: decide %d %v", name, status, body)
 		}
 	}
 
 	// 用户拒绝。
-	back := e.approve(t, authorizeQuery(nil), "deny")
+	back := e.approve(t, authorizeQuery(nil), false)
 	if back.Query().Get("error") != "access_denied" || back.Query().Get("code") != "" {
 		t.Fatalf("deny: %s", back)
 	}
@@ -382,15 +437,14 @@ func TestAuthorizeErrors(t *testing.T) {
 	e.fake.On(cimdPattern).Reply(outboundtest.JSON(200, map[string]any{
 		"client_id": "https://client.example.com/other.json", "client_name": "Claude", "redirect_uris": []string{callback},
 	}))
-	if res := e.browser.Get(oauthserver.AuthorizePath + "?" + authorizeQuery(nil).Encode()); res.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("mismatched metadata: %d", res.Code)
+	if u := e.authorize(t, authorizeQuery(nil)); u.Query().Get("error") != "oauth.invalid_client" {
+		t.Fatalf("mismatched metadata: %s", u)
 	}
 }
 
 func TestPreRegisteredLoopbackClient(t *testing.T) {
 	t.Parallel()
 	e := setup(t)
-	e.browser.Login(e.pages, editor)
 	// 本机回调地址忽略端口；不传 scope 时申请全部范围，不传 resource 时用唯一的资源。
 	redirect := "http://localhost:3118/callback"
 	q := authorizeQuery(func(q url.Values) {
@@ -399,11 +453,11 @@ func TestPreRegisteredLoopbackClient(t *testing.T) {
 		q.Del("scope")
 		q.Del("resource")
 	})
-	res := e.browser.Get(oauthserver.AuthorizePath + "?" + q.Encode())
-	if res.Code != http.StatusOK || !strings.Contains(res.Text(), "内部 agent") || !strings.Contains(res.Text(), "修改文章") {
-		t.Fatalf("consent: %d %s", res.Code, res.Text())
+	status, c := e.consent(e.login, e.request(t, q))
+	if status != http.StatusOK || c["client_name"] != "内部 agent" || c["resource"] != resource || !strings.Contains(fmt.Sprint(c["scopes"]), "修改文章") {
+		t.Fatalf("consent: %d %v", status, c)
 	}
-	back := e.approve(t, q, "allow")
+	back := e.approve(t, q, true)
 	form := tokenForm(back.Query().Get("code"))
 	form.Set("client_id", "agent")
 	form.Set("redirect_uri", redirect)
@@ -422,7 +476,7 @@ func TestNewPanics(t *testing.T) {
 	t.Parallel()
 	db := dbtest.Open(t, migrations(t))
 	tokens := apitoken.NewStore(db, apitoken.Config{Lifetime: time.Hour})
-	ok := oauthserver.Options{Issuer: issuer, Resources: []string{resource}, Scopes: []oauthserver.Scope{{Name: "articles:read"}}}
+	ok := oauthserver.Options{Issuer: issuer, Resources: []string{resource}, Scopes: []oauthserver.Scope{{Name: "articles:read"}}, ConsentURL: consentPage}
 	for name, edit := range map[string]func(*oauthserver.Options){
 		"issuer path":  func(o *oauthserver.Options) { o.Issuer = issuer + "/auth" },
 		"http issuer":  func(o *oauthserver.Options) { o.Issuer = "http://example.com" },
@@ -433,7 +487,11 @@ func TestNewPanics(t *testing.T) {
 		"url client id": func(o *oauthserver.Options) {
 			o.Clients = []oauthserver.Client{{ID: cimd, RedirectURIs: []string{callback}}}
 		},
-		"no redirects": func(o *oauthserver.Options) { o.Clients = []oauthserver.Client{{ID: "agent"}} },
+		"no redirects":          func(o *oauthserver.Options) { o.Clients = []oauthserver.Client{{ID: "agent"}} },
+		"no consent":            func(o *oauthserver.Options) { o.ConsentURL = "" },
+		"relative consent":      func(o *oauthserver.Options) { o.ConsentURL = "oauth/consent" },
+		"protocol-relative URL": func(o *oauthserver.Options) { o.ConsentURL = "//evil.example.com/consent" },
+		"http consent":          func(o *oauthserver.Options) { o.ConsentURL = "http://app.example.com/consent" },
 	} {
 		func() {
 			defer func() {
@@ -453,8 +511,7 @@ func TestNewPanics(t *testing.T) {
 func TestTokenRetry(t *testing.T) {
 	t.Parallel()
 	e := setup(t)
-	e.browser.Login(e.pages, editor)
-	c := e.approve(t, authorizeQuery(nil), "allow").Query().Get("code")
+	c := e.approve(t, authorizeQuery(nil), true).Query().Get("code")
 
 	wrong := tokenForm(c)
 	wrong.Set("client_id", "agent")
@@ -476,5 +533,15 @@ func TestTokenRetry(t *testing.T) {
 	// 兑换成功后不能再用。
 	if status, body := e.exchange(t, tokenForm(c)); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
 		t.Fatalf("reused: %d %v", status, body)
+	}
+}
+
+// 同意页可以是另一个地址上的单页应用，地址中原有的参数保留。
+func TestConsentURLWithQuery(t *testing.T) {
+	t.Parallel()
+	e := setupWith(t, func(o *oauthserver.Options) { o.ConsentURL = "https://app.example.com/consent?lang=zh" })
+	u := e.authorize(t, authorizeQuery(nil))
+	if u.Scheme+"://"+u.Host+u.Path != "https://app.example.com/consent" || u.Query().Get("lang") != "zh" || u.Query().Get("request") == "" {
+		t.Fatalf("consent URL %s", u)
 	}
 }

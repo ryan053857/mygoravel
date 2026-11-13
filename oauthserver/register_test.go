@@ -34,7 +34,7 @@ func TestDynamicRegistration(t *testing.T) {
 	t.Parallel()
 	e := setupWith(t, withDCR)
 	var meta map[string]any
-	_ = json.Unmarshal(e.browser.Get(oauthserver.MetadataPath).Body.Bytes(), &meta)
+	_ = json.Unmarshal(e.do(http.MethodGet, oauthserver.MetadataPath, "", nil).Body.Bytes(), &meta)
 	if meta["registration_endpoint"] != issuer+"/oauth/register" {
 		t.Fatalf("metadata %v", meta)
 	}
@@ -46,15 +46,14 @@ func TestDynamicRegistration(t *testing.T) {
 	}
 
 	// 用注册得到的 client_id 走完授权。
-	e.browser.Login(e.pages, editor)
 	q := authorizeQuery(func(q url.Values) {
 		q.Set("client_id", id)
 		q.Set("redirect_uri", "https://agent.example.com/cb")
 	})
-	if res := e.browser.Get(oauthserver.AuthorizePath + "?" + q.Encode()); res.Code != http.StatusOK || !strings.Contains(res.Text(), "Some Agent") {
-		t.Fatalf("consent: %d %s", res.Code, res.Text())
+	if status, c := e.consent(e.login, e.request(t, q)); status != http.StatusOK || c["client_name"] != "Some Agent" {
+		t.Fatalf("consent: %d %v", status, c)
 	}
-	code := e.approve(t, q, "allow").Query().Get("code")
+	code := e.approve(t, q, true).Query().Get("code")
 	form := tokenForm(code)
 	form.Set("client_id", id)
 	form.Set("redirect_uri", "https://agent.example.com/cb")
@@ -86,8 +85,8 @@ func TestDynamicRegistration(t *testing.T) {
 	if n, err := e.srv.CleanupClients(90*24*time.Hour)(context.Background(), 10); err != nil || n != 2 {
 		t.Fatalf("cleanup: %d %v", n, err)
 	}
-	if res := e.browser.Get(oauthserver.AuthorizePath + "?" + q.Encode()); res.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("after cleanup: %d", res.Code)
+	if u := e.authorize(t, q); u.Query().Get("error") != "oauth.invalid_client" {
+		t.Fatalf("after cleanup: %s", u)
 	}
 }
 
@@ -95,7 +94,7 @@ func TestDynamicRegistrationDisabled(t *testing.T) {
 	t.Parallel()
 	e := setup(t)
 	var meta map[string]any
-	_ = json.Unmarshal(e.browser.Get(oauthserver.MetadataPath).Body.Bytes(), &meta)
+	_ = json.Unmarshal(e.do(http.MethodGet, oauthserver.MetadataPath, "", nil).Body.Bytes(), &meta)
 	if _, ok := meta["registration_endpoint"]; ok {
 		t.Fatalf("metadata %v", meta)
 	}
@@ -108,7 +107,6 @@ func TestDynamicRegistrationDisabled(t *testing.T) {
 func TestOfficialSDKClientWithDCR(t *testing.T) {
 	t.Parallel()
 	e := setupWith(t, withDCR)
-	e.browser.Login(e.pages, editor)
 	client := &http.Client{Transport: handlerTransport{e.router}}
 	handler, err := auth.NewAuthorizationCodeHandler(&auth.AuthorizationCodeHandlerConfig{
 		DynamicClientRegistrationConfig: &auth.DynamicClientRegistrationConfig{Metadata: &oauthex.ClientRegistrationMetadata{
@@ -121,7 +119,7 @@ func TestOfficialSDKClientWithDCR(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			back := e.approve(t, u.Query(), "allow")
+			back := e.approve(t, u.Query(), true)
 			return &auth.AuthorizationResult{Code: back.Query().Get("code"), State: back.Query().Get("state"), Iss: back.Query().Get("iss")}, nil
 		},
 	})

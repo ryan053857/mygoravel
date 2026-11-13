@@ -1,6 +1,7 @@
 package oauthserver
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -12,16 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/a-h/templ"
 	"github.com/cockroachdb/errors"
 	"github.com/uptrace/bun"
 
+	"github.com/ryan053857/mygoravel/errorx"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/web"
-	"github.com/ryan053857/mygoravel/web/ui"
 )
 
-// authParams 是授权请求中原样带到同意页、再提交回来的参数。
+// authParams 是授权请求中带到同意页（request 参数）、再随同意页的接口交回的参数。
 var authParams = []string{"response_type", "client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "scope", "resource"}
 
 // codeChallenge 是 S256 的 code_challenge：SHA-256 的 base64url（无填充），43 个字符。
@@ -55,7 +54,7 @@ type authRequest struct {
 	challenge string
 	scopes    []string
 	resource  string
-	params    map[string]string
+	params    url.Values
 }
 
 // redirectError 是可以跳回客户端的授权错误（RFC 6749 4.1.2.1）。
@@ -66,31 +65,31 @@ type redirectError struct {
 func (e *redirectError) Error() string { return e.code + ": " + e.description }
 
 // parse 校验授权请求。client_id 或 redirect_uri 不对时返回 ErrInvalidClient、ErrInvalidRedirect：
-// 不能确认回调地址属于这个客户端，不能跳回去，呈现错误页；其他问题返回 *redirectError，带着 req 跳回客户端。
-func (s *Server) parse(r *http.Request, values url.Values) (*authRequest, error) {
-	params := map[string]string{}
+// 不能确认回调地址属于这个客户端，不能跳回去；其他问题返回 *redirectError，可以带着 req 跳回客户端。
+func (s *Server) parse(ctx context.Context, values url.Values) (*authRequest, error) {
+	params := url.Values{}
 	for _, name := range authParams {
 		if v := values.Get(name); v != "" {
-			params[name] = v
+			params.Set(name, v)
 		}
 	}
-	cl, err := s.resolve(r.Context(), params["client_id"])
+	cl, err := s.resolve(ctx, params.Get("client_id"))
 	if err != nil {
-		s.logger.WarnContext(r.Context(), "oauth client rejected", "client_id", params["client_id"], "error", err)
+		s.logger.WarnContext(ctx, "oauth client rejected", "client_id", params.Get("client_id"), "error", err)
 		return nil, ErrInvalidClient.Wrap(err)
 	}
-	redirect := params["redirect_uri"]
+	redirect := params.Get("redirect_uri")
 	if redirect == "" || !cl.allows(redirect) {
 		return nil, ErrInvalidRedirect.New()
 	}
-	req := &authRequest{client: cl, redirect: redirect, state: params["state"], challenge: params["code_challenge"], params: params}
+	req := &authRequest{client: cl, redirect: redirect, state: params.Get("state"), challenge: params.Get("code_challenge"), params: params}
 	switch {
-	case params["response_type"] != "code":
+	case params.Get("response_type") != "code":
 		return req, &redirectError{"unsupported_response_type", "response_type must be code"}
-	case params["code_challenge_method"] != "S256" || !codeChallenge.MatchString(req.challenge):
+	case params.Get("code_challenge_method") != "S256" || !codeChallenge.MatchString(req.challenge):
 		return req, &redirectError{"invalid_request", "PKCE with code_challenge_method S256 is required"}
 	}
-	if scope := strings.Fields(params["scope"]); len(scope) > 0 {
+	if scope := strings.Fields(params.Get("scope")); len(scope) > 0 {
 		for _, sc := range scope {
 			if _, ok := s.scopes[sc]; !ok {
 				return req, &redirectError{"invalid_scope", "unknown scope " + sc}
@@ -101,7 +100,7 @@ func (s *Server) parse(r *http.Request, values url.Values) (*authRequest, error)
 	} else {
 		req.scopes = s.scopeNames()
 	}
-	req.resource = params["resource"]
+	req.resource = params.Get("resource")
 	if req.resource == "" && len(s.opts.Resources) == 1 {
 		req.resource = s.opts.Resources[0]
 	}
@@ -111,46 +110,24 @@ func (s *Server) parse(r *http.Request, values url.Values) (*authRequest, error)
 	return req, nil
 }
 
-// authorize 呈现同意页。
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request) error {
-	noFrame(w)
-	req, err := s.parse(r, r.URL.Query())
-	if err != nil {
-		return s.fail(w, r, req, err)
+// authorize 校验授权请求，把它交给单页应用的同意页：合法的请求编码为 request 参数；
+// 能跳回客户端的错误直接带着 error 跳回；client_id 或 redirect_uri 不对时不能跳回，把错误码交给同意页显示。
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	req, err := s.parse(r.Context(), r.URL.Query())
+	var re *redirectError
+	switch {
+	case err == nil:
+		http.Redirect(w, r, s.consentURL(url.Values{"request": {req.params.Encode()}}), http.StatusFound)
+	case req != nil && errors.As(err, &re):
+		http.Redirect(w, r, s.back(req, re.values()), http.StatusFound)
+	default:
+		http.Redirect(w, r, s.consentURL(url.Values{"error": {errorx.CodeOf(err)}}), http.StatusFound)
 	}
-	sub, _ := identity.FromContext(r.Context())
-	props := ui.ConsentProps{
-		Brand:        s.opts.Brand,
-		ClientName:   req.client.name,
-		RedirectHost: host(req.redirect),
-		Account:      s.account(r, sub),
-		Action:       AuthorizePath,
-		Fields:       req.params,
-	}
-	for _, name := range req.scopes {
-		props.Scopes = append(props.Scopes, ui.ConsentScope{Name: name, Description: s.scopes[name].Description})
-	}
-	render := s.opts.Consent
-	if render == nil {
-		render = func(_ *http.Request, p ui.ConsentProps) templ.Component { return ui.ConsentPage(p) }
-	}
-	return web.Render(w, r, http.StatusOK, render(r, props))
 }
 
-// decide 处理同意页的提交：重新校验授权请求，同意时签发授权码，带着它跳回客户端；拒绝时带着 access_denied 跳回。
-func (s *Server) decide(w http.ResponseWriter, r *http.Request) error {
-	noFrame(w)
-	if err := r.ParseForm(); err != nil {
-		return web.ErrBadForm.Wrap(err)
-	}
-	req, err := s.parse(r, r.PostForm)
-	if err != nil {
-		return s.fail(w, r, req, err)
-	}
-	if r.PostForm.Get("decision") != "allow" {
-		return s.fail(w, r, req, &redirectError{"access_denied", "the user denied the request"})
-	}
-	sub, _ := identity.FromContext(r.Context())
+// issue 为 sub 签发授权码，返回带着它跳回客户端的地址。
+func (s *Server) issue(ctx context.Context, req *authRequest, sub identity.Subject) (string, error) {
 	plain := randomCode()
 	now := time.Now().UTC()
 	c := &code{
@@ -161,25 +138,18 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) error {
 		ImpersonatorType: string(sub.Impersonator.Type), ImpersonatorID: sub.Impersonator.ID,
 		CreatedAt: now, ExpiresAt: now.Add(DefaultCodeTTL),
 	}
-	if _, err := s.db.NewInsert().Model(c).Exec(r.Context()); err != nil {
-		return errors.Wrap(err, "oauthserver: save code")
+	if _, err := s.db.NewInsert().Model(c).Exec(ctx); err != nil {
+		return "", errors.Wrap(err, "oauthserver: save code")
 	}
-	s.redirect(w, r, req, url.Values{"code": {plain}})
-	return nil
+	return s.back(req, url.Values{"code": {plain}}), nil
 }
 
-// fail 呈现授权错误：能跳回客户端的带着 error 跳回，其余交给页面的错误页。
-func (s *Server) fail(w http.ResponseWriter, r *http.Request, req *authRequest, err error) error {
-	var re *redirectError
-	if req == nil || !errors.As(err, &re) {
-		return err
-	}
-	s.redirect(w, r, req, url.Values{"error": {re.code}, "error_description": {re.description}})
-	return nil
+func (e *redirectError) values() url.Values {
+	return url.Values{"error": {e.code}, "error_description": {e.description}}
 }
 
-// redirect 跳回客户端的回调地址，附上 values、state 和 iss（RFC 9207）。
-func (s *Server) redirect(w http.ResponseWriter, r *http.Request, req *authRequest, values url.Values) {
+// back 返回跳回客户端回调地址的 URL，附上 values、state 和 iss（RFC 9207）。
+func (s *Server) back(req *authRequest, values url.Values) string {
 	u, _ := url.Parse(req.redirect)
 	q := u.Query()
 	for k, v := range values {
@@ -190,22 +160,18 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request, req *authReque
 	}
 	q.Set("iss", s.issuer)
 	u.RawQuery = q.Encode()
-	http.Redirect(w, r, u.String(), http.StatusFound)
+	return u.String()
 }
 
-func (s *Server) account(r *http.Request, sub identity.Subject) string {
-	if s.opts.Account != nil {
-		return s.opts.Account(r.Context(), sub)
+// consentURL 返回 Options.ConsentURL 附上 values 的地址。
+func (s *Server) consentURL(values url.Values) string {
+	u, _ := url.Parse(s.opts.ConsentURL)
+	q := u.Query()
+	for k, v := range values {
+		q[k] = v
 	}
-	return sub.ID
-}
-
-// noFrame 禁止同意页被嵌入其他网站的框架，防止诱导点击。
-// CSP 用 Add 追加为第二条策略：浏览器同时执行全部策略，web.Options.CSP 放开了 frame-ancestors 时同意页仍然不能被嵌入。
-func noFrame(w http.ResponseWriter) {
-	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Add("Content-Security-Policy", "frame-ancestors 'none'")
-	w.Header().Set("Cache-Control", "no-store")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func host(raw string) string {

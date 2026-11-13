@@ -106,7 +106,7 @@ var rules = map[string]rule{
 	"ai/chat":           {layerFeature, []string{"ai", "broadcast", "errorx", "httpx", "lock", "logging"}},
 	"login":             {layerFeature, []string{"crypt", "errorx", "hashing", "identity", "ratelimit"}},
 	"login/oauth":       {layerFeature, []string{"errorx", "login"}},
-	"oauthserver":       {layerFeature, []string{"apitoken", "errorx", "httpx", "identity", "logging", "mcpx", "outbound", "web"}},
+	"oauthserver":       {layerFeature, []string{"apitoken", "errorx", "httpx", "identity", "logging", "mcpx", "outbound"}},
 	"login/passkey":     {layerFeature, []string{"crypt", "errorx", "identity", "login"}},
 
 	"internal": {},

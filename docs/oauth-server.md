@@ -22,7 +22,7 @@
 - 客户端不需要事先登记：claude.ai、ChatGPT 的 client_id 是一个 https 地址，授权时从这个地址取回客户端的名称和回调地址（Client ID Metadata Document）。
 - 令牌是 [`apitoken`](api-tokens.md) 的 OAuth 令牌：只能用于授权时的 MCP 服务，权限是用户本人的权限与同意的范围的交集，按使用滑动过期，出现在用户的令牌列表中，可以随时撤销。
 
-授权页是 `web` 的页面，用户用页面的会话登录，所以能授权的是页面接受的账号体系。本章的例子是博客的编辑：他们在编辑后台登录，在 Claude 中查找和发布文章。
+同意页是应用的[单页应用](spa.md)中的一个页面：授权端点校验请求后跳到同意页，同意页用登录 token 调用两个接口，读取请求、提交用户的选择。所以能授权的是这两个接口接受的账号体系。本章的例子是博客的编辑：他们在编辑后台登录，在 Claude 中查找和发布文章。
 
 <a id="installation"></a>
 ## 安装
@@ -39,7 +39,7 @@ migratecmd.Publish(
 <a id="assembling"></a>
 ## 装配
 
-在编辑后台的路由中创建授权服务器，挂在应用的根上：
+创建授权服务器，端点挂在应用的根上，同意页的两个接口注册在编辑后台的 API 上：
 
 ```go
 oauth := oauthserver.New(a.db, tokens, oauthserver.Options{
@@ -49,10 +49,10 @@ oauth := oauthserver.New(a.db, tokens, oauthserver.Options{
         {Name: "articles:read", Description: "查看文章"},
         {Name: "articles:write", Description: "撰写和发布文章"},
     },
-    Brand:   "Blog 编辑后台",
-    Account: editorEmail, // func(ctx, sub) string：同意页上显示的当前账号，例如邮箱
+    ConsentURL: "/oauth/consent", // 编辑后台单页应用中的同意页
 })
-oauth.Routes(router, pages)
+oauth.Routes(router)
+oauth.Register(api, rest.RequireBearer(api, tokens.Validate))
 ```
 
 | 选项 | 说明 |
@@ -62,19 +62,24 @@ oauth.Routes(router, pages)
 | `Scopes` | 客户端可以申请的范围，见下一节 |
 | `Clients` | 预先登记的客户端，见[客户端](#clients) |
 | `DynamicRegistration` | 开启动态客户端注册，默认关闭，见[动态客户端注册](#dynamic-registration) |
-| `Brand`、`Account` | 同意页上方的名称和当前账号 |
-| `Consent` | 换成自己的同意页，见[同意页](#consent-page) |
+| `ConsentURL` | 单页应用中同意页的地址，见[同意页](#consent-page)。通常是本站的路径；单页应用部署在别的地址时写完整的 https 地址 |
 | `TokenLifetime`、`TokenIdleTimeout` | 令牌的最长有效期和最长空闲时间，默认 1 年和 30 天 |
 
-`Routes` 注册以下端点。授权页注册为 `pages` 中需要登录的页面，没有登录时先去 `pages` 的登录页，登录后回到授权页：
+`Routes` 注册客户端访问的端点：
 
 | 端点 | 说明 |
 | --- | --- |
 | `GET /.well-known/oauth-authorization-server` | 授权服务器元数据 |
-| `GET /oauth/authorize` | 同意页 |
-| `POST /oauth/authorize` | 用户允许或拒绝 |
+| `GET /oauth/authorize` | 校验授权请求，跳到同意页 |
 | `POST /oauth/token` | 授权码换令牌 |
 | `POST /oauth/revoke` | 客户端交回令牌（RFC 7009） |
+
+`Register` 在 API 上注册同意页调用的两个接口，第二个参数是它们的认证方式，与编辑后台的其他接口相同：
+
+| 接口 | 操作 ID | 说明 |
+| --- | --- | --- |
+| `GET /oauth/consent?request=…` | `oauth-consent-get` | 读取授权请求：应用、范围、跳转去向 |
+| `POST /oauth/consent` | `oauth-consent-decide` | 允许或拒绝，返回浏览器要跳转去的地址 |
 
 授权码 10 分钟有效。用 `oauth.Cleanup` 定时删除过期的授权码，见[清理框架数据](scheduling.md#framework-cleanups)。
 
@@ -110,11 +115,12 @@ router.Handle("/mcp", mcpx.Handler(tools, mcpx.HandlerOptions{
 用户在 Claude 中添加连接器，填写 `https://blog.example.com/mcp`：
 
 1. Claude 访问 MCP 服务，得到 `401`，从受保护资源元数据和授权服务器元数据中找到各端点。
-2. Claude 打开授权页。用户没有登录编辑后台时先登录，然后看到同意页：Claude 申请哪些范围、以哪个账号、授权后跳转到 `claude.ai`。
-3. 用户点“允许”，浏览器带着授权码回到 Claude；Claude 用授权码和 PKCE 的 verifier 换取令牌。
-4. Claude 带着令牌调用 MCP 工具，以这个编辑的身份执行。
+2. Claude 在浏览器中打开 `/oauth/authorize`。授权端点校验请求后跳到编辑后台的同意页，地址中带着 `request` 参数。
+3. 编辑没有登录时，编辑后台先让他登录，再回到同意页。同意页显示 Claude 申请哪些范围、以哪个账号、授权后跳转到 `claude.ai`。
+4. 编辑点“允许”，浏览器带着授权码回到 Claude；Claude 用授权码和 PKCE 的 verifier 换取令牌。
+5. Claude 带着令牌调用 MCP 工具，以这个编辑的身份执行。
 
-用户点“拒绝”时，Claude 收到 `access_denied`。授权请求本身有问题时：client_id 或回调地址不对的，显示错误页，不跳回去；其他问题（缺少 PKCE、未知的范围）带着错误跳回客户端。
+用户点“拒绝”时，Claude 收到 `access_denied`。授权请求本身有问题时：client_id 或回调地址不对的，不能跳回去，授权端点跳到同意页并带上 `error` 参数，值是错误码 `oauth.invalid_client` 或 `oauth.invalid_redirect_uri`；其他问题（缺少 PKCE、未知的范围）带着错误直接跳回客户端。
 
 <a id="clients"></a>
 ## 客户端
@@ -158,15 +164,60 @@ sched.Add("oauth:cleanup-clients", "@daily", schedule.Cleanup(oauth.CleanupClien
 <a id="consent-page"></a>
 ## 同意页
 
-默认的同意页是 `ui.ConsentPage`，使用这组页面的[主题](components.md)。换成自己的页面时设置 `Options.Consent`，收到的 `ui.ConsentProps` 中有应用名、账号、范围、跳转去向，以及要原样提交回去的参数：
+同意页是编辑后台单页应用中的一个路由，路径与 `ConsentURL` 相同。它从地址中取出 `request`，用[客户端](clients.md#creating-the-client)读取授权请求，用户点击后提交选择，再跳转到返回的地址。下面是用 TanStack Router 写的 `src/routes/oauth/consent.tsx`：
 
-```go
-Consent: func(r *http.Request, p ui.ConsentProps) templ.Component {
-    return views.Consent(p) // 表单 POST 到 p.Action，带上 p.Fields 和 decision=allow 或 deny
-},
+```tsx
+import { createFileRoute } from "@tanstack/react-router"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { api } from "../../client"
+
+export const Route = createFileRoute("/oauth/consent")({
+  validateSearch: (s: Record<string, unknown>) => ({
+    request: String(s.request ?? ""),
+    error: String(s.error ?? ""),
+  }),
+  component: Consent,
+})
+
+function Consent() {
+  const { request, error } = Route.useSearch()
+  const consent = useQuery({
+    queryKey: ["oauth-consent", request],
+    enabled: request !== "",
+    queryFn: async () => {
+      const { data, error } = await api.GET("/oauth/consent", { params: { query: { request } } })
+      if (error) throw error
+      return data
+    },
+  })
+  const decide = useMutation({
+    mutationFn: async (approve: boolean) => {
+      const { data, error } = await api.POST("/oauth/consent", { body: { request, approve } })
+      if (error) throw error
+      location.assign(data.url) // 回到 Claude；整页跳转，不经过前端路由
+    },
+  })
+
+  if (error) return <p>无法授权（{error}）</p> // 错误码，例如 oauth.invalid_client
+  if (consent.error) return <p>{consent.error.detail}</p>
+  if (!consent.data) return null
+  const c = consent.data
+  return (
+    <div>
+      <h1>{c.client_name} 请求访问你的账号</h1>
+      <ul>{c.scopes.map((s) => <li key={s.name}>{s.description}</li>)}</ul>
+      <p>授权后将跳转到 {c.redirect_host}</p>
+      <button disabled={decide.isPending} onClick={() => decide.mutate(true)}>允许</button>
+      <button disabled={decide.isPending} onClick={() => decide.mutate(false)}>拒绝</button>
+    </div>
+  )
+}
 ```
 
-同意页禁止被嵌入其他网站的框架，防止诱导点击。提交由页面的跨站请求防护保护。
+- **登录**：同意页和编辑后台的其他页面一样要求登录。没有登录时，编辑后台照常跳到登录页，登录后回到原地址（包括 `request` 参数）。
+- **只接受登录 token**：个人访问令牌和 OAuth 令牌带有权限限制，不代表用户本人，用它们调用这两个接口返回 `403 oauth.restricted_credential`。
+- **重新校验**：`request` 就是原始的授权参数，两个接口每次都重新校验，被改过的请求返回 `422`（`oauth.invalid_client`、`oauth.invalid_redirect_uri` 或 `oauth.invalid_request`）。
+- **不能被嵌入框架**：同意页要防止诱导点击。`httpx.SPA` 默认带 `frame-ancestors 'none'`，见[单页应用](spa.md)；放开了它时，至少不要放开同意页所在的路由。
 
 <a id="deployment"></a>
 ## 部署
@@ -178,4 +229,10 @@ Consent: func(r *http.Request, p ui.ConsentProps) templ.Component {
 <a id="testing"></a>
 ## 测试
 
-`web/webtest` 的客户端登录后访问授权页、提交同意，再用授权码换令牌，就能在测试中走完整个流程。框架自己的测试还用 MCP 官方 Go SDK 的 OAuth 客户端（`auth.NewAuthorizationCodeHandler`）走过一遍：从 `401` 开始发现元数据、授权、换取令牌到调用工具。
+测试中代替浏览器和同意页走完整个流程：
+
+1. 请求 `GET /oauth/authorize`，从 `Location` 中取出 `request`；
+2. 用 `tokens.Login` 签发的登录 token 调用 `POST /oauth/consent`，得到带授权码的地址；
+3. 用授权码换令牌，再用令牌调用 MCP 工具。
+
+框架自己的测试还用 MCP 官方 Go SDK 的 OAuth 客户端（`auth.NewAuthorizationCodeHandler`）走过一遍：从 `401` 开始发现元数据、授权、换取令牌到调用工具。

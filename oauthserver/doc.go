@@ -1,6 +1,7 @@
 // Package oauthserver 是 OAuth 2.1 授权服务器，让 claude.ai、ChatGPT 这类远程客户端在用户同意后访问 MCP 服务。
 //
-// 用户在浏览器中登录（web 的页面会话），在同意页上看到哪个应用申请哪些范围，同意后客户端用授权码和 PKCE 换取令牌。
+// 同意页是应用的单页应用中的一个页面：授权端点校验请求后跳到 Options.ConsentURL，同意页用 Bearer 调用 Register 注册的接口，
+// 显示哪个应用申请哪些范围，用户同意后跳回客户端，客户端用授权码和 PKCE 换取令牌。
 // 令牌是 apitoken 的 OAuth 令牌，只能用于授权时的资源，权限是用户本人的权限与同意的范围的交集，
 // 在“已连接的应用”中可以撤销。
 //
@@ -9,11 +10,13 @@
 // 不发刷新令牌：令牌按使用滑动过期，到期后客户端重新授权。
 //
 //	srv := oauthserver.New(db, tokens, oauthserver.Options{
-//	    Issuer:    "https://blog.example.com",
-//	    Resources: []string{"https://blog.example.com/mcp"},
-//	    Scopes:    []oauthserver.Scope{{Name: "articles:read", Description: "查看文章"}},
+//	    Issuer:     "https://blog.example.com",
+//	    Resources:  []string{"https://blog.example.com/mcp"},
+//	    Scopes:     []oauthserver.Scope{{Name: "articles:read", Description: "查看文章"}},
+//	    ConsentURL: "/oauth/consent",
 //	})
-//	srv.Routes(router, pages)
+//	srv.Routes(router)
+//	srv.Register(api, rest.RequireBearer(api, tokens.Validate))
 //
 //	res := srv.Resource("https://blog.example.com/mcp")
 //	router.Handle(res.MetadataPath(), mcpx.ResourceMetadata(res))
