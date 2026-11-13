@@ -43,7 +43,6 @@ import (
     "example.com/blog/internal/settings"
     "example.com/blog/migrations"
     "github.com/go-tenon/tenon/command"
-    "github.com/go-tenon/tenon/command/devcmd"
     "github.com/go-tenon/tenon/command/migratecmd"
     "github.com/go-tenon/tenon/command/httpcmd"
     "github.com/go-tenon/tenon/database"
@@ -58,25 +57,14 @@ func New() *cobra.Command {
         command.Run("schedule", "执行定时任务", bootstrap.Schedule),
         command.Run("start", "在一个进程中运行 HTTP 服务、队列和定时任务", bootstrap.Start),
         migratecmd.New(migrations.FS, dbConfig),
-        httpcmd.OpenAPI(bootstrap.API, bootstrap.DocRoutes),
-        httpcmd.Routes(bootstrap.DocRouter),
         command.Config[settings.Config](),
-        devcmd.New(devcmd.Options{
-            Main:   "./cmd/api",
-            Static: "internal/web/static",
-            Tools: []devcmd.Tool{
-                devcmd.Vite("frontend"),
-                devcmd.Tailwind("internal/web/app.css", "internal/web/static/css/app.css"),
-            },
-        }, httpAddr),
     )
+    root.AddCommand(httpcmd.Commands(bootstrap.API, bootstrap.DocRoutes, bootstrap.DocRouter)...)
     root.AddCommand(bootstrap.Commands()...)
     return root
 }
 
 func dbConfig(cfg settings.Config) database.Config { return cfg.Database }
-
-func httpAddr(cfg settings.Config) string { return cfg.HTTP.Addr }
 ```
 
 入口文件 `cmd/api/main.go` 只有一行：
@@ -104,15 +92,12 @@ func main() {
 | `command.Config[C]()` | `config check`、`config show` | 是 |
 | `migratecmd.New(fsys, dbConfig, opts...)` | `migrate up`、`migrate status`、`migrate down`、`migrate make`；`migratecmd.Name` 构造其他数据库的命令，见[多个数据库](database.md#multiple-databases) | 是 |
 | `migratecmd.Publish(driver, sources...)` | 显式挂载的 `migrate publish` | 否 |
-| `httpcmd.OpenAPI(opts, register)` | `openapi` | 否 |
-| `httpcmd.Routes(router)` | `routes` | 否 |
-| `clientgen.Command(opts, register)` | `client`，生成 TypeScript（`--ts`）或 Go（`--out`）客户端，见[客户端代码](clients.md) | 否 |
-| `devcmd.New(opts, addr)` | `dev`，开发时运行应用和前端工具，修改代码后重新编译、重启，见 [dev 命令](#dev-command) | 是 |
+| `httpcmd.Commands(opts, register, router)` | `openapi`、`routes`、`client`（生成 TypeScript 或 Go 客户端，见[客户端代码](clients.md)）；也可以用 `httpcmd.OpenAPI`、`httpcmd.Routes`、`clientgen.Command` 单独装配 | 否 |
 | `command.Bind(open, declare)` | 应用声明的命令，例如 `article publish`，见[从命令行运行 action](actions.md#as-commands) | 是 |
 | `queuecmd.New(db)` | `queue status`、`queue failed`、`queue slot recreate`，在 `command.Bind` 中声明，见[队列状态](queue.md#stats-command) | 是 |
 | `schedulecmd.New(tasks, m)` | `schedules`，在 `command.Bind` 中声明，见[列出任务的命令](scheduling.md#schedules-command) | 是 |
 
-迁移命令、HTTP 命令和 dev 命令分别放在 `command/migratecmd`、`command/httpcmd`、`command/devcmd` 三个子包中。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
+迁移命令和 HTTP 命令分别放在 `command/migratecmd`、`command/httpcmd` 两个子包中。开发时用的 `dev`、`build`、`generate` 不在应用中，由[开发工具](tooling.md) `go tool tenon` 提供。`command` 本身不依赖 HTTP 和数据库组件，只导入它的应用不会链接 Huma、pgx 和 goose。
 
 不提供 HTTP API 的应用，例如一个只消费消息队列的常驻进程，只装配它需要的命令即可：
 
@@ -226,44 +211,7 @@ Huma 自动注册的 `/docs`、`/openapi.json`、`/schemas/{schema}` 等文档�
 <a id="dev-command"></a>
 ### dev 命令
 
-开发时，`dev` 命令把应用和前端工具合成一条命令：
-
-```bash
-go run ./cmd/api dev --config config/app.yaml,config/local.yaml
-```
-
-它同时运行：
-
-- **应用**：编译 `Main` 到临时目录，运行 `serve`，`--config` 与 `dev` 相同。模块中的 `.go` 文件（测试除外）、`go.mod`、`go.sum` 变化后重新编译：成功时平滑停止旧进程（`SIGTERM`），启动新的；失败时打印编译错误，旧进程继续运行，改好后再重启。
-- **`Tools` 中每个工具的监听命令**：
-  - `devcmd.Vite("frontend")` 运行 `bun --cwd frontend run dev`，见[单页应用的开发](spa.md#development)。启动前没有 `node_modules` 时先 `bun install`，没有 `dist` 时先构建一次；
-  - `devcmd.Tailwind` 运行 `tailwindcss --watch`。启动前，它把框架内置的组件样式源复制到入口旁边的 `.web-ui` 目录，见[用 Tailwind 编写样式](assets.md#tailwind)。只用内置样式表、不写 Tailwind 的应用不需要它。
-- **服务端渲染的页面**（模块中有 `.templ` 文件时）：
-  - `go tool templ generate --watch`：修改 `.templ` 后重新生成代码；只改了文字时不必重新编译。templ 在 7331 端口代理应用，并注入自动刷新的脚本，这时打开 http://localhost:7331；
-  - 监视 `Static` 目录：其中的文件变化时（例如 Tailwind 重新生成了样式表）刷新浏览器。`config/local.yaml` 设置 `static_dir`，让应用直接读取磁盘上的静态文件，见[前端资源](assets.md#development)。
-
-  没有 `.templ` 文件时不运行 templ，打开应用自己的地址。
-
-`addr` 从配置中取出应用的监听地址。`Generate` 是每次重新编译成功后，用编译出的程序运行一次的子命令，例如重新生成 [Go 客户端](clients.md#go)，App 的代码随接口一起更新：
-
-```go
-devcmd.New(devcmd.Options{
-    Main:     "./cmd/api",
-    Tools:    []devcmd.Tool{devcmd.Vite("frontend")},
-    Generate: []string{"client", "--out", "../api"},
-}, httpAddr)
-```
-
-`dev` 启动前检查用到的命令是否已安装：Bun、templ（`go get -tool github.com/a-h/templ/cmd/templ`）、Tailwind。按 `Ctrl-C` 停止后，它平滑停止应用，再运行 `templ generate` 和各工具的生成命令，例如 `bun run build`、`tailwindcss --minify`，把监听模式的输出恢复为正式版本。
-
-其他工具写成 `devcmd.Tool`，`Watch` 是开发时的监听命令，`Build` 是停止后的生成命令，`Prepare` 在启动监听命令之前运行一次。例如用 esbuild 打包应用自己的脚本：
-
-```go
-devcmd.Tool{
-    Watch: []string{"esbuild", "internal/web/js/app.js", "--bundle", "--outdir=internal/web/static/js", "--watch=forever"},
-    Build: []string{"esbuild", "internal/web/js/app.js", "--bundle", "--outdir=internal/web/static/js", "--minify"},
-}
-```
+开发时一起运行 Vite 和应用、修改代码后重新编译和重启，由[开发工具](tooling.md)的 `go tool tenon dev` 提供，不是应用自己的命令。
 
 <a id="migrate-command"></a>
 ### migrate 命令

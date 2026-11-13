@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/go-tenon/tenon/main/cmd/tenon/schema.json",
+  "title": "tenon.json",
+  "description": "Tenon 项目的开发工具配置（go tool tenon）。所有字段都可以省略，省略时用约定的默认值。",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "main": { "type": "string", "description": "应用入口的包，默认 ./cmd/api。", "default": "./cmd/api" },
+    "serve": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "开发时运行应用的参数，默认 [\"serve\", \"--config\", \"config/app.yaml,config/local.yaml\"]（local.yaml 不存在时去掉它）。"
+    },
+    "url": { "type": "string", "description": "应用的地址，dev 打印它，templ 的代理访问它，默认 http://localhost:8080。", "default": "http://localhost:8080" },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "单页应用（Vite）。项目中有 frontend/index.html 时默认启用。",
+      "properties": {
+        "dir": { "type": "string", "description": "前端源码的目录，其中有 index.html 和 frontend.go（go:embed dist），默认 frontend。", "default": "frontend" },
+        "devUrl": { "type": "string", "description": "Vite 开发服务器的地址，默认 http://localhost:5173。dev 等它能访问后再启动应用。", "default": "http://localhost:5173" }
+      }
+    },
+    "generate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "每次重新编译成功后生成的客户端。",
+      "properties": {
+        "ts": { "type": "string", "description": "TypeScript 客户端的目录；有前端时默认 <frontend.dir>/src/api，\"-\" 表示不生成。" },
+        "go": { "type": "string", "description": "Go 客户端的目录，例如 ../api，默认不生成。" }
+      }
+    },
+    "templ": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "服务端渲染的页面。项目中有 .templ 文件时默认启用。",
+      "properties": {
+        "proxyPort": { "type": "integer", "description": "浏览器访问的端口，templ 在这里代理应用并注入自动刷新的脚本，默认 7331。", "default": 7331 },
+        "static": { "type": "string", "description": "静态文件目录，其中的文件变化时刷新浏览器。" }
+      }
+    },
+    "tailwind": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output"],
+      "description": "用 Tailwind standalone CLI 生成的样式表。启动前把框架 web/ui 的样式源复制到 input 旁边的 .web-ui 目录。",
+      "properties": {
+        "input": { "type": "string", "description": "样式入口，例如 internal/web/app.css。" },
+        "output": { "type": "string", "description": "生成的样式表，例如 internal/web/static/css/app.css。" }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "description": "与应用一起运行的其他工具：开发时运行 watch，停止后运行一次 build。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["watch"],
+        "properties": {
+          "watch": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "build": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

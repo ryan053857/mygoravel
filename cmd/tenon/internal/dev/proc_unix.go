@@ -1,6 +1,6 @@
 //go:build unix
 
-package devcmd
+package dev
 
 import (
 	"os/exec"

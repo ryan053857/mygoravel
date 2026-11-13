@@ -1,4 +1,4 @@
-package devcmd
+package dev
 
 import "time"
 

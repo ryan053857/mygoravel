@@ -54,10 +54,10 @@
 <a id="generating-types"></a>
 ### 生成客户端
 
-`client` 命令的 `--ts` 从路由生成 TypeScript 客户端，与 [Go 客户端](#generating-go-client)是同一个命令，在服务端的源码目录中运行：
+[tenon generate](tooling.md#generate) 从路由生成 TypeScript 客户端，有前端时默认写到 `frontend/src/api`。它编译应用，运行应用的 `client` 命令（见 [httpcmd.Commands](tooling.md#app-side)），与 [Go 客户端](#generating-go-client)是同一个命令：
 
 ```bash
-go run ./cmd/api client --ts frontend/src/api
+go tool tenon generate   # 等价于 go run ./cmd/api client --ts frontend/src/api
 ```
 
 | 文件 | 内容 |
@@ -68,15 +68,7 @@ go run ./cmd/api client --ts frontend/src/api
 
 生成的代码不依赖任何 npm 包，也不需要 Node 或 Bun 参与生成。重新生成时只删除带生成标记的文件，目录中手写的文件保持不变。把它们提交到仓库，CI 中重新生成后用 `git diff --exit-code` 检查是否忘了更新。
 
-开发时交给 [dev 命令](commands.md#dev-command)，改了 Go 接口，前端的类型随之更新：
-
-```go
-devcmd.New(devcmd.Options{
-    Main:     "./cmd/api",
-    Tools:    []devcmd.Tool{devcmd.Vite("frontend")},
-    Generate: []string{"client", "--ts", "frontend/src/api"},
-}, httpAddr)
-```
+开发时 [tenon dev](tooling.md#dev) 在每次重新编译后自动生成，改了 Go 接口，前端的类型随之更新。
 
 <a id="creating-the-client"></a>
 ### 创建客户端
@@ -258,15 +250,13 @@ if errors.Is(err, article.ErrSlugTaken) {
 <a id="generating-go-client"></a>
 ### 生成客户端
 
-把 `client` 命令加入命令行，参数和 [openapi 命令](commands.md#openapi-command)相同：
+`client` 命令由 [`httpcmd.Commands`](tooling.md#app-side) 加入命令行。在 `tenon.json` 中写上输出目录，`tenon generate` 和 `tenon dev` 就会一起生成 Go 客户端：
 
-```go
-import "github.com/go-tenon/tenon/httpx/rest/clientgen"
-
-root.AddCommand(clientgen.Command(bootstrap.API, bootstrap.DocRoutes))
+```json
+{ "generate": { "go": "../api" } }
 ```
 
-在服务端的源码目录中运行，`--out` 是输出目录：
+也可以在服务端的源码目录中直接运行，`--out` 是输出目录：
 
 ```bash
 go run ./cmd/api client --out ../api

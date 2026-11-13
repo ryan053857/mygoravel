@@ -104,33 +104,23 @@ type Config struct {
 frontend_dev_server: http://localhost:5173
 ```
 
-然后用 [dev 命令](commands.md#dev-command)一起启动 Vite 和应用，打开 http://localhost:8080：
+然后用[开发工具](tooling.md)一起启动 Vite 和应用，打开 http://localhost:8080：
 
 ```bash
-go run ./cmd/api dev --config config/app.yaml,config/local.yaml
+bun run dev   # package.json 中是 "dev": "go tool tenon dev"
 ```
 
-命令行中加上 `devcmd.Vite("frontend")`，它运行 `bun --cwd frontend run dev`；修改 Go 代码后应用自动重新编译、重启，并重新生成 [TypeScript 客户端](clients.md#typescript)，前端的热更新不受影响：
+修改 Go 代码后应用自动重新编译、重启，并重新生成 [TypeScript 客户端](clients.md#typescript)，前端的热更新不受影响。按约定的[目录结构](directory-structure.md)组织时不需要任何配置，见 [tenon dev](tooling.md#dev)。
 
-```go
-devcmd.New(devcmd.Options{
-    Main:     "./cmd/api",
-    Tools:    []devcmd.Tool{devcmd.Vite("frontend")},
-    Generate: []string{"client", "--ts", "frontend/src/api"},
-}, httpAddr)
-```
-
-设置了 `DevServer` 时，`NewSPA` 不读取构建产物，但 `dist` 仍然要存在，程序才能编译。`dev` 第一次启动时，没有 `node_modules` 就先运行 `bun install`，没有 `dist` 就先构建一次；停止后再构建一次，`dist` 总是最新的。Vite 没有启动时，页面返回 `502`，内容是连接错误。
+设置了 `DevServer` 时，`NewSPA` 不读取构建产物，但 `dist` 仍然要存在，程序才能编译。`tenon dev` 第一次启动时，没有 `node_modules` 就先运行 `bun install`，没有 `dist` 就先构建一次；停止后再构建一次，`dist` 总是最新的。Vite 没有启动时，页面返回 `502`，内容是连接错误。
 
 <a id="building"></a>
 ## 构建与发布
 
-先构建前端，再构建 Go：
+[tenon build](tooling.md#build) 先构建前端，再构建 Go：
 
 ```bash
-bun --cwd frontend install --frozen-lockfile
-bun --cwd frontend run build
-go build -trimpath -o bin/api ./cmd/api
+bun run build   # 即 go tool tenon build：bun install --frozen-lockfile、vite build、go build -trimpath -o bin/api ./cmd/api
 ```
 
 `--frozen-lockfile` 要求 `bun.lock` 与 `package.json` 一致，CI 中安装的依赖与本地完全相同。CI 用 [setup-bun](https://github.com/oven-sh/setup-bun) 安装 Bun。
@@ -139,11 +129,11 @@ go build -trimpath -o bin/api ./cmd/api
 
 ```dockerfile
 FROM oven/bun:1 AS frontend
-WORKDIR /src/frontend
-COPY frontend/package.json frontend/bun.lock ./
+WORKDIR /src
+COPY package.json bun.lock vite.config.ts ./
 RUN bun install --frozen-lockfile
-COPY frontend .
-RUN bun run build
+COPY frontend frontend
+RUN bun x vite build
 
 FROM golang:1.27 AS build
 WORKDIR /src

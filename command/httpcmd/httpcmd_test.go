@@ -166,3 +166,14 @@ func TestUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestCommands(t *testing.T) {
+	cmds := httpcmd.Commands(rest.Options{}, registerRoutes(t), docRouter(t))
+	var names []string
+	for _, c := range cmds {
+		names = append(names, c.Name())
+	}
+	if strings.Join(names, ",") != "openapi,routes,client" {
+		t.Fatalf("commands %v", names)
+	}
+}

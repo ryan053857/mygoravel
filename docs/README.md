@@ -13,6 +13,7 @@
 - [安装](installation.md)
 - [配置](configuration.md)
 - [目录结构](directory-structure.md)
+- [开发工具](tooling.md)
 - [部署](deployment.md)
 
 ## 架构概念

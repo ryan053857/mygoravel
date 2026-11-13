@@ -121,7 +121,7 @@ Tailwind 的 [standalone CLI](https://tailwindcss.com/blog/standalone-cli) 是�
 }
 ```
 
-- 第二行导入组件和一套风格，风格与[主题](components.md#themes)的 `style` 一致。`.web-ui` 目录由 [dev 命令](commands.md#dev-command)的 `devcmd.Tailwind` 从框架中复制过来，目录中带 `.gitignore`，不会被提交。
+- 第二行导入组件和一套风格，风格与[主题](components.md#themes)的 `style` 一致。`.web-ui` 目录由[开发工具](tooling.md)从框架中复制过来，目录中带 `.gitignore`，不会被提交。
 - `@theme` 定义应用自己的设计令牌，之后就可以在 class 中使用 `bg-brand-500`、`font-display` 这样的工具类，见 [Tailwind 文档](https://tailwindcss.com/docs/theme)。组件的颜色变量（`bg-primary`、`text-muted-foreground` 等）同样可以使用。
 
 然后让主题使用生成的样式表：
@@ -132,10 +132,17 @@ theme:
   stylesheet: css/app.css
 ```
 
-开发时运行 [dev 命令](commands.md#dev-command)，打开 http://localhost:7331：
+在 `tenon.json` 中写上 Tailwind 的入口和输出，开发时运行 [tenon dev](tooling.md#dev)，打开 http://localhost:7331：
+
+```json
+{
+  "tailwind": { "input": "internal/web/app.css", "output": "internal/web/static/css/app.css" },
+  "templ": { "static": "internal/web/static" }
+}
+```
 
 ```bash
-go run ./cmd/api dev --config config/app.yaml,config/local.yaml
+go tool tenon dev
 ```
 
 修改 `.templ` 后，templ 重新生成代码、重启应用；Tailwind 随之重新生成 `internal/web/static/css/app.css`，浏览器自动刷新。停止 `dev` 时，它会生成压缩的样式表。生成的 `app.css` 和 `_templ.go` 一样要提交到版本库，这样构建和 CI 不需要安装 Tailwind。

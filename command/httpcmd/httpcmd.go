@@ -1,5 +1,6 @@
-// Package httpcmd 提供查看 HTTP 路由的命令：openapi 输出 JSON API 的 OpenAPI 文档，
-// routes 输出 JSON API 和页面的路由表。两个命令都以文档模式注册路由，不读取配置，不调用处理器。
+// Package httpcmd 提供与 HTTP 路由有关的命令：openapi 输出 JSON API 的 OpenAPI 文档，
+// routes 输出 JSON API 和页面的路由表，client 生成 TypeScript 和 Go 客户端（tenon generate 调用它）。
+// 它们都以文档模式注册路由，不读取配置，不调用处理器。Commands 一次返回这三个命令。
 package httpcmd
 
 import (
@@ -13,7 +14,17 @@ import (
 	"github.com/go-tenon/tenon/command"
 	"github.com/go-tenon/tenon/httpx"
 	"github.com/go-tenon/tenon/httpx/rest"
+	"github.com/go-tenon/tenon/httpx/rest/clientgen"
 )
+
+// Commands 返回 openapi、routes、client 三个命令，加入应用的根命令：
+//
+//	root.AddCommand(httpcmd.Commands(bootstrap.API, bootstrap.DocRoutes, bootstrap.DocRouter)...)
+//
+// register 以文档模式注册 JSON API，router 构造应用的完整路由，见 OpenAPI、Routes 和 clientgen.Command。
+func Commands(opts rest.Options, register func(api *rest.API), router func() chi.Routes) []*cobra.Command {
+	return []*cobra.Command{OpenAPI(opts, register), Routes(router), clientgen.Command(opts, register)}
+}
 
 // OpenAPI 构造 openapi 命令：以文档模式创建 API、调用 register 注册路由，
 // 把 OpenAPI 文档输出到标准输出。不读取配置，不调用处理器。

@@ -23,6 +23,7 @@ go get github.com/go-tenon/tenon@main
 | 你想做的事 | 文档 |
 | --- | --- |
 | 运行第一个应用 | [安装](docs/installation.md) |
+| 一条命令开发、构建前端和应用 | [开发工具](docs/tooling.md) |
 | 读取配置与密钥 | [配置](docs/configuration.md) |
 | 组织项目代码 | [目录结构](docs/directory-structure.md) · [依赖装配](docs/dependencies.md) · [业务动作](docs/actions.md) |
 | 编写接口 | [路由](docs/routing.md) · [请求](docs/requests.md) · [验证](docs/validation.md) · [响应](docs/responses.md) · [认证](docs/authentication.md) |
