@@ -120,6 +120,9 @@ type Pair struct {
 	Refresh string
 	// ExpiresAt 是 Access 的过期时间。
 	ExpiresAt time.Time
+	// RefreshExpiresAt 是 Refresh 不为空时这次登录当前的截止时间：签发时间加 Lifetime 与最近一次刷新加空闲时长中较早的一个，
+	// 每次刷新都会延长。RefreshCookie 用它作为 cookie 的过期时间。
+	RefreshExpiresAt time.Time
 }
 
 // claims 是 access token 的内容，只包含签发时确定、之后不变的信息；权限由 Resolver 按请求加载。
@@ -171,7 +174,7 @@ func (j *JWT) Login(ctx context.Context, sub identity.Subject, d Device) (Pair, 
 		return Pair{}, err
 	}
 	p, err := j.sign(r, r.CreatedAt)
-	p.Refresh = refresh
+	p.Refresh, p.RefreshExpiresAt = refresh, r.ExpiresAt
 	return p, err
 }
 
@@ -216,7 +219,7 @@ func (j *JWT) Refresh(ctx context.Context, refresh string) (Pair, error) {
 		return j.reuse(ctx, r, now)
 	}
 	p, err := j.sign(r, now)
-	p.Refresh = next
+	p.Refresh, p.RefreshExpiresAt = next, r.ExpiresAt
 	return p, err
 }
 

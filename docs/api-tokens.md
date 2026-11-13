@@ -276,7 +276,7 @@ requireCustomer := rest.RequireBearer(api, customerJWT.Validate)
 
 `JWT.Validate` 也是 `rest.TokenValidator`。不是 JWT 的 token 交给 `Store.Validate`，所以同一个 API 仍然接受[个人访问令牌](#personal-access-tokens)。
 
-登录时用 `customerJWT.Login` 代替 `Store.Login`，返回 `Pair`；刷新接口是公开的，客户端提交 refresh token：
+登录时用 `customerJWT.Login` 代替 `Store.Login`，返回 `Pair`；刷新接口是公开的，客户端提交 refresh token。浏览器中的单页应用把 refresh token 放在 cookie 中，见[单页应用](#single-page-applications)：
 
 ```go
 pair, err := customerJWT.Login(ctx, sub, device)
@@ -361,6 +361,84 @@ n, err := tokens.Cleanup(ctx, 1000)
 <a id="single-page-applications"></a>
 ## 单页应用
 
-单页应用（例如 React）和 App 一样使用登录 token：登录后保存 token，之后的请求都带上 `Authorization: Bearer <token>`，收到 `401` 时跳转到登录页。token 通常保存在 `localStorage` 中，这样刷新页面和打开新标签页后仍保持登录。页面上的脚本都能读到它，所以要防范 XSS；有效期和撤销可以限制 token 泄露后造成的影响。
+浏览器中的单页应用（例如 React）使用 [JWT 模式](#jwt)，并把 refresh token 放进 cookie：
 
-单页应用与 API 同源时（例如由 [`httpx.SPA`](spa.md) 提供）不需要额外设置。不在同一个源时，浏览器要求 API 返回 CORS 响应头，在 `/api` 的路由组上安装 [httpx.CORS](middleware.md#cors)。Bearer token 不是 cookie，不需要允许携带凭据。
+- access token 只保存在内存中，请求照常带 `Authorization: Bearer`；
+- refresh token 保存在 `apitoken.RefreshCookie` 描述的 cookie 中：`HttpOnly`，页面上的脚本读不到；`SameSite=Strict`，其他站点发起的请求不带它；`Path` 只包含刷新和登出接口，其他请求也不带它；
+- 打开页面（包括刷新页面、新标签页）时先调用一次刷新接口拿到 access token，失败就显示登录页。
+
+这样 XSS 只能在页面打开期间借用用户的权限，拿不走长期有效的凭据。API 本身仍然只认 Bearer：cookie 不是 API 的凭据，所以不需要跨站请求伪造的防护。
+
+不透明的登录 token 没有 refresh token，放进 cookie 就成了 API 的凭据，所以浏览器中的单页应用不使用它。App、桌面端、小程序和脚本照常在请求体中传递 refresh token，或者使用不透明 token。同一组接口可以同时服务两种客户端：登录时请求体带 `cookie: true` 的写 cookie，否则把 refresh token 放在响应体中；刷新时请求体中有 refresh token 就用它，没有就读 cookie：
+
+```go
+var refreshCookie = apitoken.RefreshCookie{Name: "blog_refresh", Path: "/api/auth"}
+
+type LoginInput struct {
+    UserAgent string `header:"User-Agent"`
+    Body      struct {
+        Email    string `json:"email" format:"email"`
+        Password string `json:"password" minLength:"1"`
+        Cookie   bool   `json:"cookie,omitempty" doc:"浏览器中的单页应用传 true：refresh token 写入 HttpOnly cookie"`
+    }
+}
+
+type RefreshInput struct {
+    Cookie string `cookie:"blog_refresh"`
+    Body   struct {
+        RefreshToken string `json:"refresh_token,omitempty" doc:"App 传入；浏览器留空，使用 cookie"`
+    }
+}
+
+type SessionOutput struct {
+    SetCookie *http.Cookie `header:"Set-Cookie"`
+    Body      struct {
+        AccessToken  string    `json:"access_token"`
+        RefreshToken string    `json:"refresh_token,omitempty" doc:"为空时继续使用已保存的 refresh token；浏览器总是为空"`
+        ExpiresAt    time.Time `json:"expires_at"`
+    }
+}
+
+// session 把一对凭据交给客户端：浏览器的 refresh token 写入 cookie，其他客户端的放在响应体中。
+func session(pair apitoken.Pair, cookie bool) *SessionOutput {
+    out := &SessionOutput{}
+    out.Body.AccessToken, out.Body.ExpiresAt = pair.Access, pair.ExpiresAt
+    if cookie {
+        out.SetCookie = refreshCookie.Set(pair)
+    } else {
+        out.Body.RefreshToken = pair.Refresh
+    }
+    return out
+}
+
+func (h *handlers) refresh(ctx context.Context, in *RefreshInput) (*SessionOutput, error) {
+    token, cookie := in.Body.RefreshToken, false
+    if token == "" {
+        token, cookie = in.Cookie, true
+    }
+    pair, err := h.jwt.Refresh(ctx, token)
+    if err != nil {
+        return nil, err // 401：重新登录
+    }
+    return session(pair, cookie), nil
+}
+
+// logout 撤销这次登录，并清除浏览器中的 cookie。
+func (h *handlers) logout(ctx context.Context, _ *struct{}) (*LogoutOutput, error) {
+    sub, _ := identity.FromContext(ctx)
+    if err := h.tokens.Revoke(ctx, sub, sub.Credential); err != nil {
+        return nil, err
+    }
+    return &LogoutOutput{SetCookie: refreshCookie.Clear()}, nil
+}
+```
+
+`LogoutOutput` 只有 `SetCookie` 一个字段。登录处理器在 `Password` 成功后调用 `h.jwt.Login`，再 `return session(pair, in.Body.Cookie), nil`。`RefreshCookie.Set` 在宽限期内的重复刷新（`pair.Refresh` 为空）时返回 `nil`，浏览器中保留的就是最新的那个。前端的写法见 [API 客户端](clients.md#creating-the-client)，完整的例子见[编辑后台](account-examples.md#editor-api)。
+
+部署方式决定还要做什么：
+
+| 单页应用与 API | 需要的设置 |
+| --- | --- |
+| 同源，例如由 [`httpx.SPA`](spa.md) 提供 | 不需要 |
+| 同一站点的不同子域名，例如 `app.example.com` 与 `api.example.com` | API 的 [CORS](middleware.md#cors) 设置 `credentials: true`，逐个列出来源；`RefreshCookie.Domain` 设为 `example.com`；前端刷新时 `credentials: "include"` |
+| 不同站点，例如 `example.com` 与 `example-api.io` | 浏览器拦截第三方 cookie，用不了 cookie。退回请求体方式，refresh token 只能放在 `localStorage` 中，页面上的脚本都能读到，要格外防范 XSS |

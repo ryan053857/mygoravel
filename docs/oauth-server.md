@@ -54,7 +54,7 @@ oauth := oauthserver.New(a.db, tokens, oauthserver.Options{
 })
 router.Handle(oauth.MetadataPath(), oauth.Metadata())
 oauth.Routes(router)
-oauth.Register(api, rest.RequireBearer(api, tokens.Validate))
+oauth.Register(api, rest.RequireBearer(api, tokens.Validate)) // 编辑后台用 JWT 登录时传入 jwt.Validate
 ```
 
 | 选项 | 说明 |

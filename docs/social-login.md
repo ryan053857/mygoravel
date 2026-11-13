@@ -199,7 +199,7 @@ out, err := users.External(ctx, ext)
 1. 登录页上的“使用 GitHub 登录”调用 `POST /auth/github/start`，`Start` 生成跳转地址和 `oauth.Flow`（state、nonce 和 PKCE verifier）。单页应用把 `flow` 存进 `sessionStorage`，然后整页跳转到第三方；
 2. 用户同意授权后，第三方带着授权码和 state 跳回单页应用的回调页 `/admin/auth/github/callback`，也就是 `RedirectURL`；
 3. 回调页把地址中的查询参数和保存的 `flow` 交给 `POST /auth/github/finish`，`Finish` 比较 state，用授权码和 verifier 换取 token，读取账号；
-4. API 签发[登录 token](api-tokens.md)。
+4. API 签发 [JWT](api-tokens.md#jwt)，refresh token 写入 [HttpOnly cookie](api-tokens.md#single-page-applications)。编辑必须使用[二次验证](login.md#requiring-two-factor)，所以多数时候 `finish` 返回的是 `pending`（或者还没有启用时的 `enroll`），单页应用接着走与密码登录相同的第二步。
 
 编辑后台不开放注册，第三方账号还没有绑定时返回 `social.ErrNotLinked`，编辑先用密码登录，再在账号设置中[绑定](#linking-accounts)。下面是完整的 `internal/auth/authhttp/web_social.go`：
 
@@ -240,14 +240,18 @@ type FinishInput struct {
     }
 }
 
+// FinishOutput 与密码登录的结果相同，三者只有一个不为空；登录成功时 refresh token 写入 cookie。
 type FinishOutput struct {
-    Body struct {
-        Token string `json:"token"`
+    SetCookie *http.Cookie `header:"Set-Cookie"`
+    Body      struct {
+        AccessToken string `json:"access_token,omitempty"`
+        Pending     string `json:"pending,omitempty" doc:"带着它和验证器上的数字调用 /auth/two-factor"`
+        Enroll      string `json:"enroll,omitempty" doc:"还没有启用二次验证：带着它调用 /auth/two-factor/enroll"`
     }
 }
 
 // RegisterWebSocial 注册编辑后台单页应用的第三方登录接口。
-func RegisterWebSocial(api *rest.API, providers map[string]*oauth.Provider, editors *login.Realm, tokens *apitoken.Store) {
+func RegisterWebSocial(api *rest.API, providers map[string]*oauth.Provider, editors *login.Realm, jwt *apitoken.JWT, cookie apitoken.RefreshCookie) {
     start := huma.Operation{OperationID: "editor-social-start", Method: http.MethodPost, Path: "/auth/{provider}/start"}
     rest.Public()(&start)
     rest.Register(api, start, func(_ context.Context, in *StartInput) (*StartOutput, error) {
@@ -285,12 +289,20 @@ func RegisterWebSocial(api *rest.API, providers map[string]*oauth.Provider, edit
         if err != nil {
             return nil, err
         }
-        if res.Proof != "" {
-            return nil, social.ErrNotLinked.New()
-        }
         out := &FinishOutput{}
-        out.Body.Token, err = tokens.Login(ctx, res.Subject, apitoken.Device{UserAgent: in.UserAgent})
-        return out, err
+        switch {
+        case res.Proof != "":
+            return nil, social.ErrNotLinked.New()
+        case res.Pending != "" || res.Enroll != "":
+            out.Body.Pending, out.Body.Enroll = res.Pending, res.Enroll
+            return out, nil
+        }
+        pair, err := jwt.Login(ctx, res.Subject, apitoken.Device{UserAgent: in.UserAgent})
+        if err != nil {
+            return nil, err
+        }
+        out.SetCookie, out.Body.AccessToken = cookie.Set(pair), pair.Access
+        return out, nil
     })
 }
 ```
@@ -302,7 +314,7 @@ providers, err := social.Providers(ctx, a.cfg.Social)
 if err != nil {
     return err
 }
-authhttp.RegisterWebSocial(admin, providers, acc.Editors, acc.EditorTokens)
+authhttp.RegisterWebSocial(admin, providers, acc.Editors, acc.EditorJWT, acc.EditorCookie)
 ```
 
 `flow` 中有 state 和 PKCE verifier，回调页用完就从 `sessionStorage` 中删除。state 来自回调地址，`flow` 来自发起登录的那个标签页，两者对不上时（例如攻击者诱导用户打开带着自己授权码的回调地址）返回 `oauth.ErrInvalid`，响应 `401`；授权码已用过、ID token 无效时也是如此。

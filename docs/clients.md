@@ -66,48 +66,56 @@ npx openapi-typescript openapi.json -o src/api.d.ts \
 <a id="creating-the-client"></a>
 ### 创建客户端
 
-博客的用户端用 [JWT 模式](api-tokens.md#jwt)登录：请求带 access token，收到 `401` 时用 refresh token 换一对新的，再重试请求。这个逻辑放在传给 openapi-fetch 的 `fetch` 中，所有接口都会经过它：
+博客的单页应用用 [JWT 模式](api-tokens.md#jwt)登录，refresh token 保存在 [HttpOnly cookie](api-tokens.md#single-page-applications) 中：access token 只放在内存里，请求带上它；收到 `401` 时用 cookie 换一个新的，再重试请求。这个逻辑放在传给 openapi-fetch 的 `fetch` 中，所有接口都会经过它：
 
 ```ts
 import createClient from "openapi-fetch"
 import type { paths } from "./api"
 
-const token = (name: string) => localStorage.getItem(name) ?? ""
+let accessToken = "" // 只在内存中；refresh token 在 HttpOnly cookie 中，页面上的脚本读不到
 
-export function saveTokens(access: string, refresh?: string) {
-  localStorage.setItem("access_token", access)
-  if (refresh) localStorage.setItem("refresh_token", refresh) // 为空时继续使用已保存的
-}
-
-const plain = createClient<paths>({ baseUrl: "/api" })
+// 刷新接口靠 cookie 认证。单页应用与 API 在不同的子域名时需要 credentials: "include"，同源时可以省略。
+const plain = createClient<paths>({ baseUrl: "/api", credentials: "include" })
 let refreshing: Promise<boolean> | null = null
 
-async function refresh(): Promise<boolean> {
-  const { data } = await plain.POST("/auth/refresh", { body: { refresh_token: token("refresh_token") } })
-  if (!data) return false // 刷新失败：让用户重新登录
-  saveTokens(data.access_token, data.refresh_token)
-  return true
+// refresh 用 cookie 换新的 access token，返回 false 表示没有登录或登录已失效。
+// 打开页面（包括刷新页面、新标签页）时先调用一次，决定显示登录页还是应用。
+export function refresh(): Promise<boolean> {
+  refreshing ??= plain
+    .POST("/auth/refresh", { body: {} })
+    .then(({ data }) => {
+      accessToken = data?.access_token ?? ""
+      return accessToken !== ""
+    })
+    .finally(() => (refreshing = null))
+  return refreshing
 }
+
+// signedIn 在登录接口（请求体带 cookie: true）返回后调用。
+export function signedIn(access: string) {
+  accessToken = access
+}
+
+export const currentAccessToken = () => accessToken
 
 async function authFetch(request: Request): Promise<Response> {
   const retry = request.clone()
   const res = await fetch(withToken(request))
-  if (res.status !== 401 || !token("refresh_token")) return res
-  refreshing ??= refresh().finally(() => (refreshing = null))
-  return (await refreshing) ? fetch(withToken(retry)) : res
+  if (res.status !== 401) return res
+  return (await refresh()) ? fetch(withToken(retry)) : res
 }
 
 function withToken(request: Request): Request {
-  request.headers.set("Authorization", `Bearer ${token("access_token")}`)
+  request.headers.set("Authorization", `Bearer ${accessToken}`)
   return request
 }
 
 export const api = createClient<paths>({ baseUrl: "/api", fetch: authFetch })
 ```
 
-`/auth/refresh` 是博客自己注册的公开接口，调用 `JWT.Refresh`。几个请求同时收到 `401` 时，`refreshing` 让它们等待同一次刷新。token 每次使用时从 `localStorage` 读取，不要缓存在变量中：refresh token 每次刷新都会更换，另一个标签页如果还拿着换掉的那个，过了[宽限期](api-tokens.md#jwt)再用它刷新，服务端会当作被盗，撤销这次登录。
+`/auth/login`、`/auth/refresh` 是博客自己注册的公开接口，写法见[单页应用](api-tokens.md#single-page-applications)。几个请求同时收到 `401` 时，`refreshing` 让它们等待同一次刷新。各个标签页共用同一个 cookie，一个标签页刷新后，其他标签页下次刷新时拿到的就是新的 refresh token；几个标签页同时刷新时，由服务端的[宽限期](api-tokens.md#jwt)兜住。登出调用 `DELETE /auth/session`，服务端撤销这次登录并清除 cookie，单页应用把 `accessToken` 清空。
 
-不透明 token 没有刷新：去掉 `refresh`，`authFetch` 只设置请求头，收到 `401` 时跳转登录。
+App、桌面端（Electron、Tauri）和小程序不用 cookie：登录时不传 `cookie`，refresh token 在响应体中，保存在系统的钥匙串中，刷新时放进请求体。
 
 <a id="calling-endpoints"></a>
 ### 调用接口
