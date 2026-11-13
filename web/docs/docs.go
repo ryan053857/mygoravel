@@ -69,10 +69,10 @@ func (s *Site) load() (*tree, error) {
 	return t, nil
 }
 
-// Register 在 rt 上注册文档的路由：Prefix 和 Prefix 之下的 GET 请求。访问策略由 rt 决定，
-// 公开的帮助中心用 web.Public，内部文档用 web.Require。
+// Register 在 rt 上注册文档的路由：Prefix 和 Prefix 之下的 GET 请求。
+// 内部文档用 HTTP Basic 认证等中间件保护：pages.Routes(router.With(…))。
 //
-//	site.Register(pages.Routes(router, web.Public))
+//	site.Register(pages.Routes(router))
 func (s *Site) Register(rt *web.Routes) {
 	rt.Get(pageURL(s.opts.Prefix, ""), s.serve)
 	rt.Get(s.opts.Prefix+"/*", s.serve)

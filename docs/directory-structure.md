@@ -41,7 +41,7 @@ blog/
 │   ├── cli/                 装配命令行：serve、work、schedule、start、routes、openapi、migrate、config，以及 bootstrap.Commands
 │   ├── settings/            配置结构与加载
 │   ├── bootstrap/           打开资源、组装服务；HTTP 服务、队列 worker、调度器等运行部分，以及需要 App 的命令（各模块命令、seed、queue）
-│   ├── auth/                token 校验器；authweb/ 是登录页
+│   ├── auth/                token 校验器；authhttp/ 是登录接口
 │   ├── web/                 页面布局（templ）、Tailwind 的样式入口 app.css；static/ 是嵌入的静态文件
 │   └── article/             文章业务模块
 │       ├── article.go       模型、业务错误与共享的规则
@@ -52,11 +52,11 @@ blog/
 │       ├── dto.go           共享的响应结构与转换
 │       ├── routes.go        本模块的路由声明
 │       ├── commands.go      本模块的命令声明
-│       └── articleweb/      编辑后台页面
+│       └── articleweb/      读者看到的公开页面
 │           ├── routes.go    页面路由
 │           ├── handlers.go  页面处理器
 │           └── views/       templ 组件及生成的 _templ.go
-├── frontend/                单页应用（Vite 项目）和嵌入构建产物的 frontend.go
+├── frontend/                编辑后台等单页应用（Vite 项目）和嵌入构建产物的 frontend.go
 ├── migrations/              SQL 迁移文件和 embed.go
 └── locales/                 应用自己的翻译文件
 ```
@@ -78,7 +78,7 @@ blog/
 | `internal/article/create.go`、`get.go`、`update.go` | [数据库](database.md#constraint-errors)、[action 的 HTTP 入口](routing.md#http-actions)、[错误处理](errors.md#example) |
 | `internal/article/routes.go`、`dto.go` | [模块内注册](routing.md#module-registration)、[共享响应结构](routing.md#shared-responses) |
 | `internal/web/`、`internal/article/articleweb/` | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[界面组件](components.md) |
-| `internal/auth/authweb/` | [登录](views.md#login) |
+| `internal/auth/authhttp/` | [API 令牌的登录与登出](api-tokens.md#login-and-logout)、[第三方登录](social-login.md) |
 | `frontend/` | [单页应用](spa.md) |
 | `migrations/` | [迁移](migrations.md#embedding-migrations) |
 
@@ -149,7 +149,7 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 
 ```text
 功能        apitoken  login  oauthserver  authz  notification  push  activity  feature  settings  operation  webhook  search  vector  sheet/imports  sheet/exports  ai
-入口        httpx  web  session  realtime  mcpx  command
+入口        httpx  web  realtime  mcpx  command
 基础设施    database  queue  schedule  cachex  lock  ratelimit  captcha  broadcast  filesystem  imgproxy  mail  sms  pdf  outbound  sheet  document
 基础        errorx  identity  config  cleanup  logging  telemetry  i18n  page  form  hashing  crypt  acquire
 ```
@@ -212,19 +212,17 @@ mygoravel 的每个包都可以单独使用，按需引入即可。顶层的包�
 <a id="entry"></a>
 ### 入口
 
-请求进入应用的方式：JSON API、服务端渲染页面、实时频道和命令行。
+请求进入应用的方式：JSON API、服务端渲染的公开页面、实时频道和命令行。
 
 | 包 | 用途 | 相关文档 |
 | --- | --- | --- |
 | `httpx` | HTTP 中间件、平滑停机、就绪检查、单页应用 | [中间件](middleware.md)、[请求生命周期](lifecycle.md)、[单页应用](spa.md) |
 | `httpx/rest` | 基于 Huma 的路由注册、错误转换与 OpenAPI | [路由](routing.md) |
 | `httpx/rest/clientgen` | 从路由生成 Go 客户端的 `client` 命令 | [Go 客户端](clients.md#go) |
-| `session` | 页面使用的 cookie 会话与 Bun 存储 | [会话](session.md) |
-| `web` | 服务端渲染页面：渲染组件、会话登录、错误页、表单、提示消息、主题、SSE、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md)、[服务端推送](sse.md) |
-| `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载，提示、对话框与页面的衔接 | [界面组件](components.md) |
+| `web` | 服务端渲染的公开页面：渲染组件、错误页、表单、主题、内容安全策略、带指纹的静态文件，内嵌 htmx 与 Alpine.js | [视图](views.md)、[表单](forms.md)、[前端资源](assets.md) |
+| `web/ui` | 内置 shadcn-templ 界面组件的样式表和脚本，按主题加载；表单字段、分页、确认对话框与错误提示的衔接 | [界面组件](components.md) |
 | `web/docs` | 把目录中的 Markdown 变成带侧边栏、本页目录和站内搜索的文档页，例如帮助中心 | [文档页](doc-pages.md) |
-| `web/webtest` | 测试页面：保存会话 cookie，不经过登录页登录，读取 htmx 的响应头 | [页面测试](testing.md#page-tests) |
-| `web/upload` | 页面的上传接口，与 `ui.FileField` 配合：直传 S3 或经服务器上传 | [上传文件](forms.md#file-uploads) |
+| `web/webtest` | 测试页面：保存 cookie，读取 htmx 的响应头 | [页面测试](testing.md#page-tests) |
 | `realtime` | 嵌入 Centrifuge 的 WebSocket 实时频道：公开、私有与 presence 频道，频道就是广播的主题；`realtime/redispresence` 是在线成员的 Redis 存储，`realtime/realtimetest` 是测试用的内存存储与存储的契约测试 | [实时频道](realtime.md) |
 | `mcpx` | 把 action 作为 MCP 工具提供给 AI 客户端：Bearer 认证、按权限筛选工具、按 Huma 规则校验参数；`mcpx/mcpxtest` 在测试中以指定的主体调用工具；`mcpx/mcpcmd` 是以 stdio 运行服务、列出工具的 `mcp` 命令 | [MCP 服务](mcp.md) |
 | `command` | 根命令、`Run`、`Bind`、`config` 命令、退出码 | [命令行](commands.md) |

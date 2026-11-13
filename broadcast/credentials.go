@@ -11,8 +11,8 @@ import (
 )
 
 // Credentials 通知所有实例上的长连接立即重新校验凭据，实现 httpx.CredentialWatcher。
-// 把它设置为 rest.Options.Credentials 和 web.Options.Credentials，
-// 撤销 token、退出会话、停用用户或修改权限之后调用对应的 Recheck 方法，受影响的 SSE 连接随即复查，
+// 把它设置为 rest.Options.Credentials 和 realtime.Options.Credentials，
+// 撤销 token、停用用户或修改权限之后调用对应的 Recheck 方法，受影响的 SSE 连接随即复查，
 // 凭据已经失效的连接结束。
 //
 // 它只提醒复查，不说明凭据怎样变化：是否结束连接由认证中间件的复查决定，多发的提醒只是多查一次。
@@ -45,7 +45,7 @@ func credTopic(prefix, id string) string {
 }
 
 // RecheckCredential 让使用凭据 id 的长连接立即复查，id 是主体的 Credential：
-// API 令牌的 ID 或会话 ID。用于退出某一台设备，例如 apitoken.Store.Revoke、session.Store.Revoke 之后。
+// API 令牌的 ID。用于退出某一台设备，例如 apitoken.Store.Revoke 之后。
 func (c *Credentials) RecheckCredential(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("broadcast: empty credential id")

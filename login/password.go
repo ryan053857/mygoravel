@@ -100,7 +100,7 @@ func (r *Realm) storePassword(ctx context.Context, db bun.IDB, subjectID, passwo
 }
 
 // SetPassword 设置或修改 ref 的密码，按 Options.PasswordPolicy 检查，不符合时返回它的错误。
-// 修改密码后，应用通常还要撤销 ref 的其他会话和 token。
+// 修改密码后，应用通常还要撤销 ref 的其他 token。
 func (r *Realm) SetPassword(ctx context.Context, db bun.IDB, ref identity.Ref, password string) error {
 	if err := r.check(ref); err != nil {
 		return err

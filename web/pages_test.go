@@ -17,8 +17,6 @@ var errLocked = errorx.Define(errorx.Conflict, "auth.forbidden") // 借用内置
 
 func TestNewRequiresAllOptions(t *testing.T) {
 	for name, mutate := range map[string]func(*web.Options){
-		"sessions":     func(o *web.Options) { o.Sessions = nil },
-		"login":        func(o *web.Options) { o.Login = "" },
 		"error page":   func(o *web.Options) { o.ErrorPage = nil },
 		"error target": func(o *web.Options) { o.ErrorTarget = "" },
 	} {

@@ -270,7 +270,7 @@ func (r *Realm) canSignIn(ids []Identifier, hasPassword bool) bool {
 }
 
 // Forget 删除 ref 的全部登录凭据：标识、密码、二次验证和未完成的验证码，用于注销账号。
-// 应用在同一个事务中删除自己的账号行，并撤销会话和 token。
+// 应用在同一个事务中删除自己的账号行，并撤销 token。
 func (r *Realm) Forget(ctx context.Context, db bun.IDB, ref identity.Ref) error {
 	if err := r.check(ref); err != nil {
 		return err

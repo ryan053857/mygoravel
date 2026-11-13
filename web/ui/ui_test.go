@@ -14,11 +14,9 @@ import (
 	"testing/fstest"
 
 	"github.com/a-h/templ"
-	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ryan053857/mygoravel/httpx"
-	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 	"github.com/ryan053857/mygoravel/web/ui"
 )
@@ -38,20 +36,12 @@ func TestAssetsMatchGoMod(t *testing.T) {
 // pages 返回使用 theme 的 Pages 和它的路由，GET / 渲染 c。
 func pages(t *testing.T, theme web.Theme, static *web.Static, c func() templ.Component) http.Handler {
 	t.Helper()
-	var cfg session.Config
-	cfg.SetDefaults()
-	p := web.New(web.Options{Sessions: session.New(cfg, memstore.New()), Login: "/login", ErrorPage: ui.ErrorPage, Theme: theme, Static: static})
+	p := web.New(web.Options{ErrorPage: ui.ErrorPage, Theme: theme, Static: static})
 	r := chi.NewRouter()
 	r.NotFound(p.NotFound)
 	r.Handle(ui.AssetsPath+"*", ui.Assets())
-	public := p.Routes(r, web.Public)
-	public.Get("/", func(w http.ResponseWriter, r *http.Request) error {
+	p.Routes(r).Get("/", func(w http.ResponseWriter, r *http.Request) error {
 		return web.Render(w, r, http.StatusOK, c())
-	})
-	public.Post("/flash", func(w http.ResponseWriter, r *http.Request) error {
-		web.Flash(r.Context(), web.Message{Type: "success", Title: "已保存"})
-		web.Redirect(w, r, "/")
-		return nil
 	})
 	return r
 }
@@ -172,15 +162,9 @@ func TestHeadExtras(t *testing.T) {
 	}
 }
 
-func TestToasterShowsFlashes(t *testing.T) {
+func TestToaster(t *testing.T) {
 	h := pages(t, web.Theme{}, nil, func() templ.Component { return ui.Toaster() })
-	rr, _ := body(t, h, httptest.NewRequest("POST", "/flash", nil))
-	req := httptest.NewRequest("GET", "/", nil)
-	for _, c := range rr.Result().Cookies() {
-		req.AddCookie(c)
-	}
-	_, html := body(t, h, req)
-	if !strings.Contains(html, "data-web-ui-toaster") || !strings.Contains(html, "已保存") {
+	if _, html := body(t, h, httptest.NewRequest("GET", "/", nil)); !strings.Contains(html, "data-web-ui-toaster") {
 		t.Fatalf("toaster:\n%s", html)
 	}
 }

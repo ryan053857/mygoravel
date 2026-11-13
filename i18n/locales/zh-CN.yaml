@@ -15,7 +15,6 @@ ai.busy: 对话正在进行，请稍后再试
 ai.awaiting_approval: 对话正在等待审批，请先处理待审批的操作
 ai.not_pending: 没有这个待审批的操作
 apitoken.not_found: 令牌不存在
-session.not_found: 会话不存在
 login.invalid_credentials: 账号或密码不正确
 login.invalid_code: 验证码不正确或已失效
 login.invalid_proof: 验证已失效，请重新获取验证码
@@ -56,18 +55,13 @@ document.too_large: 文档太大，超出了处理上限
 web.not_found: 页面不存在
 web.bad_form: 无法解析提交的表单
 web.bad_query: 查询参数 {{.field}} 不正确：{{.message}}
-web.cross_origin: 跨站请求被拒绝
 web.request_id: 请求编号：{{.id}}
-upload.bad_request: 上传请求的格式不正确
 ui.pagination.previous: 上一页
 ui.pagination.next: 下一页
 ui.confirm.action: 确定
 ui.confirm.cancel: 取消
 ui.sidebar.toggle: 展开或收起侧边栏
 ui.theme.toggle: 切换暗色模式
-ui.file.remove: 移除
-ui.file.failed: 上传失败
-ui.file.too_large: 文件不能超过
 docs.toc: 本页目录
 docs.previous: 上一页
 docs.next: 下一页

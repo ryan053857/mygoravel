@@ -6,22 +6,17 @@
 // 组件中的文字按请求的语言（i18n）显示。ui 只提供衔接：
 //
 //   - Head、Page：按 web.ThemeFrom 的主题加载样式表、主题变量、htmx、Alpine 和组件脚本；
-//   - Toaster：用 toast 显示 web.Flash 的提示和局部请求的错误；
-//   - Modal：放置服务端渲染的对话框，web.CloseDialog 关闭它；
+//   - Toaster：用 toast 显示局部请求的错误（web.FlashEvent）；
 //   - Confirm：hx-confirm 弹出确认对话框，代替浏览器的确认框；
 //   - 请求进行中的按钮自动禁用并显示加载图标（衔接脚本，不需要组件）；
 //   - ErrorPage：web.Options.ErrorPage 的默认实现。
 //   - TextField、SelectField、CheckboxField 等表单字段：读取 web.Form 的输入和错误；
 //   - Pagination：page.Offset 的分页导航；SortHead：点击排序的表头；Empty：没有数据时的提示。
-//   - FileField：选择后立即上传的文件字段，配合 web/upload；
-//   - AppShell：后台的侧边栏外壳，导航按权限过滤、高亮当前页面；AuthCard：登录等页面的居中卡片；
-//     ThemeToggle：暗色模式开关。
+//   - ThemeToggle：暗色模式开关。
 //
-// 每一项都可以不用：例如租户端用自己的提示组件监听 web:flash，或者自己写 <html> 只调用 Head。
+// 每一项都可以不用：例如用自己的提示组件监听 web:flash，或者自己写 <html> 只调用 Head。
 //
 //	pages := web.New(web.Options{
-//		Sessions:  sessions,
-//		Login:     "/login",
 //		ErrorPage: ui.ErrorPage,
 //		Theme:     cfg.Theme,
 //	})

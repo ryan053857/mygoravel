@@ -3,8 +3,8 @@
 - [简介](#introduction)
 - [提供方](#providers)
 - [登录与注册](#signing-in)
-- [在页面中登录](#page-login)
-- [在单页应用和 App 中登录](#api-login)
+- [在单页应用中登录](#spa-login)
+- [在 App 中登录](#api-login)
     - [App 原生登录](#native-sign-in)
 - [账号关联](#linking-accounts)
 - [Sign in with Apple](#sign-in-with-apple)
@@ -21,8 +21,8 @@
 
 | 入口 | 谁与第三方交互 | 方法 |
 | --- | --- | --- |
-| [页面](#page-login) | 服务器：跳转到第三方，在回调中换取 token | `Start`、`Finish` |
-| [单页应用和 App](#api-login) | 客户端：跳转到第三方，把授权码交给 API | `Exchange` |
+| [单页应用](#spa-login) | API 生成跳转地址和 Flow，单页应用保存 Flow，回调后把它和回调参数交给 API | `Start`、`Finish` |
+| [App](#api-login) | App 自己跳转到第三方，把授权码交给 API | `Exchange` |
 | [App 原生登录](#native-sign-in) | SDK 直接返回 ID token | `IDToken` |
 
 本章为博客的编辑后台加上 Google 和 GitHub 登录，读者 App 可以用它们注册。
@@ -67,9 +67,9 @@ type Client struct {
 type Config struct {
     Google Client `yaml:"google"`
     GitHub Client `yaml:"github"`
-    // RedirectURL 是页面登录的回调地址，{provider} 换成提供方的名称。
+    // RedirectURL 是单页应用中回调页的地址，{provider} 换成提供方的名称。
     RedirectURL string `yaml:"redirect_url"`
-    // ClientRedirectURLs 是单页应用和 App 登记的回调地址，API 只接受这些地址。
+    // ClientRedirectURLs 是 App 登记的回调地址，Exchange 只接受这些地址。
     ClientRedirectURLs []string `yaml:"client_redirect_urls"`
     // GoogleAppClientIDs 是 App 原生登录使用的 Google client ID，例如 iOS 和 Android 各一个。
     GoogleAppClientIDs []string `yaml:"google_app_client_ids"`
@@ -157,7 +157,7 @@ social:
   github:
     client_id: ${GITHUB_CLIENT_ID}
     client_secret: ${GITHUB_CLIENT_SECRET}
-  redirect_url: https://blog.example.com/auth/{provider}/callback
+  redirect_url: https://blog.example.com/admin/auth/{provider}/callback
   client_redirect_urls:
     - https://app.example.com/auth/callback
 ```
@@ -180,118 +180,133 @@ out, err := users.External(ctx, ext)
 
 | 结果 | 含义 | 应用要做的 |
 | --- | --- | --- |
-| `out.Subject` | 这个第三方账号已经绑定 | 签发会话或 token |
+| `out.Subject` | 这个第三方账号已经绑定 | 签发 token |
 | `out.Proof` | 还没有绑定 | 注册新账号，或者让用户登录已有账号后[绑定](#linking-accounts) |
 
 注册与[验证码注册](login.md#codes)相同：应用的注册 action 在事务中创建账号行，再把 `out.Proof` 交给 `Register`。第三方账号作为登录标识写入，第三方确认过（`EmailVerified`）的邮箱也一并写入，之后用户也可以用这个邮箱收验证码登录。第三方账号登录不再要求[二次验证](login.md#two-factor)，由提供方负责验证身份。
 
 **框架不按邮箱把第三方账号自动关联到已有账号。** 否则任何人都可以在一个不验证邮箱的第三方平台上填上别人的邮箱，借此登录别人的账号。注册时邮箱已属于其他账号，`Register` 返回 `login.ErrTaken`：提示用户先用原来的方式登录，再绑定这个第三方账号。
 
-<a id="page-login"></a>
-## 在页面中登录
+<a id="spa-login"></a>
+## 在单页应用中登录
 
-页面登录由服务器完成整个流程：
+单页应用不保存 client secret，也不必知道各家的授权地址，由 API 生成跳转地址：
 
-1. 登录页上的“使用 GitHub 登录”链接指向 `/auth/github`；
-2. `Start` 生成跳转地址和 `oauth.Flow`（state、nonce 和 PKCE verifier），Flow 存入会话，然后跳转到第三方；
-3. 用户同意授权后，第三方带着授权码和 state 跳回 `/auth/github/callback`；
-4. `Finish` 比较 state，用授权码和 verifier 换取 token，读取账号。
+1. 登录页上的“使用 GitHub 登录”调用 `POST /auth/github/start`，`Start` 生成跳转地址和 `oauth.Flow`（state、nonce 和 PKCE verifier）。单页应用把 `flow` 存进 `sessionStorage`，然后整页跳转到第三方；
+2. 用户同意授权后，第三方带着授权码和 state 跳回单页应用的回调页 `/admin/auth/github/callback`，也就是 `RedirectURL`；
+3. 回调页把地址中的查询参数和保存的 `flow` 交给 `POST /auth/github/finish`，`Finish` 比较 state，用授权码和 verifier 换取 token，读取账号；
+4. API 签发[登录 token](api-tokens.md)。
 
-编辑后台不开放注册，第三方账号还没有绑定时返回 `social.ErrNotLinked`，编辑先用密码登录，再在账号设置中[绑定](#linking-accounts)。下面是完整的 `internal/auth/authweb/social.go`：
+编辑后台不开放注册，第三方账号还没有绑定时返回 `social.ErrNotLinked`，编辑先用密码登录，再在账号设置中[绑定](#linking-accounts)。下面是完整的 `internal/auth/authhttp/web_social.go`：
 
 ```go
-package authweb
+package authhttp
 
 import (
-    "errors"
+    "context"
     "net/http"
+    "net/url"
 
-    "github.com/alexedwards/scs/v2"
-    "github.com/go-chi/chi/v5"
+    "github.com/danielgtaylor/huma/v2"
 
     "example.com/blog/internal/auth/social"
+    "github.com/ryan053857/mygoravel/apitoken"
+    "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/login"
     "github.com/ryan053857/mygoravel/login/oauth"
-    "github.com/ryan053857/mygoravel/web"
 )
 
-type socialHandlers struct {
-    pages     *web.Pages
-    sessions  *scs.SessionManager
-    providers map[string]*oauth.Provider
-    users     *login.Realm
+type StartInput struct {
+    Provider string `path:"provider"`
 }
 
-// RegisterSocial 注册第三方登录的跳转和回调页面。
-func RegisterSocial(r chi.Router, pages *web.Pages, sessions *scs.SessionManager, providers map[string]*oauth.Provider, users *login.Realm) {
-    h := &socialHandlers{pages: pages, sessions: sessions, providers: providers, users: users}
-    public := pages.Routes(r, web.Public)
-    public.Get("/auth/{provider}", h.redirect)
-    public.Get("/auth/{provider}/callback", h.callback)
+type StartOutput struct {
+    Body struct {
+        URL  string `json:"url" doc:"跳转到第三方的地址"`
+        Flow string `json:"flow" doc:"保存到回调之后，交给 finish"`
+    }
 }
 
-func (h *socialHandlers) redirect(w http.ResponseWriter, r *http.Request) error {
-    p, ok := h.providers[chi.URLParam(r, "provider")]
-    if !ok {
-        return social.ErrUnknownProvider.New()
+type FinishInput struct {
+    Provider  string `path:"provider"`
+    UserAgent string `header:"User-Agent"`
+    Body      struct {
+        Flow     string `json:"flow" minLength:"1"`
+        Callback string `json:"callback" doc:"回调页地址中的查询参数，原样交回，例如 code=…&state=…"`
     }
-    url, flow := p.Start()
-    h.sessions.Put(r.Context(), "social.flow", flow.String())
-    h.sessions.Put(r.Context(), "social.next", web.LocalPath(r.URL.Query().Get("next"), "/admin"))
-    http.Redirect(w, r, url, http.StatusSeeOther)
-    return nil
 }
 
-func (h *socialHandlers) callback(w http.ResponseWriter, r *http.Request) error {
-    p, ok := h.providers[chi.URLParam(r, "provider")]
-    if !ok {
-        return social.ErrUnknownProvider.New()
+type FinishOutput struct {
+    Body struct {
+        Token string `json:"token"`
     }
-    ctx := r.Context()
-    flow, err := oauth.ParseFlow(h.sessions.PopString(ctx, "social.flow"))
-    if err != nil {
-        return err
-    }
-    next := h.sessions.PopString(ctx, "social.next")
-    ext, err := p.Finish(ctx, flow, r.URL.Query())
-    if errors.Is(err, oauth.ErrDenied) { // 用户在第三方页面取消了授权
-        web.Redirect(w, r, "/login")
-        return nil
-    }
-    if err != nil {
-        return err
-    }
-    out, err := h.users.External(ctx, ext)
-    if err != nil {
-        return err
-    }
-    if out.Proof != "" {
-        return social.ErrNotLinked.New()
-    }
-    if err := h.pages.Login(r, out.Subject); err != nil {
-        return err
-    }
-    web.Redirect(w, r, next)
-    return nil
+}
+
+// RegisterWebSocial 注册编辑后台单页应用的第三方登录接口。
+func RegisterWebSocial(api *rest.API, providers map[string]*oauth.Provider, editors *login.Realm, tokens *apitoken.Store) {
+    start := huma.Operation{OperationID: "editor-social-start", Method: http.MethodPost, Path: "/auth/{provider}/start"}
+    rest.Public()(&start)
+    rest.Register(api, start, func(_ context.Context, in *StartInput) (*StartOutput, error) {
+        p, ok := providers[in.Provider]
+        if !ok {
+            return nil, social.ErrUnknownProvider.New()
+        }
+        out := &StartOutput{}
+        var flow oauth.Flow
+        out.Body.URL, flow = p.Start()
+        out.Body.Flow = flow.String()
+        return out, nil
+    })
+
+    finish := huma.Operation{OperationID: "editor-social-finish", Method: http.MethodPost, Path: "/auth/{provider}/finish"}
+    rest.Public()(&finish)
+    rest.Register(api, finish, func(ctx context.Context, in *FinishInput) (*FinishOutput, error) {
+        p, ok := providers[in.Provider]
+        if !ok {
+            return nil, social.ErrUnknownProvider.New()
+        }
+        flow, err := oauth.ParseFlow(in.Body.Flow)
+        if err != nil {
+            return nil, err
+        }
+        params, err := url.ParseQuery(in.Body.Callback)
+        if err != nil {
+            return nil, oauth.ErrInvalid.Wrap(err)
+        }
+        ext, err := p.Finish(ctx, flow, params)
+        if err != nil {
+            return nil, err // 用户取消了授权：oauth.ErrDenied
+        }
+        res, err := editors.External(ctx, ext)
+        if err != nil {
+            return nil, err
+        }
+        if res.Proof != "" {
+            return nil, social.ErrNotLinked.New()
+        }
+        out := &FinishOutput{}
+        out.Body.Token, err = tokens.Login(ctx, res.Subject, apitoken.Device{UserAgent: in.UserAgent})
+        return out, err
+    })
 }
 ```
 
-在[装配页面](views.md#assembling-pages)时和密码登录一起注册：
+在编辑后台的 API 上注册：
 
 ```go
 providers, err := social.Providers(ctx, a.cfg.Social)
 if err != nil {
     return err
 }
-authweb.RegisterSocial(r, pages, sessions, providers, users)
+authhttp.RegisterWebSocial(admin, providers, acc.Editors, acc.EditorTokens)
 ```
 
-Flow 用 `Pop` 读取，只能使用一次。回调是从第三方跳回本站的顶层 GET 请求，SameSite 为 `lax` 的会话 cookie 会随它发送，`pages.Routes` 的跨站请求防护也只拦截 `POST` 等非安全请求，所以会话中的值都能读到。state 不符、授权码已用过、ID token 无效时返回 `oauth.ErrInvalid`，呈现为 `401`。
+`flow` 中有 state 和 PKCE verifier，回调页用完就从 `sessionStorage` 中删除。state 来自回调地址，`flow` 来自发起登录的那个标签页，两者对不上时（例如攻击者诱导用户打开带着自己授权码的回调地址）返回 `oauth.ErrInvalid`，响应 `401`；授权码已用过、ID token 无效时也是如此。
 
 <a id="api-login"></a>
-## 在单页应用和 App 中登录
+## 在 App 中登录
 
-单页应用和 App 不使用会话，由客户端自己完成跳转：
+App 自己完成跳转：
 
 1. 客户端生成 state、nonce 和 PKCE verifier，自己保存，然后打开第三方的授权地址，`redirect_uri` 是它登记的回调地址；
 2. 第三方带着授权码跳回客户端，客户端比较 state；
@@ -396,10 +411,10 @@ nonce 用来确认 ID token 属于这一次登录：截获的 ID token 在有效
 <a id="linking-accounts"></a>
 ## 账号关联
 
-一个账号可以绑定多个第三方账号。账号设置页面中的“绑定 GitHub”与页面登录的跳转相同，回调中用 `Link` 绑定到当前登录的账号：
+一个账号可以绑定多个第三方账号。账号设置页面中的“绑定 GitHub”与[单页应用中登录](#spa-login)的跳转相同，回调页把参数交给一个要求登录的接口，用 `Link` 绑定到当前登录的账号：
 
 ```go
-ext, err := p.Finish(ctx, flow, r.URL.Query())
+ext, err := p.Finish(ctx, flow, params)
 if err != nil {
     return err
 }
@@ -429,7 +444,7 @@ apple, err := oauth.Discover(ctx, oauth.Config{
     Issuer:       "https://appleid.apple.com",
     ClientID:     cfg.Apple.ServiceID,
     ClientSecret: cfg.Apple.ClientSecret,
-    RedirectURL:  "https://blog.example.com/auth/apple/callback",
+    RedirectURL:  "https://blog.example.com/auth/apple/callback", // 服务器上的转发地址，见下文
     Scopes:       []string{"openid", "email", "name"},
     NoPKCE:       true,
     FormPost:     true,
@@ -441,20 +456,16 @@ apple, err := oauth.Discover(ctx, oauth.Config{
 - **用户姓名只在第一次授权时返回**：它不在 ID token 中，而是回调表单中的 `user` 字段，第一次登录时就要保存下来。`email_verified` 是字符串，`oauth` 已经处理。
 - **申请了姓名或邮箱时，回调是跨站 POST**：Apple 要求 `response_mode=form_post`（`FormPost`），浏览器从 `appleid.apple.com` 把授权码提交到回调地址。
 
-最后一点影响[页面登录](#page-login)的写法：
+最后一点影响[单页应用中登录](#spa-login)的写法：回调是 POST，单页应用接收不了。在服务器上注册这个回调地址，把表单原样转成查询参数，跳到单页应用的回调页，之后的步骤与 Google 相同：
 
-1. `pages.Routes` 会拒绝跨站的 `POST`，需要把 Apple 加入 `web.Options.TrustedOrigins`：
-   ```go
-   TrustedOrigins: []string{"https://appleid.apple.com"},
-   ```
-2. 跨站 `POST` **不会**携带 SameSite 为 `lax` 的会话 cookie，回调中读不到会话里的 Flow。因此跳转时把 `flow.String()` 存进一个单独的短期 cookie，它必须是 `SameSite=None`：
-   ```go
-   http.SetCookie(w, &http.Cookie{
-       Name: "apple_auth", Value: flow.String(),
-       Path: "/auth/apple/callback", MaxAge: 600,
-       HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode,
-   })
-   ```
-   回调用 `public.Post("/auth/apple/callback", ...)` 注册，从这个 cookie 中取出 Flow 并删除 cookie，再把 `r.PostForm`（先调用 `r.ParseForm`）交给 `Finish`。其余步骤与 Google 相同。
+```go
+router.Post("/auth/apple/callback", func(w http.ResponseWriter, r *http.Request) {
+    if err := r.ParseForm(); err != nil {
+        http.Error(w, "bad request", http.StatusBadRequest)
+        return
+    }
+    http.Redirect(w, r, "/admin/auth/apple/callback?"+r.PostForm.Encode(), http.StatusSeeOther)
+})
+```
 
-回调中调用 `pages.Login` 不受影响：它为这个请求创建新的会话，浏览器接受顶层跳转响应中的会话 cookie。
+`RedirectURL` 是这个服务器地址。授权码只能使用一次，有效期很短，与第三方用查询参数直接跳回时一样出现在地址中；`user` 字段（第一次授权时的姓名）随之带到回调页，单页应用把它一起交给注册接口。

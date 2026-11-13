@@ -14,7 +14,6 @@
 - [使用应用自己的消息表](#own-history)
     - [实现 HistoryStore](#history-store)
     - [群聊中的 AI](#group-chat)
-- [在页面中使用](#pages)
 - [图片、语音和向量](#media)
 - [决策](#decisions)
 - [部署](#deployment)
@@ -456,35 +455,7 @@ if mentionsAssistant(msg) {
 - AI 正在回答时（在任何一个实例上），`Notify` 记下通知，这次回答结束后再运行一轮，期间写入的消息都在新一轮的上下文中。回答期间无论来多少条消息、通知多少次，都只多运行一轮，不会返回 `ErrBusy`。
 - 有等待审批的工具调用时返回 `chat.ErrAwaitingApproval`。
 
-`Notify` 返回处理通知的运行。正在生成的回答用 `chat.UIStream(run)` 推给页面，群里的每个成员都可以用 `runs.Get(ctx, "", conversationID)` 接上它；回答的每条完整消息保存之后，由应用像普通消息一样通过[广播](broadcasting.md)推送。
-
-<a id="pages"></a>
-## 在页面中使用
-
-服务端渲染的页面不使用 `useChat`，而是用 `web.SSE` 推送 HTML 片段。`run.Events` 依次返回运行中的事件（回答文本、工具调用、结束），由你渲染成组件：
-
-```go
-return web.SSE(w, r, func(s *web.Stream) error {
-    for ev := range run.Events(s.Context(), s.LastEventID()) {
-        var c templ.Component
-        switch data := ev.Data.(type) {
-        case chat.Text:
-            if ev.Name != chat.EventText {
-                continue
-            }
-            c = views.AnswerDelta(data.Text) // <hx-partial hx-target="#answer" hx-swap="beforeend">
-        case chat.Done:
-            c = views.Approvals(data.Pending)
-        default:
-            continue
-        }
-        if err := s.SendEvent(web.Event{ID: ev.ID}, c); err != nil {
-            return nil
-        }
-    }
-    return nil
-})
-```
+`Notify` 返回处理通知的运行。正在生成的回答用 `chat.UIStream(run)` 推给前端，群里的每个成员都可以用 `runs.Get(ctx, "", conversationID)` 接上它；回答的每条完整消息保存之后，由应用像普通消息一样通过[广播](broadcasting.md)推送。
 
 <a id="media"></a>
 ## 图片、语音和向量

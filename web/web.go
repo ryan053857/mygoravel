@@ -45,7 +45,7 @@ func Redirect(w http.ResponseWriter, r *http.Request, url string) {
 }
 
 // LocalPath 在 path 是本站路径（以单个 / 开头）时返回它，否则返回 fallback。
-// 用于校验登录后的 next 参数等来自请求的跳转地址，防止跳到其他站点。
+// 用于校验 next 参数等来自请求的跳转地址，防止跳到其他站点。
 func LocalPath(path, fallback string) string {
 	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.HasPrefix(path, `/\`) {
 		return fallback

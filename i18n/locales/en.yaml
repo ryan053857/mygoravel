@@ -15,7 +15,6 @@ ai.busy: The conversation is in progress, please try again later
 ai.awaiting_approval: The conversation is waiting for approval
 ai.not_pending: No such pending action
 apitoken.not_found: Token not found
-session.not_found: Session not found
 login.invalid_credentials: Incorrect account or password
 login.invalid_code: The code is incorrect or has expired
 login.invalid_proof: The verification has expired, please request a new code
@@ -56,18 +55,13 @@ document.too_large: The document is too large to process
 web.not_found: Page not found
 web.bad_form: The submitted form could not be parsed
 web.bad_query: "Invalid query parameter {{.field}}: {{.message}}"
-web.cross_origin: Cross-origin request rejected
 web.request_id: "Request ID: {{.id}}"
-upload.bad_request: Invalid upload request
 ui.pagination.previous: Previous
 ui.pagination.next: Next
 ui.confirm.action: Confirm
 ui.confirm.cancel: Cancel
 ui.sidebar.toggle: Toggle sidebar
 ui.theme.toggle: Toggle dark mode
-ui.file.remove: Remove
-ui.file.failed: Upload failed
-ui.file.too_large: The file must not be larger than
 docs.toc: On this page
 docs.previous: Previous
 docs.next: Next

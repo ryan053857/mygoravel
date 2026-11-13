@@ -4,7 +4,7 @@
 - [安装](#installation)
 - [声明开关](#defining-flags)
 - [检查开关](#checking-flags)
-    - [在页面中检查多个开关](#checking-in-pages)
+    - [一次检查多个开关](#checking-in-pages)
     - [后台任务](#background-jobs)
 - [修改设置](#changing-settings)
     - [判断顺序](#evaluation-order)
@@ -93,18 +93,18 @@ func (a *Edit) Handle(ctx context.Context, subject identity.Subject, id uuid.UUI
 每次 `Active` 是一次带索引的查询。读取设置出错时，它记录一条 Error 日志并返回 `Default` 的结果，不会让请求失败。
 
 <a id="checking-in-pages"></a>
-### 在页面中检查多个开关
+### 一次检查多个开关
 
-一个页面往往要检查多个开关，例如编辑页上的多个按钮。`For` 用一次查询读出这个主体的全部设置，再把结果传给 templ 组件：
+一个界面往往要检查多个开关，例如编辑页上的多个按钮。`For` 用一次查询读出这个主体的全部设置，“当前用户”接口把单页应用需要的开关一起返回：
 
 ```go
-flags := h.features.For(r.Context(), subject)
-return web.Render(w, r, http.StatusOK, views.Edit(item, views.EditOptions{
-    NewEditor: flags.Active(article.NewEditor),
-}))
+flags := h.features.For(ctx, subject)
+out.Body.Features = map[string]bool{
+    "new_editor": flags.Active(article.NewEditor),
+}
 ```
 
-`flags` 只在本次请求中使用。
+`flags` 只在本次请求中使用。前端只拿到开关的结果，判断仍在服务端：接口和 action 照常用 `Active` 检查，不信任前端传来的开关状态。
 
 <a id="background-jobs"></a>
 ### 后台任务

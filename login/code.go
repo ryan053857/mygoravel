@@ -348,7 +348,7 @@ func (r *Realm) Register(ctx context.Context, db bun.IDB, proof string, ref iden
 }
 
 // ResetPassword 用 Reset 的完成凭证设置新密码，按 Options.PasswordPolicy 检查；接收验证码的标识同时标为已验证，
-// 它的密码登录失败计数清零。返回密码所属的主体，应用通常接着撤销它的全部会话和 token。
+// 它的密码登录失败计数清零。返回密码所属的主体，应用通常接着撤销它的全部 token。
 // 它不登录：用户接着用新密码登录，启用了二次验证的账号仍然需要二次验证。
 func (r *Realm) ResetPassword(ctx context.Context, proof, password string) (identity.Ref, error) {
 	if err := r.opts.PasswordPolicy(password); err != nil {

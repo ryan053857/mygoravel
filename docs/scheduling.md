@@ -19,7 +19,7 @@
 <a id="introduction"></a>
 ## 简介
 
-会话、锁、限流和失败任务都会在数据库中留下过期的行，需要定期清理；应用自己也常有定时的工作，例如每天凌晨生成报表。`schedule` 包按 cron 表达式定时执行这些任务，精度到秒。
+过期的 token、验证码和失败任务都会在数据库中留下过期的行，需要定期清理；应用自己也常有定时的工作，例如每天凌晨生成报表。`schedule` 包按 cron 表达式定时执行这些任务，精度到秒。
 
 调度器只负责「按时触发」：任务就是一个 `func(ctx context.Context) error`，在调度器所在的进程中执行。部署多个实例时，同一个任务的同一次触发只会在一个实例上执行。
 
@@ -80,7 +80,6 @@ import (
     "example.com/blog/internal/settings"
     "github.com/ryan053857/mygoravel/command"
     "github.com/ryan053857/mygoravel/schedule"
-    "github.com/ryan053857/mygoravel/session"
 )
 
 // tasks 创建调度器并注册全部定时任务。
@@ -89,8 +88,6 @@ func (a *App) tasks() *schedule.Scheduler {
         schedule.WithTelemetry(a.meters, a.tracers))
     sched.Add("articles:publish-scheduled", "* * * * *", article.NewPublishScheduled(a.db).Handle,
         schedule.Describe("发布到了预定时间的文章"))
-    sched.Add("sessions:cleanup", "*/10 * * * *", schedule.Cleanup(session.NewStore(a.db).Cleanup, 1000),
-        schedule.Describe("删除过期的会话"))
     sched.Add("queue:prune-failed", "@daily", schedule.Cleanup(a.failed.Cleanup(30*24*time.Hour), 1000),
         schedule.Describe("删除 30 天前的失败任务"))
     return sched
@@ -118,7 +115,7 @@ root.AddCommand(command.Run("schedule", "执行定时任务", bootstrap.Schedule
 <a id="multiple-instances"></a>
 ## 多个实例
 
-部署多个实例时，每个实例上的调度器都会在同一时刻触发同一个任务。调度器在执行之前取得一把锁，锁名包含任务名和触发时刻，例如 `schedule:sessions:cleanup:1794366000`，只有取得锁的实例执行这一次触发。锁不会主动释放，一分钟后过期，所以各实例的时钟偏差小于一分钟时就不会重复执行。
+部署多个实例时，每个实例上的调度器都会在同一时刻触发同一个任务。调度器在执行之前取得一把锁，锁名包含任务名和触发时刻，例如 `schedule:queue:prune-failed:1794366000`，只有取得锁的实例执行这一次触发。锁不会主动释放，一分钟后过期，所以各实例的时钟偏差小于一分钟时就不会重复执行。
 
 所有进程共用同一个 [Redis 锁存储](locks.md#redis-store)，去重就覆盖全部实例。单机部署也一样：[不停机升级](deployment.md#upgrade-overlap)时新旧两个调度器会同时运行。过期的锁由 Redis 自动删除。
 
@@ -210,7 +207,6 @@ schedulecmd.New(a.tasks),
 ```text
 TASK                        EXPRESSION    NEXT RUN             IN        RUNNING  DESCRIPTION
 articles:publish-scheduled  * * * * *     2026-11-11 17:01:00  42s       no       发布到了预定时间的文章
-sessions:cleanup            */10 * * * *  2026-11-11 17:10:00  9m42s     no       删除过期的会话
 locks:cleanup               @hourly       2026-11-11 18:00:00  59m42s    yes      删除过期的锁
 queue:prune-failed          @daily        2026-11-12 00:00:00  6h59m42s  no       删除 30 天前的失败任务
 ```
@@ -279,7 +275,7 @@ article.PublishScheduledJob.Handle(w, func(ctx context.Context, _ struct{}) erro
 
 | 数据 | 清理方法 | 建议频率 |
 | --- | --- | --- |
-| [会话](session.md#cleanup) | `session.NewStore(db).Cleanup` | 每 10 分钟 |
+| [API 令牌](api-tokens.md#cleanup) | `apitoken.Store` 的 `Cleanup` | 每小时 |
 | [登录验证码](login.md#cleanup) | 每套账号的 `login.Realm` 的 `Cleanup` | 每小时 |
 | [未绑定的 passkey](login.md#passkeys) | `passkey.Store` 的 `Cleanup` | 每天 |
 | [文件](filesystem.md#cleanup) | 文件服务的 `Cleanup` | 每 5 分钟 |

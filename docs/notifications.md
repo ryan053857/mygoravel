@@ -81,18 +81,20 @@ article.published_by_admin: "你的文章《{{.title}}》已由管理员发布"
 <a id="listing"></a>
 ## 查看通知
 
-`notification.List` 按时间从新到旧返回一个收件人的通知，`UnreadCount` 返回未读数，用来在导航栏显示角标：
+`notification.List` 按时间从新到旧返回一个收件人的通知，`UnreadCount` 返回未读数，用来在导航栏显示角标。下面是通知列表接口的处理器：
 
 ```go
-func (h *Handlers) Index(w http.ResponseWriter, r *http.Request) error {
-    sub, _ := identity.FromContext(r.Context())
-    me := notification.RecipientOf(sub)
-    before, _ := uuid.Parse(r.URL.Query().Get("before"))
-    list, err := notification.List(r.Context(), h.db, notification.Query{Recipient: me, Before: before})
+type IndexInput struct {
+    Before uuid.UUID `query:"before" required:"false" doc:"上一页最后一条通知的 ID"`
+}
+
+func (h *Handlers) Index(ctx context.Context, in *IndexInput) (*IndexOutput, error) {
+    sub, _ := identity.FromContext(ctx)
+    list, err := notification.List(ctx, h.db, notification.Query{Recipient: notification.RecipientOf(sub), Before: in.Before})
     if err != nil {
-        return err
+        return nil, err
     }
-    return web.Render(w, r, http.StatusOK, views.Notifications(list))
+    return &IndexOutput{Body: toDTOs(ctx, list)}, nil
 }
 ```
 
@@ -102,32 +104,23 @@ func (h *Handlers) Index(w http.ResponseWriter, r *http.Request) error {
 | `Limit` | 返回的条数，默认 50 |
 | `Before` | 翻页：传入上一页最后一条通知的 `ID`，返回比它更早的通知 |
 
-模板中用 `i18n.T(ctx, n.Event, n.Data)` 显示每条通知，`n.Read()` 报告它是否已读。所有函数都只读写传入的收件人自己的通知，其他人的通知 ID 会被忽略或返回 `notification.ErrNotFound`，不需要另外授权。
+`toDTOs` 用 `i18n.T(ctx, n.Event, n.Data)` 生成每条通知的文案，`n.Read()` 报告它是否已读。所有函数都只读写传入的收件人自己的通知，其他人的通知 ID 会被忽略或返回 `notification.ErrNotFound`，不需要另外授权。
 
 `notification.Notification` 就是这张表的 Bun 模型，其他查询可以直接用 Bun 编写，条件请以 `tenant, recipient_type, recipient_id` 开头，与索引一致。
 
 <a id="marking-as-read"></a>
 ### 标记已读
 
-点击一条通知时，标记为已读再跳转到文章：
+点击一条通知时，前端调用标记已读的接口，再打开文章：
 
 ```go
-func (h *Handlers) Open(w http.ResponseWriter, r *http.Request) error {
-    id, err := uuid.Parse(chi.URLParam(r, "id"))
-    if err != nil {
-        return web.ErrNotFound.New()
-    }
-    sub, _ := identity.FromContext(r.Context())
-    me := notification.RecipientOf(sub)
-    n, err := notification.Get(r.Context(), h.db, me, id)
-    if err != nil {
-        return err
-    }
-    if err := notification.MarkRead(r.Context(), h.db, me, id); err != nil {
-        return err
-    }
-    web.Redirect(w, r, "/articles/"+n.Data["article_id"].(string))
-    return nil
+type ReadInput struct {
+    ID uuid.UUID `path:"id"`
+}
+
+func (h *Handlers) Read(ctx context.Context, in *ReadInput) (*struct{}, error) {
+    sub, _ := identity.FromContext(ctx)
+    return nil, notification.MarkRead(ctx, h.db, notification.RecipientOf(sub), in.ID)
 }
 ```
 
@@ -196,7 +189,7 @@ func (h *Handlers) Webhook(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-webhook 路由挂在页面的会话和跨站请求防护之外。webhook 的地址和 `secret` 用 `setWebhook` 注册一次，可以写成一个[命令](commands.md)。
+webhook 直接注册在 chi 上，不经过 API 的认证，由请求头中的 `secret` 确认来源。webhook 的地址和 `secret` 用 `setWebhook` 注册一次，可以写成一个[命令](commands.md)。
 
 **发送。** 发布文章时，作者绑定了 Telegram，就在同一个事务中把消息交给队列，文案用作者绑定时的语言渲染：
 
@@ -297,21 +290,25 @@ func inboxTopic(r notification.Recipient) string {
 
 主题只能由字母、数字和 `_ - : .` 组成，租户和用户 ID 中有其他字符时，先做转换。
 
-页面的 SSE 处理器订阅当前用户的主题。角标是状态而不是事件：连接（包括断线重连）时先推送一次当前的未读数，之后每收到一条广播就重新查询，因此不需要按 `Last-Event-ID` 补发：
+[事件流接口](sse.md#long-lived-connections)订阅当前用户的主题。角标是状态而不是事件：连接（包括断线重连）时先推送一次当前的未读数，之后每收到一条广播就重新查询，因此不需要按 `Last-Event-ID` 补发：
 
 ```go
-func (h *Handlers) Inbox(w http.ResponseWriter, r *http.Request) error {
-    sub, _ := identity.FromContext(r.Context())
+type Badge struct {
+    Unread int `json:"unread"`
+}
+
+func (h *Handlers) Inbox(ctx context.Context, _ *struct{}) (*huma.StreamResponse, error) {
+    sub, _ := identity.FromContext(ctx)
     me := notification.RecipientOf(sub)
-    events := h.hub.Subscribe(inboxTopic(me)) // 先订阅，再查询
-    defer events.Close()
-    return web.SSE(w, r, func(s *web.Stream) error {
+    return rest.SSE(func(s *httpx.Stream) error {
+        events := h.hub.Subscribe(inboxTopic(me)) // 先订阅，再查询
+        defer events.Close()
         for {
             n, err := notification.UnreadCount(s.Context(), h.db, me)
             if err != nil {
                 return err
             }
-            if err := s.Send(views.UnreadBadge(n)); err != nil {
+            if err := s.SendJSON(httpx.Event{Name: "badge"}, Badge{Unread: n}); err != nil {
                 return nil
             }
             select {
@@ -319,15 +316,15 @@ func (h *Handlers) Inbox(w http.ResponseWriter, r *http.Request) error {
                 return nil
             case _, ok := <-events.C():
                 if !ok {
-                    return nil // 订阅已结束，浏览器会重连
+                    return nil // 订阅已结束，客户端会重连
                 }
             }
         }
-    })
+    }), nil
 }
 ```
 
-`views.UnreadBadge` 用 `<hx-partial>` 替换导航栏中的角标，写法见[长连接](sse.md#long-lived-connections)。标记已读之后同样发布一条广播，用户打开的其他标签页也会随之更新。
+用 `rest.RegisterSSE(api, op, map[string]any{"badge": Badge{}}, h.Inbox)` 注册。前端收到 `badge` 事件就更新导航栏的角标，见[客户端代码的事件流](clients.md#event-streams)。标记已读之后同样发布一条广播，用户打开的其他标签页也会随之更新。
 
 <a id="retention"></a>
 ## 保留期限

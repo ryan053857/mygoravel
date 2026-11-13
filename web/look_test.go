@@ -15,23 +15,20 @@ import (
 	"github.com/ryan053857/mygoravel/web"
 )
 
-// 没有 ErrorFragment 时，局部请求的错误不替换页面内容，作为提示送达，并与会话中的提示合并为一个事件。
+// 没有 ErrorFragment 时，局部请求的错误不替换页面内容，作为提示送达；译文中的非 ASCII 字符在响应头中转义。
 func TestPartialErrorsAsFlash(t *testing.T) {
 	o := options()
 	o.ErrorFragment, o.ErrorTarget = nil, ""
 	h := handle(web.New(o), func(w http.ResponseWriter, r *http.Request) error {
-		if r.URL.Query().Has("flash") {
-			web.Flash(r.Context(), web.Message{Type: "success", Title: "已保存"})
-		}
 		return errLocked.New()
 	})
 
-	rr := serve(h, zh(t, htmx(httptest.NewRequest("POST", "/?flash", nil), true)))
+	rr := serve(h, zh(t, htmx(httptest.NewRequest("POST", "/", nil), true)))
 	if rr.Code != 409 || rr.Body.Len() != 0 || rr.Header().Get("HX-Reswap") != "none" || rr.Header().Get("HX-Retarget") != "" {
 		t.Fatalf("partial: %d %q %v", rr.Code, rr.Body.String(), rr.Header())
 	}
 	msgs := flashTrigger(t, rr)
-	if len(msgs) != 2 || msgs[0].Title != "已保存" || msgs[1] != (web.Message{Type: "error", Title: "没有访问权限"}) {
+	if len(msgs) != 1 || msgs[0] != (web.Message{Type: "error", Title: "没有访问权限"}) {
 		t.Fatalf("messages = %+v (HX-Trigger %s)", msgs, rr.Header().Get("HX-Trigger"))
 	}
 
@@ -42,33 +39,17 @@ func TestPartialErrorsAsFlash(t *testing.T) {
 	}
 }
 
-// 页面处理器之外的错误（这里是跨站请求被拒绝）同样作为提示送达。
+// 页面处理器之外的错误（这里是 NotFound）同样作为提示送达。
 func TestPartialErrorsAsFlashOutsideHandler(t *testing.T) {
 	o := options()
 	o.ErrorFragment, o.ErrorTarget = nil, ""
-	h := handle(web.New(o), func(http.ResponseWriter, *http.Request) error { return nil })
-	req := htmx(httptest.NewRequest("POST", "http://example.com/", nil), true)
-	req.Header.Set("Sec-Fetch-Site", "cross-site")
-	rr := serve(h, req)
-	if rr.Code != 403 || rr.Header().Get("HX-Reswap") != "none" {
-		t.Fatalf("cross origin: %d %v", rr.Code, rr.Header())
+	p := web.New(o)
+	rr := serve(http.HandlerFunc(p.NotFound), htmx(httptest.NewRequest("GET", "/missing", nil), true))
+	if rr.Code != 404 || rr.Header().Get("HX-Reswap") != "none" {
+		t.Fatalf("not found: %d %v", rr.Code, rr.Header())
 	}
 	if msgs := flashTrigger(t, rr); len(msgs) != 1 || msgs[0].Type != "error" {
 		t.Fatalf("messages = %+v", msgs)
-	}
-}
-
-// Login 中的 {name} 按当前请求的路径参数替换。
-func TestLoginPlaceholders(t *testing.T) {
-	o := options()
-	o.Login = "/t/{tenant}/login"
-	pages := web.New(o)
-	router := chi.NewRouter()
-	pages.Routes(router, web.Require()).Get("/t/{tenant}/dash", func(http.ResponseWriter, *http.Request) error { return nil })
-
-	rr := serve(router, httptest.NewRequest("GET", "/t/acme%20co/dash", nil))
-	if loc := rr.Header().Get("Location"); rr.Code != 303 || loc != "/t/acme%20co/login?next=%2Ft%2Facme%2520co%2Fdash" {
-		t.Fatalf("redirect: %d %q", rr.Code, loc)
 	}
 }
 
@@ -90,7 +71,7 @@ func TestThemeFrom(t *testing.T) {
 		pages := web.New(o)
 		router.Route(area.prefix, func(r chi.Router) {
 			r.NotFound(pages.NotFound)
-			pages.Routes(r, web.Public).Get("/", func(w http.ResponseWriter, r *http.Request) error {
+			pages.Routes(r).Get("/", func(w http.ResponseWriter, r *http.Request) error {
 				return web.Render(w, r, http.StatusOK, themeName("page"))
 			})
 		})
@@ -120,13 +101,5 @@ func TestThemeValidate(t *testing.T) {
 		if th.Validate() == nil {
 			t.Errorf("%s: expected an error", name)
 		}
-	}
-}
-
-func TestCloseDialog(t *testing.T) {
-	rr := httptest.NewRecorder()
-	web.CloseDialog(rr, "article-dialog")
-	if got := rr.Header().Get("HX-Trigger"); got != `{"web:dialog-close":{"id":"article-dialog","target":"body"}}` {
-		t.Fatalf("HX-Trigger = %s", got)
 	}
 }

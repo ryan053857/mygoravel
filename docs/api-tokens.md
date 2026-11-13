@@ -48,7 +48,7 @@ api_token:
   remember_idle_timeout: 168h # 登录时选择“记住我”的空闲时长
 ```
 
-上面是默认值。登录 token 的截止时间是“签发时间 + `lifetime`”与“最近使用时间 + 空闲时长”中较早的一个，与[会话](session.md#configuration)的 `lifetime`、`idle_timeout` 含义相同。不透明的登录 token 不需要刷新：每次使用都会延长它的有效期，收到 `401` 时让用户重新登录即可。[JWT 模式](#jwt)按同样的规则计算，只是在刷新时延长。
+上面是默认值。登录 token 的截止时间是“签发时间 + `lifetime`”与“最近使用时间 + 空闲时长”中较早的一个。不透明的登录 token 不需要刷新：每次使用都会延长它的有效期，收到 `401` 时让用户重新登录即可。[JWT 模式](#jwt)按同样的规则计算，只是在刷新时延长。
 
 有效期在签发时写入 token：修改配置只影响之后签发的 token，已经签发的 token 仍然按签发时的有效期滑动。
 
@@ -220,32 +220,6 @@ for _, t := range list {
 
 撤销立即生效，被撤销的 token 在下一次请求时返回 `401`（[JWT 模式](#jwt)中已签发的 access token 要等到过期）；用它建立的 SSE 长连接最多 30 秒内结束，见[凭据失效](sse.md#revoked-credentials)。撤销后调用 `RecheckCredential` 或 `RecheckSubject`，连接会立即结束，见[立即断开](sse.md#immediate-revocation)。
 
-同一个用户可能还在浏览器中通过[会话](session.md)登录了页面。让用户在所有地方下线时，两边都要撤销。下面是用户模块的 `SignOutEverywhere` action 的 `Handle`，会话存储和 token 存储由构造函数传入：
-
-```go
-func (a *SignOutEverywhere) Handle(ctx context.Context, target identity.Ref) error {
-    if _, err := a.sessions.RevokeSubject(ctx, target); err != nil {
-        return err
-    }
-    _, err := a.tokens.RevokeSubject(ctx, target)
-    return err
-}
-```
-
-“退出其他设备”也是如此。会话存储的 [`RevokeOthers`](session.md#revoking-sessions) 与 token 存储的签名相同，都只保留 `sub.Credential` 对应的那一个凭据，所以页面和单页应用可以调用同一个 action：
-
-```go
-func (a *SignOutOthers) Handle(ctx context.Context, subject identity.Subject) error {
-    if _, err := a.sessions.RevokeOthers(ctx, subject); err != nil {
-        return err
-    }
-    _, err := a.tokens.RevokeOthers(ctx, subject)
-    return err
-}
-```
-
-在页面中发起时，`Credential` 是会话 ID，保留当前会话、撤销全部登录 token；在单页应用中发起时，`Credential` 是 token 的 ID，保留当前 token、撤销全部会话。
-
 <a id="loading-permissions"></a>
 ## 加载权限
 
@@ -277,7 +251,7 @@ api := rest.New(rest.Options{
 
 不透明的登录 token 每个请求都要查一次表。JWT 模式改为签发一对凭据：请求带短期的 access token（JWT），校验只验签名和有效期，不访问数据库；access token 过期后，用 refresh token 换一对新的。适合请求量大、或者有其他服务也要校验 token 的场景。权限仍由 Resolver 在每个请求中[加载](#loading-permissions)，使用 `authz` 时可以[缓存权限](authorization.md#caching-permissions)，请求就不再访问数据库。
 
-每次登录仍然是 `api_tokens` 中的一行，[设备列表](#listing-tokens)、[撤销](#revoking-tokens)、[过期清理](#cleanup)都照常使用。区别在于撤销的效果：refresh token 立即失效，已经签发的 access token 在有效期（默认 10 分钟）内仍然可以发起请求。撤销需要立即生效的账号体系继续用不透明 token。两种方式可以在同一个应用中并存，例如商家后台的 API 用不透明 token，客户 App 用 JWT。运营后台是服务端渲染的页面，使用[会话](session.md)，不签发 token。
+每次登录仍然是 `api_tokens` 中的一行，[设备列表](#listing-tokens)、[撤销](#revoking-tokens)、[过期清理](#cleanup)都照常使用。区别在于撤销的效果：refresh token 立即失效，已经签发的 access token 在有效期（默认 10 分钟）内仍然可以发起请求。撤销需要立即生效的账号体系继续用不透明 token。两种方式可以在同一个应用中并存，例如运营后台和商家后台用不透明 token，客户 App 用 JWT。
 
 [SSE](sse.md#revoked-credentials) 和[实时连接](realtime.md#revocation)这类长连接不受这个限制：复查凭据时 `JWT.Validate` 按登录 ID 查一次表，撤销后连接和不透明 token 一样，最多 30 秒内结束，调用 `Recheck*` 时立即结束。复查只看登录是否还在，不看 access token 是否过期，所以已经建立的连接不会每 10 分钟断开一次。断线后重连时 access token 可能已经过期，实时连接的客户端要设置 [`getToken`](realtime.md#tokens) 换新的。
 
@@ -375,6 +349,6 @@ n, err := tokens.Cleanup(ctx, 1000)
 <a id="single-page-applications"></a>
 ## 单页应用
 
-独立部署的单页应用（例如 React）和 App 一样使用登录 token：登录后保存 token，之后的请求都带上 `Authorization: Bearer <token>`，收到 `401` 时跳转到登录页。token 通常保存在 `localStorage` 中，这样刷新页面和打开新标签页后仍保持登录。页面上的脚本都能读到它，所以要防范 XSS；有效期和撤销可以限制 token 泄露后造成的影响。
+单页应用（例如 React）和 App 一样使用登录 token：登录后保存 token，之后的请求都带上 `Authorization: Bearer <token>`，收到 `401` 时跳转到登录页。token 通常保存在 `localStorage` 中，这样刷新页面和打开新标签页后仍保持登录。页面上的脚本都能读到它，所以要防范 XSS；有效期和撤销可以限制 token 泄露后造成的影响。
 
-单页应用与 API 不在同一个源时，浏览器要求 API 返回 CORS 响应头，在 `/api` 的路由组上安装 [httpx.CORS](middleware.md#cors)。Bearer token 不是 cookie，不需要允许携带凭据。
+单页应用与 API 同源时（例如由 [`httpx.SPA`](spa.md) 提供）不需要额外设置。不在同一个源时，浏览器要求 API 返回 CORS 响应头，在 `/api` 的路由组上安装 [httpx.CORS](middleware.md#cors)。Bearer token 不是 cookie，不需要允许携带凭据。

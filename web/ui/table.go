@@ -1,6 +1,9 @@
 package ui
 
-import "github.com/a-h/templ"
+import (
+	"github.com/a-h/templ"
+	"github.com/axadrn/shadcn-templ/v2/components/icon"
+)
 
 // SortHeadProps 是 SortHead 的可选参数。
 type SortHeadProps struct {
@@ -51,6 +54,9 @@ func sortLinkAttrs(url string, htmx bool) templ.Attributes {
 	}
 	return templ.Attributes{"hx-get": url}
 }
+
+// Icon 是 shadcn-templ 的图标，例如 icon.FileText。
+type Icon = func(...icon.Props) templ.Component
 
 // EmptyProps 配置 Empty。
 type EmptyProps struct {

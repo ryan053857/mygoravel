@@ -4,6 +4,8 @@ import (
 	"strconv"
 
 	"github.com/axadrn/shadcn-templ/v2/components/alertdialog"
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/icon"
 	"github.com/axadrn/shadcn-templ/v2/components/toast"
 	"github.com/ryan053857/mygoravel/web"
 )
@@ -39,22 +41,11 @@ templ Page(p PageProps) {
 	</html>
 }
 
-// Toaster 用 shadcn-templ 的 toast 显示提示：整页渲染时 web.Flashes 取出的提示，
-// 以及 htmx 请求带来的 web:flash（包括局部请求的错误）。放在布局的 <body> 中，props 传给 toast.Toaster。
+// Toaster 用 shadcn-templ 的 toast 显示 htmx 请求带来的 web:flash，即局部请求的错误。
+// 放在布局的 <body> 中，props 传给 toast.Toaster。
 templ Toaster(props ...toast.ToasterProps) {
 	@toast.Toaster(props...)
 	<template data-web-ui-toaster></template>
-	for _, m := range web.Flashes(ctx) {
-		@toast.Toast(toast.Props{Title: m.Title, Description: m.Description, Type: toast.Type(m.Type)})
-	}
-}
-
-// ModalTarget 是 Modal 的选择器。打开对话框的元素用 hx-target 把服务端渲染的对话框放进来。
-const ModalTarget = "#modal"
-
-// Modal 是放置服务端渲染的对话框的位置，放在布局的 <body> 中。
-templ Modal() {
-	<div id="modal"></div>
 }
 
 // ConfirmID 是 Confirm 渲染的确认对话框的 ID。
@@ -62,8 +53,8 @@ const ConfirmID = "web-ui-confirm"
 
 // Confirm 用确认对话框代替 hx-confirm 的浏览器原生确认框，放在布局的 <body> 中：
 //
-//	<button hx-delete="/admin/articles/1" hx-confirm="删除这篇文章？" data-confirm-description="删除后无法恢复。"
-//		data-confirm-action="删除" data-confirm-variant="destructive">删除</button>
+//	<button hx-post="/subscription/cancel" hx-confirm="退订邮件？" data-confirm-description="之后不再收到新文章的通知。"
+//		data-confirm-action="退订" data-confirm-variant="destructive">退订</button>
 //
 // hx-confirm 是对话框的标题；元素上可选的 data-confirm-description 是说明，data-confirm-action 是确认按钮的文字，
 // data-confirm-variant="destructive" 让确认按钮显示为危险操作。点击确认后才发出请求；取消、按 Esc 或点击遮罩时放弃。
@@ -105,4 +96,12 @@ func orDefault(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// ThemeToggle 是切换暗色模式的按钮，选择记在浏览器中。放在页面的任何位置。
+templ ThemeToggle() {
+	@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Attributes: templ.Attributes{"data-web-ui-theme-toggle": "true", "aria-label": text(ctx, "ui.theme.toggle", "Toggle dark mode")}}) {
+		@icon.Moon(icon.Props{Class: "dark:hidden"})
+		@icon.Sun(icon.Props{Class: "hidden dark:block"})
+	}
 }

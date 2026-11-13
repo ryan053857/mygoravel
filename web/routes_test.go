@@ -12,30 +12,20 @@ import (
 	"github.com/ryan053857/mygoravel/web"
 )
 
-func TestRoutesRequiresDeclaredAccess(t *testing.T) {
-	for name, register := range map[string]func(){
-		"zero access": func() { pages().Routes(chi.NewRouter(), web.Access{}) },
-		"nil handler": func() { pages().Routes(chi.NewRouter(), web.Public).Get("/", nil) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			defer func() {
-				if recover() == nil {
-					t.Fatal("expected panic")
-				}
-			}()
-			register()
-		})
-	}
+func TestRoutesRejectNilHandler(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	pages().Routes(chi.NewRouter()).Get("/", nil)
 }
 
 func registerPages(r chi.Router, p *web.Pages, h web.HandlerFunc) {
-	public := p.Routes(r, web.Public)
-	public.Get("/login", h)
-	public.Post("/login", h)
-	admin := p.Routes(r, web.Require("articles"))
-	admin.Get("/admin/articles/{id}/edit", h)
-	admin.Put("/admin/articles/{id}", h)
-	p.Routes(r, web.Require()).Get("/me", h)
+	pages := p.Routes(r)
+	pages.Get("/", h)
+	pages.Get("/articles/{slug}", h)
+	pages.Post("/subscribe", h)
 	r.Handle(web.AssetsPath+"*", web.Assets())
 	r.Get("/healthz", func(http.ResponseWriter, *http.Request) {})
 }
@@ -52,13 +42,11 @@ func TestRoutesDescribeAccess(t *testing.T) {
 			return nil
 		})
 		want := []httpx.Route{
+			{Method: "GET", Path: "/", Access: "public"},
 			{Method: "GET", Path: "/_web/*", Access: "public"},
-			{Method: "PUT", Path: "/admin/articles/{id}", Access: "session", Permissions: []string{"articles"}},
-			{Method: "GET", Path: "/admin/articles/{id}/edit", Access: "session", Permissions: []string{"articles"}},
+			{Method: "GET", Path: "/articles/{slug}", Access: "public"},
 			{Method: "GET", Path: "/healthz", Access: "unknown"},
-			{Method: "GET", Path: "/login", Access: "public"},
-			{Method: "POST", Path: "/login", Access: "public"},
-			{Method: "GET", Path: "/me", Access: "session"},
+			{Method: "POST", Path: "/subscribe", Access: "public"},
 		}
 		var got []httpx.Route
 		for _, r := range httpx.Routes(router) {
@@ -74,7 +62,7 @@ func TestRoutesDescribeAccess(t *testing.T) {
 
 func TestModeRoutesHandlersAreNotCalled(t *testing.T) {
 	router := chi.NewRouter()
-	web.New(web.Options{Mode: web.ModeRoutes}).Routes(router, web.Public).Get("/", func(http.ResponseWriter, *http.Request) error {
+	web.New(web.Options{Mode: web.ModeRoutes}).Routes(router).Get("/", func(http.ResponseWriter, *http.Request) error {
 		t.Fatal("handler called in ModeRoutes")
 		return nil
 	})

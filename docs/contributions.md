@@ -109,7 +109,7 @@ CI 不运行 `-race`，它让整个流程慢了好几倍。提交之前，请在
 - 代码使用 `gofmt` 格式化；
 - 遵循[目录结构](directory-structure.md#naming-conventions)中的命名约定；
 - 优先暴露社区组件的原生类型（`*bun.DB`、`*slog.Logger`、`*cobra.Command` 等），而不是再包装一层；
-- 数据库句柄有两种约定：存储（`session.NewStore`、`lock.NewDatabase` 等）接收 `bun.IDB`，可以用连接池或业务事务构造；自己开启事务的服务（`operation`、`sheet/imports`、`sheet/exports`、`filesystem`）接收 `*bun.DB`，要与业务数据一起提交的方法另外接收 `tx bun.IDB` 参数，或提供 `WithDB`；
+- 数据库句柄有两种约定：存储（`apitoken.NewStore`、`lock.NewDatabase` 等）接收 `bun.IDB`，可以用连接池或业务事务构造；自己开启事务的服务（`operation`、`sheet/imports`、`sheet/exports`、`filesystem`）接收 `*bun.DB`，要与业务数据一起提交的方法另外接收 `tx bun.IDB` 参数，或提供 `WithDB`；
 - 不引入全局状态，所有依赖都通过参数显式传递。
 
 <a id="writing-documentation"></a>

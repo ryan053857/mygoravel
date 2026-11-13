@@ -8,7 +8,6 @@ require (
 	github.com/a-h/templ v0.3.1100
 	github.com/adhocore/gronx v1.20.6
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/alexedwards/scs/v2 v2.9.0
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.40
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.16

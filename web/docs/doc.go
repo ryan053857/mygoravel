@@ -36,5 +36,5 @@
 //
 //	content, _ := fs.Sub(helpFS, "help")
 //	site, err := docs.New(docs.Options{Content: content, Prefix: "/help", Title: "帮助中心"})
-//	site.Register(pages.Routes(router, web.Public))
+//	site.Register(pages.Routes(router))
 package docs

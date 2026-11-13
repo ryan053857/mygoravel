@@ -29,7 +29,7 @@ var blogFiles = []docFile{
 	{"internal/bootstrap/worker.go", "queue.md"},
 	{"internal/bootstrap/scheduler.go", "scheduling.md"},
 	{"internal/auth/social/social.go", "social-login.md"},
-	{"internal/auth/authweb/social.go", "social-login.md"},
+	{"internal/auth/authhttp/web_social.go", "social-login.md"},
 	{"internal/auth/authhttp/social.go", "social-login.md"},
 	{"internal/article/publish.go", "actions.md"},
 	{"internal/article/get.go", "routing.md"},
@@ -50,7 +50,7 @@ var blogFiles = []docFile{
 	{"internal/editor/editor.go", "account-examples.md"},
 	{"internal/reader/reader.go", "account-examples.md"},
 	{"internal/accounts/accounts.go", "account-examples.md"},
-	{"internal/editor/editorweb/routes.go", "account-examples.md"},
+	{"internal/editor/editorapi/routes.go", "account-examples.md"},
 	{"internal/reader/readerapi/routes.go", "account-examples.md"},
 }
 

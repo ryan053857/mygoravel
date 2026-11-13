@@ -9,7 +9,7 @@ import (
 // Config 是登录 token 的有效期配置，对应配置文件的 api_token 段。个人访问令牌的有效期由创建者指定，不受它影响。
 //
 // 登录 token 的截止时间是“创建时间 + Lifetime”与“最近使用时间 + 空闲时长”中较早的一个，
-// 与会话的 lifetime、idle_timeout 含义相同。两者在签发时写入 token，之后修改配置只影响新签发的 token。
+// 两者在签发时写入 token，之后修改配置只影响新签发的 token。
 type Config struct {
 	// Lifetime 是登录 token 从签发起的最长有效期，到期后必须重新登录。
 	Lifetime time.Duration `yaml:"lifetime"`

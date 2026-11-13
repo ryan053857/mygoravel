@@ -238,7 +238,7 @@ router.Use(httpx.RateLimit(ratelimit.NewMemory(a.cfg.HTTP.RateLimit), httpx.KeyB
 <a id="cors"></a>
 ## 跨域请求
 
-独立部署的单页应用、桌面或移动端的 WebView 与 API 不在同一个源时，浏览器要求 API 返回 CORS 响应头。`httpx.CORS` 只安装在 API 的路由组上，页面路由使用会话 cookie，不开放跨域：
+独立部署的单页应用、桌面或移动端的 WebView 与 API 不在同一个源时，浏览器要求 API 返回 CORS 响应头。`httpx.CORS` 只安装在 API 的路由组上，页面不开放跨域：
 
 ```go
 router.Route("/api", func(r chi.Router) {

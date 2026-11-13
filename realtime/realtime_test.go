@@ -565,39 +565,25 @@ type wrapped struct{ http.ResponseWriter }
 
 func (w wrapped) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
+// 在中间件之后（包装 ResponseWriter、写入租户、很短的请求超时）连接仍然可用，使用外层写入的租户。
 func TestBehindMiddleware(t *testing.T) {
-	defer realtime.SetCredentialInterval(50 * time.Millisecond)()
-	var mu sync.Mutex
-	loggedOut := false
-	// 模拟页面路由的认证中间件：写入主体和凭据复查，包装 ResponseWriter，并设置很短的请求超时。
-	auth := func(next http.Handler) http.Handler {
+	outer := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := identity.WithTenant(r.Context(), "acme")
-			ctx = identity.WithSubject(ctx, identity.Subject{Type: "user", ID: "alice", Tenant: "acme", Method: "session"})
-			ctx = httpx.WithCredentialCheck(ctx, func(context.Context) error {
-				mu.Lock()
-				defer mu.Unlock()
-				if loggedOut {
-					return errRevoked.New()
-				}
-				return nil
-			})
-			next.ServeHTTP(wrapped{w}, r.WithContext(ctx))
+			next.ServeHTTP(wrapped{w}, r.WithContext(identity.WithTenant(r.Context(), "acme")))
 		})
 	}
 	timeout := httpx.Timeout(httpx.TimeoutConfig{Duration: 100 * time.Millisecond})
 	n := start(t, broadcasttest.NewBackend(), realtime.Options{
-		// 中间件已经识别出主体时不使用 token。
 		Authenticate: func(context.Context, string) (identity.Subject, error) {
-			t.Error("Authenticate called for a request that already has a subject")
-			return identity.Subject{}, errRevoked.New()
+			return identity.Subject{Type: "user", ID: "alice"}, nil
 		},
-	}, func(next http.Handler) http.Handler { return timeout(auth(next)) })
+		Accounts: identity.Accounts{"user": nil},
+	}, func(next http.Handler) http.Handler { return timeout(outer(next)) })
 	n.rt.Channel("t:{tenant}:inbox", realtime.Private(func(ctx context.Context, sub identity.Subject, p realtime.Params) (bool, error) {
-		return sub.ID == "alice" && p["tenant"] == sub.Tenant && identity.TenantFromContext(ctx) == "acme", nil
+		return sub.ID == "alice" && p["tenant"] == identity.TenantFromContext(ctx), nil
 	}))
 
-	c := mustConnect(t, n.url, "ignored", nil)
+	c := mustConnect(t, n.url, "token", nil)
 	time.Sleep(300 * time.Millisecond) // 超过请求超时，连接仍然可用
 	c.mustSubscribe("t:acme:inbox")
 	if reply := c.subscribe("t:globex:inbox"); reply.Error == nil || reply.Error.Code != 103 {
@@ -605,13 +591,6 @@ func TestBehindMiddleware(t *testing.T) {
 	}
 	publish(t, n.hub, "t:acme:inbox", map[string]int{"unread": 3})
 	c.push()
-
-	mu.Lock()
-	loggedOut = true
-	mu.Unlock()
-	if code := c.closed(); code != 3500 {
-		t.Fatalf("closed with %d", code)
-	}
 }
 
 func TestOrigin(t *testing.T) {

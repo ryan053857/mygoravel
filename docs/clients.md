@@ -8,6 +8,7 @@
     - [调用接口](#calling-endpoints)
     - [事件流](#event-streams)
     - [上传文件](#uploading-files)
+    - [下载文件](#downloading-files)
     - [TanStack Query](#tanstack)
 - [Go 客户端](#go)
     - [生成客户端](#generating-go-client)
@@ -129,7 +130,7 @@ render(data) // ArticleDTO
 <a id="event-streams"></a>
 ### 事件流
 
-[`rest.RegisterSSE`](sse.md#json-api) 注册的接口在文档中列出了每种事件的数据类型。浏览器的 `EventSource` 不能带 `Authorization` 请求头，所以用 `parseAs: "stream"` 取得响应流，交给 [eventsource-parser](https://github.com/rexxars/eventsource-parser) 解析：
+[`rest.RegisterSSE`](sse.md) 注册的接口在文档中列出了每种事件的数据类型。浏览器的 `EventSource` 不能带 `Authorization` 请求头，所以用 `parseAs: "stream"` 取得响应流，交给 [eventsource-parser](https://github.com/rexxars/eventsource-parser) 解析：
 
 ```ts
 import { EventSourceParserStream } from "eventsource-parser/stream"
@@ -168,6 +169,22 @@ form.append("file", file)
 const { data } = await api.POST("/files", {
   body: form as unknown as { file: string }, // 生成的类型把文件写作 string
 })
+```
+
+<a id="downloading-files"></a>
+### 下载文件
+
+[文件存储](filesystem.md)中的文件有公开地址，`<a href>`、`<img src>` 直接使用。需要登录才能下载的内容，例如[导入失败的行](import-export.md)，链接带不了 `Authorization` 请求头，用 `fetch` 取回后交给浏览器保存：
+
+```ts
+const { response } = await api.GET("/articles/imports/{id}/failures", {
+  params: { path: { id }, query: { format: "xlsx" } },
+  parseAs: "blob",
+})
+const url = URL.createObjectURL(await response.blob())
+const a = Object.assign(document.createElement("a"), { href: url, download: "failures.xlsx" })
+a.click()
+URL.revokeObjectURL(url)
 ```
 
 <a id="tanstack"></a>
@@ -376,7 +393,7 @@ func (t *tokens) Refresh(ctx context.Context) error {
 <a id="go-client-events"></a>
 ### 事件流
 
-用 [`rest.RegisterSSE`](sse.md#json-api) 登记的接口返回事件的迭代器。每个接口生成一个事件结构体，每种事件一个指针字段，一次只有一个不为 `nil`；默认的 `message` 事件是 `Message` 字段：
+用 [`rest.RegisterSSE`](sse.md) 登记的接口返回事件的迭代器。每个接口生成一个事件结构体，每种事件一个指针字段，一次只有一个不为 `nil`；默认的 `message` 事件是 `Message` 字段：
 
 ```go
 for ev, err := range c.Article.Events(ctx, article.EventsInput{}) {
@@ -425,7 +442,7 @@ uploaded, err := c.File.Upload(ctx, file.UploadInputForm{
 | --- | --- |
 | 类型实现了 `MarshalJSON`、`UnmarshalText` 等自定义编码 | 生成失败：复制字段得不到相同的 JSON。把它放进客户端可以导入的包，或者改用普通字段 |
 | 用到了其他第三方包的类型 | 生成失败。确认那个包适合在客户端使用后，用 `--import 包路径` 允许导入，子包一并允许 |
-| 两个包同名，例如应用的 `session` 和框架的 `session` | 生成失败。用 `--rename 包路径=新名字` 给其中一个改名 |
+| 两个包同名，例如应用的 `settings` 和框架的 `settings` | 生成失败。用 `--rename 包路径=新名字` 给其中一个改名 |
 
 <a id="other-languages"></a>
 ## 其他语言

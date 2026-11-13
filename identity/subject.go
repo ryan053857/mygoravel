@@ -16,7 +16,7 @@ type Subject struct {
 	Type         SubjectType
 	ID           string
 	Impersonator Ref      // 代为登录时实际操作的人，可以属于另一套账号体系；零值表示主体本人
-	Method       string   // 认证方式，如 bearer、session
+	Method       string   // 认证方式，如 bearer
 	Credential   string   // 本次请求所用凭据的 ID，如 API token 的 ID；用于登出当前设备、在设备列表中标出当前设备，可为空
 	Tenant       string   // 本次请求所在的租户，"" 表示平台本身；由凭据设置时，凭据只能在这个租户中使用
 	Permissions  []string // 主体在 Tenant 中拥有的权限，支持通配符，见 Can
@@ -66,7 +66,7 @@ func FromContext(ctx context.Context) (Subject, bool) {
 	return sub, ok
 }
 
-// WithTenant 将本次请求所在的租户写入 context，通常由 rest.Options.Tenant 或 web.Options.Tenant 完成。
+// WithTenant 将本次请求所在的租户写入 context，通常由 rest.Options.Tenant 或 realtime.Options.Tenant 完成。
 func WithTenant(ctx context.Context, tenant string) context.Context {
 	return context.WithValue(ctx, tenantKey{}, tenant)
 }

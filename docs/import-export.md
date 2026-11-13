@@ -558,7 +558,7 @@ article.ImportJob.Handle(w, article.NewQueueImport(a.db, a.hub, a.importer, arti
 <a id="progress-and-failures"></a>
 ### 进度与失败的行
 
-在 `routes.go` 中注册路由。`Progress` 用 [`rest.RegisterSSE`](sse.md#json-api) 注册，事件表描述推送的数据：
+在 `routes.go` 中注册路由。`Progress` 用 [`rest.RegisterSSE`](sse.md) 注册，事件表描述推送的数据：
 
 ```go
 queueImport := NewQueueImport(db, hub, importer, NewImport(NewCreate(db)))
@@ -594,7 +594,7 @@ data: {"id":"0193e7a2-7c1e-7b4a-9d2f-3c5a1e8b6f10","kind":"articles.import","sta
 
 进度是状态而不是事件：广播只提醒连接重新读取，连接（包括断线重连）时先推送一次当前进度，所以中间漏掉的广播没有影响，也不需要按 `Last-Event-ID` 补发，与[通知角标](notifications.md#realtime)的做法相同。worker 和 SSE 连接在不同的实例上时，广播由 Hub 的后端送达，见[广播](broadcasting.md)。每次读取都经过 `Get`，只有发起导入的人能看到进度，其他人收到 `operation.ErrNotFound`。
 
-浏览器的 `EventSource` 不能设置 `Authorization` 请求头，使用 Bearer 令牌的前端用 `fetch` 读取事件流，见 [JSON API](sse.md#json-api)。
+浏览器的 `EventSource` 不能设置 `Authorization` 请求头，使用 Bearer 令牌的前端用 `fetch` 读取事件流，见[客户端代码的事件流](clients.md#event-streams)。
 
 `WriteFailures` 写出的表格是原来的表头加上一列“错误”，每一行是原始单元格和这一行的错误，例如 `标题: 不能为空`。用户在这个文件里改正后可以直接重新导入，多出的错误列会被忽略。需要在页面上直接显示失败的行时，用 `Failures` 读取前几行。
 

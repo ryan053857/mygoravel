@@ -21,12 +21,10 @@ type connection struct {
 
 type connectionKey struct{}
 
-// connecting 识别连接的主体：认证中间件写入的主体优先，其次是 SDK 传入的 token，都没有时是匿名连接。
+// connecting 识别连接的主体：SDK 传入 token 时由 Options.Authenticate 校验，没有 token 时是匿名连接。
 func (rt *Realtime) connecting(ctx context.Context, e centrifuge.ConnectEvent) (centrifuge.ConnectReply, error) {
 	conn := &connection{}
-	if sub, ok := identity.FromContext(ctx); ok && sub.ID != "" {
-		conn.sub = sub
-	} else if e.Token != "" {
+	if e.Token != "" {
 		sub, err := identity.Establish(ctx, rt.authenticator(e.Token), rt.opts.Accounts.Resolve)
 		switch {
 		case identity.Failed(err):
@@ -62,12 +60,7 @@ func (rt *Realtime) authenticator(token string) identity.Authenticator {
 func (rt *Realtime) check(ctx context.Context, conn *connection) *centrifuge.Disconnect {
 	ctx, cancel := context.WithTimeout(ctx, credentialTimeout)
 	defer cancel()
-	var err error
-	if conn.token == "" {
-		err = httpx.CheckCredential(ctx)
-	} else {
-		err = identity.Reestablish(ctx, conn.sub, rt.authenticator(conn.token), rt.opts.Accounts.Resolve)
-	}
+	err := identity.Reestablish(ctx, conn.sub, rt.authenticator(conn.token), rt.opts.Accounts.Resolve)
 	switch {
 	case err == nil, identity.Failed(err):
 		return nil

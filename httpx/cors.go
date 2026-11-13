@@ -71,7 +71,7 @@ func validOrigin(o string) error {
 }
 
 // CORS 允许其他来源的网页跨域调用 JSON API，例如独立部署的单页应用、桌面或移动端的 WebView。
-// 只安装在 API 的路由组上：页面路由使用会话 Cookie，不应开放跨域。cfg 不合法时 panic。
+// 只安装在 API 的路由组上，页面不开放跨域。cfg 不合法时 panic。
 //
 // API 只用 Bearer token 认证，不使用 Cookie，因此 CORS 从不允许携带凭据
 // （Access-Control-Allow-Credentials）：其他网站的网页拿不到用户的 token，允许任何来源（*）也是安全的。

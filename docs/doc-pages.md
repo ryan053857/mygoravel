@@ -14,7 +14,7 @@
 <a id="introduction"></a>
 ## 简介
 
-产品的帮助中心、运营后台的操作手册，内容都是一篇篇说明文字。`web/docs` 把一个目录中的 Markdown 文件变成带导航的文档页：
+产品的帮助中心、团队内部的操作手册，内容都是一篇篇说明文字。`web/docs` 把一个目录中的 Markdown 文件变成带导航的文档页：
 
 - 左侧是按目录生成的侧边栏，正文右侧是本页目录；
 - 顶栏有站内搜索；
@@ -102,12 +102,12 @@ site, err := docs.New(docs.Options{
 if err != nil {
     return err
 }
-site.Register(pages.Routes(router, web.Public))
+site.Register(pages.Routes(router))
 ```
 
 `docs.New` 读取并渲染全部文档。front matter 不合法、目录超过两层、两篇文档的地址相同、链接指向不存在的文件时返回错误，应用不会带着坏链接启动。之后每个请求只是套用页面模板。
 
-访问策略由 `pages.Routes` 决定。公开的帮助中心用 `web.Public`，只给编辑看的操作手册换成 `web.Require("articles:write")`。文档页用这组 `Pages` 的主题和错误页。
+文档页用这组 `Pages` 的主题和错误页。帮助中心是公开的；只给内部人员看的操作手册，把认证中间件装在传入的路由上，例如 `site.Register(pages.Routes(router.With(staffOnly)))`，或者只在内网开放。
 
 <a id="markdown"></a>
 ## Markdown 写法
@@ -179,4 +179,3 @@ site, err := docs.New(opts)
 
 - 多种语言的文档各自是一个 `docs.Site`，例如 `/help` 和 `/en/help`。
 - 侧边栏和本页目录的文字（「本页目录」「上一页」等）随请求的语言变化，正文不变。
-- 文档页使用会话中间件，但没有写会话的数据，所以不会给匿名访客设置 cookie。

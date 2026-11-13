@@ -9,7 +9,7 @@ import (
 
 // CredentialCheck 在长连接期间重新校验请求的凭据。
 //
-// 凭据已经失效（会话或 token 被撤销、用户被停用、失去所需的 scope）时返回 4xx 类错误，
+// 凭据已经失效（token 被撤销、用户被停用、失去所需的 scope）时返回 4xx 类错误，
 // 例如 errorx.Unauthenticated、errorx.PermissionDenied；暂时无法判断（例如数据库故障）时
 // 返回 5xx 类错误，连接保持，下次再查。
 type CredentialCheck func(ctx context.Context) error
@@ -34,7 +34,7 @@ type CredentialWatcher interface {
 type watcherKey struct{}
 
 // WithCredentialWatcher 返回带有 w 的 context。认证中间件在安装 CredentialCheck 的同时调用它，
-// rest.Options.Credentials 和 web.Options.Credentials 设置后自动安装。
+// rest.Options.Credentials 设置后自动安装。
 // SSE 开始时用它关注请求的主体，收到信号就立即执行 CheckCredential。
 func WithCredentialWatcher(ctx context.Context, w CredentialWatcher) context.Context {
 	return context.WithValue(ctx, watcherKey{}, w)

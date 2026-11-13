@@ -3,8 +3,8 @@
 //
 // 三种入口：
 //
-//   - 页面：Start 生成跳转地址和 Flow，Flow 存进会话；回调中 Finish 换取 token 并读取账号。
-//   - 单页应用和 App 自己完成跳转：把授权码交给 API，Exchange 换取 token 并读取账号。
+//   - 单页应用：API 用 Start 生成跳转地址和 Flow，单页应用保存 Flow；回调后把它和回调参数交给 API，Finish 换取 token 并读取账号。
+//   - App 自己完成跳转：把授权码交给 API，Exchange 换取 token 并读取账号。
 //   - App 原生登录（Google 登录、Sign in with Apple 等 SDK 直接返回 ID token）：IDToken 校验，只适用于 OpenID Connect。
 package oauth
 
@@ -42,9 +42,9 @@ type Config struct {
 	// ClientID、ClientSecret 是登记应用时得到的凭据。
 	ClientID     string
 	ClientSecret string
-	// RedirectURL 是页面登录（Start、Finish）的回调地址。
+	// RedirectURL 是 Start、Finish 的回调地址，通常是单页应用中的回调页。
 	RedirectURL string
-	// ClientRedirectURLs 是单页应用和 App 自己发起授权时登记的回调地址，Exchange 只接受这些地址。
+	// ClientRedirectURLs 是 App 自己发起授权时登记的回调地址，Exchange 只接受这些地址。
 	ClientRedirectURLs []string
 	// Audiences 是 ID token 可以接受的受众（aud），默认只有 ClientID。
 	// App 原生登录时，SDK 签发的 ID token 的受众是 App 自己的 client ID，例如 iOS、Android 各一个，加在这里。
@@ -140,7 +140,7 @@ type Flow struct {
 	Verifier string
 }
 
-// String 把 Flow 编码为一个字符串，便于存进会话或 cookie；用 ParseFlow 还原。
+// String 把 Flow 编码为一个字符串，交给单页应用保存；用 ParseFlow 还原。
 func (f Flow) String() string { return f.State + "." + f.Nonce + "." + f.Verifier }
 
 // ParseFlow 还原 Flow.String 的结果，格式不对时返回 ErrInvalid。
@@ -152,7 +152,7 @@ func ParseFlow(s string) (Flow, error) {
 	return Flow{State: parts[0], Nonce: parts[1], Verifier: parts[2]}, nil
 }
 
-// Start 开始页面登录：返回跳转到提供方的地址，以及要保存到回调的 Flow。
+// Start 开始登录：返回跳转到提供方的地址，以及要保存到回调的 Flow。
 func (p *Provider) Start() (string, Flow) {
 	f := Flow{State: rand.Text(), Nonce: rand.Text()}
 	var opts []oauth2.AuthCodeOption
@@ -169,7 +169,7 @@ func (p *Provider) Start() (string, Flow) {
 	return p.oauth2.AuthCodeURL(f.State, opts...), f
 }
 
-// Finish 处理页面登录的回调：比较 state，用授权码和 PKCE verifier 换取 token，读取第三方账号。
+// Finish 处理回调：比较 state，用授权码和 PKCE verifier 换取 token，读取第三方账号。
 // params 是回调的查询参数；FormPost 时是表单（r.PostForm）。用户取消授权时返回 ErrDenied。
 func (p *Provider) Finish(ctx context.Context, f Flow, params url.Values) (login.External, error) {
 	if f.State == "" || params.Get("state") != f.State {
@@ -181,7 +181,7 @@ func (p *Provider) Finish(ctx context.Context, f Flow, params url.Values) (login
 	return p.exchange(ctx, p.oauth2, params.Get("code"), f.Verifier, f.Nonce)
 }
 
-// Grant 是单页应用或 App 自己完成授权后交给 API 的内容。
+// Grant 是 App 自己完成授权后交给 API 的内容。
 type Grant struct {
 	Code string
 	// Verifier 是客户端生成的 PKCE 原值。客户端没有 client secret，PKCE 是它唯一的保护，所以必填（NoPKCE 时除外）。

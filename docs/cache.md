@@ -134,7 +134,7 @@ func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID
 
 缓存后端不可用时每个请求都会出错，所以这些日志每个 `Cache` 每分钟最多一条，附上期间省略的条数。出错的次数用[指标](telemetry.md)观察。
 
-这套降级策略只适用于可丢弃的查询缓存。Memcached 只用来放这类数据：会话在数据库中，限流计数和锁在 [Redis](redis.md) 中。
+这套降级策略只适用于可丢弃的查询缓存。Memcached 只用来放这类数据：token 在数据库中，限流计数和锁在 [Redis](redis.md) 中。
 
 <a id="hot-keys"></a>
 ### 热点、集中过期与不存在的数据

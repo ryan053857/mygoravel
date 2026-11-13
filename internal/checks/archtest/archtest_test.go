@@ -71,9 +71,7 @@ var rules = map[string]rule{
 
 	"httpx":                {layerEntry, []string{"acquire", "errorx", "form", "i18n", "identity", "logging", "ratelimit"}},
 	"httpx/rest/clientgen": {layerEntry, []string{"command", "errorx", "httpx", "page"}},
-	"session":              {layerEntry, []string{"errorx", "identity"}},
-	"web":                  {layerEntry, []string{"errorx", "form", "httpx", "i18n", "identity", "logging", "session"}},
-	"web/upload":           {layerEntry, []string{"errorx", "filesystem", "httpx", "identity", "web"}},
+	"web":                  {layerEntry, []string{"errorx", "form", "httpx", "i18n", "logging"}},
 	"realtime":             {layerEntry, []string{"broadcast", "httpx", "identity", "logging"}},
 	"mcpx":                 {layerEntry, []string{"errorx", "httpx", "identity", "logging"}},
 	"mcpx/mcpxtest":        {layerEntry, []string{"identity", "mcpx"}},
@@ -266,13 +264,9 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/mail", module + "/i18n", true},
 		{module + "/mail", module + "/database", false},
 		{module + "/httpx", module + "/mail", false},
-		{module + "/session", module + "/httpx/rest", false},
-		{module + "/session", module + "/web", false},
-		{module + "/web", module + "/session", true},
 		{module + "/web", module + "/httpx", true},
 		{module + "/httpx", module + "/web", false},
-		{module + "/httpx", module + "/session", false},
-		{module + "/session", module + "/database", false},
+		{module + "/web", module + "/database", false},
 		{module + "/apitoken", module + "/httpx/rest", false},
 		{module + "/apitoken", module + "/database", false},
 		{module + "/authz", module + "/httpx/rest", false},
@@ -295,7 +289,7 @@ func TestDependencyRules(t *testing.T) {
 		{module + "/ai/openai", module + "/ai", true},
 		{module + "/ai", module + "/httpx", false},
 		{module + "/web", module + "/filesystem", false},
-		{module + "/web/upload", module + "/filesystem", true},
+		{module + "/web/docs", module + "/web", true},
 		{module + "/web/ui", module + "/web", true},
 		// 引用只能指向同层或更低层。
 		{module + "/errorx", module + "/database", false},
@@ -419,9 +413,9 @@ func TestMailCoreDoesNotLinkDrivers(t *testing.T) {
 	}
 }
 
-// TestAPIDoesNotLinkTempl 确保 JSON API 与会话存储不会链接 templ，templ 只由 web 引入。
+// TestAPIDoesNotLinkTempl 确保 JSON API 与认证、授权不会链接 templ，templ 只由 web 引入。
 func TestAPIDoesNotLinkTempl(t *testing.T) {
-	for _, pkg := range []string{module + "/httpx", module + "/httpx/rest", module + "/session", module + "/apitoken", module + "/authz"} {
+	for _, pkg := range []string{module + "/httpx", module + "/httpx/rest", module + "/apitoken", module + "/authz", module + "/oauthserver"} {
 		out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 		if err != nil {
 			t.Fatalf("go list: %v\n%s", err, out)

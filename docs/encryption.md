@@ -118,11 +118,11 @@ func (h *Handlers) VerifyEmail(w http.ResponseWriter, r *http.Request) error {
     if err != nil {
         return err
     }
-    web.Flash(r.Context(), web.Message{Type: "success", Title: "邮箱已验证"})
-    web.Redirect(w, r, "/account")
-    return nil
+    return web.Render(w, r, http.StatusOK, views.EmailVerified()) // 「邮箱已验证」和回到应用的链接
 }
 ```
+
+验证链接从邮件中打开，不需要登录，所以它是一个[公开页面](views.md)。
 
 `VerifyURL` 只证明这个链接是本站发出的。链接发出之后数据可能变了，action 仍要按当前数据判断：上面的 `verifyEmail` 要确认用户当前的邮箱仍是链接中的 `email`，用户在此期间又改过邮箱，旧链接就不再生效。
 

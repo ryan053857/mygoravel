@@ -422,7 +422,7 @@ publish := article.NewPublish(a.db, a.emails)
 
 - **刚写入的数据可能还读不到。** 写完立即要读的地方用主库，例如修改后返回最新内容、标记已读后刷新未读数。
 - **授权检查和事务中的读取用主库**，见[在事务中检查](authorization.md#checking-in-transactions)。
-- **框架的组件都用主库**：权限、token、会话、功能开关、队列。`search.Search` 这类只读取的函数接收 `db` 参数，可以传入副本。
+- **框架的组件都用主库**：权限、token、功能开关、队列。`search.Search` 这类只读取的函数接收 `db` 参数，可以传入副本。
 - 副本上运行很久的查询可能因为与复制冲突被取消，报表类的长查询可以在副本上开启 `hot_standby_feedback`。监控副本的复制延迟（`pg_stat_replication.replay_lag`）。
 
 测试中用 `dbtest.Replica(t, db)` 代替副本：它连接同一个测试库，没有延迟，写入时失败，能发现误把写操作交给副本的代码。

@@ -11,7 +11,6 @@ import (
 	"github.com/ryan053857/mygoravel/database/dbtest"
 	"github.com/ryan053857/mygoravel/httpx/rest"
 	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/web"
 )
 
 var catalog = authz.Catalog{
@@ -22,11 +21,8 @@ var catalog = authz.Catalog{
 	{Name: "platform:tenants", Description: "管理租户"},
 }
 
-// Resolve 是一个 identity.Resolver，可以直接作为 rest、web 的 Options.Accounts 中一套账号的 Resolver。
-var (
-	_ = rest.Options{Accounts: identity.Accounts{"user": (*authz.Store)(nil).Resolve}}
-	_ = web.Options{Accounts: identity.Accounts{"user": (*authz.Store)(nil).Resolve}}
-)
+// Resolve 是一个 identity.Resolver，可以直接作为 rest.Options.Accounts 中一套账号的 Resolver。
+var _ = rest.Options{Accounts: identity.Accounts{"user": (*authz.Store)(nil).Resolve}}
 
 func newStore(t *testing.T) *authz.Store {
 	t.Helper()

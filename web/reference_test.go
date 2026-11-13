@@ -20,7 +20,7 @@ func TestServerErrorToastCarriesRequestID(t *testing.T) {
 	p := web.New(o)
 	router := chi.NewRouter()
 	router.Use(httpx.AssignRequestID(httpx.DefaultRequestIDConfig()))
-	routes := p.Routes(router, web.Public)
+	routes := p.Routes(router)
 	routes.Post("/internal", func(http.ResponseWriter, *http.Request) error { return errorx.Define(errorx.Internal, "x.y").New() })
 	routes.Post("/conflict", func(http.ResponseWriter, *http.Request) error { return errLocked.New() })
 

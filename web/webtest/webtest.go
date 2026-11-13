@@ -1,14 +1,12 @@
-// Package webtest 测试服务端渲染的页面：像浏览器一样向应用的路由发送请求，保存会话 cookie，
-// 不走登录表单就能以某个主体登录，并读取 htmx 的响应头（跳转、提示、事件）。
+// Package webtest 测试服务端渲染的页面：像浏览器一样向应用的路由发送请求，保存响应设置的 cookie，
+// 并读取 htmx 的响应头（跳转、提示、事件）。
 //
 //	c := webtest.New(t, router)
-//	c.Login(pages, identity.Subject{Type: "user", ID: "alice", Permissions: []string{"articles"}})
-//	res := c.Put("/admin/articles/"+id, url.Values{"title": {""}}, webtest.HTMX)
+//	res := c.Post("/subscribe", url.Values{"email": {"bad"}}, webtest.HTMX)
 //	if res.Code != http.StatusUnprocessableEntity { … }
 package webtest
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -18,16 +16,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ryan053857/mygoravel/identity"
-	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 )
 
-// Origin 是请求的地址。使用 https，会话 cookie 带 Secure 时同样能发送。
+// Origin 是请求的地址。使用 https，带 Secure 的 cookie 同样能发送。
 const Origin = "https://example.com"
 
-// Client 向 h 发送请求，不监听端口。它像浏览器一样保存响应设置的 cookie，之后的请求带上它们，
-// 所以登录状态和会话中的提示可以延续到下一个请求。不能并发使用。
+// Client 向 h 发送请求，不监听端口。它像浏览器一样保存响应设置的 cookie，之后的请求带上它们。不能并发使用。
 type Client struct {
 	t   testing.TB
 	h   http.Handler
@@ -41,33 +36,6 @@ func New(t testing.TB, h http.Handler) *Client {
 		t.Fatal(err)
 	}
 	return &Client{t: t, h: h, jar: jar}
-}
-
-var origin, _ = url.Parse(Origin)
-
-// Login 把 sub 登录进 pages 的会话，之后的请求以 sub 的身份访问 pages 的路由，与 Pages.Login 的结果相同，
-// 但不需要经过应用的登录页。一个应用有多组 Pages 时，每组分别登录。
-func (c *Client) Login(pages *web.Pages, sub identity.Subject) {
-	c.t.Helper()
-	sm := pages.Sessions()
-	if sm == nil {
-		c.t.Fatal("webtest: Login needs Pages created with Options.Sessions")
-	}
-	ctx, err := sm.Load(context.Background(), "")
-	if err != nil {
-		c.t.Fatal(err)
-	}
-	if err := session.Login(ctx, sm, sub, session.Device{IP: "192.0.2.1", UserAgent: "webtest"}); err != nil {
-		c.t.Fatal(err)
-	}
-	token, expiry, err := sm.Commit(ctx)
-	if err != nil {
-		c.t.Fatal(err)
-	}
-	c.jar.SetCookies(origin, []*http.Cookie{{
-		Name: sm.Cookie.Name, Value: token, Path: sm.Cookie.Path, Domain: sm.Cookie.Domain,
-		Secure: sm.Cookie.Secure, HttpOnly: true, Expires: expiry,
-	}})
 }
 
 // Option 修改要发送的请求。
@@ -170,9 +138,8 @@ func (r *Response) Redirect() string {
 // PushURL 返回 web.PushURL 设置的地址（HX-Push-Url）。
 func (r *Response) PushURL() string { return r.Header().Get("HX-Push-Url") }
 
-// Event 返回 HX-Trigger 中事件 name 的 detail（web.Trigger 的第三个参数），以及这个事件是否存在。
+// Event 返回 HX-Trigger 中事件 name 的 detail，以及这个事件是否存在。
 // 事件的值不是对象时，detail 的 value 是这个值。
-// 例如 web.CloseDialog 触发 web.DialogCloseEvent，detail 中的 id 是对话框的 ID。
 func (r *Response) Event(name string) (map[string]any, bool) {
 	r.t.Helper()
 	raw := r.Header().Get("HX-Trigger")
@@ -201,13 +168,12 @@ func (r *Response) Event(name string) (map[string]any, bool) {
 		_ = json.Unmarshal(v, &value)
 		return map[string]any{"value": value}, true // 其他写法（例如 {"saved": "文章"}）的值
 	}
-	delete(detail, "target") // web.Trigger 加上的派发位置
+	delete(detail, "target") // web 加上的派发位置
 	return detail, true
 }
 
-// Flashes 返回随这个 htmx 响应送达的提示：web.Flash 存入的，以及局部请求的错误（Type 为 error）。
-// 整页响应的提示由页面渲染，跳转响应的提示留到下一个请求。
-func (r *Response) Flashes() []web.Message {
+// Messages 返回随这个 htmx 响应送达的提示（web.FlashEvent），即局部请求的错误，Type 为 error。
+func (r *Response) Messages() []web.Message {
 	r.t.Helper()
 	detail, ok := r.Event(web.FlashEvent)
 	if !ok {

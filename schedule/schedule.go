@@ -386,7 +386,7 @@ func taskContext(ctx context.Context, t *task) context.Context {
 }
 
 // Cleanup 把 Cleanup(ctx, limit) 形式的清理函数包装成任务：反复调用，直到一次删除的数量少于 limit。
-// 锁、限流、会话、文件存储的清理方法都是这个形式。
+// 锁、API 令牌、文件存储的清理方法都是这个形式。
 func Cleanup(fn func(ctx context.Context, limit int) (int, error), limit int) func(ctx context.Context) error {
 	if limit <= 0 {
 		panic(fmt.Sprintf("schedule: cleanup limit must be positive, got %d", limit))

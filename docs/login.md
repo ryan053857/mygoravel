@@ -22,7 +22,7 @@
 <a id="introduction"></a>
 ## 简介
 
-`login` 包回答“这个人是谁”：用登录标识和密码登录、用验证码登录或注册、找回密码、绑定和更换邮箱或手机号。得到 `identity.Subject` 之后，由入口签发凭据：页面调用 [`pages.Login`](views.md#login)，API 调用 [`tokens.Login`](api-tokens.md#login-and-logout) 或 [`JWT.Login`](api-tokens.md#jwt)。
+`login` 包回答“这个人是谁”：用登录标识和密码登录、用验证码登录或注册、找回密码、绑定和更换邮箱或手机号。得到 `identity.Subject` 之后，由 API 签发凭据：[`tokens.Login`](api-tokens.md#login-and-logout) 或 [`JWT.Login`](api-tokens.md#jwt)。单页应用、App 和后台都通过这些接口登录。
 
 框架不拥有账号表。博客的 `users` 表只保存业务字段，不需要 `email`、`password_hash` 这类列；登录标识、密码哈希和验证码保存在框架的 `auth_*` 表中，按 [`identity.Ref`](authentication.md#key-concepts) 引用账号。一个账号可以有多个邮箱、手机号，也可以没有密码只用验证码登录。
 
@@ -111,7 +111,7 @@ if err != nil {
 plain, err := tokens.Login(ctx, out.Subject, device)
 ```
 
-完整的接口见 [API 令牌的登录与登出](api-tokens.md#login-and-logout)，页面中的写法见[页面登录](views.md#login)。邮箱不存在、没有设置密码、密码错误都返回 `login.ErrInvalidCredentials`，响应 `401`。连续失败太多次时返回 `ratelimit.ErrExceeded`，响应 `429`，见[限流与防探测](#limits)。
+完整的接口见 [API 令牌的登录与登出](api-tokens.md#login-and-logout)。邮箱不存在、没有设置密码、密码错误都返回 `login.ErrInvalidCredentials`，响应 `401`。连续失败太多次时返回 `ratelimit.ErrExceeded`，响应 `429`，见[限流与防探测](#limits)。
 
 允许用哪些标识配合密码登录由 `Options.PasswordKinds` 决定，默认是邮箱、手机号和用户名。登录成功时，如果密码哈希是用旧的算法或参数生成的，会按当前配置[重新哈希](hashing.md#rehashing)。
 
@@ -184,7 +184,7 @@ if _, err := tokens.RevokeSubject(ctx, who); err != nil {
 }
 ```
 
-新密码按 `Options.PasswordPolicy` 检查，默认要求 8 到 128 个字符、首尾没有空白，不符合时返回 `login.ErrWeakPassword`。接收验证码的邮箱同时标为已验证，它的登录失败计数清零。找回密码后通常撤销这个账号的全部会话和 token，见[撤销令牌](api-tokens.md#revoking-tokens)。`ResetPassword` 不登录，用户接着用新密码登录，启用了[二次验证](#two-factor)的账号仍然要通过二次验证，所以只拿到邮箱不能绕过它。没有设置过密码的账号同样可以用这个流程设置密码。
+新密码按 `Options.PasswordPolicy` 检查，默认要求 8 到 128 个字符、首尾没有空白，不符合时返回 `login.ErrWeakPassword`。接收验证码的邮箱同时标为已验证，它的登录失败计数清零。找回密码后通常撤销这个账号的全部 token，见[撤销令牌](api-tokens.md#revoking-tokens)。`ResetPassword` 不登录，用户接着用新密码登录，启用了[二次验证](#two-factor)的账号仍然要通过二次验证，所以只拿到邮箱不能绕过它。没有设置过密码的账号同样可以用这个流程设置密码。
 
 <a id="managing"></a>
 ## 管理登录方式
@@ -255,7 +255,7 @@ plain, err := tokens.Login(ctx, out.Subject, device)
 
 `Pending` 15 分钟内有效，最多输错 5 次，之后要重新登录。同一个验证码不能用两次；验证器与服务器的时钟允许相差 30 秒。`DisableTwoFactor` 关闭二次验证，之前先[确认身份](#confirming)。
 
-运营后台通常要求员工都启用二次验证。这由应用决定：员工登录后，`TwoFactorEnabled` 为 `false` 时只允许访问启用二次验证的页面。
+运营后台通常要求员工都启用二次验证。这由应用决定，写法见[完整示例](account-examples.md#editor-api)：员工登录后，`TwoFactorEnabled` 为 `false` 时只允许调用启用二次验证的接口。
 
 <a id="passkeys"></a>
 ## Passkey
@@ -334,32 +334,7 @@ requestID, err := users.SendConfirmCode(ctx, sub.Ref(), login.Phone(phone))
 err = users.ConfirmCode(ctx, sub.Ref(), in.Body.RequestID, in.Body.Code)
 ```
 
-JSON API 让客户端在这类请求中带上密码或验证码，处理器先确认，完整的写法见[读者注销账号](account-examples.md#reader-api)。页面则把这类路由声明为 `Confirmed`，在一段时间内确认过身份的会话直接放行：
-
-```go
-pages := web.New(web.Options{
-    Login:   "/login",
-    Confirm: "/confirm",
-    // ...
-})
-pages.Routes(r, web.Require().Confirmed(15*time.Minute)).Post("/account/delete", h.Delete)
-```
-
-登录本身算一次确认。超过 15 分钟时，请求被带到 `Options.Confirm`，`next` 参数带上原地址。确认页校验密码（或验证码）后调用 `pages.Confirm`，再跳回原地址：
-
-```go
-func (h *Handlers) Confirm(w http.ResponseWriter, r *http.Request) error {
-    sub, _ := identity.FromContext(r.Context())
-    if err := h.users.Confirm(r.Context(), sub.Ref(), r.PostFormValue("password")); err != nil {
-        return err
-    }
-    h.pages.Confirm(r.Context())
-    web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/account"))
-    return nil
-}
-```
-
-确认页本身用 `web.Require()` 保护。
+客户端在这类请求中带上密码或验证码，处理器先确认，再执行操作，完整的写法见[读者注销账号](account-examples.md#reader-api)。
 
 <a id="admin-accounts"></a>
 ## 后台创建账号
@@ -379,7 +354,7 @@ _, err := a.staff.SendCode(ctx, login.Reset, login.Email(in.Email))
 <a id="forget"></a>
 ## 注销账号
 
-`Forget` 删除账号的全部登录标识、密码、二次验证和验证码。在注销账号的事务中与删除账号行一起调用，再撤销会话和 token：
+`Forget` 删除账号的全部登录标识、密码、二次验证和验证码。在注销账号的事务中与删除账号行一起调用，再撤销 token：
 
 ```go
 err := database.RunInTx(ctx, a.db, nil, func(ctx context.Context, tx database.Tx) error {
@@ -426,7 +401,7 @@ if len(known) > 0 && !slices.ContainsFunc(known, func(t apitoken.Token) bool { r
 }
 ```
 
-页面用[会话存储](session.md#listing-sessions)的 `List` 做同样的判断。refresh token 被另一方使用时，框架撤销这次登录并调用 [`OnReuse`](api-tokens.md#jwt)，在那里提醒用户。
+refresh token 被另一方使用时，框架撤销这次登录并调用 [`OnReuse`](api-tokens.md#jwt)，在那里提醒用户。
 
 <a id="limits"></a>
 ## 限流与防探测

@@ -34,25 +34,23 @@ type Options struct {
 	// 连接返回 109（token 已过期），SDK 调用 getToken 换新的再连；返回 5xx 类错误表示暂时无法判断，客户端稍后重连。
 	// 连接期间用同一个 token 定期重新调用，token 被撤销后连接结束。
 	//
-	// nil 时带 token 的连接一律拒绝。请求已经由认证中间件识别出主体时（例如同源页面的会话），不使用 token。
+	// nil 时带 token 的连接一律拒绝。
 	Authenticate func(ctx context.Context, token string) (identity.Subject, error)
 	// Accounts 是用 token 连接时接受的账号体系，以及每一种的 Resolver：按 Authenticate 给出的主体的 Type
 	// 调用对应的 Resolver，得到这个连接的主体，例如按 identity.TenantFromContext 加载用户在租户中的权限，
 	// 通常与 rest.Options.Accounts 相同；Type 不在其中的 token 被拒绝，Resolver 为 nil 时直接使用 Authenticate 给出的主体。
 	// Resolver 返回 errorx.Unauthenticated 类错误或 ID 为空的主体表示主体已失效，其他 4xx 类错误同样拒绝连接；
 	// 连接期间与 Authenticate 一起定期重新调用，用户被停用或移出租户后连接结束。
-	// 认证中间件识别出的主体（例如同源页面的会话）已经由 web.Options.Accounts 处理，不再经过它。
 	//
 	// 设置了 Authenticate 时必须设置；名称不合法时 New panic。
 	Accounts identity.Accounts
 	// Tenant 从连接请求中取出它所在的租户，例如路径参数 chi.URLParam(r, "tenant")、子域名或请求头，
 	// 结果写入 identity.WithTenant：Resolver 据此加载权限，绑定了其他租户的 token 被拒绝。
-	// 与 rest.Options.Tenant、web.Options.Tenant 的作用相同。nil 时使用外层中间件已经写入的租户
-	// （页面路由由 web.Options.Tenant 写入），都没有时是平台本身（""）。
+	// 与 rest.Options.Tenant 的作用相同。nil 时使用外层中间件已经写入的租户，没有时是平台本身（""）。
 	Tenant func(r *http.Request) string
 	// Credentials 让连接在收到复查信号时立即重新校验凭据，撤销 token、退出登录后连接随即结束；
 	// nil 时只按 30 秒的间隔定期校验。通常是 broadcast.NewCredentials 的返回值，
-	// 与 rest.Options.Credentials、web.Options.Credentials 相同。
+	// 与 rest.Options.Credentials 相同。
 	Credentials httpx.CredentialWatcher
 	// TrustedOrigins 是允许跨站建立连接的来源，例如 https://app.example.com。
 	// 浏览器发起的连接默认只接受同源请求，没有 Origin 请求头的客户端（移动端、服务器）不受限制。
@@ -203,8 +201,7 @@ func (rt *Realtime) Unsubscribe(ref identity.Ref, channel string) error {
 
 // Handler 返回接受 WebSocket 连接的处理器，客户端 SDK 连接到它所在的地址。
 //
-// 把它放在认证中间件之后时（例如 web 的页面路由），连接使用中间件识别出的主体；
-// 否则由 Options.Authenticate 校验 SDK 传入的 token。两者都没有的连接是匿名的，只能订阅 Public 频道。
+// Options.Authenticate 校验 SDK 传入的 token；没有 token 的连接是匿名的，只能订阅 Public 频道。
 // 连接不受 Timeout 中间件的超时和 http.Server.WriteTimeout 影响。
 func (rt *Realtime) Handler() http.Handler {
 	ws := centrifuge.NewWebsocketHandler(rt.node, centrifuge.WebsocketConfig{CheckOrigin: rt.checkOrigin})

@@ -139,7 +139,7 @@ func TestCreateRejectsBadRequests(t *testing.T) {
 <a id="page-tests"></a>
 ## 页面测试
 
-[服务端渲染的页面](views.md)用 `web/webtest` 测试。`webtest.Client` 像浏览器一样向页面路由发送请求，保存会话 cookie，`Login` 不经过登录页就能以某个主体登录。下面是 `internal/article/articleweb/update_test.go`，它测试[表单](forms.md#handling-submissions)一章的修改文章：
+[服务端渲染的页面](views.md)用 `web/webtest` 测试。`webtest.Client` 像浏览器一样向页面路由发送请求，保存响应设置的 cookie，并读取 htmx 的响应头。下面是 `internal/article/articleweb/pages_test.go`，它测试[视图](views.md)一章的文章页和列表页：
 
 ```go
 package articleweb_test
@@ -147,11 +147,9 @@ package articleweb_test
 import (
     "context"
     "net/http"
-    "net/url"
     "strings"
     "testing"
 
-    "github.com/alexedwards/scs/v2/memstore"
     "github.com/go-chi/chi/v5"
 
     "example.com/blog/internal/article"
@@ -160,67 +158,57 @@ import (
     "example.com/blog/migrations"
     "github.com/ryan053857/mygoravel/database/dbtest"
     "github.com/ryan053857/mygoravel/identity"
-    "github.com/ryan053857/mygoravel/session"
     "github.com/ryan053857/mygoravel/web"
     "github.com/ryan053857/mygoravel/web/ui"
     "github.com/ryan053857/mygoravel/web/webtest"
 )
 
-func TestUpdate(t *testing.T) {
+func TestPages(t *testing.T) {
     db := dbtest.Open(t, migrations.FS)
     alice := identity.Subject{Type: user.Type, ID: "alice", Permissions: []string{"articles"}}
-    item, err := article.NewCreate(db).Handle(context.Background(), alice, article.Changes{Title: "Hello", Slug: "hello"})
+    ctx := context.Background()
+    draft, err := article.NewCreate(db).Handle(ctx, alice, article.Changes{Title: "Draft", Slug: "draft"})
     if err != nil {
         t.Fatal(err)
     }
+    hello, err := article.NewCreate(db).Handle(ctx, alice, article.Changes{Title: "Hello", Slug: "hello"})
+    if err != nil {
+        t.Fatal(err)
+    }
+    if _, err := article.NewPublish(db).Handle(ctx, alice, hello.ID); err != nil {
+        t.Fatal(err)
+    }
 
-    var cfg session.Config
-    cfg.SetDefaults()
-    pages := web.New(web.Options{
-        Sessions:  session.New(cfg, memstore.New()),
-        Login:     "/login",
-        Accounts:  identity.Accounts{user.Type: nil},
-        ErrorPage: ui.ErrorPage,
-    })
+    pages := web.New(web.Options{ErrorPage: ui.ErrorPage})
     router := chi.NewRouter()
     articleweb.Register(router, pages, db)
     c := webtest.New(t, router)
-    path := "/admin/articles/" + item.ID.String()
 
-    // 未登录时跳到登录页
-    if res := c.Put(path, url.Values{"title": {"Hi"}}, webtest.HTMX); !strings.HasPrefix(res.Redirect(), "/login?next=") {
-        t.Fatalf("anonymous: %d %q", res.Code, res.Redirect())
+    // 已发布的文章可以访问，草稿对访客是 404
+    if res := c.Get("/articles/hello"); res.Code != http.StatusOK || !strings.Contains(res.Text(), "<h1>Hello</h1>") {
+        t.Fatalf("published: %d", res.Code)
     }
-
-    c.Login(pages, alice)
-    // 验证失败：422，表单回显错误
-    res := c.Put(path, url.Values{"title": {""}, "slug": {"hello"}}, webtest.HTMX)
-    if res.Code != http.StatusUnprocessableEntity || !strings.Contains(res.Text(), `aria-invalid="true"`) {
-        t.Fatalf("invalid: %d %s", res.Code, res.Text())
+    if res := c.Get("/articles/" + draft.Slug); res.Code != http.StatusNotFound {
+        t.Fatalf("draft: %d", res.Code)
     }
-    // 保存后跳到列表页，提示由列表页显示
-    res = c.Put(path, url.Values{"title": {"Hello World"}, "slug": {"hello"}}, webtest.HTMX)
-    if res.Redirect() != "/admin/articles" {
-        t.Fatalf("saved: %d %q", res.Code, res.Redirect())
-    }
-    if page := c.Get(res.Redirect()); !strings.Contains(page.Text(), "文章已保存") {
-        t.Fatal("flash not shown")
+    // 列表的局部请求只返回列表区域，并把地址栏改为这个状态
+    res := c.Get("/articles?q=hel&page=1", webtest.HTMX)
+    if !strings.Contains(res.Text(), "Hello") || res.PushURL() != "/articles?q=hel" {
+        t.Fatalf("list: %d %q", res.Code, res.PushURL())
     }
 }
 ```
 
-会话存储用 scs 的 `memstore`，页面路由与应用相同，测试覆盖了登录检查、表单验证和跳转。`Login` 的主体与 `pages.Login` 保存的相同；一个应用有[多组页面](views.md#multiple-areas)时，对每组分别 `Login`。
-
-请求默认是浏览器的整页请求。`webtest.HTMX` 让它像 htmx 替换页面中某个元素时发出的一样，`webtest.Header` 设置其他请求头，例如 `Accept-Language`。multipart 表单等其他请求用 `c.Do` 发送。响应除了 `Code`、`Text()`，还可以读取 htmx 的响应头：
+页面路由与应用相同，测试覆盖了授权、错误页和局部更新。请求默认是浏览器的整页请求。`webtest.HTMX` 让它像 htmx 替换页面中某个元素时发出的一样，`webtest.Header` 设置其他请求头，例如 `Accept-Language`。multipart 表单等其他请求用 `c.Do` 发送。响应除了 `Code`、`Text()`，还可以读取 htmx 的响应头：
 
 | 方法 | 返回 |
 | --- | --- |
 | `Redirect()` | 跳转的目标：`303` 的 `Location`，或 htmx 请求的 `HX-Redirect` |
-| `Flashes()` | 随 htmx 响应送达的[提示](views.md#flash-messages)，包括局部请求的错误 |
-| `Event(name)` | `web.Trigger` 触发的事件的 detail，例如 `res.Event(web.DialogCloseEvent)` 的 `id` 是关闭的对话框 |
+| `Messages()` | 随局部请求送达的错误提示，见[错误页](views.md#error-pages) |
+| `Event(name)` | `HX-Trigger` 中事件 `name` 的 detail |
 | `PushURL()` | `web.PushURL` 推送的地址 |
 
-`webtest` 不运行浏览器中的脚本：对话框能否打开、提示是否弹出这类交互，由框架的组件保证，应用测试服务端的响应即可。
+`webtest` 不运行浏览器中的脚本：确认对话框能否打开、提示是否弹出这类交互，由框架的组件保证，应用测试服务端的响应即可。
 
 <a id="testing-actions"></a>
 ## 测试 action

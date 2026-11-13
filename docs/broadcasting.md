@@ -3,7 +3,7 @@
 - [简介](#introduction)
 - [创建 Hub](#creating-the-hub)
 - [发布事件](#publishing-events)
-- [推送给浏览器](#pushing-to-browsers)
+- [推送给客户端](#pushing-to-browsers)
     - [断线补发](#replaying-missed-events)
 - [后端](#backends)
 - [投递保证](#delivery-guarantees)
@@ -12,7 +12,7 @@
 <a id="introduction"></a>
 ## 简介
 
-[服务端推送](sse.md)让一个连接上的浏览器收到消息。部署多个实例时，发布消息的请求和要收到消息的浏览器往往在不同实例上：编辑 A 在实例 1 上发布了文章，编辑 B 的长连接在实例 2 上。`broadcast` 包负责把消息送到每个实例，再交给这个实例上订阅了它的连接。
+[服务端推送](sse.md)让一个连接上的客户端收到消息。部署多个实例时，发布消息的请求和要收到消息的客户端往往在不同实例上：编辑 A 在实例 1 上发布了文章，编辑 B 的长连接在实例 2 上。`broadcast` 包负责把消息送到每个实例，再交给这个实例上订阅了它的连接。
 
 它与传输方式无关：同一个 Hub 既可以推给 SSE 连接，也可以推给[实时频道](realtime.md)的 WebSocket 客户端。消息按主题（topic）分发，例如 `articles`、`room:42`。
 
@@ -51,69 +51,59 @@ tx.AfterCommit(func(ctx context.Context) error {
 
 几点约定：
 
-- **发布领域事件，不发布 HTML。** 每个连接收到后自己渲染：同一条消息，不同的人看到的样式、语言可能不同，以后的 WebSocket 客户端也许需要 JSON。事件应当小，大的内容只带 ID，由收到的一方查询。
-- **在事务提交之后发布。** `Publish` 不参与数据库事务，提交之前发布，浏览器可能收到一条随后被回滚的通知。
+- **发布领域事件。** 每个连接收到后按自己的需要转换：同一条消息，不同的人看到的内容、语言可能不同。事件应当小，大的内容只带 ID，由收到的一方查询。
+- **在事务提交之后发布。** `Publish` 不参与数据库事务，提交之前发布，客户端可能收到一条随后被回滚的通知。
 - **发布失败不影响业务结果。** 通知是尽力而为的，文章已经发布成功，发布事件失败时框架记录一条 Error 日志。
 
 主题由字母、数字和 `_ - : .` 组成，最长 200 字节。多租户应用中主题要带上租户，见[缓存、广播与其他资源](tenancy.md#other-resources)。
 
 <a id="pushing-to-browsers"></a>
-## 推送给浏览器
+## 推送给客户端
 
-SSE 处理器订阅主题，收到事件就渲染并推送：
+SSE 处理器订阅主题，收到事件就推送，写法见[长连接](sse.md#long-lived-connections)：
 
 ```go
-func (h *Handlers) Events(w http.ResponseWriter, r *http.Request) error {
-    sub := h.hub.Subscribe("articles")
-    defer sub.Close()
-    return web.SSE(w, r, func(s *web.Stream) error {
-        for {
-            select {
-            case <-s.Done():
-                return nil
-            case m, ok := <-sub.C():
-                if !ok {
-                    return nil // 订阅已结束，浏览器会重连
-                }
-                var ev ArticlePublished
-                if err := json.Unmarshal(m.Data, &ev); err != nil {
-                    return err
-                }
-                if err := s.SendEvent(web.Event{ID: ev.ID.String()}, views.Notice(ev)); err != nil {
-                    return nil
-                }
-            }
+sub := hub.Subscribe("articles")
+defer sub.Close()
+for {
+    select {
+    case <-s.Done():
+        return nil
+    case m, ok := <-sub.C():
+        if !ok {
+            return nil // 订阅已结束，客户端会重连
         }
-    })
+        // m.Data 是 PublishJSON 的 JSON，按需转换后用 s.SendJSON 推送
+    }
 }
 ```
 
-`sub.C()` 被关闭表示订阅结束，`sub.Err()` 返回原因，见[投递保证](#delivery-guarantees)。这时让处理器返回，连接随之结束，htmx 会自动重连。页面和路由的写法见[服务端推送](sse.md#long-lived-connections)。
+`sub.C()` 被关闭表示订阅结束，`sub.Err()` 返回原因，见[投递保证](#delivery-guarantees)。这时让处理器返回，连接随之结束，客户端重连。
 
-一个订阅可以同时订阅多个主题，例如 `h.hub.Subscribe("articles", "comments")`。
+一个订阅可以同时订阅多个主题，例如 `hub.Subscribe("articles", "comments")`。
 
 <a id="replaying-missed-events"></a>
 ### 断线补发
 
-连接断开期间的事件不会再投递。上面的处理器为每个事件带上了 ID，浏览器重连时通过 `Last-Event-ID` 发回最后收到的 ID。文章的 ID 是 UUIDv7，按时间排序，所以补发就是查询这个 ID 之后发布的文章。`h.publishedAfter` 是处理器持有的 `article.PublishedAfter` action：
+连接断开期间的事件不会再投递。[长连接](sse.md#long-lived-connections)的处理器为每个事件带上了 ID，客户端重连时通过 `Last-Event-ID` 发回最后收到的 ID。文章的 ID 是 UUIDv7，按时间排序，所以补发就是查询这个 ID 之后发布的文章。`publishedAfter` 是 `article.PublishedAfter` action：
 
 ```go
-sub := h.hub.Subscribe("articles") // 先订阅，再查询，中间发布的文章不会漏掉
-defer sub.Close()
-return web.SSE(w, r, func(s *web.Stream) error {
+return rest.SSE(func(s *httpx.Stream) error {
+    sub := hub.Subscribe("articles") // 先订阅，再查询，中间发布的文章不会漏掉
+    defer sub.Close()
     if last, err := uuid.Parse(s.LastEventID()); err == nil {
-        missed, err := h.publishedAfter.Handle(s.Context(), last)
+        missed, err := publishedAfter.Handle(s.Context(), last)
         if err != nil {
             return err
         }
         for _, item := range missed {
-            if err := s.SendEvent(web.Event{ID: item.ID.String()}, views.Notice(noticeOf(item))); err != nil {
+            if err := s.SendJSON(httpx.Event{Name: "published", ID: item.ID.String()}, eventOf(item)); err != nil {
                 return nil
             }
         }
     }
     // ……接着处理 sub.C()，和上面相同
-})
+}), nil
 ```
 
 一定要先订阅、再查询。反过来的话，查询之后、订阅之前发布的事件两边都收不到。先订阅时，同一篇文章可能既被查到、又从订阅中收到，按 ID 去重即可。

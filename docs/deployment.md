@@ -357,7 +357,7 @@ mygoravel 不会自动注册健康检查路由，你可以根据部署平台的�
 
 如果应用部署在负载均衡器或反向代理之后，请在 `http.client_ip.trusted_proxies` 中配置代理的实际网段，以便正确识别客户端地址，见[可信代理](middleware.md#trusted-proxies)。
 
-反向代理转发请求时请保留原始的 `Host` 请求头（包括端口），例如 nginx 使用 `proxy_set_header Host $http_host;`。`$host` 会丢掉端口，[跨站请求伪造](session.md#csrf)防护会因为 `Origin` 与 `Host` 不一致而拒绝所有 `POST` 等请求。使用[服务端推送](sse.md#deployment)时，还要在反向代理上启用 HTTP/2。
+反向代理转发请求时请保留原始的 `Host` 请求头（包括端口），例如 nginx 使用 `proxy_set_header Host $http_host;`。`$host` 会丢掉端口，应用生成的地址和[实时频道](realtime.md)的同源检查会因为 `Origin` 与 `Host` 不一致而出错。使用[服务端推送](sse.md#deployment)时，还要在反向代理上启用 HTTP/2。
 
 TLS 终止和响应压缩通常在反向代理中配置。全站使用 HTTPS 后，在反向代理上加上 `Strict-Transport-Security` 响应头（HSTS），例如 nginx 的 `add_header Strict-Transport-Security "max-age=31536000" always;`，浏览器此后只用 HTTPS 访问这个域名；页面的[内容安全策略](views.md#content-security-policy)由应用设置。应用直接对外提供服务时，安装 [httpx.Compress](middleware.md#compression) 压缩响应。跨域请求使用内置的 [CORS](middleware.md#cors)。限流既可以在网关中配置，也可以使用内置的[限流](rate-limiting.md)；内存限流器按实例分别计数，多实例部署时请把这一点计入配置值，需要共享计数时使用数据库限流器。
 
@@ -563,7 +563,7 @@ mygoravel 不提供备份命令。只有数据库自己的备份机制能持续�
 
 - **重建队列的复制槽。** 备份不包含复制槽，恢复后 worker 因为找不到它而拒绝启动，按[重建复制槽](#queue-recovery)处理。做备份时还没转发的任务随之丢失，从业务数据中找出没有完成的工作重新发布；备份之后执行过的任务（`queue_scheduled` 中的、失败后重新发布的）恢复后可能再执行一次，处理函数本来就需要能安全地重复执行。
 - **向量索引比数据库新。** Qdrant 中还有备份之后才写入的文档，检索可能返回数据库中已经不存在的内容。逐个[重建向量索引](vector.md#reindexing)：新版本只包含数据库中现有的数据，切换后旧版本整个删除。
-- **撤销过的凭据又能用了。** 备份之后撤销的 [API token](api-tokens.md#revoking-tokens) 和[会话](session.md)，恢复后会重新生效。如果这段时间里有用户被封禁或改过密码，恢复后对这些用户再调用一次 `RevokeSubject`。无法逐个确认时，清空 `sessions` 表并删除 `api_tokens` 中 `kind = 'login'` 的行，让所有人重新登录；这段时间里撤销过的个人访问令牌需要再撤销一次。
+- **撤销过的凭据又能用了。** 备份之后撤销的 [API token](api-tokens.md#revoking-tokens)，恢复后会重新生效。如果这段时间里有用户被封禁或改过密码，恢复后对这些用户再调用一次 `RevokeSubject`。无法逐个确认时，删除 `api_tokens` 中 `kind = 'login'` 的行，让所有人重新登录；这段时间里撤销过的个人访问令牌需要再撤销一次。
 
 <a id="restore-drills"></a>
 ### 恢复演练

@@ -296,7 +296,7 @@ func (a *Summarize) Job(ctx context.Context, u operation.Unit[SummarizeUnit]) er
 
 `Run` 每次保存进度（变为 `running`、每次 `Save`、结束）都在同一个事务中调用 `saved`。例子中的 `saved` 用 [AfterCommit](database.md#after-commit) 在提交后发布广播，提醒正在查看进度的连接；操作结束时在这个事务中发送[通知](notifications.md)，通知和状态一起提交，不会重复发送，也不会漏发。
 
-`Progress` 用 [`rest.RegisterSSE`](sse.md#json-api) 注册，连接后每次保存进度都会收到一个 `progress` 事件：
+`Progress` 用 [`rest.RegisterSSE`](sse.md) 注册，连接后每次保存进度都会收到一个 `progress` 事件：
 
 ```text
 event: progress

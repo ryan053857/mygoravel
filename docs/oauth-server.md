@@ -101,7 +101,7 @@ res := oauth.Resource("https://blog.example.com/mcp")
 router.Handle(res.MetadataPath(), mcpx.ResourceMetadata(res))
 router.Handle("/mcp", mcpx.Handler(tools, mcpx.HandlerOptions{
     Validate: tokens.ValidateFor(res.URL),
-    Accounts: identity.Accounts{editor.Type: editorweb.Resolve(a.db, acc.Editors)},
+    Accounts: identity.Accounts{editor.Type: editorapi.Resolve(a.db, acc.Editors)},
     Resource: &res,
 }))
 ```

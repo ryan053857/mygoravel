@@ -73,8 +73,9 @@ func docRouter(t *testing.T) func() chi.Routes {
 			t.Fatal("page handler must not run")
 			return nil
 		}
-		pages.Routes(router, web.Public).Get("/login", page)
-		pages.Routes(router, web.Require("articles")).Get("/admin/articles/{id}/edit", page)
+		site := pages.Routes(router)
+		site.Get("/", page)
+		site.Get("/posts/{slug}", page)
 		return router
 	}
 }
@@ -113,11 +114,11 @@ func TestRoutes(t *testing.T) {
 		want []string
 		omit []string
 	}{
-		{"default", nil, []string{"GET /articles article-list public 获取文章 列表", "POST /articles article-create bearer: articles 创建文章", "GET /livez - unknown -", "GET /login - public -"}, []string{"/docs", "/openapi", "/schemas"}},
+		{"default", nil, []string{"GET /articles article-list public 获取文章 列表", "POST /articles article-create bearer: articles 创建文章", "GET /livez - unknown -", "GET /posts/{slug} - public -"}, []string{"/docs", "/openapi", "/schemas"}},
 		{"all", []string{"--all"}, []string{"GET /articles article-list public 获取文章 列表", "GET /docs - docs -", "GET /openapi.json - docs -", "GET /schemas/{schema} - docs -"}, nil},
 		{"method", []string{"--method", "post"}, []string{"POST /articles article-create bearer: articles 创建文章"}, []string{"article-list", "/livez", "/docs"}},
 		{"path", []string{"--path", "live"}, []string{"GET /livez - unknown -"}, []string{"article-create", "article-list", "/docs"}},
-		{"pages", []string{"--path", "/admin"}, []string{"GET /admin/articles/{id}/edit - session: articles -"}, []string{"/login", "article-create"}},
+		{"pages", []string{"--path", "/posts"}, []string{"GET /posts/{slug} - public -"}, []string{"/livez", "article-create"}},
 		{"combined", []string{"--path", "articles", "--method", "get"}, []string{"GET /articles article-list public 获取文章 列表"}, []string{"article-create", "/docs"}},
 		{"empty", []string{"--path", "missing"}, nil, []string{"article-create", "article-list", "/docs", "/livez"}},
 	} {

@@ -495,7 +495,7 @@ services:
 <a id="pages"></a>
 ## 在页面中上传
 
-服务端渲染的页面用 `web/upload` 和 `ui.FileField`：用户选择文件后立即上传为临时文件，磁盘支持时直传到 S3，表单只提交文件 ID，保存时确认。见[表单的上传文件](forms.md#file-uploads)。
+单页应用的上传见[客户端代码的上传文件](clients.md#uploading-files)：用户选择文件后立即上传为临时文件，表单只提交文件 ID，保存时确认。
 
 <a id="rest"></a>
 ## 在 REST 接口中使用

@@ -3,22 +3,22 @@
 - [简介](#introduction)
 - [两张账号表](#account-tables)
 - [装配](#assembling)
-- [编辑后台](#editor-pages)
+- [编辑后台](#editor-api)
 - [读者 App](#reader-api)
 - [接入入口](#wiring)
 
 <a id="introduction"></a>
 ## 简介
 
-本章把[登录与注册](login.md)、[第三方登录](social-login.md)、[API 令牌](api-tokens.md)和[页面](views.md)串起来，给出两套账号体系从建表到接口的完整代码。博客上线读者 App 之后，账号分成两套：
+本章把[登录与注册](login.md)、[第三方登录](social-login.md)和 [API 令牌](api-tokens.md)串起来，给出两套账号体系从建表到接口的完整代码。博客上线读者 App 之后，账号分成两套：
 
 | | 编辑后台 | 读者 App |
 | --- | --- | --- |
 | 账号体系 | `editor.Type`，`editors` 表 | `reader.Type`，`readers` 表 |
-| 入口 | 服务端渲染的页面，会话登录 | JSON API，JWT access token + refresh token |
+| 入口 | 单页应用调用 `/admin` 下的 JSON API，不透明的登录 token | JSON API，JWT access token + refresh token |
 | 账号怎么来 | 管理员邀请，编辑通过邮件中的链接设置密码 | 手机验证码自助注册，或 Sign in with Apple |
 | 怎么登录 | 邮箱 + 密码，**必须**启用 TOTP 二次验证 | 手机验证码，或 Apple |
-| 敏感操作 | 邀请编辑前 15 分钟内确认过密码 | 注销账号前用验证码或重新登录 Apple 确认身份 |
+| 敏感操作 | 邀请编辑时再输入一次自己的密码 | 注销账号前用验证码或重新登录 Apple 确认身份 |
 
 两套账号的登录凭据都保存在框架的 `auth_*` 表中，`editors`、`readers` 表只有业务字段。下面的五个文件都是完整的代码。
 
@@ -242,8 +242,9 @@ import (
 )
 
 type Config struct {
-    // PasswordURL 是编辑设置密码页面的地址，邀请邮件中的链接指向它。
+    // PasswordURL 是编辑后台单页应用中设置密码页面的地址，邀请邮件中的链接指向它。
     PasswordURL string          `yaml:"password_url"`
+    EditorToken apitoken.Config `yaml:"editor_token"`
     ReaderToken apitoken.Config `yaml:"reader_token"`
     Apple       Apple           `yaml:"apple"`
 }
@@ -257,6 +258,7 @@ type Apple struct {
 
 type Accounts struct {
     Editors      *login.Realm
+    EditorTokens *apitoken.Store
     Readers      *login.Realm
     ReaderTokens *apitoken.Store
     ReaderJWT    *apitoken.JWT
@@ -314,6 +316,7 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
     tokens := apitoken.NewStore(db, cfg.ReaderToken)
     return &Accounts{
         Editors:      editors,
+        EditorTokens: apitoken.NewStore(db, cfg.EditorToken),
         Readers:      readers,
         ReaderTokens: tokens,
         ReaderJWT:    apitoken.NewJWT(tokens, apitoken.JWTConfig{Keys: apitoken.HMACKeys(c)}),
@@ -322,40 +325,39 @@ func New(ctx context.Context, db *bun.DB, rdb rueidis.Client, cfg Config, hasher
 }
 ```
 
-两个 `Realm` 共用 `auth_*` 表：同一个邮箱可以既是编辑又是读者，彼此互不影响。
+两个 `Realm` 共用 `auth_*` 表：同一个邮箱可以既是编辑又是读者，彼此互不影响。两个 `apitoken.Store` 也共用 `api_tokens` 表，各自的有效期按配置签发。
 
-<a id="editor-pages"></a>
+<a id="editor-api"></a>
 ## 编辑后台
 
-编辑后台的页面流程：
+编辑后台是[单页应用](spa.md)，调用 `/admin` 下的接口：
 
-1. 编辑收到邀请邮件，打开链接，设置密码；
-2. 用邮箱和密码登录。还没有启用二次验证时，先到启用页面扫码；启用后每次登录都要输入验证器上的数字；
-3. 邀请其他编辑之前，15 分钟内要确认过一次密码。
+1. 编辑收到邀请邮件，打开单页应用中的设置密码页。页面把链接中的 `request` 和 `code` 交给 `POST /auth/password/verify`，得到完成凭证，再带着它和新密码调用 `POST /auth/password`；
+2. 用邮箱和密码登录（`POST /auth/login`）。启用了二次验证时得到 `pending`，带着它和验证器上的数字调用 `POST /auth/two-factor`；
+3. 还没有启用二次验证时，先到启用页：`POST /account/two-factor/setup` 得到二维码，`POST /account/two-factor` 提交验证码启用；
+4. 邀请其他编辑时（`POST /editors`），请求中再带上自己的密码。
 
-“必须启用二次验证”由页面的 Resolver 保证：没有启用的编辑没有任何权限，只能访问启用页面。下面是完整的 `internal/editor/editorweb/routes.go`，表单结构体和 templ 组件在 `editorviews` 包中，写法见[视图](views.md)和[表单](forms.md)：
+“必须启用二次验证”由 Resolver 保证：没有启用的编辑没有任何权限，只能调用不要求权限的接口，也就是登录、启用二次验证和退出。下面是完整的 `internal/editor/editorapi/routes.go`：
 
 ```go
-package editorweb
+package editorapi
 
 import (
     "context"
-    "errors"
     "net/http"
-    "time"
 
-    "github.com/go-chi/chi/v5"
+    "github.com/danielgtaylor/huma/v2"
     "github.com/uptrace/bun"
 
+    "example.com/blog/internal/accounts"
     "example.com/blog/internal/editor"
-    "example.com/blog/internal/editor/editorviews"
-    "github.com/ryan053857/mygoravel/httpx"
+    "github.com/ryan053857/mygoravel/apitoken"
+    "github.com/ryan053857/mygoravel/httpx/rest"
     "github.com/ryan053857/mygoravel/identity"
     "github.com/ryan053857/mygoravel/login"
-    "github.com/ryan053857/mygoravel/web"
 )
 
-// Resolve 是编辑后台页面的 Resolver：在 editor.Resolve 的基础上，没有启用二次验证的编辑没有任何权限。
+// Resolve 是编辑后台 API 的 Resolver：在 editor.Resolve 的基础上，没有启用二次验证的编辑没有任何权限。
 func Resolve(db *bun.DB, logins *login.Realm) identity.Resolver {
     base := editor.Resolve(db)
     return func(ctx context.Context, sub identity.Subject) (identity.Subject, error) {
@@ -374,211 +376,201 @@ func Resolve(db *bun.DB, logins *login.Realm) identity.Resolver {
     }
 }
 
+type LoginInput struct {
+    UserAgent string `header:"User-Agent"`
+    Body      struct {
+        Email    string `json:"email" format:"email"`
+        Password string `json:"password" minLength:"1"`
+    }
+}
+
+type TwoFactorInput struct {
+    UserAgent string `header:"User-Agent"`
+    Body      struct {
+        Pending string `json:"pending" minLength:"1"`
+        Code    string `json:"code" minLength:"1"`
+    }
+}
+
+// LoginOutput 是登录的结果：token；需要二次验证时只有 pending。
+type LoginOutput struct {
+    Body struct {
+        Token     string `json:"token,omitempty"`
+        Pending   string `json:"pending,omitempty" doc:"带着它和验证码调用 /auth/two-factor"`
+        TwoFactor bool   `json:"two_factor" doc:"是否已经启用二次验证；为 false 时先去启用"`
+    }
+}
+
+type VerifyLinkInput struct {
+    Body struct {
+        Request string `json:"request" minLength:"1"`
+        Code    string `json:"code" minLength:"1"`
+    }
+}
+
+type VerifyLinkOutput struct {
+    Body struct {
+        Proof string `json:"proof"`
+    }
+}
+
+type PasswordInput struct {
+    Body struct {
+        Proof    string `json:"proof" minLength:"1"`
+        Password string `json:"password" minLength:"1"`
+    }
+}
+
+type SetupOutput struct {
+    Body struct {
+        Secret string `json:"secret"`
+        URI    string `json:"uri" doc:"otpauth:// 地址，渲染成二维码"`
+    }
+}
+
+type EnableInput struct {
+    Body struct {
+        Code string `json:"code" minLength:"1"`
+    }
+}
+
+type EnableOutput struct {
+    Body struct {
+        RecoveryCodes []string `json:"recovery_codes"`
+    }
+}
+
+type InviteInput struct {
+    Body struct {
+        Name     string `json:"name" minLength:"1" maxLength:"50"`
+        Email    string `json:"email" format:"email"`
+        Password string `json:"password" minLength:"1" doc:"当前编辑的密码，确认是本人操作"`
+    }
+}
+
 type handlers struct {
-    pages  *web.Pages
     db     *bun.DB
     logins *login.Realm
+    tokens *apitoken.Store
     invite *editor.Invite
 }
 
-func Register(r chi.Router, pages *web.Pages, db *bun.DB, logins *login.Realm) {
-    h := &handlers{pages: pages, db: db, logins: logins, invite: editor.NewInvite(db, logins)}
-    public := pages.Routes(r, web.Public)
-    public.Get("/login", h.loginPage)
-    public.Post("/login", h.login)
-    public.Post("/login/two-factor", h.twoFactor)
-    public.Get("/password", h.passwordPage)
-    public.Post("/password", h.setPassword)
-
-    signedIn := pages.Routes(r, web.Require())
-    signedIn.Get("/account/two-factor", h.setupPage)
-    signedIn.Post("/account/two-factor", h.setup)
-    signedIn.Get("/confirm", h.confirmPage)
-    signedIn.Post("/confirm", h.confirm)
-    signedIn.Post("/logout", h.logout)
-
-    pages.Routes(r, web.Require("editors:invite").Confirmed(15*time.Minute)).Post("/editors", h.inviteEditor)
+func Register(api *rest.API, db *bun.DB, acc *accounts.Accounts) {
+    h := &handlers{db: db, logins: acc.Editors, tokens: acc.EditorTokens, invite: editor.NewInvite(db, acc.Editors)}
+    op := func(id, method, path string, auth func(*huma.Operation)) huma.Operation {
+        o := huma.Operation{OperationID: id, Method: method, Path: path}
+        auth(&o)
+        return o
+    }
+    public := rest.Public()
+    signedIn := rest.RequireBearer(api, acc.EditorTokens.Validate)
+    rest.Register(api, op("editor-login", http.MethodPost, "/auth/login", public), h.login)
+    rest.Register(api, op("editor-two-factor", http.MethodPost, "/auth/two-factor", public), h.twoFactor)
+    rest.Register(api, op("editor-password-verify", http.MethodPost, "/auth/password/verify", public), h.verifyLink)
+    rest.Register(api, op("editor-password", http.MethodPost, "/auth/password", public), h.setPassword)
+    rest.Register(api, op("editor-logout", http.MethodDelete, "/auth/session", signedIn), h.logout)
+    rest.Register(api, op("editor-two-factor-setup", http.MethodPost, "/account/two-factor/setup", signedIn), h.setup)
+    rest.Register(api, op("editor-two-factor-enable", http.MethodPost, "/account/two-factor", signedIn), h.enable)
+    rest.Register(api, op("editor-invite", http.MethodPost, "/editors", rest.RequireBearer(api, acc.EditorTokens.Validate, "editors:invite")), h.inviteEditor)
 }
 
-func (h *handlers) loginPage(w http.ResponseWriter, r *http.Request) error {
-    return web.Render(w, r, http.StatusOK, editorviews.Login(web.NewForm(editorviews.LoginInput{})))
-}
-
-func (h *handlers) login(w http.ResponseWriter, r *http.Request) error {
-    f, err := web.ParseForm[editorviews.LoginInput](r)
+func (h *handlers) login(ctx context.Context, in *LoginInput) (*LoginOutput, error) {
+    out, err := h.logins.Password(ctx, login.Email(in.Body.Email), in.Body.Password)
     if err != nil {
-        return err
+        return nil, err // 密码错误：login.ErrInvalidCredentials，401；连续失败太多次：ratelimit.ErrExceeded，429
     }
-    if f.Valid() {
-        out, err := h.logins.Password(r.Context(), login.Email(f.Data.Email), f.Data.Password)
-        switch {
-        case err == nil && out.Pending != "":
-            form := web.NewForm(editorviews.CodeInput{Pending: out.Pending})
-            return web.Render(w, r, http.StatusOK, editorviews.TwoFactor(form))
-        case err == nil:
-            return h.signIn(w, r, out.Subject)
-        case !errors.Is(err, login.ErrInvalidCredentials):
-            return err // 例如连续失败太多次：ratelimit.ErrExceeded，呈现为 429
-        }
-        f.SetError("password", httpx.ErrorDetail(r.Context(), err))
+    if out.Pending != "" {
+        resp := &LoginOutput{}
+        resp.Body.Pending, resp.Body.TwoFactor = out.Pending, true
+        return resp, nil
     }
-    return web.Render(w, r, http.StatusUnprocessableEntity, editorviews.Login(f))
+    return h.issue(ctx, out.Subject, in.UserAgent)
 }
 
-func (h *handlers) twoFactor(w http.ResponseWriter, r *http.Request) error {
-    f, err := web.ParseForm[editorviews.CodeInput](r)
+func (h *handlers) twoFactor(ctx context.Context, in *TwoFactorInput) (*LoginOutput, error) {
+    out, err := h.logins.TwoFactor(ctx, in.Body.Pending, in.Body.Code)
     if err != nil {
-        return err
+        return nil, err // 验证码不正确：login.ErrInvalidCode；输错太多次或超时：login.ErrInvalidProof，重新登录
     }
-    if f.Valid() {
-        out, err := h.logins.TwoFactor(r.Context(), f.Data.Pending, f.Data.Code)
-        switch {
-        case err == nil:
-            return h.signIn(w, r, out.Subject)
-        case errors.Is(err, login.ErrInvalidProof): // 输错太多次或超时，重新登录
-            web.Redirect(w, r, "/login")
-            return nil
-        case !errors.Is(err, login.ErrInvalidCode):
-            return err
-        }
-        f.SetError("code", httpx.ErrorDetail(r.Context(), err))
-    }
-    return web.Render(w, r, http.StatusUnprocessableEntity, editorviews.TwoFactor(f))
+    return h.issue(ctx, out.Subject, in.UserAgent)
 }
 
-// signIn 写入会话；还没有启用二次验证的编辑先去启用。
-func (h *handlers) signIn(w http.ResponseWriter, r *http.Request, sub identity.Subject) error {
-    if err := h.pages.Login(r, sub); err != nil {
-        return err
-    }
-    enabled, err := h.logins.TwoFactorEnabled(r.Context(), sub.Ref())
+// issue 签发登录 token，并告诉单页应用这个编辑是否已经启用二次验证。
+func (h *handlers) issue(ctx context.Context, sub identity.Subject, userAgent string) (*LoginOutput, error) {
+    enabled, err := h.logins.TwoFactorEnabled(ctx, sub.Ref())
     if err != nil {
-        return err
+        return nil, err
     }
-    if !enabled {
-        web.Redirect(w, r, "/account/two-factor")
-        return nil
-    }
-    web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
-    return nil
-}
-
-// passwordPage 是邀请和找回密码邮件中的链接。它只渲染表单，提交时才验证：
-// 邮件服务商的安全扫描会预先打开链接，GET 请求不能用掉验证码。
-func (h *handlers) passwordPage(w http.ResponseWriter, r *http.Request) error {
-    q := r.URL.Query()
-    form := web.NewForm(editorviews.PasswordInput{Request: q.Get("request"), Code: q.Get("code")})
-    return web.Render(w, r, http.StatusOK, editorviews.SetPassword(form))
-}
-
-func (h *handlers) setPassword(w http.ResponseWriter, r *http.Request) error {
-    f, err := web.ParseForm[editorviews.PasswordInput](r)
+    token, err := h.tokens.Login(ctx, sub, apitoken.Device{UserAgent: userAgent})
     if err != nil {
-        return err
+        return nil, err
     }
-    if f.Valid() {
-        // 验证码只能验证一次：密码不符合要求时，表单带上完成凭证重新提交。
-        if f.Data.Proof == "" {
-            out, err := h.logins.VerifyCode(r.Context(), f.Data.Request, f.Data.Code)
-            if err != nil {
-                return err // 链接已失效：login.ErrInvalidCode
-            }
-            f.Data.Proof = out.Proof
-        }
-        _, err := h.logins.ResetPassword(r.Context(), f.Data.Proof, f.Data.Password)
-        if err == nil {
-            web.Redirect(w, r, "/login")
-            return nil
-        }
-        if !errors.Is(err, login.ErrWeakPassword) {
-            return err
-        }
-        f.SetError("password", httpx.ErrorDetail(r.Context(), err))
-    }
-    return web.Render(w, r, http.StatusUnprocessableEntity, editorviews.SetPassword(f))
+    resp := &LoginOutput{}
+    resp.Body.Token, resp.Body.TwoFactor = token, enabled
+    return resp, nil
 }
 
-func (h *handlers) setupPage(w http.ResponseWriter, r *http.Request) error {
-    sub, _ := identity.FromContext(r.Context())
-    setup, err := h.logins.SetupTOTP(r.Context(), h.db, sub.Ref(), sub.ID)
-    if errors.Is(err, login.ErrTwoFactorEnabled) {
-        web.Redirect(w, r, "/admin")
-        return nil
-    }
+// verifyLink 校验邀请和找回密码邮件中的链接。设置密码页打开后才调用它：
+// 邮件服务商的安全扫描会预先打开链接，只有页面上的脚本会提交验证码。
+func (h *handlers) verifyLink(ctx context.Context, in *VerifyLinkInput) (*VerifyLinkOutput, error) {
+    out, err := h.logins.VerifyCode(ctx, in.Body.Request, in.Body.Code)
     if err != nil {
-        return err
+        return nil, err // 链接已失效：login.ErrInvalidCode
     }
-    return web.Render(w, r, http.StatusOK, editorviews.SetupTOTP(setup))
+    resp := &VerifyLinkOutput{}
+    resp.Body.Proof = out.Proof
+    return resp, nil
 }
 
-func (h *handlers) setup(w http.ResponseWriter, r *http.Request) error {
-    sub, _ := identity.FromContext(r.Context())
-    codes, err := h.logins.ConfirmTOTP(r.Context(), h.db, sub.Ref(), r.PostFormValue("code"))
+// setPassword 用完成凭证设置密码。密码不符合要求时返回 login.ErrWeakPassword，凭证仍然有效，可以重新提交。
+func (h *handlers) setPassword(ctx context.Context, in *PasswordInput) (*struct{}, error) {
+    _, err := h.logins.ResetPassword(ctx, in.Body.Proof, in.Body.Password)
+    return nil, err
+}
+
+func (h *handlers) logout(ctx context.Context, _ *struct{}) (*struct{}, error) {
+    sub, _ := identity.FromContext(ctx)
+    return nil, h.tokens.Revoke(ctx, sub, sub.Credential)
+}
+
+func (h *handlers) setup(ctx context.Context, _ *struct{}) (*SetupOutput, error) {
+    sub, _ := identity.FromContext(ctx)
+    setup, err := h.logins.SetupTOTP(ctx, h.db, sub.Ref(), sub.ID)
     if err != nil {
-        return err // 验证码不正确：login.ErrInvalidCode，页面提示后重新扫码
+        return nil, err // 已经启用：login.ErrTwoFactorEnabled
     }
-    return web.Render(w, r, http.StatusOK, editorviews.RecoveryCodes(codes))
+    resp := &SetupOutput{}
+    resp.Body.Secret, resp.Body.URI = setup.Secret, setup.URI
+    return resp, nil
 }
 
-func (h *handlers) confirmPage(w http.ResponseWriter, r *http.Request) error {
-    return web.Render(w, r, http.StatusOK, editorviews.Confirm(web.NewForm(editorviews.ConfirmInput{})))
-}
-
-// confirm 校验密码后记下确认时间，回到 Confirmed 路由跳转前的页面。
-func (h *handlers) confirm(w http.ResponseWriter, r *http.Request) error {
-    f, err := web.ParseForm[editorviews.ConfirmInput](r)
+func (h *handlers) enable(ctx context.Context, in *EnableInput) (*EnableOutput, error) {
+    sub, _ := identity.FromContext(ctx)
+    codes, err := h.logins.ConfirmTOTP(ctx, h.db, sub.Ref(), in.Body.Code)
     if err != nil {
-        return err
+        return nil, err // 验证码不正确：login.ErrInvalidCode，重新扫码
     }
-    if f.Valid() {
-        sub, _ := identity.FromContext(r.Context())
-        err := h.logins.Confirm(r.Context(), sub.Ref(), f.Data.Password)
-        if err == nil {
-            h.pages.Confirm(r.Context())
-            web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
-            return nil
-        }
-        if !errors.Is(err, login.ErrInvalidCredentials) {
-            return err
-        }
-        f.SetError("password", httpx.ErrorDetail(r.Context(), err))
-    }
-    return web.Render(w, r, http.StatusUnprocessableEntity, editorviews.Confirm(f))
+    resp := &EnableOutput{}
+    resp.Body.RecoveryCodes = codes
+    return resp, nil
 }
 
-func (h *handlers) inviteEditor(w http.ResponseWriter, r *http.Request) error {
-    f, err := web.ParseForm[editorviews.InviteInput](r)
-    if err != nil {
-        return err
+func (h *handlers) inviteEditor(ctx context.Context, in *InviteInput) (*struct{}, error) {
+    sub, _ := identity.FromContext(ctx)
+    if err := h.logins.Confirm(ctx, sub.Ref(), in.Body.Password); err != nil {
+        return nil, err // 密码错误：login.ErrInvalidCredentials
     }
-    if f.Valid() {
-        _, err := h.invite.Handle(r.Context(), f.Data.Name, f.Data.Email)
-        if err == nil {
-            web.Redirect(w, r, "/admin/editors")
-            return nil
-        }
-        if !errors.Is(err, login.ErrTaken) {
-            return err
-        }
-        f.SetError("email", httpx.ErrorDetail(r.Context(), err))
-    }
-    return web.Render(w, r, http.StatusUnprocessableEntity, editorviews.Invite(f))
-}
-
-func (h *handlers) logout(w http.ResponseWriter, r *http.Request) error {
-    if err := h.pages.Logout(r.Context()); err != nil {
-        return err
-    }
-    web.Redirect(w, r, "/login")
-    return nil
+    _, err := h.invite.Handle(ctx, in.Body.Name, in.Body.Email)
+    return nil, err // 邮箱已被使用：login.ErrTaken
 }
 ```
 
 几点说明：
 
-- 待完成的登录（`out.Pending`）放在二次验证表单的隐藏字段中，不需要会话；它 15 分钟内有效，最多输错 5 次。
-- `SetupTOTP` 的第三个参数是验证器中显示的账号名，这里用编辑的 ID，也可以查出邮箱或姓名。`setup.URI` 在页面中渲染成二维码。
-- 邀请编辑的路由声明了 `Confirmed(15*time.Minute)`：超时后先跳到 `Options.Confirm` 的确认页，确认后回到原来的页面，见[确认身份](login.md#confirming)。
+- 待完成的登录（`pending`）由单页应用暂存，带到二次验证的请求中；它 15 分钟内有效，最多输错 5 次。
+- 没有启用二次验证的编辑也会拿到 token，`two_factor` 为 `false`。Resolver 让这个 token 没有任何权限，单页应用据此直接进入启用页，启用后不需要重新登录。
+- `SetupTOTP` 的第三个参数是验证器中显示的账号名，这里用编辑的 ID，也可以查出邮箱或姓名。`uri` 由单页应用渲染成二维码。
+- 邀请编辑在请求中带上自己的密码，与[读者注销账号](#reader-api)带验证码的做法相同，见[确认身份](login.md#confirming)。
 
 <a id="reader-api"></a>
 ## 读者 App
@@ -830,7 +822,7 @@ func (h *handlers) confirm(ctx context.Context, ref identity.Ref, in *ConfirmInp
 
 几点说明：
 
-- 读者没有启用二次验证，`VerifyCode` 和 `External` 不会返回 `Pending`。需要时与编辑后台一样处理。
+- 读者没有启用二次验证，`VerifyCode` 和 `External` 不会返回 `Pending`。需要时与[编辑后台](#editor-api)一样处理。
 - 发送验证码对未注册的手机号同样发送（`Register: true`），所以第 2 步才知道要注册；同一个手机号 15 分钟内最多发 5 次，见[限流与防探测](login.md#limits)。
 - Apple 的 `Nonce` 应当由服务器下发，见 [App 原生登录](social-login.md#native-sign-in)。Apple 账号对方确认过的邮箱会一并写入，所以邮箱已被其他读者使用时注册返回 `login.ErrTaken`。
 - 退出登录撤销的是这次登录的 refresh token，已签发的 access token 在 10 分钟内过期；注销账号还会让这个读者的全部登录立即无法刷新。
@@ -839,7 +831,7 @@ func (h *handlers) confirm(ctx context.Context, ref identity.Ref, in *ConfirmInp
 <a id="wiring"></a>
 ## 接入入口
 
-在[入口](dependencies.md#assembling-the-application)中创建 `accounts.Accounts`，交给两组入口。`texts` 是[短信发送器](sms.md#assembling)。页面只接受编辑，API 只接受读者：
+在[入口](dependencies.md#assembling-the-application)中创建 `accounts.Accounts`，交给两组 API。`texts` 是[短信发送器](sms.md#assembling)。编辑后台的 API 挂在 `/admin/api` 下，只接受编辑；读者的 API 只接受读者：
 
 ```go
 acc, err := accounts.New(ctx, a.db, a.rdb, a.cfg.Accounts, hashing.New(a.cfg.Hashing), a.crypt, mailer, texts)
@@ -847,21 +839,26 @@ if err != nil {
     return err
 }
 
-pages := web.New(web.Options{
-    Sessions: session.New(a.cfg.Session, session.NewStore(a.db)),
-    Login:    "/login",
-    Confirm:  "/confirm",
-    Accounts: identity.Accounts{editor.Type: editorweb.Resolve(a.db, acc.Editors)},
-    // ErrorPage、Theme 等见视图
+router.Route("/admin/api", func(r chi.Router) {
+    admin := rest.New(rest.Options{
+        Title:    "Blog Admin API",
+        Router:   r,
+        BasePath: "/admin/api",
+        Accounts: identity.Accounts{editor.Type: editorapi.Resolve(a.db, acc.Editors)},
+    })
+    editorapi.Register(admin, a.db, acc)
 })
-router.Group(func(r chi.Router) { editorweb.Register(r, pages, a.db, acc.Editors) })
+router.Handle("/admin/*", adminSPA) // 编辑后台的单页应用，见单页应用一章
 
-api := rest.New(rest.Options{
-    Title:    "Blog Reader API",
-    Version:  "1.0.0",
-    Accounts: identity.Accounts{reader.Type: reader.Resolve(a.db)},
+router.Route("/api", func(r chi.Router) {
+    api := rest.New(rest.Options{
+        Title:    "Blog Reader API",
+        Router:   r,
+        BasePath: "/api",
+        Accounts: identity.Accounts{reader.Type: reader.Resolve(a.db)},
+    })
+    readerapi.Register(api, a.db, acc)
 })
-readerapi.Register(api, a.db, acc)
 ```
 
-编辑的会话带到 API 上、读者的 token 带到页面上都会被当作未登录，见[多套账号体系](authentication.md#account-systems)。需要发布的迁移有 `login`、`ratelimit`、`apitoken` 和 `session`，以及两张账号表自己的迁移；`login.Realm`、`apitoken.Store` 和 `session.Store` 的 `Cleanup` 注册为[定时任务](scheduling.md#framework-cleanups)。
+编辑的 token 带到读者的 API 上、读者的 token 带到编辑后台的 API 上都会被当作未登录，见[多套账号体系](authentication.md#account-systems)。需要发布的迁移有 `login`、`ratelimit` 和 `apitoken`，以及两张账号表自己的迁移；`login.Realm` 和 `apitoken.Store` 的 `Cleanup` 注册为[定时任务](scheduling.md#framework-cleanups)。

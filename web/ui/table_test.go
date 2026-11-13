@@ -1,6 +1,8 @@
 package ui_test
 
 import (
+	"context"
+	"io"
 	"testing"
 
 	"github.com/a-h/templ"
@@ -41,4 +43,10 @@ func TestEmpty(t *testing.T) {
 	contains(t, html, `data-slot="empty"`, "lucide-file-text", ">还没有文章<", "写下第一篇文章吧。", `<a id="new"`, "border-dashed")
 	html = render(t, withChildren(ui.Empty(ui.EmptyProps{Title: "没有结果"}), templ.NopComponent))
 	lacks(t, html, "lucide-", "empty-description")
+}
+
+func withChildren(parent, children templ.Component) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+		return parent.Render(templ.WithChildren(ctx, children), w)
+	})
 }

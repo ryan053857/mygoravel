@@ -9,7 +9,7 @@ import (
 // Accounts 是一个入口接受的账号体系：键是账号体系的 SubjectType，值是这套账号的 Resolver，
 // 例如按用户表重新加载主体、按租户加载权限。值为 nil 表示直接使用凭据给出的主体。
 //
-// rest.Options、web.Options 和 realtime.Options 都用它声明入口接受哪些主体：凭据的 Type 不在其中时，
+// rest.Options、mcpx.HandlerOptions 和 realtime.Options 都用它声明入口接受哪些主体：凭据的 Type 不在其中时，
 // 与凭据无效相同。一个入口可以接受多套账号，同一个 Resolver 也可以用于多个入口：
 //
 //	identity.Accounts{Member: roles.Resolve, Customer: customers.Resolve}

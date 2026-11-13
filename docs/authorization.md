@@ -15,7 +15,7 @@
     - [在事务中检查](#checking-in-transactions)
     - [缓存与授权](#caching-and-authorization)
 - [列表查询中的授权](#scoping-queries)
-- [在页面中按权限显示](#authorization-in-views)
+- [在界面中按权限显示](#authorization-in-views)
 - [授权失败的响应](#authorization-failures)
 
 <a id="introduction"></a>
@@ -43,15 +43,13 @@ mygoravel 的授权分为三层：
 <a id="route-permissions"></a>
 ### 在路由上声明
 
-JSON API 在 `rest.RequireBearer` 中列出路由需要的权限，页面在 `web.Require` 中列出：
+JSON API 在 `rest.RequireBearer` 中列出路由需要的权限：
 
 ```go
 requireWrite := rest.RequireBearer(api, tokens.Validate, "articles:write")
-
-pages.Routes(r, web.Require("articles:write")).Put("/admin/articles/{id}", pages.Handle(h.Update))
 ```
 
-传入多个权限时，调用者必须全部具备；缺少任何一个时，API 返回 `403`，页面呈现 `403` 错误页。路由需要的权限会出现在 OpenAPI 文档的 `x-required-permissions` 字段和 [`routes` 命令](commands.md)的输出中。
+传入多个权限时，调用者必须全部具备；缺少任何一个时返回 `403`。路由需要的权限会出现在 OpenAPI 文档的 `x-required-permissions` 字段和 [`routes` 命令](commands.md)的输出中。
 
 在路由上检查的永远是**权限**，而不是角色名：角色可以由租户自己创建和命名，代码中写死的角色名在那时就会失效。
 
@@ -141,12 +139,11 @@ err = roles.Assign(ctx, identity.Ref{Type: user.Type, ID: userID}, "", editor.ID
 <a id="resolving-permissions"></a>
 ### 每次请求加载权限
 
-`roles.Resolve` 可以直接作为 API、页面和[实时频道](realtime.md#tokens)的 `Accounts` 中一套账号的 Resolver，它在每个请求中按用户当前的角色加载权限：
+`roles.Resolve` 可以直接作为 API、[MCP 服务](mcp.md)和[实时频道](realtime.md#tokens)的 `Accounts` 中一套账号的 Resolver，它在每个请求中按用户当前的角色加载权限：
 
 ```go
 accounts := identity.Accounts{user.Type: roles.Resolve}
 api := rest.New(rest.Options{Accounts: accounts})
-pages := web.New(web.Options{Accounts: accounts /* 其余字段见视图 */})
 rt, err := realtime.New(hub, realtime.Options{Authenticate: tokens.Validate, Accounts: accounts})
 ```
 
@@ -161,7 +158,7 @@ resolve := func(ctx context.Context, sub identity.Subject) (identity.Subject, er
         return identity.Subject{}, err
     }
     if u.Disabled {
-        return identity.Subject{}, auth.ErrUnauthenticated.New() // 401，页面登出
+        return identity.Subject{}, auth.ErrUnauthenticated.New() // 401，单页应用回到登录页
     }
     return roles.Resolve(ctx, sub)
 }
@@ -233,7 +230,7 @@ func (a *Get) Handle(ctx context.Context, subject identity.Subject, id uuid.UUID
 <a id="authorization-functions"></a>
 ### 编写授权函数
 
-当授权规则变得复杂时，把它提取为业务包 `article.go` 中**导出**的函数，相当于 Laravel 的 Policy。各个 action 和[页面](#authorization-in-views)调用同一个函数，规则只有一份：
+当授权规则变得复杂时，把它提取为业务包 `article.go` 中**导出**的函数，相当于 Laravel 的 Policy。各个 action 和[给界面的 DTO](#authorization-in-views)调用同一个函数，规则只有一份：
 
 ```go
 // CanEdit 报告 subject 能否修改 item：作者本人，或者能修改任何文章的编辑。
@@ -317,43 +314,35 @@ func (a *List) Handle(ctx context.Context, subject identity.Subject, limit int64
 多租户应用中，每个查询还必须限定在 `subject.Tenant` 中，见[租户数据隔离](tenancy.md#data-isolation)。
 
 <a id="authorization-in-views"></a>
-## 在页面中按权限显示
+## 在界面中按权限显示
 
-页面上的按钮、菜单应当与服务端的规则一致：没有权限的用户不应看到“编辑”按钮。在视图包中写两个小函数，从 context 取出主体（`web.Require` 已经把它放进去了），再调用同一份规则：
+单页应用上的按钮、菜单应当与服务端的规则一致：没有权限的用户不应看到“编辑”按钮。服务端把结论交给前端，前端不重复实现规则：
+
+- **全局权限**：“当前用户”接口返回主体的权限，前端用它决定菜单和全局按钮；
+- **针对某一条数据的权限**：DTO 中带上判断结果，由服务端调用同一份规则。
 
 ```go
-package views
-
-func can(ctx context.Context, perm string) bool {
-    sub, _ := identity.FromContext(ctx)
-    return sub.Can(perm)
+type ArticleDTO struct {
+    // ……
+    CanEdit bool `json:"can_edit" doc:"当前用户能否编辑这篇文章"`
 }
 
-func canEdit(ctx context.Context, item *article.Article) bool {
-    sub, _ := identity.FromContext(ctx)
-    return article.CanEdit(sub, item)
+func toDTO(sub identity.Subject, a *Article) ArticleDTO {
+    return ArticleDTO{ /* …… */ CanEdit: CanEdit(sub, a)}
 }
 ```
 
-templ 组件中可以直接使用 `ctx`：
-
-```templ
-templ ArticleActions(item *article.Article) {
-    if canEdit(ctx, item) {
-        <a href={ templ.SafeURL("/admin/articles/" + item.ID.String() + "/edit") }>编辑</a>
-    }
-    if can(ctx, "comments:delete") {
-        <button hx-delete={ "/admin/articles/" + item.ID.String() + "/comments" }>清空评论</button>
-    }
-}
+```tsx
+{article.can_edit && <Link to="/articles/$id/edit" params={{ id: article.id }}>编辑</Link>}
+{me.permissions.includes("comments:delete") && <button onClick={clearComments}>清空评论</button>}
 ```
 
-隐藏按钮只是为了界面友好，不能代替服务端的检查：action 仍然要按上面的方式授权。
+`me.permissions` 是 `sub.Permissions`，其中可能有 `articles:*` 这样的通配符；需要判断某个具体权限时，让接口直接返回布尔值，不要在前端实现通配符匹配。隐藏按钮只是为了界面友好，不能代替服务端的检查：action 仍然要按上面的方式授权。
 
 <a id="authorization-failures"></a>
 ## 授权失败的响应
 
-- 缺少路由所需的权限时，API 返回 `403`，错误码为 `auth.forbidden`，页面呈现 `403` 错误页；
+- 缺少路由所需的权限时，API 返回 `403`，错误码为 `auth.forbidden`；
 - 在租户中没有任何角色时，`authz` 的 `Resolve` 返回 `authz.not_member`，状态码为 `404`；
 - action 返回 `errorx.PermissionDenied` 或 `errorx.NotFound` 分类的错误时，响应对应的状态码，错误码为你定义的业务错误码，例如 `article.forbidden`。
 

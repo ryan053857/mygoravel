@@ -15,7 +15,7 @@
 
 `web.Static` 按文件内容给地址加上指纹，例如 `/static/css/app.3f2a9c1d.css`。这样的地址可以让浏览器和 CDN 永久缓存：文件内容一变，指纹随之改变，页面引用的就是新地址，不需要手动加版本号，也不会读到旧缓存。
 
-本章接着[视图](views.md)一章，给博客的编辑后台加上应用自己的静态文件和样式。
+本章接着[视图](views.md)一章，给博客的公开页面加上应用自己的静态文件和样式。
 
 <a id="static-files"></a>
 ## 存放静态文件
@@ -48,9 +48,8 @@ if err != nil {
     return err
 }
 pages := web.New(web.Options{
-    Sessions: sessions,
-    Static:   static,
-    // Login、ErrorPage 等其余字段见视图一章
+    Static: static,
+    // ErrorPage 等其余字段见视图一章
 })
 
 router.Handle(web.StaticPath+"*", static)
@@ -106,7 +105,7 @@ static_dir: internal/web/static
 <a id="tailwind"></a>
 ## 用 Tailwind CSS 编写样式
 
-内置的样式表包含组件用到的类名和一组常用的布局工具类，见[使用组件](components.md#using-components)。设计感强的页面，例如有自己品牌风格的代理后台、数据大屏，会用到更多的类名和自己的设计令牌，这时用 [Tailwind CSS](https://tailwindcss.com) 生成应用自己的样式表。它代替内置的样式表，组件、风格与应用的类名生成在同一份样式表中。
+内置的样式表包含组件用到的类名和一组常用的布局工具类，见[使用组件](components.md#using-components)。设计感强的页面，例如有自己品牌风格的官网、活动页，会用到更多的类名和自己的设计令牌，这时用 [Tailwind CSS](https://tailwindcss.com) 生成应用自己的样式表。它代替内置的样式表，组件、风格与应用的类名生成在同一份样式表中。
 
 Tailwind 的 [standalone CLI](https://tailwindcss.com/blog/standalone-cli) 是一个独立的可执行文件，不需要 Node.js。从 [GitHub Releases](https://github.com/tailwindlabs/tailwindcss/releases) 下载对应平台的版本，放进 `PATH`。
 

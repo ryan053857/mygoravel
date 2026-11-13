@@ -381,7 +381,7 @@ func (s *Store) RevokeToken(ctx context.Context, token string) error {
 }
 
 // RevokeOthers 撤销 sub 除本次请求所用 token（sub.Credential）以外的全部登录 token（包括 JWT 模式的登录），返回撤销的个数，
-// 例如“退出其他设备”。个人访问令牌不受影响。sub 来自会话等其他凭据时，撤销它的全部登录 token。
+// 例如“退出其他设备”。个人访问令牌不受影响。sub.Credential 不是 sub 的 token 时，撤销它的全部登录 token。
 func (s *Store) RevokeOthers(ctx context.Context, sub identity.Subject) (int, error) {
 	if sub.ID == "" {
 		return 0, errors.New("apitoken: subject ID is required")

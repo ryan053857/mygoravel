@@ -17,7 +17,7 @@
 
 很多 API 都需要知道“是谁在调用”。mygoravel 内置了基于 Bearer Token 的认证：客户端在请求头中携带 `Authorization: Bearer <token>`，框架调用你提供的校验函数确认身份，然后把身份信息交给处理器。
 
-JSON API 只使用 Bearer token，不使用会话。面向用户的一端，无论是网页、桌面客户端还是移动端，都调用 JSON API。服务端渲染的页面用于运营后台和内部管理后台，使用会话登录，见[页面登录](views.md#login)。两者产生的都是 `identity.Subject`，action 和[授权](authorization.md)规则不需要区分。
+JSON API 只使用 Bearer token，不使用会话。需要登录的一端，无论是后台、网页、桌面客户端还是移动端，都调用 JSON API；网页和后台是[单页应用](spa.md)。服务端渲染的[页面](views.md)只用于不需要登录的公开内容。
 
 本章讲每个请求如何确认调用者。用户如何用密码或验证码登录、注册和找回密码，见[登录与注册](login.md)；运营后台和用户 App 两套账号的完整代码见[完整示例](account-examples.md)。
 
@@ -50,12 +50,12 @@ type Subject struct {
 | `ID` | 调用者在这套账号体系中的标识，是一个不透明的字符串，例如用户表的主键 |
 | `Impersonator` | 代为登录时实际操作的人，例如客服；零值表示调用者本人，见[代为登录](#impersonation) |
 | `Method` | 认证方式，例如 `bearer` 或 `session` |
-| `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)或[会话](session.md#listing-sessions)的 ID；用于在设备列表中标出当前设备、退出其他设备，可以为空 |
+| `Credential` | 本次请求所用凭据的 ID，例如 [API 令牌](api-tokens.md)的 ID；用于在设备列表中标出当前设备、退出其他设备，可以为空 |
 | `Tenant` | 本次请求所在的租户，`""` 表示平台本身；由凭据设置时，凭据只能在这个租户中使用，见[多租户](#tenants) |
 | `Permissions` | 调用者拥有的权限，例如 `articles:write` |
 | `Scopes` | 本次请求所用凭据被限制在内的权限，例如只读令牌的 `articles:read`；`nil` 表示不限制 |
 
-`Type` 和 `ID` 合起来是 `identity.Ref`，用 `sub.Ref()` 取得。框架保存主体的地方——会话、令牌、角色、操作日志、通知等——都同时记录两者，所以 `ID` 只需在同一种 `Type` 中唯一：员工表和客户表可以各自使用自增 ID，互不混淆。博客应用只有一套账号，在用户模块 `internal/user/user.go` 中声明它的类型：
+`Type` 和 `ID` 合起来是 `identity.Ref`，用 `sub.Ref()` 取得。框架保存主体的地方——令牌、角色、操作日志、通知等——都同时记录两者，所以 `ID` 只需在同一种 `Type` 中唯一：员工表和客户表可以各自使用自增 ID，互不混淆。博客应用只有一套账号，在用户模块 `internal/user/user.go` 中声明它的类型：
 
 ```go
 const Type identity.SubjectType = "user"
@@ -266,7 +266,7 @@ api := rest.New(rest.Options{
 
 Resolver 只负责加载权限和租户：返回的主体中 `Type`、`ID`、`Method`、`Credential`、`Scopes` 和 `Impersonator` 总是取自凭据，像上面这样修改收到的主体，或者新建一个主体返回，结果都一样，Resolver 不能把主体换成另一个人。
 
-页面的 [`web.Options.Accounts`](views.md#login) 和实时频道的 [`realtime.Options.Accounts`](realtime.md#tokens) 与它是同一个类型 `identity.Accounts`，所以同一个 Resolver 可以同时交给它们，三者按相同的规则处理它的返回值。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
+[MCP 服务](mcp.md)和[实时频道](realtime.md#tokens)的 `Accounts` 与它是同一个类型 `identity.Accounts`，所以同一个 Resolver 可以同时交给它们，三者按相同的规则处理它的返回值。[API 令牌](api-tokens.md)不保存权限，总是和 `Resolve` 一起使用。
 
 <a id="account-systems"></a>
 ## 多套账号体系
@@ -288,10 +288,10 @@ const Type identity.SubjectType = "customer"
 
 登录时用它构造主体，例如 `identity.Subject{Type: customer.Type, ID: c.ID}`。
 
-**2. 每个入口声明接受哪几套账号。** 运营后台的页面只接受运营人员，商家后台的 API 只接受商家员工，App 和小程序调用的 API 只接受客户：
+**2. 每个入口声明接受哪几套账号。** 运营后台的 API 只接受运营人员，商家后台的 API 只接受商家员工，App 和小程序调用的 API 只接受客户：
 
 ```go
-ops := web.New(web.Options{Accounts: identity.Accounts{staff.Type: roles.Resolve} /* 其余字段见视图 */})
+ops := rest.New(rest.Options{Accounts: identity.Accounts{staff.Type: roles.Resolve}})
 console := rest.New(rest.Options{Accounts: identity.Accounts{member.Type: roles.Resolve}, Tenant: fromPath})
 shop := rest.New(rest.Options{Accounts: identity.Accounts{customer.Type: customers.Resolve}, Tenant: fromHost})
 ```
@@ -300,7 +300,7 @@ shop := rest.New(rest.Options{Accounts: identity.Accounts{customer.Type: custome
 
 **3. 每套账号有自己的登录方式和令牌有效期。** 每套账号用一个 [`login.Realm`](login.md) 管理登录标识和密码，例如运营人员只能由管理员创建、必须用密码登录，客户可以用手机验证码自助注册；令牌用各自的配置创建 `apitoken.Store` 签发，见[装配](api-tokens.md#assembling)。
 
-**4. ID 只需在同一套账号中唯一。** 会话、令牌、角色、[操作日志](activity.md)、[通知](notifications.md)、[功能开关](features.md)和实时频道的在线成员都同时保存主体的类型和 ID，员工表和客户表都用自增 ID 也不会混淆。主键是 `(tenant_id, id)` 这类组合时，把租户编进 ID，例如 `t42:1001`。新表推荐使用 UUIDv7。需要把主体放进一个字符串时，例如缓存键、广播主题，使用 `sub.Ref().String()`，结果形如 `customer:42`。
+**4. ID 只需在同一套账号中唯一。** 令牌、角色、[操作日志](activity.md)、[通知](notifications.md)、[功能开关](features.md)和实时频道的在线成员都同时保存主体的类型和 ID，员工表和客户表都用自增 ID 也不会混淆。主键是 `(tenant_id, id)` 这类组合时，把租户编进 ID，例如 `t42:1001`。新表推荐使用 UUIDv7。需要把主体放进一个字符串时，例如缓存键、广播主题，使用 `sub.Ref().String()`，结果形如 `customer:42`。
 
 [代为登录](#impersonation)也可以跨账号体系：运营人员代客户登录时，主体是客户，`Impersonator` 是运营人员的 `identity.Ref`。
 
@@ -337,49 +337,26 @@ func resolve(ctx context.Context, sub identity.Subject) (identity.Subject, error
 <a id="impersonation"></a>
 ## 代为登录
 
-客服排查问题时常常需要“以用户的身份看一看”。代为登录得到的主体就是这个用户，权限也是他的，`Impersonator` 记录实际操作的人。`Impersonator` 和其他字段一起保存在会话或令牌中，之后的每个请求都带着它。
+客服排查问题时常常需要“以用户的身份看一看”。代为登录得到的主体就是这个用户，权限也是他的，`Impersonator` 记录实际操作的人。`Impersonator` 和其他字段一起保存在令牌中，之后的每个请求都带着它。
 
-运营人员和用户在同一组页面中时，例如内部管理后台里“以这位同事的身份看一看”，“以此用户登录”按钮提交到一个要求 `users:impersonate` 的页面路由：
-
-```go
-func (h *Handlers) Impersonate(w http.ResponseWriter, r *http.Request) error {
-    staff, _ := identity.FromContext(r.Context())
-    if !staff.Impersonator.IsZero() {
-        return web.ErrForbidden.New() // 先回到自己的账号，不能层层代为登录
-    }
-    target := identity.Subject{Type: user.Type, ID: chi.URLParam(r, "id"), Impersonator: staff.Ref()}
-    if err := h.pages.Login(r, target); err != nil {
-        return err
-    }
-    web.Redirect(w, r, "/")
-    return nil
-}
-
-func (h *Handlers) StopImpersonating(w http.ResponseWriter, r *http.Request) error {
-    sub, _ := identity.FromContext(r.Context())
-    if !sub.Impersonator.IsZero() {
-        if err := h.pages.Login(r, identity.Subject{Type: sub.Impersonator.Type, ID: sub.Impersonator.ID}); err != nil {
-            return err
-        }
-    }
-    web.Redirect(w, r, "/admin/users")
-    return nil
-}
-```
-
-`StopImpersonating` 注册为只要求登录的路由，页面顶部在 `sub.Impersonator` 不为零值时显示“正在代 {用户} 操作”和退出按钮。`pages.Login` 每次都更换会话 token，代为登录期间的会话在退出后不能继续使用。
-
-用户使用的是调用 API 的网页或 App 时，用[登录令牌](api-tokens.md#login-and-logout)完成同样的事：运营后台为目标用户签发一个带 `Impersonator` 的令牌，交给用户端的前端使用，排查完毕[撤销](api-tokens.md#revoking-tokens)它。运营人员和用户属于不同的[账号体系](#account-systems)时也是如此，主体是用户，`Impersonator` 是运营人员：
+代为登录就是签发一个带 `Impersonator` 的[登录令牌](api-tokens.md#login-and-logout)。运营后台的“以此用户登录”调用一个要求 `users:impersonate` 的接口，它为目标用户签发令牌，交给用户端的前端使用，排查完毕[撤销](api-tokens.md#revoking-tokens)它。运营人员和用户属于不同的[账号体系](#account-systems)时也是如此，主体是用户，`Impersonator` 是运营人员：
 
 ```go
-plain, err := tokens.Login(ctx, identity.Subject{Type: customer.Type, ID: customerID, Impersonator: staff.Ref()}, device)
+staff, _ := identity.FromContext(ctx)
+if !staff.Impersonator.IsZero() {
+    return nil, identity.ErrForbidden.New() // 先回到自己的账号，不能层层代为登录
+}
+target := identity.Subject{Type: customer.Type, ID: in.CustomerID, Impersonator: staff.Ref()}
+plain, err := tokens.Login(ctx, target, device)
 ```
+
+用户端的前端在 `sub.Impersonator` 不为零值时显示“正在代 {用户} 操作”和退出按钮，退出时撤销这个令牌，回到运营后台。
 
 令牌不要放进跳转地址的查询参数，它会留在浏览器历史和访问日志中。
 
 几件需要应用自己决定的事：
 
-- **操作者仍然有效**：在 Resolver 中检查 `Impersonator` 仍然拥有代为登录的权限。客服离职或被收回权限后，他代为登录的会话和令牌在下一个请求就失效：
+- **操作者仍然有效**：在 Resolver 中检查 `Impersonator` 仍然拥有代为登录的权限。客服离职或被收回权限后，他代为登录的令牌在下一个请求就失效：
 
   ```go
   if !sub.Impersonator.IsZero() {

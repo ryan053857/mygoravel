@@ -254,7 +254,7 @@ func (h *Handlers) ResendWebhook(w http.ResponseWriter, r *http.Request) {
 - 签名针对原始请求体计算，必须先读出原始字节再校验，校验之后再解析 JSON。
 - 对方会重发，同一个事件可能收到多次。任务处理前按 `webhook-id` 去重，例如插入一张以它为主键的表，冲突时跳过。
 - 处理器不做业务逻辑，尽快返回，对方等待超时也会重发。
-- webhook 路由挂在页面的会话和跨站请求防护之外，与[接收 Telegram 的消息](notifications.md#telegram)相同。
+- webhook 路由直接注册在 chi 上，不经过 API 的认证，由签名确认来源，与[接收 Telegram 的消息](notifications.md#telegram)相同。
 
 不按这个规范签名的服务，用它们自己 SDK 中的校验函数，接收的流程不变：Stripe 是 `stripe-go` 的 `webhook.ConstructEvent`（包名与本包相同，导入时起个别名），GitHub 是 `go-github` 的 `github.ValidatePayloadFromBody`。
 

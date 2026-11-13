@@ -45,7 +45,7 @@ type Options struct {
 	// Type 是这套账号体系，Realm 只管理这个类型的主体。
 	Type identity.SubjectType
 	// PerTenant 为 true 时，登录标识在租户内唯一：查找和写入都使用 identity.TenantFromContext(ctx)，
-	// 登录得到的主体带有这个 Tenant，签发的会话或 token 只能在这个租户中使用。
+	// 登录得到的主体带有这个 Tenant，签发的 token 只能在这个租户中使用。
 	// 为 false 时登录标识全平台唯一，主体的 Tenant 为空。
 	PerTenant bool
 	// Register 为 true 时开放自助注册：向未注册的标识发送 SignIn 验证码，验证后得到注册用的完成凭证。
@@ -157,7 +157,7 @@ func defaultPolicy(password string) error {
 // Outcome 是一次身份证明的结果，三者只有一个不为零值。
 type Outcome struct {
 	// Subject 是登录成功的主体：Type、ID，PerTenant 时还有 Tenant，以及 Options.Resolve 加载的字段。
-	// 交给 pages.Login 或 tokens.Login 签发凭据。
+	// 交给 tokens.Login 或 JWT.Login 签发凭据。
 	Subject identity.Subject
 	// Pending 表示第一步验证已通过，但账号启用了二次验证：把它交给客户端，
 	// 客户端连同 TOTP 验证码或恢复码提交给 TwoFactor 完成登录。

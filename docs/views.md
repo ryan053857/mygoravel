@@ -5,36 +5,31 @@
 - [布局](#layouts)
 - [装配页面](#assembling-pages)
 - [注册页面路由](#page-routes)
-- [登录](#login)
 - [多组页面](#multiple-areas)
 - [渲染页面](#rendering-pages)
 - [局部更新](#partial-updates)
 - [列表页](#list-pages)
 - [错误页](#error-pages)
 - [跳转](#redirects)
-- [提示消息](#flash-messages)
-- [触发事件](#triggering-events)
 - [前端状态](#client-state)
 - [内容安全策略](#content-security-policy)
 
 <a id="introduction"></a>
 ## 简介
 
-除了 JSON API，mygoravel 也可以在服务端渲染 HTML 页面，写法类似 Laravel 的 Blade 加 Livewire：
+需要登录的界面——后台、用户端、[OAuth 同意页](oauth-server.md#consent-page)——都是[单页应用](spa.md)，调用 [JSON API](routing.md)，用 Bearer token 认证。官网、文章页、帮助中心这类**公开页面**适合在服务端渲染：搜索引擎直接读到内容，首屏不用等脚本加载。写法类似 Laravel 的 Blade 加 Livewire：
 
 - [templ](https://templ.guide) 把 `.templ` 文件编译成带类型参数的 Go 函数，相当于 Blade 组件，错误在编译期就能发现；
 - [htmx 4](https://four.htmx.org) 用 HTML 属性声明「点这里就请求某个地址，把返回的片段放到某个位置」，服务端只管返回 HTML；
 - [Alpine.js](https://alpinejs.dev) 处理纯前端的小交互，例如折叠区、计数。
 
-按钮、表格、下拉菜单、对话框这些现成的组件，见[界面组件](components.md)。
+按钮、表格、分页这些现成的组件，见[界面组件](components.md)。
 
-`web` 包负责把它们接到框架上：渲染 templ 组件、加载会话和检查登录、呈现错误、处理 htmx 的跳转，并内嵌了 htmx 与 Alpine 的脚本。`web/ui` 包内置了界面组件的样式表和脚本，按主题加载，不需要安装 Tailwind。
+`web` 包负责把它们接到框架上：渲染 templ 组件、呈现错误、处理 htmx 的跳转、设置内容安全策略，并内嵌了 htmx 与 Alpine 的脚本。`web/ui` 包内置了界面组件的样式表和脚本，按主题加载，不需要安装 Tailwind。
 
-服务端渲染的页面用于运营后台和内部管理后台。面向用户的一端，无论是网页、桌面客户端还是移动端，都调用 [JSON API](routing.md)，前端技术由产品自己选择。
+页面没有会话，也没有登录：页面路由都是公开的。只给内部人员看的页面，例如[文档页](doc-pages.md)中的操作手册，用 HTTP Basic 认证等中间件保护，或者只在内网开放。
 
-页面总是使用[会话](session.md)：用户登录后，服务器把身份记在会话里，浏览器通过 cookie 自动携带。JSON API 则只用 Bearer token，不使用会话，见[认证](authentication.md)。
-
-本章把博客的编辑后台做成服务端渲染的页面：编辑登录后打开文章的编辑页，预览并保存修改。表单见[表单](forms.md)，实时推送见[服务端推送](sse.md)。
+本章把博客读者看到的首页、文章列表和文章页做成服务端渲染的页面。表单见[表单](forms.md)。
 
 <a id="installing-templ"></a>
 ## 安装 templ
@@ -50,7 +45,7 @@ go get -tool github.com/a-h/templ/cmd/templ
 <a id="layouts"></a>
 ## 布局
 
-后台的页面共用一个布局。下面是 `internal/web/layout.templ`：
+网站的页面共用一个布局。下面是 `internal/web/layout.templ`：
 
 ```templ
 package web
@@ -59,37 +54,31 @@ import "github.com/ryan053857/mygoravel/web/ui"
 
 templ Layout(title string) {
 	@ui.Page(ui.PageProps{Title: title}) {
-		<main id="main" class="mx-auto max-w-5xl p-6">
+		<main id="main" class="mx-auto max-w-3xl p-6">
 			{ children... }
 		</main>
-		@ui.Modal()
-		@ui.Confirm()
 		@ui.Toaster()
 	}
 }
 ```
 
-`ui.Page` 输出完整的 HTML 文档，`<head>` 中按[主题](components.md#themes)加载样式表、htmx、Alpine 和组件脚本。`ui.Toaster()` 显示[提示消息](#flash-messages)和局部请求的错误，`ui.Modal()` 是放置[对话框](components.md#dialogs)的位置，`ui.Confirm()` 让 `hx-confirm` 弹出[确认对话框](components.md#confirming)。错误页用 `ui.ErrorPage`，见[装配页面](#assembling-pages)。
+`ui.Page` 输出完整的 HTML 文档，`<head>` 中按[主题](components.md#themes)加载样式表、htmx、Alpine 和组件脚本。`ui.Toaster()` 把局部请求的错误显示为 toast，见[错误页](#error-pages)。错误页用 `ui.ErrorPage`，见[装配页面](#assembling-pages)。
 
-运营后台可以用 `ui.AppShell` 加上侧边栏导航，见[后台外壳](components.md#app-shell)。这些都可以换成自己的组件：自己写 `<html>` 时，在 `<head>` 中调用 `@ui.Head()`；不用 `web/ui` 时，`@web.Scripts()` 只输出 htmx 与 Alpine 的 `<script>` 标签，样式由应用自己提供。
+这些都可以换成自己的组件：自己写 `<html>` 时，在 `<head>` 中调用 `@ui.Head()`；不用 `web/ui` 时，`@web.Scripts()` 只输出 htmx 与 Alpine 的 `<script>` 标签，样式由应用自己提供。
 
 <a id="assembling-pages"></a>
 ## 装配页面
 
-在入口的 [`HTTP` 方法](dependencies.md#assembling-the-application)中创建[会话](session.md#assembling-sessions)和 `web.Pages`，再挂载内嵌脚本和 404 页面。下面是 `internal/bootstrap/http.go` 中 `HTTP` 方法的新写法：
+在入口的 [`HTTP` 方法](dependencies.md#assembling-the-application)中创建 `web.Pages`，再挂载内嵌脚本和 404 页面。下面是 `internal/bootstrap/http.go` 中 `HTTP` 方法的新写法：
 
 ```go
 func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
-    sessions := session.New(a.cfg.Session, session.NewStore(a.db))
     static, err := web.NewStatic(layout.Static, web.StaticOptions{DevDir: a.cfg.StaticDir})
     if err != nil {
         return nil, err
     }
     pages := web.New(web.Options{
-        Sessions:  sessions,
         Static:    static,
-        Login:     "/login",
-        Accounts:  identity.Accounts{user.Type: nil},
         ErrorPage: ui.ErrorPage,
         Theme:     a.cfg.Theme,
     })
@@ -109,7 +98,7 @@ func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
     })
     router.Group(func(r chi.Router) {
         r.Use(httpx.Timeout(a.cfg.HTTP.Timeout))
-        PageRoutes(r, pages, a.db, a.hasher)
+        PageRoutes(r, pages, a.db)
     })
 
     ln, err := d.Listen("tcp", a.cfg.HTTP.Addr)
@@ -122,43 +111,40 @@ func (a *App) HTTP(d *command.Daemon) (func(context.Context) error, error) {
 }
 
 // PageRoutes 注册应用的全部页面，HTTP 方法和 DocRouter 共用它。
-func PageRoutes(r chi.Router, pages *web.Pages, db *bun.DB, hasher *hashing.Hasher) {
-    authweb.Register(r, pages, db, hasher)
+func PageRoutes(r chi.Router, pages *web.Pages, db *bun.DB) {
     articleweb.Register(r, pages, db)
 }
 ```
 
 几点说明：
 
-- 页面和 JSON API 共用一个 Router。API 挂在 `/api/v1` 下，不经过会话；`BasePath` 让 OpenAPI 文档中的地址带上这个前缀，见 [API 版本](routing.md#api-versioning)。`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
+- 页面和 JSON API 共用一个 Router。API 挂在 `/api/v1` 下；`BasePath` 让 OpenAPI 文档中的地址带上这个前缀，见 [API 版本](routing.md#api-versioning)。`rest.New` 返回 JSON 格式 404 的设置只作用于这个子路由，其余地址的 404 由 `pages.NotFound` 渲染成页面。
+- 后台等[单页应用](spa.md)也挂在这个 Router 上，例如 `router.Handle("/admin/*", spa)`。
 - `static` 提供应用自己的图片等静态文件，见[前端资源](assets.md)。`Theme` 来自配置，决定组件的风格和颜色，见[主题](components.md#themes)；`ui.Assets()` 提供它们的样式表和脚本。
-- `a.hasher` 是登录校验密码用的[哈希器](hashing.md#hashing-passwords)，和数据库一样在 `open` 中创建，见[依赖装配](dependencies.md#assembling-the-application)。
-- `web.New` 接管会话的错误处理：会话存储出错时记录日志，并用 `ErrorPage` 呈现 `500`。
-- [请求超时](middleware.md#request-timeout)按路由组安装，[服务端推送](sse.md)的路由不能有超时。
+- [请求超时](middleware.md#request-timeout)按路由组安装。
 
 <a id="page-routes"></a>
 ## 注册页面路由
 
-页面路由通过 `pages.Routes` 注册，它的第二个参数是这一组路由的访问策略：`web.Public` 允许未登录访问，`web.Require(permissions...)` 要求登录并具备权限，见[登录](#login)。下面是 `internal/article/articleweb/routes.go`：
+页面路由通过 `pages.Routes` 注册。下面是 `internal/article/articleweb/routes.go`：
 
 ```go
 package articleweb
 
 func Register(r chi.Router, pages *web.Pages, db *bun.DB) {
-    h := &Handlers{list: article.NewList(db), get: article.NewGet(db), update: article.NewUpdate(db)}
-    editor := pages.Routes(r, web.Require("articles"))
-    editor.Get("/admin/articles", h.List)
-    editor.Get("/admin/articles/{id}/edit", h.Edit)
-    editor.Put("/admin/articles/{id}", h.Update)
-    editor.Post("/admin/articles/preview", h.Preview)
+    h := &Handlers{list: article.NewList(db), get: article.NewGetBySlug(db)}
+    site := pages.Routes(r)
+    site.Get("/", h.Home)
+    site.Get("/articles", h.List)
+    site.Get("/articles/{slug}", h.Show)
 }
 ```
 
-页面处理器的签名是 `func(w http.ResponseWriter, r *http.Request) error`。注册的每条路由会依次：拒绝跨站的非安全请求（Go 标准库的 `http.CrossOriginProtection`，htmx 发出的是同源请求，表单不需要 CSRF token，见[跨站请求伪造](session.md#csrf)）、加载和保存会话、检查访问策略，最后调用处理器，并呈现它返回的错误。
+页面处理器的签名是 `func(w http.ResponseWriter, r *http.Request) error`。注册的每条路由会设置[内容安全策略](#content-security-policy)和主题，调用处理器，并呈现它返回的错误。
 
-与 JSON API 的 [`rest.Public`、`rest.RequireBearer`](routing.md#access-policies) 一样，每条页面路由都必须显式声明访问策略：不经过 `pages.Routes` 就无法注册页面处理器，`web.Access` 的零值也会让注册 panic。因此不会因为漏写而意外公开一个后台页面。
+只给内部人员看的页面，把认证中间件装在传入的路由上，例如 `pages.Routes(r.With(staffOnly))`。
 
-[routes 命令](commands.md#routes-command)同时列出 JSON API 和页面，页面的访问策略显示为 `public` 或 `session: articles`。命令使用的 `DocRouter` 以文档模式注册全部路由，不打开数据库，页面使用 `web.ModeRoutes`，不需要会话：
+[routes 命令](commands.md#routes-command)同时列出 JSON API 和页面，页面的访问策略显示为 `public`。命令使用的 `DocRouter` 以文档模式注册全部路由，不打开数据库，页面使用 `web.ModeRoutes`：
 
 ```go
 // DocRouter 在文档模式下构造全部路由，routes 命令用它。
@@ -169,138 +155,31 @@ func DocRouter() chi.Routes {
         opts.Mode, opts.Router, opts.BasePath = rest.ModeOpenAPI, r, "/api/v1"
         DocRoutes(rest.New(opts))
     })
-    PageRoutes(router, web.New(web.Options{Mode: web.ModeRoutes}), nil, nil)
+    PageRoutes(router, web.New(web.Options{Mode: web.ModeRoutes}), nil)
     return router
 }
 ```
 
 `PageRoutes` 收到的依赖都是 `nil`。处理器只是被登记，不会被调用，所以不受影响。
 
-<a id="login"></a>
-## 登录
-
-`web.Require` 要求请求已经登录，并且主体能执行给出的全部权限（`sub.Can`，见[核心概念](authentication.md#key-concepts)）：
-
-| 情况 | 结果 |
-| --- | --- |
-| 未登录 | 跳转到 `Options.Login`，`next` 参数带上原地址；htmx 请求通过 `HX-Redirect` 整页跳转，原地址取自发起请求的页面 |
-| 缺少所需的权限 | 呈现 `403`，见[错误页](#error-pages) |
-| 通过 | 主体写入请求的 context，处理器用 `identity.FromContext` 读取，再传给 action |
-
-登录页由应用自己实现，注册为公开路由。下面是 `internal/auth/authweb/routes.go`，`users` 是博客用户的 [`login.Realm`](login.md)，它校验邮箱和密码：
-
-```go
-type LoginInput struct {
-    Email    string `json:"email" format:"email"`
-    Password string `json:"password" minLength:"1"`
-}
-
-func Register(r chi.Router, pages *web.Pages, users *login.Realm) {
-    h := &Handlers{pages: pages, users: users}
-    public := pages.Routes(r, web.Public)
-    public.Get("/login", h.LoginPage)
-    public.Post("/login", h.Login)
-    pages.Routes(r, web.Require()).Post("/logout", h.Logout)
-}
-
-func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) error {
-    f, err := web.ParseForm[LoginInput](r)
-    if err != nil {
-        return err
-    }
-    if f.Valid() {
-        out, err := h.users.Password(r.Context(), login.Email(f.Data.Email), f.Data.Password)
-        if err == nil {
-            if err := h.pages.Login(r, out.Subject); err != nil {
-                return err
-            }
-            web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
-            return nil
-        }
-        if !errors.Is(err, login.ErrInvalidCredentials) {
-            return err
-        }
-        f.SetError("password", httpx.ErrorDetail(r.Context(), err))
-    }
-    return web.Render(w, r, http.StatusUnprocessableEntity, views.Login(f))
-}
-
-func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) error {
-    if err := h.pages.Logout(r.Context()); err != nil {
-        return err
-    }
-    web.Redirect(w, r, "/login")
-    return nil
-}
-```
-
-启用了[二次验证](login.md#two-factor)的账号，`Password` 返回 `out.Pending` 而不是主体：把它存进表单的隐藏字段，渲染输入验证码的页面，提交后用 `TwoFactor` 完成登录。修改邮箱、删除账号这类路由可以要求最近[确认过身份](login.md#confirming)。
-
-`pages.Login` 先更换会话 token，再保存主体，防止登录前泄露的 token 在登录后继续有效；它还从请求中记录客户端地址和 User-Agent，用于[设备列表](session.md#listing-sessions)。`next` 来自请求，必须用 `web.LocalPath` 确认它是本站路径。表单的写法见[表单](forms.md)。同一个邮箱连续失败太多次时，`Password` 返回 `ratelimit.ErrExceeded`，交给 `pages` 呈现为 `429` 错误页，见[限流与防探测](login.md#limits)。
-
-会话保存的是登录时主体的快照：编辑被收回 `articles` 权限、账号被停用之后，已登录的会话仍然按旧的状态通过检查，直到重新登录。需要立即生效时，在 `Options.Accounts` 中为这套账号指定 Resolver，它在 `web.Require` 保护的每个请求中收到登录时保存的主体，返回本次请求的主体。它与 API 的 [`rest.Options.Accounts`](authentication.md#resolving-subjects) 是同一个类型，同一个 Resolver 可以交给两者：
-
-```go
-pages := web.New(web.Options{
-    Sessions: sessions,
-    Login:    "/login",
-    Accounts: identity.Accounts{
-        user.Type: func(ctx context.Context, stored identity.Subject) (identity.Subject, error) {
-            u, err := user.Find(ctx, a.db, stored.ID)
-            if err != nil {
-                return identity.Subject{}, err
-            }
-            if u.Disabled {
-                return identity.Subject{}, user.ErrDisabled.New()
-            }
-            return identity.Subject{Type: user.Type, ID: u.ID, Permissions: u.Permissions}, nil
-        },
-    },
-    // ErrorPage 等其余字段同上
-})
-```
-
-| Resolver 返回 | 结果 |
-| --- | --- |
-| 主体 | 权限检查和处理器都使用它，`Method` 为 `session` |
-| `errorx.Unauthenticated` 类错误（例如账号已停用），或 `ID` 为空的主体 | 销毁会话，按未登录跳转到登录页 |
-| 其他 4xx 类错误（例如不是这个租户的成员） | 按分类呈现错误页，例如 `404`，不登出 |
-| 5xx 类错误（例如数据库故障） | 呈现错误页 |
-
-`user.Find` 是用户模块按 ID 查询用户的函数。每个请求因此多一次查询，访问量大时可以在 `user.Find` 中加缓存。页面同样支持[多租户](authentication.md#tenants)，例如运营后台按路径进入某个租户查看数据：`Options.Tenant` 从请求中取出租户，例如 `func(r *http.Request) string { return chi.URLParam(r, "tenant") }`，结果写入 context 供 Resolver 使用；登录时主体带有 `Tenant` 的会话只能在这个租户中使用。租户在路径中时，`Login` 写成 `/t/{tenant}/login`，跳转时 `{tenant}` 换成当前请求的路径参数。要让用户在所有设备上立即下线，而不必等到下一次请求，用 `RevokeSubject` 撤销他的全部会话，见[撤销会话](session.md#revoking-sessions)。
-
 <a id="multiple-areas"></a>
 ## 多组页面
 
-一个应用可以有几组页面，例如平台的运营后台和给合作伙伴用的代理后台，各用一个 `web.Pages`，挂在各自的子路由上。每组有自己的会话 cookie、登录页、主题和错误呈现，互不影响：登录运营后台不会登录代理后台。
+一个应用可以有几组页面，例如官网和帮助中心，各用一个 `web.Pages`，挂在各自的子路由上，各有自己的主题和错误呈现：
 
 ```go
-ops := web.New(web.Options{
-    Sessions:  session.New(a.cfg.Ops.Session, session.NewStore(a.db)),
-    Login:     "/ops/login",
-    Accounts:  identity.Accounts{staff.Type: roles.Resolve},
-    ErrorPage: ui.ErrorPage,
-    Theme:     a.cfg.Ops.Theme,
+site := web.New(web.Options{ErrorPage: ui.ErrorPage, Theme: a.cfg.Site.Theme, Static: static})
+help := web.New(web.Options{ErrorPage: ui.ErrorPage, Theme: a.cfg.Help.Theme})
+router.Group(func(r chi.Router) {
+    articleweb.Register(r, site, a.db)
 })
-partners := web.New(web.Options{
-    Sessions:  session.New(a.cfg.Partners.Session, session.NewStore(a.db)),
-    Login:     "/partners/login",
-    Accounts:  identity.Accounts{partner.Type: partner.Resolve},
-    ErrorPage: ui.ErrorPage,
-    Theme:     a.cfg.Partners.Theme,
-    Static:    static,
-})
-router.Route("/ops", func(r chi.Router) {
-    r.NotFound(ops.NotFound)
-    opsweb.Register(r, ops, a.db)
-})
-router.Route("/partners", func(r chi.Router) {
-    r.NotFound(partners.NotFound)
-    partnerweb.Register(r, partners, a.db)
+router.Route("/help", func(r chi.Router) {
+    r.NotFound(help.NotFound)
+    helpSite.Register(help.Routes(r))
 })
 ```
 
-两组会话的 `cookie.name` 要不同，例如 `ops_session` 和 `partner_session`。两组页面各自用 `Accounts` 声明接受的[账号体系](authentication.md#account-systems)，即使会话被带到另一组页面，属于其他账号体系的主体也会按未登录处理。主题、提示和错误样式的差异见[不同区域的界面](components.md#areas)。
+主题和错误样式的差异见[不同区域的界面](components.md#areas)，`helpSite` 是[文档页](doc-pages.md)。
 
 <a id="rendering-pages"></a>
 ## 渲染页面
@@ -308,19 +187,16 @@ router.Route("/partners", func(r chi.Router) {
 处理器调用 action 的 `Handle`，再用 `web.Render` 渲染组件。返回的错误交给 `pages` 呈现：
 
 ```go
-func (h *Handlers) Edit(w http.ResponseWriter, r *http.Request) error {
-    id, err := uuid.Parse(chi.URLParam(r, "id"))
-    if err != nil {
-        return web.ErrNotFound.New()
-    }
-    sub, _ := identity.FromContext(r.Context())
-    item, err := h.get.Handle(r.Context(), sub, id)
+func (h *Handlers) Show(w http.ResponseWriter, r *http.Request) error {
+    item, err := h.get.Handle(r.Context(), identity.Subject{}, chi.URLParam(r, "slug"))
     if err != nil {
         return err // 例如 article.ErrNotFound，呈现为 404 页面
     }
-    return web.Render(w, r, http.StatusOK, views.EditArticle(item))
+    return web.Render(w, r, http.StatusOK, views.Article(item))
 }
 ```
+
+访客没有登录，传给 action 的主体是零值：action 按匿名访客授权，例如只返回已发布的文章。
 
 `web.Render` 先把组件渲染到缓冲区，成功后再写出。组件用请求的 context 渲染，所以组件里可以直接用 `i18n.T(ctx, ...)` 翻译文案，见[本地化](localization.md)。templ 组件里的 `ctx` 就是这个 context。
 
@@ -329,18 +205,21 @@ func (h *Handlers) Edit(w http.ResponseWriter, r *http.Request) error {
 <a id="partial-updates"></a>
 ## 局部更新
 
-htmx 让页面上的元素直接发请求，并把响应的 HTML 放到指定位置。例如编辑页上的「预览」按钮，把正文发给服务端渲染，结果放进 `#preview`：
+htmx 让页面上的元素直接发请求，并把响应的 HTML 放到指定位置。例如文章页底部的「相关文章」在页面显示出来之后再加载，不拖慢首屏：
 
 ```templ
-<button type="button" hx-post="/admin/articles/preview" hx-include="closest form" hx-target="#preview">预览</button>
-<div id="preview"></div>
+<section hx-get={ "/articles/" + item.Slug + "/related" } hx-trigger="revealed" hx-swap="outerHTML"></section>
 ```
 
 处理器只渲染片段：
 
 ```go
-func (h *Handlers) Preview(w http.ResponseWriter, r *http.Request) error {
-    return web.Render(w, r, http.StatusOK, views.Preview(r.PostFormValue("content")))
+func (h *Handlers) Related(w http.ResponseWriter, r *http.Request) error {
+    items, err := h.related.Handle(r.Context(), chi.URLParam(r, "slug"))
+    if err != nil {
+        return err
+    }
+    return web.Render(w, r, http.StatusOK, views.Related(items))
 }
 ```
 
@@ -349,7 +228,7 @@ func (h *Handlers) Preview(w http.ResponseWriter, r *http.Request) error {
 <a id="list-pages"></a>
 ## 列表页
 
-后台的文章列表可以搜索、按状态筛选、排序和翻页。列表的状态全部放在地址的查询参数中，例如 `/admin/articles?status=draft&sort=title&page=2`。这样刷新、后退、复制链接都能回到同一个状态。
+文章列表可以搜索、排序和翻页。列表的状态全部放在地址的查询参数中，例如 `/articles?q=go&sort=title&page=2`。这样刷新、后退、复制链接都能回到同一个状态，搜索引擎也能收录每一页。
 
 查询参数用一个结构体描述，写法与[表单](forms.md#defining-forms)相同：字段名取 `json` 标签，规则写在 Huma 标签上。查询参数都是可选的，字段要带 `omitempty`。分页嵌入 `page.OffsetParams`。下面的 `ListQuery` 放在文章模块中，同时带上 `query` 标签，[列表接口](responses.md#filtering-and-sorting)也可以直接使用它：
 
@@ -370,8 +249,7 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) error {
     if err != nil {
         return err
     }
-    sub, _ := identity.FromContext(r.Context())
-    items, total, err := h.list.Handle(r.Context(), sub, q)
+    items, total, err := h.list.Handle(r.Context(), identity.Subject{}, q)
     if err != nil {
         return err
     }
@@ -384,12 +262,12 @@ func (h *Handlers) List(w http.ResponseWriter, r *http.Request) error {
 }
 ```
 
-`article.List` 是列表 action，按筛选条件和排序查询当前页，同时返回总数，代码见[筛选与排序](responses.md#filtering-and-sorting)。筛选、排序、翻页都只替换列表区域，`web.PushURL` 让 htmx 把地址栏改为这个状态的地址。
+`article.List` 是列表 action，按筛选条件和排序查询当前页，同时返回总数，代码见[筛选与排序](responses.md#filtering-and-sorting)；匿名访客只能看到已发布的文章。筛选、排序、翻页都只替换列表区域，`web.PushURL` 让 htmx 把地址栏改为这个状态的地址。
 
 链接由 `web.QueryURL` 生成，它是 `ParseQuery` 的逆操作。零值和等于 `default` 的参数会被省略，同一个状态总是得到同一个地址。在视图包中写几个小函数：
 
 ```go
-func listURL(q article.ListQuery) string { return web.QueryURL("/admin/articles", q) }
+func listURL(q article.ListQuery) string { return web.QueryURL("/articles", q) }
 
 func pageURL(q article.ListQuery, p int) string {
     q.Page = p
@@ -410,17 +288,12 @@ func sortURL(q article.ListQuery) func(sort string) string {
 ```templ
 templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
 	<section id="articles" hx-target:inherited="this" hx-swap:inherited="outerHTML">
-		<form hx-get="/admin/articles" hx-trigger="input delay:300ms from:#q, change from:#status">
+		<form hx-get="/articles" hx-trigger="input delay:300ms from:#q">
 			<input id="q" name="q" type="search" value={ q.Q } hx-preserve/>
-			<select id="status" name="status">
-				<option value="">全部</option>
-				<option value="draft" selected?={ q.Status == "draft" }>草稿</option>
-				<option value="published" selected?={ q.Status == "published" }>已发布</option>
-			</select>
 			<input type="hidden" name="sort" value={ q.Sort }/>
 		</form>
 		if len(list.Items) == 0 {
-			@ui.Empty(ui.EmptyProps{Icon: icon.FileText, Title: "没有符合条件的文章", Description: "换个关键词或状态试试。"})
+			@ui.Empty(ui.EmptyProps{Icon: icon.FileText, Title: "没有符合条件的文章", Description: "换个关键词试试。"})
 		} else {
 			<table>
 				<tr>
@@ -428,7 +301,7 @@ templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
 					@ui.SortHead(q.Sort, "created", "创建时间", sortURL(q), ui.SortHeadProps{HTMX: true, DescFirst: true})
 				</tr>
 				for _, item := range list.Items {
-					<tr><td>{ item.Title }</td><td>{ item.CreatedAt.Format("2006-01-02") }</td></tr>
+					<tr><td><a href={ templ.SafeURL("/articles/" + item.Slug) }>{ item.Title }</a></td><td>{ item.CreatedAt.Format("2006-01-02") }</td></tr>
 				}
 			</table>
 		}
@@ -439,14 +312,14 @@ templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
 
 `ui.SortHead` 是可以点击排序的表头：点击按这一列升序，再点击改为降序，当前排序的列显示方向箭头并带 `aria-sort`；`DescFirst` 让第一次点击按降序，适合时间、数量。它按 `q.Sort` 判断当前的方向（`title` 为升序，`-title` 为降序），用 `sortURL(q)` 生成下一次点击的地址。`ListQuery` 的 `enum` 要包含每一列的两个方向，例如 `title,-title,created,-created`。
 
-`ui.Empty` 是没有数据时的提示，children 可以放操作，例如「新建文章」按钮。
+`ui.Empty` 是没有数据时的提示，children 可以放操作，例如「清除搜索」链接。
 
 `ui.Pagination` 显示上一页、下一页、首页、末页，以及当前页两侧各 1 页，中间省略；只有一页时不显示。`HTMX` 让链接同时带 `hx-get`，沿用区域上的 `hx-target`；链接也写了 `href`，不支持 htmx 的场景（例如在新标签页打开）也能正常访问。自己写分页导航时，`list.Links(1)` 返回要显示的页码，省略的部分用 `0` 表示，例如 `[1 0 9 10 11 0 20]`，`list.LastPage()` 是最后一页的页码。
 
 两个细节：
 
 - 表单的 `hx-trigger` 要用 `from:` 指明来源。如果写成 `input delay:300ms, change`，输入框失焦时触发的 `change` 会再提交一次，和随后点击的排序链接争抢。
-- 地址交给 `web.PushURL`，元素上不写 `hx-push-url`。表单提交时会带上空字段（`?q=&status=`），由服务端推送的地址不含这些参数。
+- 地址交给 `web.PushURL`，元素上不写 `hx-push-url`。表单提交时会带上空字段（`?q=`），由服务端推送的地址不含这些参数。
 
 <a id="error-pages"></a>
 ## 错误页
@@ -456,7 +329,7 @@ templ ArticleTable(q article.ListQuery, list page.Offset[article.Article]) {
 | 请求 | 呈现 |
 | --- | --- |
 | 普通请求、整页 htmx 请求 | 用 `ErrorPage` 渲染整页 |
-| 局部 htmx 请求 | 不替换页面内容，错误作为 `Type` 为 `error` 的[提示](#flash-messages)送达，`ui.Toaster()` 把它显示为 toast |
+| 局部 htmx 请求 | 不替换页面内容，错误放进 `HX-Trigger` 响应头，htmx 在 `body` 上派发 `web:flash` 事件（`event.detail.messages` 中是一条 `Type` 为 `error` 的 `web.Message`），`ui.Toaster()` 把它显示为 toast |
 
 局部请求的错误需要别的样子时，设置 `Options.ErrorFragment` 和 `ErrorTarget`：错误用 `ErrorFragment` 渲染，通过 `HX-Retarget` 放进 `ErrorTarget` 选择的元素，例如页面顶部的一条横幅。
 
@@ -474,81 +347,29 @@ htmx 请求由 `fetch` 发出，浏览器会自动跟随 `303` 等跳转，跳�
 `web.Redirect` 会自动选择：htmx 请求写 `HX-Redirect`，普通请求返回 `303`：
 
 ```go
-web.Redirect(w, r, "/admin/articles")
+web.Redirect(w, r, "/articles")
 ```
 
 在页面处理器中，直接调用 `http.Redirect` 也可以，htmx 请求的 3xx 会被改写为 `HX-Redirect`。
 
-跳转地址来自请求时（例如登录后的 `next` 参数），用 `web.LocalPath` 确认它是本站路径，防止跳到其他站点：
+跳转地址来自请求时（例如 `next` 参数），用 `web.LocalPath` 确认它是本站路径，防止跳到其他站点：
 
 ```go
-web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/admin"))
+web.Redirect(w, r, web.LocalPath(r.URL.Query().Get("next"), "/"))
 ```
-
-<a id="flash-messages"></a>
-## 提示消息
-
-保存文章后跳转到列表页，并在列表页提示「文章已保存」。处理器用 `web.Flash` 把提示存入会话：
-
-```go
-web.Flash(r.Context(), web.Message{Type: "success", Title: "文章已保存"})
-web.Redirect(w, r, "/admin/articles")
-```
-
-`Message` 有 `Type`、`Title`、`Description` 三个字段，`Type` 惯例取 `success`、`info`、`warning`、`error`。提示只显示一次，由之后的响应负责送达：
-
-| 之后的响应 | 提示 |
-| --- | --- |
-| 跳转（`303` 或 `HX-Redirect`） | 留在会话里，由跳转后的页面显示 |
-| 整页 | 布局用 `web.Flashes(ctx)` 取出并渲染 |
-| htmx 请求的其他响应，包括片段、`204` 和错误 | 放进 `HX-Trigger` 响应头，htmx 在 `body` 上派发 `web:flash` 事件，`event.detail.messages` 是提示列表。局部请求出错时，错误也作为一条 `error` 提示放在其中 |
-
-布局中的 `ui.Toaster()` 处理两种情况：服务端渲染整页时取出的提示，以及 htmx 请求带来的提示，都显示为 toast。
-
-需要别的样子时，不用 `ui.Toaster()`，自己写提示区域。例如用 Alpine 写的提示列表：
-
-```templ
-<div id="toasts" x-data="{ messages: [] }" x-on:web:flash.window="messages.push(...$event.detail.messages)">
-	for _, m := range web.Flashes(ctx) {
-		<p class={ "toast", m.Type }>{ m.Title }</p>
-	}
-	<template x-for="m in messages">
-		<p :class="'toast ' + m.type" x-text="m.title"></p>
-	</template>
-</div>
-```
-
-`web.Flash` 只能在页面路由中、写出响应之前调用。
-
-<a id="triggering-events"></a>
-## 触发事件
-
-一次请求改变的数据，常常需要更新页面上的其他区域。例如在编辑页用 htmx 保存后，侧栏的修订记录也要刷新。处理器用 `web.Trigger` 通知页面：
-
-```go
-web.Trigger(w, "article:saved", map[string]any{"id": item.ID})
-```
-
-htmx 处理完响应后，在 `body` 上派发 `article:saved` 事件，第三个参数的各项成为 `event.detail` 的字段。需要刷新的区域监听它：
-
-```templ
-<ul id="revisions" hx-get={ "/admin/articles/" + id.String() + "/revisions" } hx-trigger="article:saved from:body"></ul>
-```
-
-`web.Trigger` 可以多次调用，事件按调用顺序派发。事件派发在 `body` 上，而不是发起请求的元素上，所以即使这个元素在本次替换中被移除，事件也能送达。
 
 <a id="client-state"></a>
 ## 前端状态
 
-只影响页面显示、不需要服务端参与的交互交给 Alpine。例如编辑页的「高级选项」折叠区：
+只影响页面显示、不需要服务端参与的交互交给 Alpine。例如文章页的「目录」折叠区：
 
 ```templ
-<div x-data="{ open: false }">
-	<button type="button" @click="open = !open">高级选项</button>
-	<div x-show="open">
-		<!-- 发布时间、置顶等字段 -->
-	</div>
-</div>
+<nav x-data="{ open: false }">
+	<button type="button" @click="open = !open">目录</button>
+	<ol x-show="open">
+		<!-- 各级标题 -->
+	</ol>
+</nav>
 ```
 
 htmx 用 `outerMorph` 或 `innerMorph` 替换内容时，内嵌的 hx-alpine-compat 扩展会保留 Alpine 的状态：表单验证失败重新渲染后，展开的折叠区仍然是展开的。
@@ -568,9 +389,9 @@ script-src 'self' 'nonce-…' 'unsafe-eval'; object-src 'none'; base-uri 'none';
 - `ui.Head()` 读取 context 中的 nonce，给它输出的 `<script>`、`<style>` 带上它；其中的 `web.Scripts()` 还设置了 htmx 的 `inlineScriptNonce`，htmx 执行交换进来的脚本时也使用这个 nonce。
 - 布局中自己写的内联脚本，以及其他网站的脚本（例如[人机验证](login.md#captcha)的组件），要加上 `nonce={ templ.GetNonce(ctx) }`。
 - `'self'` 允许加载本站的脚本文件，包括[静态文件](assets.md)。样式、图片、字体和 iframe 不受限制。
-- `frame-ancestors 'none'` 禁止其他网站把后台嵌入框架，诱导用户点击。
+- `frame-ancestors 'none'` 禁止其他网站把页面嵌入框架，诱导用户点击。
 
-页面响应同时带有 `Referrer-Policy: same-origin`，从后台点开其他网站的链接时，不会带上后台页面的地址。
+页面响应同时带有 `Referrer-Policy: same-origin`，点开其他网站的链接时，不会带上本站页面的地址。
 
 Alpine 的表达式（`x-data`、`x-on` 等）和 htmx 的 `hx-on` 在运行时编译执行，需要 `'unsafe-eval'`。去掉它之后，这两类属性都会失效。只用 htmx 属性和[界面组件](components.md)、不写 Alpine 表达式的页面可以用 `Options.CSP` 去掉它。
 

@@ -267,7 +267,7 @@ func (a *SaveSettings) HTTP(ctx context.Context, in *SiteSettingsBody) (*SiteSet
 }
 ```
 
-在[运营后台](tenancy.md#platform)的页面中，同一个结构体也可以用作[表单](forms.md)，验证规则只写一次；表单只有一层字段，带嵌套结构体的设置要拆开。修改设置的路由用权限保护，例如只允许有 `platform:settings` 权限的运营人员访问；租户管理员只能修改 `Tenant(sub.Tenant)` 的设置。
+[运营后台](tenancy.md#platform)修改设置的接口直接用同一个结构体作为请求体，验证规则只写一次。修改设置的路由用权限保护，例如只允许有 `platform:settings` 权限的运营人员访问；租户管理员只能修改 `Tenant(sub.Tenant)` 的设置。
 
 <a id="testing"></a>
 ## 测试

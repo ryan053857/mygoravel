@@ -7,13 +7,11 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ryan053857/mygoravel/i18n"
-	"github.com/ryan053857/mygoravel/session"
 	"github.com/ryan053857/mygoravel/web"
 	"github.com/ryan053857/mygoravel/web/docs"
 	"github.com/ryan053857/mygoravel/web/ui"
@@ -47,9 +45,7 @@ func newClient(t *testing.T, opts docs.Options) *webtest.Client {
 	t.Helper()
 	site, err := docs.New(opts)
 	require.NoError(t, err)
-	var cfg session.Config
-	cfg.SetDefaults()
-	pages := web.New(web.Options{Sessions: session.New(cfg, memstore.New()), Login: "/login", ErrorPage: ui.ErrorPage})
+	pages := web.New(web.Options{ErrorPage: ui.ErrorPage})
 	r := chi.NewRouter()
 	b, err := i18n.New("zh-CN")
 	require.NoError(t, err)
@@ -58,7 +54,7 @@ func newClient(t *testing.T, opts docs.Options) *webtest.Client {
 			next.ServeHTTP(w, r.WithContext(i18n.WithLocale(r.Context(), b, "zh-CN")))
 		})
 	})
-	site.Register(pages.Routes(r, web.Public))
+	site.Register(pages.Routes(r))
 	return webtest.New(t, r)
 }
 

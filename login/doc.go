@@ -2,7 +2,7 @@
 //
 // 框架不拥有账号表。每套账号体系（运营人员、商家成员、客户……）用一个 Realm 管理登录凭据，
 // 数据保存在 auth_* 表中，按 identity.Ref 引用应用自己的账号行。Realm 只回答“这是谁”，
-// 得到 identity.Subject 后由入口签发凭据：页面调用 pages.Login，API 调用 tokens.Login 或 JWT.Login。
+// 得到 identity.Subject 后由 API 签发凭据：tokens.Login 或 JWT.Login。
 //
 //	customers := login.New(db, login.Options{Type: customer.Type, PerTenant: true, Register: true,
 //		Hasher: hasher, Crypt: crypt, Send: sendCode})

@@ -237,7 +237,7 @@ func (s *Store) BeginLogin(ctx context.Context) (Ceremony, error) {
 }
 
 // FinishLogin 校验客户端用 passkey 签名的结果（navigator.credentials.get 返回的 PublicKeyCredential 的 JSON），
-// 返回登录成功的主体，交给 pages.Login 或 tokens.Login。passkey 不存在、没有绑定账号、属于其他租户，
+// 返回登录成功的主体，交给 tokens.Login 或 JWT.Login。passkey 不存在、没有绑定账号、属于其他租户，
 // 或者签名计数倒退（疑似被克隆）时返回 ErrInvalid。
 func (s *Store) FinishLogin(ctx context.Context, token string, response []byte) (login.Outcome, error) {
 	st, err := s.open(ctx, token, "login")

@@ -1,6 +1,6 @@
 # mygoravel
 
-mygoravel 是一个用于构建 HTTP API 和服务端渲染页面的 Go 应用框架。它为配置、路由、验证、错误处理、日志、认证、数据库、迁移和命令行提供一套统一的约定，同时让你直接使用社区组件的原生能力：chi 与 Huma、templ、htmx 与 shadcn-templ、slog 与 slog-multi / slog-formatter / slog-chi、Bun 与 pgx、goose、Cobra、go-i18n 和 cockroachdb/errors。
+mygoravel 是一个用于构建 HTTP API 的 Go 应用框架：后台和用户端是调用 API 的单页应用或 App，官网、帮助中心这类公开页面可以在服务端渲染。它为配置、路由、验证、错误处理、日志、认证、数据库、迁移和命令行提供一套统一的约定，同时让你直接使用社区组件的原生能力：chi 与 Huma、templ、htmx 与 shadcn-templ、slog 与 slog-multi / slog-formatter / slog-chi、Bun 与 pgx、goose、Cobra、go-i18n 和 cockroachdb/errors。
 
 - **依赖一目了然**：没有服务容器和全局状态，所有依赖都通过普通的构造函数显式传递。
 - **一个动作一个文件**：业务逻辑写成 action，HTTP 接口、队列任务、定时任务和命令行都是它的入口方法。
@@ -25,10 +25,11 @@ go get github.com/ryan053857/mygoravel@main
 | 运行第一个应用 | [安装](docs/installation.md) |
 | 读取配置与密钥 | [配置](docs/configuration.md) |
 | 组织项目代码 | [目录结构](docs/directory-structure.md) · [依赖装配](docs/dependencies.md) · [业务动作](docs/actions.md) |
-| 编写接口 | [路由](docs/routing.md) · [请求](docs/requests.md) · [验证](docs/validation.md) · [响应](docs/responses.md) · [会话](docs/session.md) |
+| 编写接口 | [路由](docs/routing.md) · [请求](docs/requests.md) · [验证](docs/validation.md) · [响应](docs/responses.md) · [认证](docs/authentication.md) |
 | 为前端和 App 生成接口类型 | [客户端代码](docs/clients.md) |
 | 把 React、Vue 等单页应用打进二进制 | [单页应用](docs/spa.md) |
-| 渲染页面 | [视图](docs/views.md) · [表单](docs/forms.md) · [界面组件](docs/components.md) · [文档页](docs/doc-pages.md) · [服务端推送](docs/sse.md) · [广播](docs/broadcasting.md) · [实时频道](docs/realtime.md) |
+| 渲染公开页面 | [视图](docs/views.md) · [表单](docs/forms.md) · [界面组件](docs/components.md) · [文档页](docs/doc-pages.md) |
+| 推送实时消息 | [服务端推送](docs/sse.md) · [广播](docs/broadcasting.md) · [实时频道](docs/realtime.md) |
 | 查看全部路由 | [routes 命令](docs/commands.md#routes-command) |
 | 处理错误与日志 | [错误处理](docs/errors.md) · [日志](docs/logging.md) · [可观测性](docs/telemetry.md) |
 | 在后台执行任务 | [队列](docs/queue.md) · [定时任务](docs/scheduling.md) |
@@ -47,7 +48,7 @@ go get github.com/ryan053857/mygoravel@main
 | 批量处理并显示进度 | [后台操作](docs/operations.md) |
 | 向租户推送事件 | [Webhook](docs/webhooks.md) |
 | 按关键词搜索文章、商品 | [全文搜索](docs/search.md) |
-| 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md#json-api) |
+| 构建 AI 助手 | [AI 助手](docs/ai.md) · [服务端推送](docs/sse.md) |
 | 让 Claude、Cursor 调用业务操作 | [MCP 服务](docs/mcp.md) · [OAuth 授权服务器](docs/oauth-server.md) |
 | 让 AI 引用 PDF、Word 等文档 | [文档转换与切分](docs/documents.md) · [向量检索](docs/vector.md) |
 | 保护接口 | [认证](docs/authentication.md) · [登录与注册](docs/login.md) · [授权](docs/authorization.md) · [哈希](docs/hashing.md) · [加密与签名链接](docs/encryption.md) · [限流](docs/rate-limiting.md) · [人机验证](docs/login.md#captcha) |
